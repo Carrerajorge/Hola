@@ -1,72 +1,71 @@
 /**
  * Academic Search Routes
- * Scopus, Google Scholar, and combined academic search
+ * Unified API for multiple academic databases:
+ * - Scopus, SciELO, PubMed, Google Scholar, DuckDuckGo, Web of Science
  */
 
 import { Router } from "express";
 import { 
-  searchScopus, 
-  scopusToSearchResults, 
-  searchAcademicSources,
-  isScopusConfigured,
-  getScopusArticleByDoi,
-  formatApaCitation
-} from "../services/scopusSearch";
-import { searchScholar } from "../services/webSearch";
+  searchAllSources,
+  searchScopus,
+  searchScielo,
+  searchPubMed,
+  searchScholar,
+  searchDuckDuckGo,
+  searchWOS,
+  getSourcesStatus,
+  AcademicResult
+} from "../services/unifiedAcademicSearch";
 
 export const academicSearchRouter = Router();
 
 // GET /api/academic/status - Check which sources are available
 academicSearchRouter.get("/status", async (req, res) => {
-  res.json({
-    scopus: {
-      configured: isScopusConfigured(),
-      name: "Scopus (Elsevier)",
-      description: "Base de datos académica con más de 80 millones de registros"
-    },
-    scholar: {
-      configured: true,
-      name: "Google Scholar",
-      description: "Buscador académico gratuito de Google"
-    }
-  });
+  try {
+    const sources = getSourcesStatus();
+    const available = Object.entries(sources)
+      .filter(([_, v]) => v.available)
+      .map(([k]) => k);
+    
+    res.json({
+      totalSources: Object.keys(sources).length,
+      availableSources: available.length,
+      sources
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// POST /api/academic/search - Search academic sources
+// POST /api/academic/search - Search all available sources
 academicSearchRouter.post("/search", async (req, res) => {
   try {
     const { 
       query, 
       maxResults = 10, 
-      sources = ["scopus", "scholar"],
+      sources,
       yearFrom,
       yearTo,
-      sortBy = "relevance"
+      language
     } = req.body;
 
     if (!query) {
       return res.status(400).json({ error: "query is required" });
     }
 
-    const includeScopus = sources.includes("scopus");
-    const includeScholar = sources.includes("scholar");
+    console.log(`[Academic] Unified search: "${query}" | sources: ${sources?.join(",") || "all"}`);
 
-    const results = await searchAcademicSources(query, {
+    const result = await searchAllSources(query, {
       maxResults,
-      includeScopus,
-      includeScholar
+      sources,
+      yearFrom,
+      yearTo,
+      language
     });
 
-    res.json({
-      query,
-      totalResults: results.length,
-      sources: {
-        scopus: includeScopus && isScopusConfigured(),
-        scholar: includeScholar
-      },
-      results
-    });
+    res.json(result);
   } catch (error: any) {
+    console.error("[Academic] Search error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -74,26 +73,63 @@ academicSearchRouter.post("/search", async (req, res) => {
 // POST /api/academic/scopus - Search Scopus only
 academicSearchRouter.post("/scopus", async (req, res) => {
   try {
-    const { query, maxResults = 10, yearFrom, yearTo, sortBy = "relevance" } = req.body;
+    const { query, maxResults = 10 } = req.body;
 
     if (!query) {
       return res.status(400).json({ error: "query is required" });
     }
 
-    if (!isScopusConfigured()) {
-      return res.status(503).json({ 
-        error: "Scopus API not configured",
-        message: "Configure SCOPUS_API_KEY in environment variables"
-      });
-    }
-
-    const response = await searchScopus(query, { maxResults, yearFrom, yearTo, sortBy });
+    const results = await searchScopus(query, { maxResults });
     
     res.json({
       query,
-      totalResults: response.totalResults,
-      articles: response.articles,
-      citations: response.articles.map(a => formatApaCitation(a))
+      source: "scopus",
+      totalResults: results.length,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/academic/scielo - Search SciELO only
+academicSearchRouter.post("/scielo", async (req, res) => {
+  try {
+    const { query, maxResults = 10, language = "es" } = req.body;
+
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
+    }
+
+    const results = await searchScielo(query, { maxResults, language });
+    
+    res.json({
+      query,
+      source: "scielo",
+      totalResults: results.length,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/academic/pubmed - Search PubMed only
+academicSearchRouter.post("/pubmed", async (req, res) => {
+  try {
+    const { query, maxResults = 10 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
+    }
+
+    const results = await searchPubMed(query, { maxResults });
+    
+    res.json({
+      query,
+      source: "pubmed",
+      totalResults: results.length,
+      results
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -109,10 +145,11 @@ academicSearchRouter.post("/scholar", async (req, res) => {
       return res.status(400).json({ error: "query is required" });
     }
 
-    const results = await searchScholar(query, maxResults);
+    const results = await searchScholar(query, { maxResults });
     
     res.json({
       query,
+      source: "scholar",
       totalResults: results.length,
       results
     });
@@ -121,25 +158,77 @@ academicSearchRouter.post("/scholar", async (req, res) => {
   }
 });
 
-// GET /api/academic/article/:doi - Get article details by DOI
-academicSearchRouter.get("/article/:doi(*)", async (req, res) => {
+// POST /api/academic/duckduckgo - Search DuckDuckGo only
+academicSearchRouter.post("/duckduckgo", async (req, res) => {
   try {
-    const doi = req.params.doi;
+    const { query, maxResults = 10 } = req.body;
 
-    if (!doi) {
-      return res.status(400).json({ error: "DOI is required" });
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
     }
 
-    const article = await getScopusArticleByDoi(doi);
+    const results = await searchDuckDuckGo(query, { maxResults });
+    
+    res.json({
+      query,
+      source: "duckduckgo",
+      totalResults: results.length,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    if (!article) {
-      return res.status(404).json({ error: "Article not found" });
+// POST /api/academic/wos - Search Web of Science only
+academicSearchRouter.post("/wos", async (req, res) => {
+  try {
+    const { query, maxResults = 10 } = req.body;
+
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
     }
+
+    const results = await searchWOS(query, { maxResults });
+    
+    res.json({
+      query,
+      source: "wos",
+      totalResults: results.length,
+      results
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/academic/cite - Generate citation from result
+academicSearchRouter.post("/cite", async (req, res) => {
+  try {
+    const { article, style = "apa" } = req.body;
+
+    if (!article || !article.title) {
+      return res.status(400).json({ error: "article with title is required" });
+    }
+
+    // APA 7th edition format
+    const authors = article.authors || "Unknown";
+    const year = article.year || "n.d.";
+    const title = article.title || "";
+    const journal = article.journal || "";
+    const doi = article.doi ? ` https://doi.org/${article.doi}` : "";
+
+    const citation = `${authors} (${year}). ${title}. ${journal}.${doi}`;
 
     res.json({
-      article,
-      citation: {
-        apa: formatApaCitation(article)
+      style,
+      citation,
+      article: {
+        title: article.title,
+        authors: article.authors,
+        year: article.year,
+        journal: article.journal,
+        doi: article.doi
       }
     });
   } catch (error: any) {
@@ -147,35 +236,15 @@ academicSearchRouter.get("/article/:doi(*)", async (req, res) => {
   }
 });
 
-// POST /api/academic/cite - Generate citation for an article
-academicSearchRouter.post("/cite", async (req, res) => {
+// GET /api/academic/quick/:query - Quick search all sources
+academicSearchRouter.get("/quick/:query", async (req, res) => {
   try {
-    const { doi, style = "apa" } = req.body;
+    const query = decodeURIComponent(req.params.query);
+    const maxResults = parseInt(req.query.max as string) || 10;
 
-    if (!doi) {
-      return res.status(400).json({ error: "DOI is required" });
-    }
-
-    const article = await getScopusArticleByDoi(doi);
-
-    if (!article) {
-      return res.status(404).json({ error: "Article not found" });
-    }
-
-    // Only APA supported for now
-    const citation = formatApaCitation(article);
-
-    res.json({
-      doi,
-      style,
-      citation,
-      article: {
-        title: article.title,
-        authors: article.authors,
-        year: article.year,
-        journal: article.publicationName
-      }
-    });
+    const result = await searchAllSources(query, { maxResults });
+    
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
