@@ -6,7 +6,7 @@ import { storage } from "../storage";
 import { responseCache } from "./responseCache";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
-import { academicEngine, generateAPACitation, exportToExcel } from "./academicResearchEngine";
+import { academicEngineV3, generateAPACitation } from "./academicResearchEngineV3";
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
