@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
-import { WelcomeAnimation } from "@/components/welcome-animation";
+import { WelcomeAnimation } from "@/components/welcome-animation-simple";
+import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
   Plus,
   ArrowUp,
@@ -367,6 +368,9 @@ export function ChatInterface({
 
   const { user } = useAuth();
   const { toast } = useToast();
+  
+  // First visit explosion
+  const { showExplosion, completeWelcome } = useFirstVisit();
 
   const userPlanInfo = useMemo(() => user ? {
     plan: user.plan || 'free',
@@ -4962,6 +4966,12 @@ IMPORTANTE:
   const hasMessages = displayMessages.length > 0;
 
   return (
+    <>
+      {/* Welcome Explosion for first-time visitors */}
+      {showExplosion && (
+        <WelcomeExplosion onComplete={completeWelcome} />
+      )}
+      
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
       <ChatHeader
@@ -6054,6 +6064,7 @@ IMPORTANTE:
 
       {/* Agent Panel removed - progress is shown inline in chat messages */}
     </div>
+    </>
   );
 }
 
