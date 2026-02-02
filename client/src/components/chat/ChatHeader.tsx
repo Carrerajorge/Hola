@@ -164,17 +164,17 @@ export function ChatHeader({
 
             <div className="flex items-center gap-0.5 sm:gap-1">
                 {/* Upgrade button - Show for free users and guests, hide for paid/admin */}
-                {(!userPlanInfo || userPlanInfo.plan === "free") && !userPlanInfo?.isPaid && (
+                {(!userPlanInfo || userPlanInfo.plan === "free") && !userPlanInfo?.isPaid && !userPlanInfo?.isAdmin && (
                     <Button
                         variant="outline"
                         size="sm"
-                        className="hidden sm:flex rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+                        className="flex rounded-full text-xs gap-1.5 px-2 sm:px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
                         onClick={() => setIsUpgradeDialogOpen(true)}
                         data-testid="button-upgrade-header"
                     >
                         <Sparkles className="h-3 w-3 text-primary" />
-                        <span className="hidden md:inline">Mejorar el plan a Go</span>
-                        <span className="md:hidden">Upgrade</span>
+                        <span className="hidden sm:inline">Mejorar el plan a Go</span>
+                        <span className="sm:hidden">Go</span>
                     </Button>
                 )}
 

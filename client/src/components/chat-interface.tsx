@@ -376,7 +376,8 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => user ? {
     plan: user.plan || 'free',
     isAdmin: (user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'),
-    isPaid: (user as any)?.isPaid || (user?.status === 'active')
+    // isPaid = true only if plan is NOT 'free' AND status is 'active'
+    isPaid: (user.plan && user.plan !== 'free') && (user?.status === 'active')
   } : null, [user]);
 
   // Upgrade prompt for free users after 3rd query
