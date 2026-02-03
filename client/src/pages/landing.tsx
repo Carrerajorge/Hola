@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe } from "lucide-react";
@@ -40,18 +40,19 @@ export default function LandingPage() {
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-purple-400 hover:text-purple-300 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Descargar</span>
+          <Link href="/about" className="text-zinc-400 hover:text-white transition-colors duration-200">Sobre nosotros</Link>
+          <Link href="/learn" className="text-zinc-400 hover:text-white transition-colors duration-200">Aprender</Link>
+          <Link href="/business" className="text-zinc-400 hover:text-white transition-colors duration-200">Business</Link>
+          <Link href="/pricing" className="text-zinc-400 hover:text-white transition-colors duration-200">Precios</Link>
+          <Link href="/login" className="text-purple-400 hover:text-purple-300 transition-colors duration-200">Imágenes</Link>
+          <Link href="/download" className="text-zinc-400 hover:text-white transition-colors duration-200">Descargar</Link>
         </nav>
 
         <div className="flex items-center gap-3">
           <Button
             className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-              border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-all duration-300"
+              border-0 shadow-sm shadow-purple-500/20 hover:shadow-purple-500/30 transition-all duration-300
+              focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -59,13 +60,19 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-white/25 text-white bg-white/[0.04] hover:bg-white/10 hover:border-white/40 transition-all duration-300
+              focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
             Suscríbete gratis
           </Button>
-          <Button variant="ghost" size="icon" className="rounded-full text-zinc-400 hover:text-white hover:bg-white/10">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-zinc-400 hover:text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0"
+            aria-label="Ayuda"
+          >
             <HelpCircle className="h-5 w-5" />
           </Button>
         </div>
@@ -109,9 +116,9 @@ export default function LandingPage() {
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-white/20 bg-white/5 text-white
+                  className={`rounded-full gap-2 text-sm border-white/25 bg-white/[0.04] text-white
                     hover:bg-white/10 hover:border-white/40 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg fade-in-up`}
+                    focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0 fade-in-up`}
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
@@ -129,7 +136,8 @@ export default function LandingPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full"
+                className="absolute top-4 right-4 h-8 w-8 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full
+                  focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-0"
                 onClick={() => setShowPromo(false)}
                 data-testid="button-close-promo"
               >
@@ -148,8 +156,8 @@ export default function LandingPage() {
                   </p>
                   <Button
                     className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-                      border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 
-                      transition-all duration-300 btn-premium"
+                      border-0 shadow-sm shadow-purple-500/20 hover:shadow-purple-500/30 
+                      transition-all duration-300 btn-premium focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >
@@ -206,11 +214,10 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-white/10 backdrop-blur-sm">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Términos</a>
+        <Link href="/terms" className="text-zinc-400 hover:text-white underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</a>.
+        <Link href="/privacy" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</Link>.
       </footer>
     </div>
   );
 }
-
