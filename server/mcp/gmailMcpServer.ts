@@ -1,14 +1,16 @@
 import { Router, Request, Response } from 'express';
-import { google, gmail_v1 } from 'googleapis';
+import { gmail_v1 } from 'googleapis';
 import { storage } from '../storage';
+import {
+  GMAIL_SCOPES,
+  getGmailClient,
+  gmailSearch,
+  gmailFetchThread,
+  gmailSend,
+  gmailMarkRead,
+  gmailLabels,
+} from '../integrations/gmailApi';
 import type { GmailOAuthToken } from '@shared/schema';
-
-const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.labels'
-];
 
 interface McpTool {
   name: string;
@@ -93,53 +95,6 @@ const MCP_TOOLS: McpTool[] = [
   }
 ];
 
-async function getGmailClient(token: GmailOAuthToken): Promise<gmail_v1.Gmail> {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-
-  oauth2Client.setCredentials({
-    access_token: token.accessToken,
-    refresh_token: token.refreshToken,
-    expiry_date: token.expiresAt.getTime()
-  });
-
-  if (token.expiresAt.getTime() < Date.now() + 60000) {
-    const { credentials } = await oauth2Client.refreshAccessToken();
-    await storage.updateGmailOAuthToken(token.userId, {
-      accessToken: credentials.access_token!,
-      expiresAt: new Date(credentials.expiry_date!)
-    });
-    oauth2Client.setCredentials(credentials);
-  }
-
-  return google.gmail({ version: 'v1', auth: oauth2Client });
-}
-
-function getHeader(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string {
-  return headers?.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
-}
-
-function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): { text: string; html: string } {
-  let text = '';
-  let html = '';
-
-  function traverse(part: gmail_v1.Schema$MessagePart) {
-    if (part.mimeType === 'text/plain' && part.body?.data) {
-      text += Buffer.from(part.body.data, 'base64').toString('utf-8');
-    } else if (part.mimeType === 'text/html' && part.body?.data) {
-      html += Buffer.from(part.body.data, 'base64').toString('utf-8');
-    }
-    if (part.parts) {
-      part.parts.forEach(traverse);
-    }
-  }
-
-  if (payload) traverse(payload);
-  return { text, html };
-}
-
 async function handleToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -148,65 +103,13 @@ async function handleToolCall(
   switch (toolName) {
     case 'gmail_search': {
       const query = String(args.query || '');
-      const maxResults = Number(args.maxResults) || 20;
-      
-      const response = await gmail.users.messages.list({
-        userId: 'me',
-        maxResults,
-        q: query
-      });
-
-      const emails = [];
-      for (const msg of (response.data.messages || []).slice(0, maxResults)) {
-        const fullMsg = await gmail.users.messages.get({
-          userId: 'me',
-          id: msg.id!,
-          format: 'metadata',
-          metadataHeaders: ['From', 'To', 'Subject', 'Date']
-        });
-
-        const headers = fullMsg.data.payload?.headers;
-        emails.push({
-          id: msg.id,
-          threadId: msg.threadId,
-          subject: getHeader(headers, 'Subject') || '(No subject)',
-          from: getHeader(headers, 'From'),
-          to: getHeader(headers, 'To'),
-          date: getHeader(headers, 'Date'),
-          snippet: fullMsg.data.snippet,
-          labels: fullMsg.data.labelIds
-        });
-      }
-
-      return { emails, count: emails.length };
+      const maxResults = args.maxResults ? Number(args.maxResults) : undefined;
+      return gmailSearch(gmail, { query, maxResults });
     }
 
     case 'gmail_fetch': {
       const threadId = String(args.threadId);
-      
-      const thread = await gmail.users.threads.get({
-        userId: 'me',
-        id: threadId,
-        format: 'full'
-      });
-
-      const messages = [];
-      for (const msg of thread.data.messages || []) {
-        const headers = msg.payload?.headers;
-        const body = extractBody(msg.payload);
-        
-        messages.push({
-          id: msg.id,
-          from: getHeader(headers, 'From'),
-          to: getHeader(headers, 'To'),
-          subject: getHeader(headers, 'Subject'),
-          date: getHeader(headers, 'Date'),
-          body: body.text || body.html.replace(/<[^>]*>/g, ' ').trim(),
-          snippet: msg.snippet
-        });
-      }
-
-      return { threadId, subject: messages[0]?.subject, messages };
+      return gmailFetchThread(gmail, { threadId });
     }
 
     case 'gmail_send': {
@@ -214,55 +117,29 @@ async function handleToolCall(
       const subject = String(args.subject);
       const body = String(args.body);
       const threadId = args.threadId ? String(args.threadId) : undefined;
-
-      const profile = await gmail.users.getProfile({ userId: 'me' });
-      const from = profile.data.emailAddress;
-
-      const email = [
-        `From: ${from}`,
-        `To: ${to}`,
-        `Subject: ${subject}`,
-        '',
-        body
-      ].join('\r\n');
-
-      const encodedMessage = Buffer.from(email).toString('base64')
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-      const result = await gmail.users.messages.send({
-        userId: 'me',
-        requestBody: {
-          raw: encodedMessage,
-          threadId
-        }
-      });
-
-      return { success: true, messageId: result.data.id };
+      return gmailSend(gmail, { to, subject, body, threadId });
     }
 
     case 'gmail_mark_read': {
       const messageId = String(args.messageId);
-      
-      await gmail.users.messages.modify({
-        userId: 'me',
-        id: messageId,
-        requestBody: {
-          removeLabelIds: ['UNREAD']
-        }
-      });
-
-      return { success: true, messageId };
+      return gmailMarkRead(gmail, { messageId });
     }
 
     case 'gmail_labels': {
-      const response = await gmail.users.labels.list({ userId: 'me' });
-      return { labels: response.data.labels };
+      return gmailLabels(gmail);
     }
 
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
 }
+
+/*
+  NOTE: gmailMcpServer previously inlined raw RFC822 encoding.
+  That logic now lives in integrations/gmailApi.ts.
+*/
+
+// (removed duplicated legacy gmail tool implementation; see integrations/gmailApi.ts)
 
 export function createGmailMcpRouter(): Router {
   const router = Router();

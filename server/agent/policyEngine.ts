@@ -115,6 +115,40 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
     maxRetries: 3,
     deniedByDefault: false,
   },
+
+  // Gmail (work productivity)
+  gmail_search: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 30000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  gmail_fetch: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 45000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  gmail_send: {
+    capabilities: ["requires_network", "accesses_external_api", "high_risk"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 45000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  gmail_mark_read: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
 };
 
 export interface PolicyCheckResult {

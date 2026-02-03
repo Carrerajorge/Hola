@@ -14,6 +14,13 @@
 import { z } from "zod";
 import { ToolDefinition, ToolResult, createArtifact, createError } from "./toolTypes";
 import { randomUUID } from "crypto";
+import {
+    getGmailClientForUser,
+    gmailSearch,
+    gmailFetchThread,
+    gmailSend,
+    gmailMarkRead,
+} from "../integrations/gmailApi";
 
 // ============================================================================
 // CALCULATOR TOOL
@@ -887,6 +894,170 @@ export const randomGenTool: ToolDefinition = {
 };
 
 // ============================================================================
+// GMAIL TOOLS (REAL)
+// ============================================================================
+
+const gmailSearchSchema = z.object({
+    query: z.string().min(1).describe("Gmail search query (e.g. 'is:unread')"),
+    maxResults: z.number().int().min(1).max(50).default(20).optional(),
+});
+
+const gmailSearchTool: ToolDefinition = {
+    name: "gmail_search",
+    description: "Search emails in Gmail using a query (e.g., is:unread, from:someone, subject:keyword).",
+    inputSchema: gmailSearchSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const gmail = await getGmailClientForUser(context.userId);
+            const result = await gmailSearch(gmail, { query: input.query, maxResults: input.maxResults });
+            return {
+                success: true,
+                output: result,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "Gmail search results",
+                    content: (result.emails || []).map((e: any, i: number) => `${i + 1}. ${e.subject} — ${e.from} (${e.date}) [thread:${e.threadId}]`).join("\n") || "No results",
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("GMAIL_SEARCH_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const gmailFetchSchema = z.object({
+    threadId: z.string().min(1),
+});
+
+const gmailFetchTool: ToolDefinition = {
+    name: "gmail_fetch",
+    description: "Fetch a Gmail thread (full messages) by threadId.",
+    inputSchema: gmailFetchSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const gmail = await getGmailClientForUser(context.userId);
+            const result = await gmailFetchThread(gmail, { threadId: input.threadId });
+            return {
+                success: true,
+                output: result,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: `Thread: ${result.subject || input.threadId}`,
+                    content: (result.messages || []).map((m: any) => `From: ${m.from}\nDate: ${m.date}\n---\n${String(m.body || "").slice(0, 1200)}\n`).join("\n\n"),
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("GMAIL_FETCH_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const gmailSendSchema = z.object({
+    to: z.string().email(),
+    subject: z.string().min(1),
+    body: z.string().min(1),
+    threadId: z.string().optional(),
+});
+
+const gmailSendTool: ToolDefinition = {
+    name: "gmail_send",
+    description: "Send an email via Gmail (requires confirmation by policy in higher layers).",
+    inputSchema: gmailSendSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const gmail = await getGmailClientForUser(context.userId);
+            const result = await gmailSend(gmail, input);
+            return {
+                success: true,
+                output: result,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "Email sent",
+                    content: `To: ${input.to}\nSubject: ${input.subject}\nMessageId: ${result.id}\nThreadId: ${result.threadId}`,
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("GMAIL_SEND_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const gmailMarkReadSchema = z.object({
+    messageId: z.string().min(1),
+});
+
+const gmailMarkReadTool: ToolDefinition = {
+    name: "gmail_mark_read",
+    description: "Mark a Gmail message as read by messageId.",
+    inputSchema: gmailMarkReadSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const gmail = await getGmailClientForUser(context.userId);
+            const result = await gmailMarkRead(gmail, { messageId: input.messageId });
+            return {
+                success: true,
+                output: result,
+                artifacts: [],
+                previews: [{ type: "text", title: "Marked read", content: `MessageId: ${input.messageId}` }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("GMAIL_MARK_READ_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+// ============================================================================
 // EXPORT ALL TOOLS
 // ============================================================================
 
@@ -898,6 +1069,12 @@ export const extendedTools: ToolDefinition[] = [
     textProcessTool,
     jsonTool,
     randomGenTool,
+
+    // Gmail (real)
+    gmailSearchTool,
+    gmailFetchTool,
+    gmailSendTool,
+    gmailMarkReadTool,
 ];
 
 export default extendedTools;
