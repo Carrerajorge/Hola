@@ -1464,6 +1464,34 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   }
 
   let contextInfo = "";
+
+  if (featureFlags.connectorSearchAuto && userId && lastUserMessage?.content) {
+    try {
+      const policy = await storage.getIntegrationPolicy(userId);
+      const tools = await storage.getIntegrationTools();
+      const enabledTools = policy?.enabledTools?.length ? new Set(policy.enabledTools) : null;
+      const queryTerms = lastUserMessage.content
+        .toLowerCase()
+        .match(/[a-záéíóúñ0-9]+/g)
+        ?.filter(term => term.length >= 3) || [];
+
+      const matchedTools = tools
+        .filter(tool => {
+          if (enabledTools && !enabledTools.has(tool.id)) return false;
+          const haystack = `${tool.name} ${tool.description || ""} ${tool.providerId || ""}`.toLowerCase();
+          return queryTerms.some(term => haystack.includes(term));
+        })
+        .slice(0, 6);
+
+      if (matchedTools.length > 0) {
+        contextInfo += `\n\nHerramientas relevantes disponibles (conectores):\n${matchedTools
+          .map(tool => `- ${tool.name} (${tool.providerId}): ${tool.description || "Sin descripción"}`)
+          .join("\n")}`;
+      }
+    } catch (error) {
+      console.warn("[ChatService] Connector auto-search failed:", error);
+    }
+  }
   let sources: ChatSource[] = [];
   let webSearchInfo = "";
   let webSources: WebSource[] = [];

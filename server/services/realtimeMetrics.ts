@@ -126,14 +126,14 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
  */
 export async function getExtendedDashboardStats() {
   const [
-    userStats,
+    allUsers,
     paymentStats,
     allModels,
     invoices,
     recentLogs,
     settings
   ] = await Promise.all([
-    storage.getUserStats(),
+    storage.getAllUsers(),
     storage.getPaymentStats(),
     storage.getAiModels(),
     storage.getInvoices(),
@@ -143,8 +143,22 @@ export async function getExtendedDashboardStats() {
   
   // Calculate trends (compare to yesterday)
   const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const previousMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999);
+
+  const totalUsers = allUsers.length;
+  const activeUsers = allUsers.filter(u => u.status === "active").length;
+  const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
+  const newLastMonth = allUsers.filter(u => u.createdAt && u.createdAt >= previousMonthStart && u.createdAt <= previousMonthEnd).length;
+
+  const formatTrend = (current: number, previous: number) => {
+    if (previous === 0 && current === 0) return "0%";
+    if (previous === 0) return "+100%";
+    const delta = ((current - previous) / previous) * 100;
+    const sign = delta > 0 ? "+" : "";
+    return `${sign}${delta.toFixed(1)}%`;
+  };
   
   // Action breakdown
   const actionCounts = recentLogs.reduce((acc, log) => {
@@ -175,10 +189,10 @@ export async function getExtendedDashboardStats() {
   
   return {
     users: {
-      total: userStats.total,
-      active: userStats.active,
-      newThisMonth: userStats.newThisMonth,
-      trend: "+12%" // TODO: Calculate real trend
+      total: totalUsers,
+      active: activeUsers,
+      newThisMonth,
+      trend: formatTrend(newThisMonth, newLastMonth)
     },
     revenue: {
       total: paymentStats.total,

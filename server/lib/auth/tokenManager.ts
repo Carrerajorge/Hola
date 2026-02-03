@@ -4,6 +4,14 @@ import { db } from '../../db';
 import { authTokens } from '../../../shared/schema/auth';
 import { eq, and, sql } from 'drizzle-orm';
 
+interface RefreshTokenResponse {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+    token_type?: string;
+}
+
 interface TokenRecord {
     userId: string;
     provider: 'google' | 'microsoft' | 'auth0';
@@ -84,6 +92,35 @@ export class TokenManager {
         }
     }
 
+    private getRefreshConfig(provider: 'google' | 'microsoft' | 'auth0') {
+        switch (provider) {
+            case 'google':
+                return {
+                    tokenUrl: 'https://oauth2.googleapis.com/token',
+                    clientId: process.env.GOOGLE_CLIENT_ID,
+                    clientSecret: process.env.GOOGLE_CLIENT_SECRET
+                };
+            case 'microsoft': {
+                const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+                return {
+                    tokenUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+                    clientId: process.env.MICROSOFT_CLIENT_ID,
+                    clientSecret: process.env.MICROSOFT_CLIENT_SECRET
+                };
+            }
+            case 'auth0': {
+                const domain = process.env.AUTH0_DOMAIN;
+                return {
+                    tokenUrl: domain ? `https://${domain}/oauth/token` : undefined,
+                    clientId: process.env.AUTH0_CLIENT_ID,
+                    clientSecret: process.env.AUTH0_CLIENT_SECRET
+                };
+            }
+            default:
+                return { tokenUrl: undefined, clientId: undefined, clientSecret: undefined };
+        }
+    }
+
     private async refreshTokens(userId: string, provider: 'google' | 'microsoft' | 'auth0', record: any): Promise<string | null> {
         if (!record.refreshToken) {
             Logger.warn(`[TokenMgr] No refresh token available for ${userId} ${provider}`);
@@ -94,14 +131,49 @@ export class TokenManager {
         if (!refreshToken) return null;
 
         try {
-            // Actual refresh logic would go here, delegated to the specific provider strategy or a helper
-            // For now, we will return null to force re-login if we can't refresh automatically
-            // In a full implementation, we'd call the provider's token endpoint here.
+            const { tokenUrl, clientId, clientSecret } = this.getRefreshConfig(provider);
+            if (!tokenUrl || !clientId || !clientSecret) {
+                Logger.warn(`[TokenMgr] Missing OAuth configuration for ${provider} - cannot refresh`);
+                return null;
+            }
 
-            // TODO: Implement actual provider refresh calls using the refresh token
-            Logger.warn(`[TokenMgr] Automatic refresh not yet fully implemented for ${provider}`);
-            return null;
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: clientId,
+                client_secret: clientSecret
+            });
 
+            if (provider === 'microsoft' && record.scope) {
+                body.set('scope', record.scope);
+            }
+
+            const response = await fetch(tokenUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                Logger.error(`[TokenMgr] Refresh failed for ${provider}: ${response.status} ${errorBody}`);
+                return null;
+            }
+
+            const refreshed = (await response.json()) as RefreshTokenResponse;
+            if (!refreshed.access_token) {
+                Logger.error(`[TokenMgr] Refresh response missing access_token for ${provider}`);
+                return null;
+            }
+
+            await this.saveTokens(userId, provider, {
+                access_token: refreshed.access_token,
+                refresh_token: refreshed.refresh_token,
+                expires_in: refreshed.expires_in,
+                scope: refreshed.scope || record.scope
+            });
+
+            return refreshed.access_token;
         } catch (e) {
             Logger.error(`[TokenMgr] Refresh failed: ${e}`);
             return null;

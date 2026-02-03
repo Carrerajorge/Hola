@@ -997,23 +997,110 @@ export class EnterpriseDocumentService {
 
   private async generatePDF(request: DocumentRequest): Promise<DocumentResult> {
     try {
-      // Generate DOCX first, then convert (basic approach)
-      // In production, use a proper PDF library like PDFKit
-      const docxResult = await this.wordGenerator.generate(request);
-      
-      if (!docxResult.success) {
-        return docxResult;
-      }
+      const theme = DOCUMENT_THEMES[request.theme || "professional"] || DOCUMENT_THEMES.professional;
 
-      // For now, return DOCX with PDF metadata
-      // TODO: Implement proper PDF generation with PDFKit
+      const lines: string[] = [];
+      lines.push(request.title);
+      if (request.subtitle) lines.push(request.subtitle);
+      if (request.author) lines.push(`Autor: ${request.author}`);
+      lines.push("");
+
+      const addList = (list: ListData, indent = 0) => {
+        list.items.forEach((item, index) => {
+          const prefix = list.type === "numbered" ? `${index + 1}.` : "•";
+          lines.push(`${" ".repeat(indent)}${prefix} ${item}`);
+        });
+        list.nested?.forEach((nested) => addList(nested, indent + 2));
+      };
+
+      const addTable = (table: TableData) => {
+        if (table.caption) lines.push(table.caption);
+        lines.push(table.headers.join(" | "));
+        table.rows.forEach((row) => lines.push(row.join(" | ")));
+        lines.push("");
+      };
+
+      const addSection = (section: DocumentSection, prefix = "") => {
+        lines.push(`${prefix}${section.title}`);
+        if (section.content) lines.push(section.content);
+        section.lists?.forEach((list) => addList(list));
+        section.tables?.forEach((table) => addTable(table));
+        section.images?.forEach((image) => {
+          if (image.url) {
+            lines.push(`Imagen: ${image.url}`);
+          } else if (image.caption) {
+            lines.push(`Imagen: ${image.caption}`);
+          } else {
+            lines.push("Imagen adjunta");
+          }
+        });
+        section.subsections?.forEach((subsection) => addSection(subsection, `${prefix}  `));
+        lines.push("");
+      };
+
+      request.sections.forEach((section) => addSection(section));
+
+      const escapePdfText = (text: string) =>
+        text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+
+      const textLines = lines.map(escapePdfText);
+      const fontSize = theme.sizes.body;
+      const lineHeight = fontSize + 4;
+      const startX = 50;
+      const startY = 750;
+
+      const contentStream = [
+        "BT",
+        `/F1 ${fontSize} Tf`,
+        `${lineHeight} TL`,
+        `${startX} ${startY} Td`,
+        ...textLines.map((line, index) => {
+          if (index === 0) {
+            return `(${line}) Tj`;
+          }
+          return `T* (${line}) Tj`;
+        }),
+        "ET"
+      ].join("\n");
+
+      const objects: string[] = [];
+      const addObject = (value: string) => {
+        objects.push(value);
+      };
+
+      addObject("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+      addObject("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+      addObject("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n");
+      addObject(`4 0 obj\n<< /Length ${Buffer.byteLength(contentStream)} >>\nstream\n${contentStream}\nendstream\nendobj\n`);
+      addObject("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+
+      let pdf = "%PDF-1.4\n";
+      const xrefPositions: number[] = [0];
+      objects.forEach((obj) => {
+        xrefPositions.push(pdf.length);
+        pdf += obj;
+      });
+      const xrefStart = pdf.length;
+      pdf += "xref\n";
+      pdf += `0 ${xrefPositions.length}\n`;
+      pdf += "0000000000 65535 f \n";
+      for (let i = 1; i < xrefPositions.length; i += 1) {
+        pdf += `${xrefPositions[i].toString().padStart(10, "0")} 00000 n \n`;
+      }
+      pdf += "trailer\n";
+      pdf += `<< /Size ${xrefPositions.length} /Root 1 0 R >>\n`;
+      pdf += "startxref\n";
+      pdf += `${xrefStart}\n`;
+      pdf += "%%EOF";
+
+      const buffer = Buffer.from(pdf, "binary");
+
       return {
         success: true,
-        buffer: docxResult.buffer,
+        buffer,
         filename: `${this.sanitizeFilename(request.title)}.pdf`,
         mimeType: "application/pdf",
-        sizeBytes: docxResult.sizeBytes,
-        error: "PDF generation pending - returning DOCX. Install PDFKit for native PDF.",
+        sizeBytes: buffer.length,
       };
     } catch (error: any) {
       return {
