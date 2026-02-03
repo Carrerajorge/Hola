@@ -20,12 +20,11 @@ export interface SecurityHeadersConfig {
 
 const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
-  // Allow inline scripts in production via unsafe-inline (required for React hydration and PWA)
-  "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
-  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
+  "script-src": ["'self'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
+  "style-src": ["'self'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
   "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
   "img-src": ["'self'", "data:", "blob:", "https:"],
-  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", "ws:"],
+  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com"],
   "frame-src": ["'self'", "https://accounts.google.com"],
   "frame-ancestors": ["'self'"],
   "base-uri": ["'self'"],
@@ -40,7 +39,7 @@ const DEFAULT_PERMISSIONS_POLICY: Record<string, string[]> = {
   "geolocation": [],
   "gyroscope": [],
   "magnetometer": [],
-  "microphone": ["self"],
+  "microphone": [],
   "payment": [],
   "usb": [],
 };
@@ -85,6 +84,18 @@ const DEFAULT_CONFIG: Required<SecurityHeadersConfig> = {
   customHeaders: {},
 };
 
+const CSP_REPORT_URI = process.env.CSP_REPORT_URI;
+const CSP_REPORT_TO = process.env.CSP_REPORT_TO;
+
+const appendNonce = (directives: Record<string, string[]>, nonce?: string) => {
+  if (!nonce) return directives;
+  const updated = { ...directives };
+  const scriptSrc = updated["script-src"] ? [...updated["script-src"]] : ["'self'"];
+  scriptSrc.push(`'nonce-${nonce}'`);
+  updated["script-src"] = scriptSrc;
+  return updated;
+};
+
 export function securityHeaders(config: SecurityHeadersConfig = {}) {
   const mergedConfig: Required<SecurityHeadersConfig> = {
     ...DEFAULT_CONFIG,
@@ -120,7 +131,8 @@ export function securityHeaders(config: SecurityHeadersConfig = {}) {
     }
 
     if (mergedConfig.enableCSP) {
-      const cspHeader = buildCSPHeader(mergedConfig.cspDirectives);
+      const nonce = (res.locals as { cspNonce?: string }).cspNonce;
+      const cspHeader = buildCSPHeader(appendNonce(mergedConfig.cspDirectives, nonce));
       res.setHeader("Content-Security-Policy", cspHeader);
     }
 
@@ -148,6 +160,16 @@ export function securityHeaders(config: SecurityHeadersConfig = {}) {
     }
 
     res.removeHeader("X-Powered-By");
+
+    if (CSP_REPORT_URI) {
+      res.setHeader("Report-To", CSP_REPORT_TO || JSON.stringify({
+        group: "csp-endpoint",
+        max_age: 10886400,
+        endpoints: [{ url: CSP_REPORT_URI }]
+      }));
+      res.setHeader("Reporting-Endpoints", `csp-endpoint="${CSP_REPORT_URI}"`);
+      res.append("Content-Security-Policy", `; report-uri ${CSP_REPORT_URI}; report-to ${CSP_REPORT_TO || "csp-endpoint"}`);
+    }
 
     for (const [headerName, headerValue] of Object.entries(mergedConfig.customHeaders)) {
       res.setHeader(headerName, headerValue);

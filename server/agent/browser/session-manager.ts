@@ -1,5 +1,6 @@
 import { chromium, Browser, Page, BrowserContext, Request, Response } from "playwright";
 import crypto from "crypto";
+import net from "net";
 import { 
   SessionConfig, 
   DEFAULT_SESSION_CONFIG, 
@@ -15,6 +16,7 @@ import {
 
 interface ActiveSession {
   id: string;
+  ownerId?: string;
   browser: Browser;
   context: BrowserContext;
   page: Page;
@@ -33,12 +35,73 @@ class BrowserSessionManager {
   private sessions: Map<string, ActiveSession> = new Map();
   private globalCallbacks: Set<SessionEventCallback> = new Set();
 
+  private isBlockedHostname(hostname: string): boolean {
+    const lowered = hostname.toLowerCase();
+    return (
+      lowered === "localhost" ||
+      lowered.endsWith(".localhost") ||
+      lowered.endsWith(".local") ||
+      lowered.endsWith(".internal")
+    );
+  }
+
+  private isPrivateIp(ip: string): boolean {
+    if (net.isIP(ip) === 4) {
+      const parts = ip.split(".").map(Number);
+      if (parts.length !== 4) return true;
+      const [a, b] = parts;
+      return (
+        a === 10 ||
+        a === 127 ||
+        a === 0 ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168)
+      );
+    }
+    if (net.isIP(ip) === 6) {
+      const normalized = ip.toLowerCase();
+      return (
+        normalized === "::1" ||
+        normalized.startsWith("fc") ||
+        normalized.startsWith("fd") ||
+        normalized.startsWith("fe80")
+      );
+    }
+    return false;
+  }
+
+  private assertSafeUrl(rawUrl: string): URL {
+    const parsed = new URL(rawUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Only http/https URLs are allowed.");
+    }
+
+    if (this.isBlockedHostname(parsed.hostname)) {
+      throw new Error("Blocked host.");
+    }
+
+    if (net.isIP(parsed.hostname) && this.isPrivateIp(parsed.hostname)) {
+      throw new Error("Blocked private IP address.");
+    }
+
+    if (parsed.hostname === "169.254.169.254") {
+      throw new Error("Blocked metadata host.");
+    }
+
+    return parsed;
+  }
+
   async createSession(
     objective: string,
     config: Partial<SessionConfig> = {},
-    onEvent?: SessionEventCallback
+    onEvent?: SessionEventCallback,
+    ownerId?: string
   ): Promise<string> {
     const sessionConfig = { ...DEFAULT_SESSION_CONFIG, ...config };
+    if (process.env.NODE_ENV === "production" && (!sessionConfig.allowedDomains || sessionConfig.allowedDomains.length === 0)) {
+      throw new Error("Browser sessions require allowedDomains in production.");
+    }
     const sessionId = crypto.randomUUID();
 
     const browser = await chromium.launch({
@@ -64,6 +127,7 @@ class BrowserSessionManager {
 
     const session: ActiveSession = {
       id: sessionId,
+      ownerId,
       browser,
       context,
       page,
@@ -139,6 +203,8 @@ class BrowserSessionManager {
     const startTime = Date.now();
 
     try {
+      this.assertSafeUrl(url);
+
       if (session.config.allowedDomains && session.config.allowedDomains.length > 0) {
         const domain = new URL(url).hostname;
         const allowed = session.config.allowedDomains.some(d => 
@@ -596,6 +662,10 @@ class BrowserSessionManager {
       currentUrl: session.page.url(),
       currentTitle: undefined
     };
+  }
+
+  getSessionOwner(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.ownerId;
   }
 
   addGlobalEventListener(callback: SessionEventCallback): void {

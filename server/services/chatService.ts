@@ -11,6 +11,7 @@ import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRate
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
+import { searchEmailsForUser } from "./gmailService";
 import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/orchestration";
 import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type GptSessionContract } from "./gptSessionService";
@@ -1516,6 +1517,21 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     /información\s+(sobre|de|del|acerca)/i,
   ];
 
+  const CONNECTOR_SEARCH_KEYWORDS = [
+    "correo",
+    "email",
+    "gmail",
+    "bandeja",
+    "inbox",
+    "mensaje",
+    "mail",
+  ];
+
+  const shouldSearchConnectors = (content: string) => {
+    const normalized = content.toLowerCase();
+    return CONNECTOR_SEARCH_KEYWORDS.some(keyword => normalized.includes(keyword));
+  };
+
   // Patterns that EXPLICITLY request internet search (even with attachments)
   const EXPLICIT_WEB_PATTERNS = [
     /busca\s+(en\s+)?(internet|la\s+web|online)/i,
@@ -1650,6 +1666,37 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
           { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
         console.error("Web search error:", error);
+      }
+    }
+  }
+
+  if (featureFlags.connectorSearchAuto && userId && lastUserMessage && shouldSearchConnectors(lastUserMessage.content)) {
+    const connectorPolicyCheck = await enforcePolicyCheck("connector_search", "gmail");
+    if (!connectorPolicyCheck.allowed) {
+      console.log(`[ChatService:ConnectorSearch] Blocked by policy: ${connectorPolicyCheck.reason}`);
+    } else {
+      const connectorStartTime = Date.now();
+      try {
+        const emailResults = await searchEmailsForUser(userId, lastUserMessage.content, 5);
+        await logToolCall(userId || "anonymous", "connector_search", "gmail",
+          { query: lastUserMessage.content }, { count: emailResults.emails.length }, "success", Date.now() - connectorStartTime);
+
+        if (emailResults.emails.length > 0) {
+          const emailSources = emailResults.emails.map(email => ({
+            fileName: `Gmail: ${email.subject}`,
+            content: `${email.snippet}\nDe: ${email.from} <${email.fromEmail}>\nFecha: ${email.date}\nEnlace: ${email.source.permalink}`
+          }));
+          sources = sources.concat(emailSources);
+
+          contextInfo += "\n\nContexto desde Gmail:\n" +
+            emailResults.emails.map((email, i) =>
+              `[${i + 1}] ${email.subject} - ${email.snippet} (De: ${email.fromEmail}, ${email.date})`
+            ).join("\n");
+        }
+      } catch (error) {
+        await logToolCall(userId || "anonymous", "connector_search", "gmail",
+          { query: lastUserMessage.content }, null, "error", Date.now() - connectorStartTime, String(error));
+        console.warn("[ChatService] Gmail connector search failed:", error);
       }
     }
   }

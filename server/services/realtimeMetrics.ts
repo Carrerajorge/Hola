@@ -131,20 +131,43 @@ export async function getExtendedDashboardStats() {
     allModels,
     invoices,
     recentLogs,
-    settings
+    settings,
+    allUsers,
+    allPayments
   ] = await Promise.all([
     storage.getUserStats(),
     storage.getPaymentStats(),
     storage.getAiModels(),
     storage.getInvoices(),
     storage.getAuditLogs(50),
-    storage.getSettings()
+    storage.getSettings(),
+    storage.getAllUsers(),
+    storage.getPayments()
   ]);
   
-  // Calculate trends (compare to yesterday)
   const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+
+  const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
+  const newPreviousMonth = allUsers.filter(u => u.createdAt && u.createdAt >= previousMonthStart && u.createdAt < monthStart).length;
+
+  const completedPayments = allPayments.filter(p => p.status === "completed");
+  const thisMonthRevenue = completedPayments
+    .filter(p => p.createdAt >= monthStart)
+    .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+  const previousMonthRevenue = completedPayments
+    .filter(p => p.createdAt >= previousMonthStart && p.createdAt < monthStart)
+    .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+
+  const formatTrend = (current: number, previous: number) => {
+    if (previous === 0) {
+      return current === 0 ? "0%" : "+100%";
+    }
+    const delta = ((current - previous) / previous) * 100;
+    const sign = delta >= 0 ? "+" : "";
+    return `${sign}${delta.toFixed(1)}%`;
+  };
   
   // Action breakdown
   const actionCounts = recentLogs.reduce((acc, log) => {
@@ -177,14 +200,14 @@ export async function getExtendedDashboardStats() {
     users: {
       total: userStats.total,
       active: userStats.active,
-      newThisMonth: userStats.newThisMonth,
-      trend: "+12%" // TODO: Calculate real trend
+      newThisMonth,
+      trend: formatTrend(newThisMonth, newPreviousMonth)
     },
     revenue: {
       total: paymentStats.total,
       thisMonth: paymentStats.thisMonth,
       transactions: paymentStats.count,
-      trend: "+8%"
+      trend: formatTrend(thisMonthRevenue, previousMonthRevenue)
     },
     models: {
       total: allModels.length,

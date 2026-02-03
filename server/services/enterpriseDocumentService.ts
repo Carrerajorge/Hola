@@ -997,23 +997,82 @@ export class EnterpriseDocumentService {
 
   private async generatePDF(request: DocumentRequest): Promise<DocumentResult> {
     try {
-      // Generate DOCX first, then convert (basic approach)
-      // In production, use a proper PDF library like PDFKit
-      const docxResult = await this.wordGenerator.generate(request);
-      
-      if (!docxResult.success) {
-        return docxResult;
+      const lines: string[] = [];
+      const pushWrapped = (text: string) => {
+        const maxChars = 90;
+        const words = text.split(/\s+/);
+        let current = "";
+        words.forEach(word => {
+          const test = current ? `${current} ${word}` : word;
+          if (test.length > maxChars && current) {
+            lines.push(current);
+            current = word;
+          } else {
+            current = test;
+          }
+        });
+        if (current) lines.push(current);
+      };
+
+      pushWrapped(request.title);
+      if (request.subtitle) {
+        pushWrapped(request.subtitle);
       }
 
-      // For now, return DOCX with PDF metadata
-      // TODO: Implement proper PDF generation with PDFKit
+      const sections = this.flattenSections(request.sections);
+      sections.forEach(section => {
+        lines.push("");
+        pushWrapped(section.title);
+        if (section.content) {
+          pushWrapped(section.content);
+        }
+        if (section.lists?.length) {
+          section.lists.forEach(list => {
+            list.items.forEach(item => pushWrapped(`• ${item}`));
+          });
+        }
+        if (section.tables?.length) {
+          section.tables.forEach(table => {
+            if (table.caption) pushWrapped(`Tabla: ${table.caption}`);
+            pushWrapped(table.headers.join(" | "));
+            table.rows.forEach(row => pushWrapped(row.join(" | ")));
+          });
+        }
+      });
+
+      const escapeText = (text: string) => text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+      const contentLines = lines.map((line) => `(${escapeText(line)}) Tj T*`).join("\n");
+      const contentStream = `BT\n/F1 12 Tf\n14 TL\n50 750 Td\n${contentLines}\nET`;
+      const contentLength = Buffer.byteLength(contentStream, "utf8");
+
+      const objects: string[] = [];
+      objects.push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj");
+      objects.push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj");
+      objects.push("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>\nendobj");
+      objects.push("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj");
+      objects.push(`5 0 obj\n<< /Length ${contentLength} >>\nstream\n${contentStream}\nendstream\nendobj`);
+
+      let offset = 0;
+      const xrefOffsets = ["0000000000 65535 f "];
+      const body = objects.map((obj) => {
+        const entry = obj + "\n";
+        xrefOffsets.push(`${offset.toString().padStart(10, "0")} 00000 n `);
+        offset += Buffer.byteLength(entry, "utf8");
+        return entry;
+      }).join("");
+
+      const xrefOffset = offset;
+      const xref = `xref\n0 ${xrefOffsets.length}\n${xrefOffsets.join("\n")}\n`;
+      const trailer = `trailer\n<< /Size ${xrefOffsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+      const pdfBuffer = Buffer.from(`%PDF-1.4\n${body}${xref}${trailer}`, "utf8");
+
+      const buffer = Buffer.from(pdfBuffer);
       return {
         success: true,
-        buffer: docxResult.buffer,
+        buffer,
         filename: `${this.sanitizeFilename(request.title)}.pdf`,
         mimeType: "application/pdf",
-        sizeBytes: docxResult.sizeBytes,
-        error: "PDF generation pending - returning DOCX. Install PDFKit for native PDF.",
+        sizeBytes: buffer.length,
       };
     } catch (error: any) {
       return {
@@ -1024,6 +1083,20 @@ export class EnterpriseDocumentService {
         error: error.message,
       };
     }
+  }
+
+  private flattenSections(sections: DocumentSection[]): DocumentSection[] {
+    const flat: DocumentSection[] = [];
+    const walk = (items: DocumentSection[]) => {
+      items.forEach(section => {
+        flat.push(section);
+        if (section.subsections?.length) {
+          walk(section.subsections);
+        }
+      });
+    };
+    walk(sections);
+    return flat;
   }
 
   private sanitizeFilename(name: string): string {

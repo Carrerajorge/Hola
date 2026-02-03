@@ -1737,6 +1737,11 @@ export async function registerRoutes(
       try {
         const data = JSON.parse(message.toString());
         if (data.type === "subscribe" && data.sessionId) {
+          const ownerId = browserSessionManager.getSessionOwner(data.sessionId);
+          if (ownerId && ownerId !== ws.userId) {
+            ws.send(JSON.stringify({ type: "error", error: "Unauthorized session access" }));
+            return;
+          }
           subscribedSessionId = data.sessionId;
           if (!browserClients.has(data.sessionId)) {
             browserClients.set(data.sessionId, new Set());

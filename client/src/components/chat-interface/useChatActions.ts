@@ -147,11 +147,22 @@ export function useChatActions({
     }, [chatId, messages, setMessages, setAiState, setStreamingContent, setUiPhase, selectedDocTool, projectId, gptConfig, toast]);
 
     const editMessage = useCallback(async (messageId: string, newContent: string) => {
+        const messageIndex = messages.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) return;
+
+        const targetMessage = messages[messageIndex];
         setMessages(prev =>
             prev.map(m => m.id === messageId ? { ...m, content: newContent } : m)
         );
-        // TODO: Optionally regenerate AI response after edit
-    }, [setMessages]);
+
+        if (targetMessage.role !== 'user') {
+            return;
+        }
+
+        // Remove messages after the edited one to maintain conversation consistency
+        setMessages(prev => prev.slice(0, messageIndex + 1));
+        await sendMessage(newContent, undefined);
+    }, [messages, sendMessage, setMessages]);
 
     const deleteMessage = useCallback(async (messageId: string) => {
         setMessages(prev => prev.filter(m => m.id !== messageId));

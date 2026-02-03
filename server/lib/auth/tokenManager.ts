@@ -94,17 +94,89 @@ export class TokenManager {
         if (!refreshToken) return null;
 
         try {
-            // Actual refresh logic would go here, delegated to the specific provider strategy or a helper
-            // For now, we will return null to force re-login if we can't refresh automatically
-            // In a full implementation, we'd call the provider's token endpoint here.
+            const providerConfig = this.getProviderConfig(provider, record);
+            if (!providerConfig) {
+                Logger.warn(`[TokenMgr] Missing configuration for ${provider} refresh`);
+                return null;
+            }
 
-            // TODO: Implement actual provider refresh calls using the refresh token
-            Logger.warn(`[TokenMgr] Automatic refresh not yet fully implemented for ${provider}`);
-            return null;
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: refreshToken,
+                client_id: providerConfig.clientId,
+                client_secret: providerConfig.clientSecret,
+            });
+
+            if (providerConfig.scope) {
+                body.set('scope', providerConfig.scope);
+            }
+
+            const response = await fetch(providerConfig.tokenUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                Logger.error(`[TokenMgr] Refresh failed for ${provider}: ${response.status} ${errorText}`);
+                return null;
+            }
+
+            const refreshed = await response.json();
+
+            await this.saveTokens(userId, provider, {
+                access_token: refreshed.access_token,
+                refresh_token: refreshed.refresh_token || refreshToken,
+                expires_in: refreshed.expires_in,
+                scope: refreshed.scope || record.scope,
+            });
+
+            return refreshed.access_token;
 
         } catch (e) {
             Logger.error(`[TokenMgr] Refresh failed: ${e}`);
             return null;
+        }
+    }
+
+    private getProviderConfig(provider: 'google' | 'microsoft' | 'auth0', record: any) {
+        switch (provider) {
+            case 'google':
+                if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+                    return null;
+                }
+                return {
+                    tokenUrl: 'https://oauth2.googleapis.com/token',
+                    clientId: process.env.GOOGLE_CLIENT_ID,
+                    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+                    scope: record.scope || undefined,
+                };
+            case 'microsoft': {
+                const tenant = process.env.MICROSOFT_TENANT_ID || 'common';
+                const scope = record.scope || 'offline_access https://graph.microsoft.com/.default';
+                if (!process.env.MICROSOFT_CLIENT_ID || !process.env.MICROSOFT_CLIENT_SECRET) {
+                    return null;
+                }
+                return {
+                    tokenUrl: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+                    clientId: process.env.MICROSOFT_CLIENT_ID,
+                    clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+                    scope,
+                };
+            }
+            case 'auth0': {
+                const domain = process.env.AUTH0_DOMAIN;
+                if (!domain || !process.env.AUTH0_CLIENT_ID || !process.env.AUTH0_CLIENT_SECRET) return null;
+                return {
+                    tokenUrl: `https://${domain}/oauth/token`,
+                    clientId: process.env.AUTH0_CLIENT_ID,
+                    clientSecret: process.env.AUTH0_CLIENT_SECRET,
+                    scope: record.scope || undefined,
+                };
+            }
+            default:
+                return null;
         }
     }
 

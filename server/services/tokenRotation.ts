@@ -7,9 +7,16 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { db } from '../db';
 import { eq, and, lt } from 'drizzle-orm';
+import { cache } from '../lib/cache';
 
-const ACCESS_TOKEN_SECRET = process.env.JWT_ACCESS_SECRET || 'access-secret-change-in-prod';
-const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh-secret-change-in-prod';
+const ACCESS_TOKEN_SECRET = process.env.JWT_ACCESS_SECRET || 'access-secret-dev-only';
+const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh-secret-dev-only';
+
+if (process.env.NODE_ENV === 'production') {
+    if (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET) {
+        throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set in production.');
+    }
+}
 
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
@@ -25,6 +32,12 @@ const refreshTokenFamilies = new Map<string, {
     lastRotatedAt: Date;
     tokens: Set<string>;
 }>();
+
+const BLACKLIST_KEY_PREFIX = 'token_blacklist:';
+const FAMILY_KEY_PREFIX = 'token_family:';
+const FAMILY_TOKENS_PREFIX = 'token_family_tokens:';
+
+const getRedisClient = () => cache.getRedisClient();
 
 interface TokenPayload {
     userId: number;
@@ -43,7 +56,7 @@ interface TokenPair {
 /**
  * Generate a new token pair
  */
-export function generateTokenPair(payload: TokenPayload): TokenPair {
+export async function generateTokenPair(payload: TokenPayload): Promise<TokenPair> {
     const sessionId = payload.sessionId || crypto.randomUUID();
     const familyId = crypto.randomUUID();
 
@@ -71,16 +84,42 @@ export function generateTokenPair(payload: TokenPayload): TokenPair {
 
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS);
 
+    const redis = getRedisClient();
+    if (redis) {
+        const familyKey = `${FAMILY_KEY_PREFIX}${familyId}`;
+        const familyTokensKey = `${FAMILY_TOKENS_PREFIX}${familyId}`;
+        const payloadData = {
+            userId: payload.userId,
+            createdAt: Date.now(),
+            lastRotatedAt: Date.now(),
+        };
+        redis
+            .multi()
+            .set(familyKey, JSON.stringify(payloadData), 'PX', REFRESH_TOKEN_EXPIRY_MS * 2)
+            .sadd(familyTokensKey, refreshToken)
+            .pexpire(familyTokensKey, REFRESH_TOKEN_EXPIRY_MS * 2)
+            .exec()
+            .catch(() => {});
+    }
+
     return { accessToken, refreshToken, expiresAt };
 }
 
 /**
  * Verify access token
  */
-export function verifyAccessToken(token: string): TokenPayload | null {
+export async function verifyAccessToken(token: string): Promise<TokenPayload | null> {
     try {
         if (tokenBlacklist.has(token)) {
             return null;
+        }
+
+        const redis = getRedisClient();
+        if (redis) {
+            const exists = await redis.exists(`${BLACKLIST_KEY_PREFIX}${token}`);
+            if (exists) {
+                return null;
+            }
         }
 
         const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as TokenPayload & { type: string };
@@ -98,7 +137,7 @@ export function verifyAccessToken(token: string): TokenPayload | null {
 /**
  * Rotate refresh token - issues new pair and invalidates old
  */
-export function rotateRefreshToken(oldRefreshToken: string): TokenPair | null {
+export async function rotateRefreshToken(oldRefreshToken: string): Promise<TokenPair | null> {
     try {
         // Verify the refresh token
         const decoded = jwt.verify(oldRefreshToken, REFRESH_TOKEN_SECRET) as TokenPayload & {
@@ -110,7 +149,31 @@ export function rotateRefreshToken(oldRefreshToken: string): TokenPair | null {
             return null;
         }
 
-        const family = refreshTokenFamilies.get(decoded.familyId);
+        let family = refreshTokenFamilies.get(decoded.familyId);
+
+        if (!family) {
+            const redis = getRedisClient();
+            if (redis) {
+                const familyKey = `${FAMILY_KEY_PREFIX}${decoded.familyId}`;
+                const familyTokensKey = `${FAMILY_TOKENS_PREFIX}${decoded.familyId}`;
+                const [familyPayload, tokenExists] = await Promise.all([
+                    redis.get(familyKey),
+                    redis.sismember(familyTokensKey, oldRefreshToken),
+                ]);
+                if (!familyPayload || !tokenExists) {
+                    console.warn('Unknown token family, possible theft detected');
+                    return null;
+                }
+                const parsed = JSON.parse(familyPayload) as { userId: number; createdAt: number; lastRotatedAt: number };
+                family = {
+                    userId: parsed.userId,
+                    createdAt: new Date(parsed.createdAt),
+                    lastRotatedAt: new Date(parsed.lastRotatedAt),
+                    tokens: new Set([oldRefreshToken]),
+                };
+                refreshTokenFamilies.set(decoded.familyId, family);
+            }
+        }
 
         if (!family) {
             // Unknown family - possible token theft, invalidate
@@ -129,9 +192,13 @@ export function rotateRefreshToken(oldRefreshToken: string): TokenPair | null {
         // Remove old token from valid set
         family.tokens.delete(oldRefreshToken);
         tokenBlacklist.add(oldRefreshToken);
+        const redis = getRedisClient();
+        if (redis) {
+            redis.set(`${BLACKLIST_KEY_PREFIX}${oldRefreshToken}`, '1', 'PX', REFRESH_TOKEN_EXPIRY_MS).catch(() => {});
+        }
 
         // Generate new pair
-        const newPair = generateTokenPair({
+        const newPair = await generateTokenPair({
             userId: decoded.userId,
             email: decoded.email,
             role: decoded.role,
@@ -142,6 +209,24 @@ export function rotateRefreshToken(oldRefreshToken: string): TokenPair | null {
         // Update family
         family.lastRotatedAt = new Date();
         family.tokens.add(newPair.refreshToken);
+
+        if (redis) {
+            const familyKey = `${FAMILY_KEY_PREFIX}${decoded.familyId}`;
+            const familyTokensKey = `${FAMILY_TOKENS_PREFIX}${decoded.familyId}`;
+            const payloadData = {
+                userId: family.userId,
+                createdAt: family.createdAt.getTime(),
+                lastRotatedAt: family.lastRotatedAt.getTime(),
+            };
+            redis
+                .multi()
+                .set(familyKey, JSON.stringify(payloadData), 'PX', REFRESH_TOKEN_EXPIRY_MS * 2)
+                .sadd(familyTokensKey, newPair.refreshToken)
+                .srem(familyTokensKey, oldRefreshToken)
+                .pexpire(familyTokensKey, REFRESH_TOKEN_EXPIRY_MS * 2)
+                .exec()
+                .catch(() => {});
+        }
 
         return newPair;
     } catch (error) {
@@ -157,8 +242,17 @@ export function invalidateTokenFamily(familyId: string): void {
     if (family) {
         for (const token of family.tokens) {
             tokenBlacklist.add(token);
+            const redis = getRedisClient();
+            if (redis) {
+                redis.set(`${BLACKLIST_KEY_PREFIX}${token}`, '1', 'PX', REFRESH_TOKEN_EXPIRY_MS).catch(() => {});
+            }
         }
         refreshTokenFamilies.delete(familyId);
+    }
+
+    const redis = getRedisClient();
+    if (redis) {
+        redis.del(`${FAMILY_KEY_PREFIX}${familyId}`, `${FAMILY_TOKENS_PREFIX}${familyId}`).catch(() => {});
     }
 }
 
@@ -178,6 +272,10 @@ export function invalidateAllUserTokens(userId: number): void {
  */
 export function blacklistToken(token: string): void {
     tokenBlacklist.add(token);
+    const redis = getRedisClient();
+    if (redis) {
+        redis.set(`${BLACKLIST_KEY_PREFIX}${token}`, '1', 'PX', REFRESH_TOKEN_EXPIRY_MS).catch(() => {});
+    }
 }
 
 /**
@@ -227,14 +325,14 @@ export function extractBearerToken(authHeader: string | undefined): string | nul
 
 import { Request, Response, NextFunction } from 'express';
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const token = extractBearerToken(req.headers.authorization);
 
     if (!token) {
         return res.status(401).json({ error: 'No token provided' });
     }
 
-    const payload = verifyAccessToken(token);
+    const payload = await verifyAccessToken(token);
 
     if (!payload) {
         return res.status(401).json({ error: 'Invalid or expired token' });
@@ -255,14 +353,14 @@ export function createTokenRouter() {
     const router = Router();
 
     // Refresh token endpoint
-    router.post('/refresh', (req, res) => {
+    router.post('/refresh', async (req, res) => {
         const { refreshToken } = req.body;
 
         if (!refreshToken) {
             return res.status(400).json({ error: 'Refresh token required' });
         }
 
-        const newPair = rotateRefreshToken(refreshToken);
+        const newPair = await rotateRefreshToken(refreshToken);
 
         if (!newPair) {
             return res.status(401).json({ error: 'Invalid refresh token' });

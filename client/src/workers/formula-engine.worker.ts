@@ -1,6 +1,6 @@
 import { expose } from 'comlink';
 import { FormulaEngine } from '@/lib/formulaEngine';
-import { SparseGrid, CellData } from '@/lib/sparseGrid';
+import { SparseGrid, CellData, parseCellRef } from '@/lib/sparseGrid';
 
 export class FormulaEngineWorker {
     private engine: FormulaEngine;
@@ -51,12 +51,15 @@ export class FormulaEngineWorker {
     }
 
     evaluate(formula: string, cellRef?: string): string {
-        // If cellRef provided, set current cell
         if (cellRef) {
-            // Parse cellRef to row/col? FormulaEngine usually takes string refs in some methods, 
-            // but 'evaluate' takes formula string.
-            // If we need to set context:
-            // TODO: Add support for context if needed.
+            try {
+                const { row, col } = parseCellRef(cellRef);
+                this.engine.setCurrentCell(row, col);
+            } catch {
+                this.engine.clearCurrentCell();
+            }
+        } else {
+            this.engine.clearCurrentCell();
         }
         return this.engine.evaluate(formula);
     }

@@ -10,6 +10,46 @@ import { browserSessionManager, SessionEvent } from "../agent/browser";
 
 export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, event: SessionEvent) => void) {
   const router = Router();
+  const resolveOwnerId = (req: any): string | undefined => {
+    const session = req.session as any;
+    const user = req.user as any;
+    const ownerId = user?.claims?.sub || user?.id || session?.authUserId;
+    if (ownerId) {
+      return ownerId;
+    }
+
+    if (session) {
+      if (!session.anonUserId) {
+        const sessionId = req.sessionID;
+        session.anonUserId = sessionId ? `anon_${sessionId}` : null;
+      }
+      return session.anonUserId || undefined;
+    }
+
+    return undefined;
+  };
+
+  const assertRunOwnership = async (req: any, runId: string): Promise<boolean> => {
+    const ownerId = resolveOwnerId(req);
+    if (!ownerId) return true;
+
+    const orchestrator = agentManager.getOrchestrator(runId);
+    if (orchestrator && orchestrator.userId && orchestrator.userId !== ownerId) {
+      return false;
+    }
+
+    const [modeRun] = await db.select().from(agentModeRuns).where(eq(agentModeRuns.id, runId));
+    if (modeRun && modeRun.userId && modeRun.userId !== ownerId) {
+      return false;
+    }
+
+    const legacyRun = await storage.getAgentRun(runId);
+    if (legacyRun && (legacyRun as any).userId && (legacyRun as any).userId !== ownerId) {
+      return false;
+    }
+
+    return true;
+  };
 
   router.post("/agent/runs", async (req, res) => {
     try {
@@ -20,7 +60,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       }
 
       const runId = randomUUID();
-      const userId = "anonymous";
+      const ownerId = resolveOwnerId(req) || "anonymous";
 
       if (!chatId || chatId.startsWith("pending-") || chatId === "") {
         const newChatId = randomUUID();
@@ -28,7 +68,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         try {
           await storage.createChat({
             id: newChatId,
-            userId: userId,
+            userId: ownerId,
             title: message.slice(0, 50) + (message.length > 50 ? "..." : ""),
             aiModelUsed: "gemini-2.5-flash"
           });
@@ -43,7 +83,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         await db.insert(agentModeRuns).values({
           id: runId,
           chatId: chatId,
-          userId: null,
+          userId: ownerId,
           status: "queued"
         });
       } catch (dbError: any) {
@@ -57,7 +97,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       const orchestrator = await agentManager.createRun(
         runId,
         chatId,
-        userId,
+        ownerId,
         message,
         attachments
       );
@@ -67,7 +107,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         await agentQueue.add("agent-execution", {
           runId,
           chatId,
-          userId,
+          ownerId,
           message,
           attachments
         });
@@ -114,11 +154,15 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
   router.get("/agent/runs/chat/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
+      const ownerId = resolveOwnerId(req);
 
       // First check in-memory runs
       const activeRuns = agentManager.getActiveRunsForChat(chatId);
       if (activeRuns.length > 0) {
         const latestRun = activeRuns[0];
+        if (ownerId && latestRun.userId && latestRun.userId !== ownerId) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
         const orchestrator = agentManager.getOrchestrator(latestRun.runId);
         const eventStream = orchestrator?.getEventStream ? orchestrator.getEventStream() : [];
         const todoList = orchestrator?.getTodoList ? orchestrator.getTodoList() : [];
@@ -157,6 +201,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       }
 
       const latestRun = runs[0];
+      if (ownerId && (latestRun as any).userId && (latestRun as any).userId !== ownerId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       const steps = await storage.getAgentSteps(latestRun.id);
       const assets = await storage.getAgentAssets(latestRun.id);
 
@@ -189,6 +236,10 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
   router.get("/agent/runs/:id", async (req, res) => {
     try {
+      const hasAccess = await assertRunOwnership(req, req.params.id);
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       const progress = agentManager.getRunStatus(req.params.id);
 
       if (progress) {
@@ -295,6 +346,10 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
   router.post("/agent/runs/:id/cancel", async (req, res) => {
     try {
+      const hasAccess = await assertRunOwnership(req, req.params.id);
+      if (!hasAccess) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       let success = await agentManager.cancelRun(req.params.id);
       if (!success) {
         success = agentOrchestrator.cancelRun(req.params.id);
@@ -315,13 +370,15 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       if (!objective) {
         return res.status(400).json({ error: "Objective is required" });
       }
+      const ownerId = resolveOwnerId(req);
 
       const sessionId = await browserSessionManager.createSession(
         objective,
         config || {},
         (event: SessionEvent) => {
           broadcastBrowserEvent(event.sessionId, event);
-        }
+        },
+        ownerId
       );
 
       browserSessionManager.startScreenshotStreaming(sessionId, 1500);

@@ -34,6 +34,7 @@ export const apiErrorHandler = (
     let title = "Internal Server Error";
     let detail = err.message || "An unexpected error occurred.";
     let errors: Record<string, string[]> | undefined;
+    const isProduction = process.env.NODE_ENV === 'production';
 
     // Handle Zod Validation Errors
     if (err instanceof ZodError) {
@@ -73,8 +74,13 @@ export const apiErrorHandler = (
         problem.errors = errors;
     }
 
+    if (isProduction && status >= 500) {
+        detail = "An unexpected error occurred.";
+        problem.detail = detail;
+    }
+
     // Include stack trace in development
-    if (process.env.NODE_ENV !== 'production' && status >= 500) {
+    if (!isProduction && status >= 500) {
         problem.stack = err.stack;
     }
 

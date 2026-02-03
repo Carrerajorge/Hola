@@ -73,7 +73,9 @@ export interface ComputerSession {
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   viewport: { width: 1280, height: 720 },
   timeout: 30000,
-  allowedDomains: [],
+  allowedDomains: process.env.ALLOWED_BROWSER_DOMAINS
+    ? process.env.ALLOWED_BROWSER_DOMAINS.split(",").map((domain) => domain.trim()).filter(Boolean)
+    : [],
   maxDownloadSize: 100 * 1024 * 1024,
   enableNetworkCapture: true
 };

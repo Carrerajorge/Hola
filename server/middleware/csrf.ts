@@ -23,15 +23,23 @@ const ensureCookies = (req: Request) => {
  */
 export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunction) => {
     const cookies = ensureCookies(req);
+    const rotationPaths = new Set([
+        "/api/auth/login",
+        "/api/auth/admin-login",
+        "/api/auth/logout",
+        "/api/login",
+    ]);
+    const shouldRotate = rotationPaths.has(req.path) || rotationPaths.has(req.originalUrl);
 
     // Only set the token if it doesn't exist or we want to rotate it
-    if (!res.headersSent && !cookies[CSRF_COOKIE_NAME]) {
+    if (!res.headersSent && (!cookies[CSRF_COOKIE_NAME] || shouldRotate)) {
         const token = crypto.randomUUID();
         res.cookie(CSRF_COOKIE_NAME, token, {
             httpOnly: false, // Must be readable by client JS to header-ize it
             secure: process.env.NODE_ENV === "production",
             sameSite: "lax", // Hardened from 'none' - sufficient for single-origin
             path: "/",
+            maxAge: 2 * 60 * 60 * 1000, // 2 hours
         });
     }
     next();
@@ -59,34 +67,6 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/callback",
         "/api/login",
     ];
-
-    // Also exempt chat API routes (session cookie is sufficient auth)
-    const CSRF_EXEMPT_PREFIXES_EXTENDED = [
-        "/api/chat/",
-        "/api/chat",
-        "/api/chats/",
-        "/api/chats",
-        "/api/image/",
-        "/api/user/",
-        "/api/users/",
-        "/api/memory/",
-        "/api/sandbox/",
-        "/api/agent/",
-        "/api/word-pipeline/",
-        "/api/ai/",
-        "/api/spreadsheet/",
-        "/api/document",
-        "/api/gpts/",
-        "/api/gpts",
-        "/api/files/",
-        "/api/folders/",
-        "/api/rag/",
-        "/api/power/",
-        "/api/academic/",
-    ];
-    if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
-        return next();
-    }
 
     // Also exempt paths that start with certain prefixes
     const CSRF_EXEMPT_PREFIXES = [

@@ -4,6 +4,33 @@ import { runWithContext, getTraceId as getTraceIdFromContext, CorrelationContext
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger("http");
+const REDACT_KEYS = new Set([
+  "password",
+  "pass",
+  "token",
+  "access_token",
+  "refresh_token",
+  "authorization",
+  "api_key",
+  "apikey",
+  "secret",
+  "session",
+]);
+
+function redactQuery(query: Request["query"]) {
+  if (!query || typeof query !== "object") {
+    return query;
+  }
+
+  return Object.fromEntries(
+    Object.entries(query).map(([key, value]) => {
+      if (REDACT_KEYS.has(key.toLowerCase())) {
+        return [key, "[REDACTED]"];
+      }
+      return [key, value];
+    })
+  );
+}
 
 export function getTraceId(): string | undefined {
   return getTraceIdFromContext();
@@ -32,7 +59,7 @@ export function requestLoggerMiddleware(
     requestLogger.info("Request started", {
       method: req.method,
       path: req.path,
-      query: Object.keys(req.query).length > 0 ? req.query : undefined,
+      query: Object.keys(req.query).length > 0 ? redactQuery(req.query) : undefined,
       userAgent: req.get("user-agent"),
       ip: req.ip || req.socket.remoteAddress,
     });

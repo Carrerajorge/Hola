@@ -50,13 +50,6 @@ export const corsOptions: cors.CorsOptions = {
             return;
         }
 
-        // In development, be more permissive
-        if (!isProduction) {
-            callback(null, true);
-            return;
-        }
-
-        // In production, check against whitelist
         if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -72,6 +65,7 @@ export const corsOptions: cors.CorsOptions = {
         'X-Requested-With',
         'X-Request-ID',
         'X-Idempotency-Key',
+        'X-CSRF-Token',
         'Accept',
         'Origin',
     ],

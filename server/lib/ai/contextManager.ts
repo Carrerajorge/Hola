@@ -61,8 +61,14 @@ export class ContextManager {
                 recentItems.unshift(item);
                 usedTokens += item.tokens;
             } else {
-                // Space exhausted
-                // TODO: Try compression on this item?
+                const remaining = availableTokens - usedTokens;
+                if (remaining > 0) {
+                    const compressed = this.compressItemToFit(item, remaining);
+                    if (compressed) {
+                        recentItems.unshift(compressed);
+                        usedTokens += compressed.tokens;
+                    }
+                }
                 break;
             }
         }
@@ -114,8 +120,38 @@ export class ContextManager {
     }
 
     private truncateContent(items: ContextItem[], limit: number): ContextItem[] {
-        // Emergency truncation
-        return items; // Placeholder
+        if (items.length === 0) return items;
+        const truncated: ContextItem[] = [];
+        let usedTokens = 0;
+        for (const item of items) {
+            if (usedTokens + item.tokens <= limit) {
+                truncated.push(item);
+                usedTokens += item.tokens;
+                continue;
+            }
+            const remaining = limit - usedTokens;
+            if (remaining <= 0) break;
+            const compressed = this.compressItemToFit(item, remaining);
+            if (compressed) {
+                truncated.push(compressed);
+                usedTokens += compressed.tokens;
+            }
+            break;
+        }
+        return truncated;
+    }
+
+    private compressItemToFit(item: ContextItem, targetTokens: number): ContextItem | null {
+        if (targetTokens <= 0) return null;
+        if (item.tokens <= targetTokens) return item;
+        const ratio = Math.max(0.1, targetTokens / item.tokens);
+        const targetLength = Math.max(50, Math.floor(item.content.length * ratio));
+        const content = `${item.content.slice(0, targetLength)}…`;
+        return {
+            ...item,
+            content,
+            tokens: Math.max(1, Math.floor(item.tokens * ratio))
+        };
     }
 }
 

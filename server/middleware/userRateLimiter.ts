@@ -54,6 +54,21 @@ type RateLimitTier = keyof typeof RATE_LIMIT_CONFIGS;
 
 // Store for rate limiters
 const rateLimiters: Map<string, RateLimiterMemory | RateLimiterRedis> = new Map();
+const isProduction = process.env.NODE_ENV === 'production';
+const whitelistedIps = (process.env.RATE_LIMIT_ALLOW_IPS || '')
+    .split(',')
+    .map(ip => ip.trim())
+    .filter(Boolean);
+const whitelistedUsers = new Set(
+    (process.env.RATE_LIMIT_ALLOW_USERS || '')
+        .split(',')
+        .map(id => id.trim())
+        .filter(Boolean)
+);
+
+if (isProduction && !process.env.REDIS_URL) {
+    throw new Error("REDIS_URL is required for rate limiting in production.");
+}
 
 /**
  * Initialize rate limiter for a tier
@@ -101,6 +116,13 @@ function getRateLimitKey(req: Request): string {
     const userId = (req as any).user?.id;
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
 
+    if (userId && whitelistedUsers.has(String(userId))) {
+        return `whitelist_user_${userId}`;
+    }
+    if (whitelistedIps.includes(String(ip))) {
+        return `whitelist_ip_${ip}`;
+    }
+
     // Authenticated users get their own bucket
     if (userId) {
         return `user_${userId}`;
@@ -115,6 +137,11 @@ function getRateLimitKey(req: Request): string {
  */
 export function createUserRateLimiter(tier: RateLimitTier = 'default') {
     return async (req: Request, res: Response, next: NextFunction) => {
+        const userId = (req as any).user?.id;
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        if ((userId && whitelistedUsers.has(String(userId))) || whitelistedIps.includes(String(ip))) {
+            return next();
+        }
         const limiter = getRateLimiter(tier);
         const config = RATE_LIMIT_CONFIGS[tier];
         const key = getRateLimitKey(req);
@@ -252,11 +279,8 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
     // Check if user is admin (claims.role or role property depending on object structure)
     const isAdmin = user?.claims?.role === 'admin' || user?.role === 'admin';
 
-    // In development, be more permissive - BYPASS rate limiting entirely
-    const isDev = process.env.NODE_ENV === 'development';
-
-    if (isDev) {
-        // Skip rate limiting entirely in development
+    const rateLimitDisabled = process.env.RATE_LIMIT_DISABLE === 'true';
+    if (rateLimitDisabled) {
         return next();
     }
 

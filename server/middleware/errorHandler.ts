@@ -29,14 +29,44 @@ function sanitizeUnknownErrorForProduction(): ErrorResponse {
   };
 }
 
+const SENSITIVE_KEYS = new Set([
+  'password',
+  'pass',
+  'token',
+  'access_token',
+  'refresh_token',
+  'authorization',
+  'api_key',
+  'apikey',
+  'secret',
+  'session',
+]);
+
+function redactSensitiveFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveFields(item));
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, val]) => {
+      if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+        return [key, '[REDACTED]'];
+      }
+      return [key, redactSensitiveFields(val)];
+    })
+  );
+}
+
 function getFullErrorDetails(error: Error, req: Request): Record<string, unknown> {
   return {
     message: error.message,
     stack: error.stack,
     path: req.path,
     method: req.method,
-    query: req.query,
-    body: req.body,
+    query: redactSensitiveFields(req.query),
+    body: redactSensitiveFields(req.body),
     headers: {
       'user-agent': req.headers['user-agent'],
       'content-type': req.headers['content-type'],

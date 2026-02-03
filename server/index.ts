@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import path from "path";
+import crypto from "crypto";
 
 // Load environment variables based on NODE_ENV
 const nodeEnv = process.env.NODE_ENV || "development";
@@ -23,7 +24,7 @@ import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
 import helmet from "helmet";
 import hpp from "hpp";
-import { apiSecurityHeaders } from "./middleware/securityHeaders";
+import { apiSecurityHeaders, securityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
 import { idempotency } from "./middleware/idempotency";
@@ -35,6 +36,8 @@ import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 
 initTracing();
+
+const isProduction = process.env.NODE_ENV === "production";
 
 const app = express();
 app.set("trust proxy", 1); // Trust first proxy (critical for rate limiting behind load balancers)
@@ -58,23 +61,17 @@ app.use(corsMiddleware);
 // Security Middleware (Helmet + HPP)
 app.use(hpp()); // Prevent HTTP Parameter Pollution
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
-      imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", "ws:"],
-      frameSrc: ["'self'", "https://accounts.google.com"],
-      frameAncestors: ["'self'"],
-      objectSrc: ["'none'"],
-      upgradeInsecureRequests: [],
-    },
-  },
+  contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin for static assets if needed
   crossOriginEmbedderPolicy: false,
 }));
+
+app.use((req, res, next) => {
+  res.locals.cspNonce = crypto.randomBytes(16).toString("base64");
+  next();
+});
+
+app.use(securityHeaders({ hstsPreload: isProduction }));
 
 // CSRF Token Generation (sets cookie)
 app.use(csrfTokenMiddleware);
@@ -117,7 +114,6 @@ export function log(message: string, source = "express") {
 // Manual logging middleware removed in favor of requestLoggerMiddleware at line 38
 
 (async () => {
-  const isProduction = process.env.NODE_ENV === "production";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
 
   // Start Python Agent Tools service if enabled

@@ -21,6 +21,9 @@ const envSchema = z.object({
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
+  JWT_ACCESS_SECRET: z.string().optional(),
+  JWT_REFRESH_SECRET: z.string().optional(),
+
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_TENANT_ID: z.string().optional(),
@@ -50,6 +53,12 @@ function validateEnv() {
 
   // Warn about missing LLM keys
   const data = result.data;
+  if (data.NODE_ENV === "production") {
+    if (!data.JWT_ACCESS_SECRET || !data.JWT_REFRESH_SECRET) {
+      console.error("❌ JWT_ACCESS_SECRET and JWT_REFRESH_SECRET are required in production");
+      process.exit(1);
+    }
+  }
   if (!data.XAI_API_KEY && !data.GEMINI_API_KEY && !data.OPENAI_API_KEY) {
     console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY)");
     console.warn("   Chat functionality will not work without at least one LLM provider.");
