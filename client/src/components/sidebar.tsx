@@ -83,6 +83,7 @@ interface SidebarProps {
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
   onOpenSkills?: () => void;
+  onOpenWhatsAppConnect?: () => void;
   onOpenCodex?: () => void;
   onOpenLibrary?: () => void;
   processingChatIds?: string[];
@@ -218,6 +219,7 @@ export function Sidebar({
   onOpenGpts,
   onOpenApps,
   onOpenSkills,
+  onOpenWhatsAppConnect,
   onOpenCodex,
   onOpenLibrary,
   processingChatIds = [],
@@ -614,6 +616,17 @@ export function Sidebar({
           <LayoutGrid className="h-4 w-4" />
           Aplicaciones
         </Button>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenWhatsAppConnect}
+          data-testid="button-whatsapp-connect"
+        >
+          <MessageSquare className="h-4 w-4" />
+          WhatsApp (QR)
+        </Button>
+
         <Button
           variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-blue-500 hover:text-blue-600 hover:bg-blue-50/50"

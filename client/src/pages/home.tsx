@@ -7,6 +7,7 @@ import { GptBuilder } from "@/components/gpt-builder";
 import { AboutGptDialog } from "@/components/about-gpt-dialog";
 import { UserLibrary } from "@/components/user-library";
 import { AppsView } from "@/components/apps-view";
+import { WhatsAppConnectDialog } from "@/components/whatsapp-connect-dialog";
 import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
@@ -64,6 +65,7 @@ export default function Home() {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isCodexOpen, setIsCodexOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
+  const [isWhatsAppConnectOpen, setIsWhatsAppConnectOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
@@ -571,6 +573,7 @@ export default function Home() {
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
           onOpenSkills={handleOpenSkills}
+          onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
           onOpenCodex={handleOpenCodex}
           onOpenLibrary={handleOpenLibrary}
           processingChatIds={processingChatIds}
@@ -618,6 +621,7 @@ export default function Home() {
               onOpenGpts={handleOpenGpts}
               onOpenApps={handleOpenApps}
               onOpenSkills={handleOpenSkills}
+              onOpenWhatsAppConnect={() => setIsWhatsAppConnectOpen(true)}
               onOpenLibrary={handleOpenLibrary}
               processingChatIds={processingChatIds}
               pendingResponseCounts={pendingResponseCounts}
@@ -631,6 +635,11 @@ export default function Home() {
           </SheetContent>
         </Sheet>
       </div>
+
+      <WhatsAppConnectDialog
+        open={isWhatsAppConnectOpen}
+        onOpenChange={setIsWhatsAppConnectOpen}
+      />
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full min-h-0">
