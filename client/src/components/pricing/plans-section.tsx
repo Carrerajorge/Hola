@@ -230,10 +230,9 @@ export function PricingPlansSection(props: {
               <div
                 key={`${activeTab}:${plan.name}`}
                 className={cn(
-                  // In light mode the pricing page background is still dark/gradient; give cards an opaque surface
-                  // so dark text remains readable. In dark mode keep the glassy look.
-                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/85 text-zinc-900 border-black/10",
-                  "dark:bg-white/5 dark:text-white dark:border-white/10",
+                  // Pricing page uses a dark/gradient background even when the browser/theme is light.
+                  // Keep a subtle glass surface but force readable (light) text without making the card bright.
+                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/5 text-white border-white/10",
                   plan.highlight && "border-primary/50 shadow-lg",
                 )}
                 data-testid={`plan-card-${plan.name.toLowerCase()}`}
@@ -245,8 +244,8 @@ export function PricingPlansSection(props: {
                       variant="secondary"
                       className={cn(
                         "text-xs",
-                        plan.badge === "NUEVO" && "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300",
-                        plan.badge === "RECOMENDADO" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
+                        plan.badge === "NUEVO" && "bg-green-500/15 text-green-300",
+                        plan.badge === "RECOMENDADO" && "bg-primary/20 text-primary",
                       )}
                       data-testid="badge-secondary"
                     >
@@ -258,10 +257,10 @@ export function PricingPlansSection(props: {
                 <div className="flex items-baseline gap-0.5 mb-2">
                   <span className="text-sm">$</span>
                   <span className="text-4xl font-bold">{plan.price}</span>
-                  <span className="text-sm text-muted-foreground">USD / mes</span>
+                  <span className="text-sm text-white/70">USD / mes</span>
                 </div>
 
-                <p className="text-sm text-muted-foreground mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                <p className="text-sm text-white/70 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
                   {plan.description}
                 </p>
 
@@ -290,14 +289,14 @@ export function PricingPlansSection(props: {
                 <div className="space-y-3 flex-1">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start gap-2 text-sm">
-                      <feature.icon className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                      <span>{feature.text}</span>
+                      <feature.icon className="h-4 w-4 mt-0.5 text-white/60 flex-shrink-0" />
+                      <span className="text-white/85">{feature.text}</span>
                     </div>
                   ))}
                 </div>
 
                 {plan.footerNote && (
-                  <p className="text-xs text-muted-foreground mt-4 pt-4 border-t">
+                  <p className="text-xs text-white/60 mt-4 pt-4 border-t border-white/10">
                     {plan.footerNote.includes("Obtener más información") ? (
                       <>
                         {plan.footerNote.replace("Obtener más información", "")}
