@@ -196,6 +196,15 @@ const AGENT_MAPPING: Record<IntentType, SpecializedAgent[]> = {
 
 export function detectIntent(message: string, attachments: AttachmentSpec[] = []): { intent: IntentType; confidence: number } {
   const lowerMessage = message.toLowerCase();
+
+  // Special-case: combined research + document deliverable (e.g., "investiga ... y crea un Word")
+  // We treat this as a multi-step task so the agent will both research and generate a DOCX artifact.
+  const wantsResearch = /\b(investiga|busca|encuentra|search|find|research|look up|investigar)\b/i.test(lowerMessage);
+  const wantsWordDoc = /\b(word|docx?|documento|informe|report|whitepaper)\b/i.test(lowerMessage);
+  const wantsCreateOrWrite = /\b(crea|create|genera|generate|escribe|write|redacta|draft|prepara|prepare)\b/i.test(lowerMessage);
+  if (wantsResearch && wantsWordDoc && wantsCreateOrWrite) {
+    return { intent: "multi_step_task", confidence: 0.9 };
+  }
   
   if (attachments.length > 0) {
     const hasDocuments = attachments.some(a => 
