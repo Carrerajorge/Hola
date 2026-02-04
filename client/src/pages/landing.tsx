@@ -125,7 +125,7 @@ export default function LandingPage() {
 
           {/* Promo Card with Premium Design */}
           {showPromo && (
-            <div className="glass-premium rounded-3xl p-6 md:p-8 relative fade-in-up fade-in-up-delay-3 card-lift">
+            <div className="glass-premium rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
               <Button
                 variant="ghost"
                 size="icon"
@@ -136,7 +136,7 @@ export default function LandingPage() {
                 <X className="h-4 w-4" />
               </Button>
 
-              <div className="flex flex-col md:flex-row gap-6">
+              <div className="flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
                     <Sparkles className="h-5 w-5 text-amber-400" />
@@ -159,7 +159,7 @@ export default function LandingPage() {
                 </div>
 
                 {/* Style Cards */}
-                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
+                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:items-center md:gap-4">
                   {[
                     { emoji: "🎨", label: "Boceto", gradient: "from-amber-500/30 to-orange-500/30" },
                     { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/30 to-green-500/30" },
@@ -173,7 +173,7 @@ export default function LandingPage() {
                     >
                       <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
                         flex items-center justify-center border border-white/10
-                        transition-all duration-300 group-hover:scale-110 group-hover:border-white/30
+                        transition-all duration-300 group-hover:scale-105 group-hover:border-white/30
                         group-hover:shadow-lg`}>
                         <span className="text-2xl">{style.emoji}</span>
                       </div>
