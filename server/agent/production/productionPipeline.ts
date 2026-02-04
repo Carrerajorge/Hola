@@ -45,6 +45,7 @@ import { contentAgent } from '../langgraph/agents/ContentAgent';
 import { createExcelFromData } from '../../services/advancedExcelBuilder';
 import { generateWordFromMarkdown } from '../../services/markdownToDocx';
 import { generateProfessionalDocument, detectDocumentType } from '../../services/docxCodeGenerator';
+import { EnterpriseDocumentService } from '../../services/enterpriseDocumentService';
 
 // ============================================================================
 // Pipeline Stages Definition
@@ -638,8 +639,52 @@ export class ProductionPipeline extends EventEmitter {
             completed++;
         }
 
-        // Note: PPT and PDF rendering would follow similar patterns
-        // using pptTemplateEngine and PDF libraries
+        // Render PPT
+        if (deliverables.includes('ppt')) {
+            this.updateStage('render', 'running', (completed / deliverables.length) * 100, 'Generating PowerPoint presentation...');
+
+            // Build sections from pptData when available, otherwise fallback to contentSpec.
+            const pptSlides: any[] = Array.isArray(this.workOrder.pptData) ? (this.workOrder.pptData as any[]) : [];
+
+            const sections = pptSlides.length
+                ? pptSlides.map((s, idx) => {
+                    const title = (s?.title || s?.heading || s?.name || `Slide ${idx + 1}`).toString();
+                    const bullets = Array.isArray(s?.bullets) ? s.bullets : Array.isArray(s?.points) ? s.points : null;
+                    const body = (s?.content || s?.body || s?.text || '').toString();
+                    const content = bullets ? bullets.map((b: any) => `• ${String(b)}`).join('\n') : body;
+                    return {
+                        title,
+                        content: content || '(Sin contenido)',
+                    };
+                })
+                : (this.contentSpec?.sections || []).map((sec: any, idx) => ({
+                    title: sec?.title || `Sección ${idx + 1}`,
+                    content: sec?.content || '',
+                }));
+
+            const pptService = EnterpriseDocumentService.create('professional');
+            const pptResult = await pptService.generateDocument({
+                type: 'pptx',
+                title: this.workOrder.topic,
+                author: 'ILIAGPT AI',
+                sections,
+            } as any);
+
+            if (!pptResult.success || !pptResult.buffer) {
+                throw new Error(`PPT render failed: ${pptResult.error || 'unknown error'}`);
+            }
+
+            this.artifacts.push({
+                type: 'ppt',
+                filename: `${this.sanitizeFilename(this.workOrder.topic)}.pptx`,
+                buffer: pptResult.buffer,
+                mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                size: pptResult.buffer.length,
+                metadata: { slides: sections.length },
+            });
+
+            completed++;
+        }
 
         this.updateStage('render', 'complete', 100, `Generated ${this.artifacts.length} documents`);
     }

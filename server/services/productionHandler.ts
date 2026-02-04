@@ -75,16 +75,30 @@ function requiresSearchFirst(message: string): boolean {
     return SEARCH_FIRST_PATTERNS.some(pattern => pattern.test(message));
 }
 
+function wantsArtifactOutput(message: string): boolean {
+    const lower = message.toLowerCase();
+    // If user mentions any concrete output format/action, we should allow production pipeline.
+    return (
+        /\b(excel|xlsx|hoja\s+de\s+c[aá]lculo|spreadsheet)\b/i.test(message) ||
+        /\b(pptx?|powerpoint|presentaci[oó]n|diapositivas|slides?)\b/i.test(message) ||
+        /\b(word|docx|documento)\b/i.test(message) ||
+        /\bpdf\b/i.test(message) ||
+        /\b(exporta|exportar|genera|generar|crea|crear|haz|hacer|construye|prepara)\b/i.test(message) &&
+        /(excel|xlsx|ppt|pptx|powerpoint|word|docx|pdf)/i.test(message)
+    );
+}
+
 export function isProductionIntent(intentResult: IntentResult | null, message?: string): boolean {
     if (!intentResult) return false;
-    
-    // If user explicitly wants to search for articles first, don't activate production mode
-    // Let the chat service handle the academic search
-    if (message && requiresSearchFirst(message)) {
-        console.log(`[ProductionHandler] Search-first detected, skipping production mode for: "${message.slice(0, 50)}..."`);
+
+    // Previously we skipped production for "search-first" prompts.
+    // That breaks the core workflow: "busca N artículos y exporta a Excel / crea PPT".
+    // New rule: only skip production if it's search-first AND user is NOT asking for an output artifact.
+    if (message && requiresSearchFirst(message) && !wantsArtifactOutput(message)) {
+        console.log(`[ProductionHandler] Search-first detected (no artifact requested), skipping production mode for: "${message.slice(0, 50)}..."`);
         return false;
     }
-    
+
     return PRODUCTION_INTENTS.includes(intentResult.intent as any);
 }
 
