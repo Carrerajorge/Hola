@@ -35,6 +35,20 @@ export default function LandingPage() {
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-white/10 backdrop-blur-sm">
         <div className="flex items-center gap-2">
+          {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-zinc-200 hover:text-white hover:bg-white/10 md:hidden"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
+            aria-expanded={mobileMenuOpen}
+            data-testid="button-mobile-menu-left"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
+
           <IliaGPTLogo size={32} />
           <span className="font-semibold text-white">ILIAGPT</span>
           <ChevronDown className="h-4 w-4 text-zinc-400" />
@@ -53,7 +67,7 @@ export default function LandingPage() {
           {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
             className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-              border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-all duration-300"
+              border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -67,20 +81,8 @@ export default function LandingPage() {
           >
             Suscríbete gratis
           </Button>
-          <Button variant="ghost" size="icon" className="rounded-full text-zinc-400 hover:text-white hover:bg-white/10">
+          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-400 hover:text-white hover:bg-white/10">
             <HelpCircle className="h-5 w-5" />
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full text-zinc-200 hover:text-white hover:bg-white/10 md:hidden"
-            onClick={() => setMobileMenuOpen((v) => !v)}
-            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
-            aria-expanded={mobileMenuOpen}
-            data-testid="button-mobile-menu"
-          >
-            <Menu className="h-5 w-5" />
           </Button>
         </div>
       </header>
