@@ -46,6 +46,7 @@ import { createExcelFromData } from '../../services/advancedExcelBuilder';
 import { generateWordFromMarkdown } from '../../services/markdownToDocx';
 import { generateProfessionalDocument, detectDocumentType } from '../../services/docxCodeGenerator';
 import { EnterpriseDocumentService } from '../../services/enterpriseDocumentService';
+import { academicSearchFallback } from '../../integrations/academicSearch';
 
 // ============================================================================
 // Pipeline Stages Definition
@@ -330,6 +331,37 @@ export class ProductionPipeline extends EventEmitter {
             gaps: result.output?.gaps || [],
             limitations: result.output?.limitations || [],
         };
+
+        // Fallback: if the LLM-based research agent returns 0 sources, hit
+        // no-key academic APIs to ensure we have evidence for Excel/Word exports.
+        if (this.evidencePack.sources.length === 0 && (this.workOrder.sourcePolicy === 'web' || this.workOrder.sourcePolicy === 'both')) {
+            try {
+                this.updateStage('research', 'running', 90, 'No sources from research agent; querying academic indexes...');
+                const academicSources = await academicSearchFallback({
+                    query: this.workOrder.topic,
+                    maxSources: Math.max(10, Math.min(this.workOrder.budget.maxSearchQueries || 20, 50)),
+                });
+                if (academicSources.length > 0) {
+                    this.evidencePack.sources = academicSources;
+                    this.evidencePack.limitations = [
+                        ...(this.evidencePack.limitations || []),
+                        'Sources obtained via academic API fallback (Semantic Scholar/Crossref).',
+                    ];
+                } else {
+                    this.evidencePack.gaps = Array.from(new Set([...(this.evidencePack.gaps || []), this.workOrder.topic]));
+                    this.evidencePack.limitations = [
+                        ...(this.evidencePack.limitations || []),
+                        'Academic API fallback returned 0 results.',
+                    ];
+                }
+            } catch (e: any) {
+                this.evidencePack.gaps = Array.from(new Set([...(this.evidencePack.gaps || []), this.workOrder.topic]));
+                this.evidencePack.limitations = [
+                    ...(this.evidencePack.limitations || []),
+                    `Academic API fallback failed: ${e?.message || 'unknown error'}`,
+                ];
+            }
+        }
 
         this.updateStage('research', 'complete', 100, `Found ${this.evidencePack.sources.length} sources`);
     }

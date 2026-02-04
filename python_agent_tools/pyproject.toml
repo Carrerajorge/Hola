@@ -39,6 +39,12 @@ dependencies = [
     "prometheus-client>=0.17.0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
+
+    # Tool dependencies required by src/tools/*
+    "aiofiles>=23.2.1",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
