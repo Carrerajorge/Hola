@@ -148,6 +148,8 @@ jobs:
           # Prevent server from crashing at module-load when OpenAI client is constructed.
           # This is a dummy key for CI only; E2E tests should not make real provider calls.
           OPENAI_API_KEY: "ci_dummy_key"
+          GEMINI_API_KEY: "ci_dummy_key"
+          XAI_API_KEY: "ci_dummy_key"
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
