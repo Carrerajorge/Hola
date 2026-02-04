@@ -868,8 +868,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       } : null;
 
       // Get the last user message for PARE routing
-      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
-      const userMessageText = lastUserMessage?.content || '';
+      // (Already computed above as lastUserMessage/userMessageText for docTool handling.)
 
       // Run Intent Router FIRST for NLU-based intent classification
       let intentResult: IntentResult | null = null;
