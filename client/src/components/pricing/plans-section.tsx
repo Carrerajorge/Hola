@@ -258,7 +258,9 @@ export function PricingPlansSection(props: {
                   <span className="text-sm text-muted-foreground">USD / mes</span>
                 </div>
 
-                <p className="text-sm text-muted-foreground mb-4">{plan.description}</p>
+                <p className="text-sm text-muted-foreground mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                  {plan.description}
+                </p>
 
                 <Button
                   variant={plan.buttonVariant}
