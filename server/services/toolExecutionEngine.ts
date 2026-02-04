@@ -669,13 +669,3 @@ export async function initializeToolExecutionEngine(): Promise<void> {
   await toolExecutionEngine.initialize();
 }
 
-export {
-  type ToolType,
-  type UnifiedToolInfo,
-  type ExecutionProgress,
-  type ExecutionResult,
-  type ExecutionHistoryEntry,
-  type ToolAnalytics,
-  type EngineAnalytics,
-  type ExecutionOptions,
-};

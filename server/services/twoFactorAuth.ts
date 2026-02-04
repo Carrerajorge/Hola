@@ -192,7 +192,7 @@ export async function setup2FA(userId: string): Promise<{
   
   // Get user email
   const userResult = await db.execute(sql`SELECT email FROM users WHERE id = ${userId}`);
-  const email = userResult.rows?.[0]?.email || "user@iliagpt.com";
+  const email = String(userResult.rows?.[0]?.email || "user@iliagpt.com");
   
   // Store secret (not enabled yet)
   await db.execute(sql`
@@ -217,7 +217,7 @@ export async function verify2FASetup(userId: string, code: string): Promise<bool
   
   if (!result.rows?.length) return false;
   
-  const { secret } = result.rows[0];
+  const secret = String((result.rows[0] as any).secret || "");
   
   if (verifyTOTP(secret, code)) {
     await db.execute(sql`
@@ -236,7 +236,8 @@ export async function verify2FALogin(userId: string, code: string): Promise<bool
   
   if (!result.rows?.length) return false;
   
-  const { secret, backup_codes } = result.rows[0];
+  const secret = String((result.rows[0] as any).secret || "");
+  const backup_codes = (result.rows[0] as any).backup_codes;
   
   // Check TOTP first
   if (verifyTOTP(secret, code)) {
@@ -308,7 +309,7 @@ export async function getRecentFailedAttempts(
     AND created_at > NOW() - INTERVAL '${minutes} minutes'
   `);
   
-  return parseInt(result.rows?.[0]?.count || "0");
+  return parseInt(String((result.rows?.[0] as any)?.count || "0"));
 }
 
 export async function isAccountLocked(email: string, ip: string): Promise<boolean> {

@@ -492,7 +492,7 @@ export class MemStorage implements IStorage {
   }
 
   async updateFileJobStatus(fileId: string, status: string, error?: string): Promise<FileJob | undefined> {
-    const updates: Partial<FileJob> = { status };
+    const updates: any = { status };
     if (status === "processing") {
       updates.startedAt = new Date();
     }
@@ -501,7 +501,7 @@ export class MemStorage implements IStorage {
     }
     if (error) {
       updates.lastError = error;
-      updates.retries = sql<number>`${fileJobs.retries} + 1`;
+      updates.retries = sql<number>`${fileJobs.retries} + 1` as any;
     }
     const [result] = await db.update(fileJobs).set(updates).where(eq(fileJobs.fileId, fileId)).returning();
     return result;
@@ -1769,8 +1769,9 @@ export class MemStorage implements IStorage {
   }
 
   async getActiveCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]> {
+    // companyKnowledge schema doesn't include an isActive flag; treat all entries as active.
     return dbRead.select().from(companyKnowledge)
-      .where(and(eq(companyKnowledge.userId, userId), eq(companyKnowledge.isActive, 'true')))
+      .where(eq(companyKnowledge.userId, userId))
       .orderBy(desc(companyKnowledge.createdAt));
   }
 
@@ -1945,10 +1946,10 @@ export class MemStorage implements IStorage {
   }
 
   async updateOfflineMessageStatus(id: string, status: string, error?: string): Promise<OfflineMessageQueue | null> {
-    const updates: Partial<OfflineMessageQueue> = { status };
+    const updates: any = { status };
     if (error) {
-      updates.error = error;
-      updates.retryCount = sql<number>`${offlineMessageQueue.retryCount} + 1`;
+      // offlineMessageQueue schema doesn't have an `error` column; keep only retryCount.
+      updates.retryCount = (sql<number>`${offlineMessageQueue.retryCount} + 1` as any);
     }
     const [result] = await db.update(offlineMessageQueue)
       .set(updates)
@@ -1959,7 +1960,7 @@ export class MemStorage implements IStorage {
 
   async syncOfflineMessage(id: string): Promise<OfflineMessageQueue | null> {
     const [result] = await db.update(offlineMessageQueue)
-      .set({ status: 'synced', syncedAt: new Date() })
+      .set({ status: 'synced', processedAt: new Date() })
       .where(eq(offlineMessageQueue.id, id))
       .returning();
     return result || null;

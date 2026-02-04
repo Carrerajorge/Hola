@@ -3,8 +3,19 @@
  * Web push notifications for real-time updates
  */
 
-import webPush from 'web-push';
-import { db } from '../db';
+// Optional dependency: only available when installed/configured.
+// We use require() to avoid hard build-time dependency.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const webPush: any = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('web-push');
+  } catch {
+    return null;
+  }
+})();
+
+// import { db } from '../db';
 
 // VAPID keys should be in environment variables
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
@@ -12,7 +23,7 @@ const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@iliagpt.com';
 
 // Configure web-push
-if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+if (webPush && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
     webPush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
@@ -91,6 +102,10 @@ export async function sendPushNotification(
             badge: payload.badge || '/icons/badge-72.png',
         });
 
+        if (!webPush) {
+            console.warn('web-push not installed; skipping push notification');
+            return false;
+        }
         await webPush.sendNotification(subscription, pushPayload);
         console.log(`Push notification sent to user ${userId}`);
         return true;

@@ -11,6 +11,14 @@ import { createQueue, createQueueEvents, QUEUE_NAMES } from "../lib/queueFactory
 
 // ============== Types ==============
 
+// Compatibility exports (used by unifiedDocumentAnalyzer)
+export type UploadJob = UploadJobData;
+export interface ProcessingResult {
+    jobId: string;
+    status: JobStatus;
+    error?: string;
+}
+
 export interface UploadJobData {
     id: string;
     userId: string;
@@ -120,8 +128,8 @@ class RateLimiter {
 // ============== Upload Queue Producer ==============
 
 export class UploadQueue extends EventEmitter {
-    private queue: Queue<UploadJobData>;
-    private events: QueueEvents;
+    private queue: Queue<UploadJobData> | null;
+    private events: QueueEvents | null;
     private rateLimiter: RateLimiter;
     private config: Required<QueueConfig>;
 
@@ -136,14 +144,22 @@ export class UploadQueue extends EventEmitter {
         };
         this.rateLimiter = new RateLimiter(this.config.rateLimits);
 
-        // Initialize BullMQ Queue
+        // Initialize BullMQ Queue (may be null if Redis is not configured)
         this.queue = createQueue<UploadJobData>(QUEUE_NAMES.UPLOAD);
         this.events = createQueueEvents(QUEUE_NAMES.UPLOAD);
 
         this.setupEventListeners();
     }
 
+    private getQueueOrThrow(): Queue<UploadJobData> {
+        if (!this.queue) {
+            throw new Error('Upload queue is disabled (Redis not configured)');
+        }
+        return this.queue;
+    }
+
     private setupEventListeners() {
+        if (!this.events) return;
         this.events.on('completed', ({ jobId, returnvalue }) => {
             this.emit('jobCompleted', { id: jobId, result: returnvalue });
         });
@@ -168,8 +184,8 @@ export class UploadQueue extends EventEmitter {
      * Closes the queue connection
      */
     async stop(): Promise<void> {
-        await this.queue.close();
-        await this.events.close();
+        if (this.queue) await this.queue.close();
+        if (this.events) await this.events.close();
         this.emit("stopped");
     }
 
@@ -218,7 +234,8 @@ export class UploadQueue extends EventEmitter {
         this.rateLimiter.record(userId);
 
         // Add to BullMQ
-        await this.queue.add('process-file', jobData, {
+        const queue = this.getQueueOrThrow();
+        await queue.add('process-file', jobData, {
             jobId: jobId,
             priority: priority === 'high' ? 1 : (priority === 'low' ? 3 : 2),
             attempts: this.config.maxRetries,
@@ -261,7 +278,8 @@ export class UploadQueue extends EventEmitter {
      * Get job status
      */
     async getJob(jobId: string) {
-        return await this.queue.getJob(jobId);
+        const queue = this.getQueueOrThrow();
+        return await queue.getJob(jobId);
     }
 
     /**
@@ -276,7 +294,8 @@ export class UploadQueue extends EventEmitter {
      * Cancel job
      */
     async cancel(jobId: string): Promise<boolean> {
-        const job = await this.queue.getJob(jobId);
+        const queue = this.getQueueOrThrow();
+        const job = await queue.getJob(jobId);
         if (job) {
             await job.remove();
             return true;
@@ -288,7 +307,8 @@ export class UploadQueue extends EventEmitter {
      * Get queue stats
      */
     async getStats() {
-        const counts = await this.queue.getJobCounts();
+        const queue = this.getQueueOrThrow();
+        const counts = await queue.getJobCounts();
         return {
             pending: counts.waiting || 0,
             processing: counts.active || 0,
@@ -302,7 +322,8 @@ export class UploadQueue extends EventEmitter {
      * Clear completed/failed jobs
      */
     async cleanup(maxAgeMs: number = 3600000): Promise<number> {
-        const cleaned = await this.queue.clean(maxAgeMs, 1000, 'completed');
+        const queue = this.getQueueOrThrow();
+        const cleaned = await queue.clean(maxAgeMs, 1000, 'completed');
         return cleaned.length;
     }
 }
