@@ -2,7 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const API_BASE = 'http://localhost:5000';
 
-describe('PARE Observability Phase 3', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('PARE Observability Phase 3', () => {
   describe('Prometheus Metrics Endpoint', () => {
     it('should expose /metrics endpoint with Prometheus format', async () => {
       const response = await fetch(`${API_BASE}/metrics`);

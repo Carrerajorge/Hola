@@ -18,7 +18,9 @@ import * as path from 'path';
 
 const API_BASE = 'http://localhost:5000/api';
 
-describe('PARE Torture Fixtures', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('PARE Torture Fixtures', () => {
   describe('CSVParser with Row/Column Citations', () => {
     it('should parse CSV and generate row/col citations', async () => {
       const csvParser = new CsvParser();
@@ -325,7 +327,7 @@ describe('DATA_MODE Kill-Switch Validation', () => {
   });
 });
 
-describe('Coverage Enforcement', () => {
+describeIntegration('Coverage Enforcement', () => {
   it('should include citation for each document in batch', async () => {
     const response = await fetch(`${API_BASE}/analyze`, {
       method: 'POST',

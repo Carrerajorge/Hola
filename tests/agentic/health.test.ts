@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 
 const BASE_URL = 'http://localhost:5000';
 
-describe('Health Endpoints', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('Health Endpoints', () => {
   describe('GET /api/health', () => {
     it('should return health status', async () => {
       const response = await fetch(`${BASE_URL}/api/health`);

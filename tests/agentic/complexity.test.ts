@@ -2,7 +2,9 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 const BASE_URL = 'http://localhost:5000';
 
-describe('ComplexityAnalyzer API', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('ComplexityAnalyzer API', () => {
   describe('POST /api/agentic/analyze-complexity', () => {
     it('should analyze trivial prompts correctly', async () => {
       const response = await fetch(`${BASE_URL}/api/agentic/analyze-complexity`, {

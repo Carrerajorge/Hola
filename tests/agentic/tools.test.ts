@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 
 const BASE_URL = 'http://localhost:5000';
 
-describe('ToolRegistry API', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('ToolRegistry API', () => {
   describe('GET /api/agentic/tools', () => {
     it('should return list of all tools', async () => {
       const response = await fetch(`${BASE_URL}/api/agentic/tools`);

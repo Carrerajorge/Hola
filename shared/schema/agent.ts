@@ -156,6 +156,11 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     idempotencyKey: varchar("idempotency_key"),
+
+    // Confirmation workflow
+    pendingConfirmation: jsonb("pending_confirmation"),
+    awaitingConfirmationSince: timestamp("awaiting_confirmation_since"),
+    confirmedStepIndices: jsonb("confirmed_step_indices"),
 }, (table) => [
     index("agent_mode_runs_chat_idx").on(table.chatId),
     index("agent_mode_runs_message_idx").on(table.messageId),

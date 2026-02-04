@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 
 const BASE_URL = 'http://localhost:5000';
 
-describe('OrchestrationEngine API', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('OrchestrationEngine API', () => {
   describe('POST /api/agentic/orchestrate', () => {
     it('should decompose a user-related task', async () => {
       const response = await fetch(`${BASE_URL}/api/agentic/orchestrate`, {

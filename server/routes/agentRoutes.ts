@@ -586,6 +586,55 @@ export function createAgentModeRouter() {
     }
   });
 
+  router.post("/runs/:id/confirm", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const decisionRaw = (req.body?.decision || req.body?.action || "confirm") as string;
+      const decision = String(decisionRaw).trim().toLowerCase();
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      if (run.status !== "awaiting_confirmation") {
+        return res.status(400).json({
+          error: "Run is not awaiting confirmation",
+          currentStatus: run.status,
+        });
+      }
+
+      if (decision === "cancel") {
+        const cancelled = await (agentManager as any).cancelPendingConfirmation?.(id);
+        await updateRunWithLock(id, "awaiting_confirmation", { status: "cancelled", completedAt: new Date() });
+        return res.json({ success: true, status: "cancelled", cancelled: !!cancelled });
+      }
+
+      const confirmed = await (agentManager as any).confirmRun?.(id);
+
+      const lockResult = await updateRunWithLock(id, "awaiting_confirmation", {
+        status: "running",
+        pendingConfirmation: null as any,
+        awaitingConfirmationSince: null as any,
+      } as any);
+
+      if (!lockResult.success) {
+        return res.status(409).json({
+          error: "Failed to confirm run due to concurrent modification",
+          details: lockResult.error,
+        });
+      }
+
+      res.json({ success: true, status: "running", confirmed: !!confirmed });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error confirming run:", error);
+      res.status(500).json({ error: "Failed to confirm agent run" });
+    }
+  });
+
   router.post("/runs/:id/retry", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;

@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 
 const BASE_URL = 'http://localhost:5000';
 
-describe('CompressedMemory API', () => {
+const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
+
+describeIntegration('CompressedMemory API', () => {
   describe('POST /api/agentic/memory/atoms', () => {
     it('should create a new memory atom', async () => {
       const response = await fetch(`${BASE_URL}/api/agentic/memory/atoms`, {

@@ -50,3 +50,6 @@ sandbox_workspace/.state/
 
 # Ignore test artifacts
 artifacts/node_modules_backup/
+artifacts/Test_*.txt
+artifacts/*.log
+artifacts/*.tmp

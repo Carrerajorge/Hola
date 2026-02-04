@@ -91,7 +91,7 @@ function registerResearchAgent(): void {
   const config: AgentConfig = {
     name: "ResearchAssistantAgent",
     description: "Specializes in web research, information gathering, fact-checking, and knowledge synthesis",
-    role: "Research Assistant",
+    role: "Research",
     model: "grok-4-1-fast-non-reasoning",
     temperature: 0.5,
     maxTokens: 8192,
@@ -229,7 +229,7 @@ function registerDataAgent(): void {
   const config: AgentConfig = {
     name: "DataAnalystAgent",
     description: "Specializes in data processing, analysis, visualization, and database operations",
-    role: "Data Analyst",
+    role: "Data",
     model: "grok-4-1-fast-non-reasoning",
     temperature: 0.3,
     maxTokens: 8192,

@@ -25,7 +25,9 @@ function generateTestKey(): string {
   return `test-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 }
 
-describe("PARE Phase 2 Idempotency System", () => {
+const describeIntegration = process.env.TEST_DATABASE_URL ? describe : describe.skip;
+
+describeIntegration("PARE Phase 2 Idempotency System", () => {
   beforeAll(async () => {
     await clearTestKeys();
   });

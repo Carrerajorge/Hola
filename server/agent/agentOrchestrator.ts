@@ -5,6 +5,9 @@ import { EventEmitter } from "events";
 import { agentEventBus } from "./eventBus";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getHTNPlanner, type Task } from "./htnPlanner";
+import { db } from "../db";
+import { agentModeRuns } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 export interface PlanStep {
   index: number;
@@ -27,6 +30,7 @@ export type AgentStatus =
   | "verifying"
   | "replanning"
   | "paused"
+  | "awaiting_confirmation"
   | "cancelling"
   | "completed"
   | "failed"
@@ -153,6 +157,16 @@ export class AgentOrchestrator extends EventEmitter {
   private abortController: AbortController;
   private userMessage: string;
   private attachments: any[];
+
+  // Confirmation workflow
+  private pendingConfirmation: null | {
+    stepIndex: number;
+    toolName: string;
+    toolInput: any;
+    reason: string;
+    requestedAt: number;
+  } = null;
+  private confirmedStepIndices: Set<number> = new Set();
 
   private eventStream: AgentEvent[] = [];
   private todoList: TodoItem[] = [];
@@ -883,7 +897,7 @@ Respond with ONLY valid JSON in this exact format:
     }
   }
 
-  async executeStep(stepIndex: number): Promise<ToolResult> {
+  async executeStep(stepIndex: number, opts?: { isConfirmed?: boolean }): Promise<ToolResult> {
     // Check for cancellation before starting step
     if (this.isCancelled) {
       return {
@@ -940,6 +954,7 @@ Respond with ONLY valid JSON in this exact format:
         chatId: this.chatId,
         runId: this.runId,
         userPlan: this.userPlan,
+        isConfirmed: opts?.isConfirmed === true,
         signal: this.abortController.signal,
       });
 
@@ -1067,8 +1082,60 @@ Respond with ONLY valid JSON in this exact format:
     }
   }
 
+  getPendingConfirmation(): null | { stepIndex: number; toolName: string; toolInput: any; reason: string; requestedAt: number } {
+    return this.pendingConfirmation;
+  }
+
+  async confirmPendingConfirmation(): Promise<boolean> {
+    if (!this.pendingConfirmation) return false;
+
+    const stepIndex = this.pendingConfirmation.stepIndex;
+    this.confirmedStepIndices.add(stepIndex);
+    this.pendingConfirmation = null;
+    this.status = "running";
+    this.emitProgress();
+
+    try {
+      await db.update(agentModeRuns)
+        .set({
+          status: "running",
+          pendingConfirmation: null,
+          awaitingConfirmationSince: null,
+          confirmedStepIndices: Array.from(this.confirmedStepIndices),
+        } as any)
+        .where(eq(agentModeRuns.id, this.runId));
+    } catch (e) {
+      console.error("[AgentOrchestrator] Failed to persist confirmation:", e);
+    }
+
+    return true;
+  }
+
+  async cancelPendingConfirmation(): Promise<boolean> {
+    if (!this.pendingConfirmation) return false;
+    this.pendingConfirmation = null;
+    this.status = "cancelled";
+    this.isCancelled = true;
+    this.emitProgress();
+
+    try {
+      await db.update(agentModeRuns)
+        .set({
+          status: "cancelled",
+          pendingConfirmation: null,
+          awaitingConfirmationSince: null,
+        } as any)
+        .where(eq(agentModeRuns.id, this.runId));
+    } catch (e) {
+      console.error("[AgentOrchestrator] Failed to persist cancellation:", e);
+    }
+
+    return true;
+  }
+
   async run(): Promise<void> {
-    if (this.status !== "queued" && this.status !== "planning") {
+    const isResume = this.status === "running" || this.status === "awaiting_confirmation";
+    if (!isResume && this.status !== "queued" && this.status !== "planning") {
       throw new Error(`Cannot start run in status: ${this.status}`);
     }
 
@@ -1077,24 +1144,30 @@ Respond with ONLY valid JSON in this exact format:
         throw new Error("No plan available. Call generatePlan first.");
       }
 
-      await this.emitTraceEvent('task_start', {
-        phase: 'planning',
-        status: 'running',
-        summary: this.plan.objective,
-      });
+      if (!isResume) {
+        await this.emitTraceEvent('task_start', {
+          phase: 'planning',
+          status: 'running',
+          summary: this.plan.objective,
+        });
 
-      await this.emitTraceEvent('plan_created', {
-        phase: 'planning',
-        plan: {
-          objective: this.plan.objective,
-          steps: this.plan.steps.map(s => ({ index: s.index, toolName: s.toolName, description: s.description })),
-          estimatedTime: this.plan.estimatedTime,
-        },
-      });
+        await this.emitTraceEvent('plan_created', {
+          phase: 'planning',
+          plan: {
+            objective: this.plan.objective,
+            steps: this.plan.steps.map(s => ({ index: s.index, toolName: s.toolName, description: s.description })),
+            estimatedTime: this.plan.estimatedTime,
+          },
+        });
 
-      this.status = "running";
-      this.initializeTodoList();
-      this.emitProgress();
+        this.status = "running";
+        if (this.todoList.length === 0) {
+          this.initializeTodoList();
+        }
+        this.emitProgress();
+      } else {
+        this.status = "running";
+      }
 
       this.logEvent('action', {
         type: 'run_started',
@@ -1107,7 +1180,7 @@ Respond with ONLY valid JSON in this exact format:
         return;
       }
 
-      let i = 0;
+      let i = isResume ? this.currentStepIndex : 0;
       while (i < this.plan.steps.length) {
         if (this.isCancelled) {
           this.status = "cancelled";
@@ -1126,8 +1199,62 @@ Respond with ONLY valid JSON in this exact format:
           return;
         }
 
+        // Skip already completed steps (idempotent resume)
+        const existingSuccess = this.stepResults.find(r => r.stepIndex === i && r.success);
+        if (existingSuccess) {
+          this.updateTodoList(i, 'completed');
+          i++;
+          continue;
+        }
+
         this.updateTodoList(i, 'in_progress');
-        const result = await this.executeStep(i);
+
+        const isConfirmed = this.confirmedStepIndices.has(i);
+        const result = await this.executeStep(i, { isConfirmed });
+        if (isConfirmed) {
+          // one-shot confirmation
+          this.confirmedStepIndices.delete(i);
+        }
+
+        // If tool requires explicit user confirmation, pause the run and persist pending action
+        if (!result.success && result.error?.code === 'REQUIRES_CONFIRMATION') {
+          this.pendingConfirmation = {
+            stepIndex: i,
+            toolName: this.plan.steps[i]?.toolName || 'unknown',
+            toolInput: this.plan.steps[i]?.input,
+            reason: result.error.message || 'Confirmation required',
+            requestedAt: Date.now(),
+          };
+
+          this.status = 'awaiting_confirmation' as any;
+
+          try {
+            await db.update(agentModeRuns)
+              .set({
+                status: 'awaiting_confirmation',
+                pendingConfirmation: this.pendingConfirmation,
+                awaitingConfirmationSince: new Date(),
+              } as any)
+              .where(eq(agentModeRuns.id, this.runId));
+          } catch (e) {
+            console.error('[AgentOrchestrator] Failed to persist pending confirmation:', e);
+          }
+
+          await this.emitTraceEvent('confirmation_required' as any, {
+            phase: 'executing',
+            status: 'awaiting_confirmation',
+            stepIndex: i,
+            summary: `Se requiere confirmación para ejecutar: ${this.pendingConfirmation.toolName}. Responda CONFIRM o CANCEL.`,
+            metadata: {
+              toolName: this.pendingConfirmation.toolName,
+              stepIndex: i,
+              reason: this.pendingConfirmation.reason,
+            },
+          } as any);
+
+          this.emitProgress();
+          return;
+        }
 
         const verification = await this.verifyStepResult(i, result);
 
@@ -1531,6 +1658,31 @@ class AgentManager {
     }
     await orchestrator.cancel();
     return true;
+  }
+
+  async confirmRun(runId: string): Promise<boolean> {
+    const orchestrator = this.activeRuns.get(runId);
+    if (!orchestrator) {
+      return false;
+    }
+
+    const ok = await orchestrator.confirmPendingConfirmation();
+    if (!ok) return false;
+
+    // Resume execution
+    this.executeRun(runId).catch((error) => {
+      console.error(`[AgentManager] Confirmed run ${runId} failed:`, error.message);
+    });
+
+    return true;
+  }
+
+  async cancelPendingConfirmation(runId: string): Promise<boolean> {
+    const orchestrator = this.activeRuns.get(runId);
+    if (!orchestrator) {
+      return false;
+    }
+    return orchestrator.cancelPendingConfirmation();
   }
 
   private cleanupOldRuns(): void {

@@ -14,6 +14,7 @@ import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } f
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
+import { agentManager } from "./agentOrchestrator";
 
 export interface UnifiedChatRequest {
   messages: Array<{ role: string; content: string }>;
@@ -256,6 +257,29 @@ export async function executeUnifiedChat(
   res.setHeader("X-Intent", requestSpec.intent);
   res.setHeader("X-Agentic-Mode", String(isAgenticMode));
   res.flushHeaders();
+
+  // Handle WhatsApp-style confirmations: user replies with CONFIRM or CANCEL
+  const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
+  const decision = lastUserMessage.trim().toUpperCase();
+  if (decision === 'CONFIRM' || decision === 'CANCEL') {
+    const [pendingRun] = await db.select()
+      .from(agentModeRuns)
+      .where(and(eq(agentModeRuns.chatId, request.chatId), eq(agentModeRuns.status, 'awaiting_confirmation')))
+      .orderBy(desc(agentModeRuns.createdAt))
+      .limit(1);
+
+    if (pendingRun) {
+      if (decision === 'CANCEL') {
+        await (agentManager as any).cancelPendingConfirmation?.(pendingRun.id);
+        writeSse(res, 'confirmation', { runId: pendingRun.id, decision: 'CANCEL', status: 'cancelled' });
+      } else {
+        await (agentManager as any).confirmRun?.(pendingRun.id);
+        writeSse(res, 'confirmation', { runId: pendingRun.id, decision: 'CONFIRM', status: 'running' });
+      }
+      res.end();
+      return;
+    }
+  }
 
   await emitTraceEvent(runId, 'task_start', {
     metadata: {

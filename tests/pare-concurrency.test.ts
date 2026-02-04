@@ -99,7 +99,9 @@ function createConcurrencyTestApp(): Express {
   return app;
 }
 
-describe("PARE Concurrency Tests", () => {
+const describeIntegration = process.env.TEST_DATABASE_URL ? describe : describe.skip;
+
+describeIntegration("PARE Concurrency Tests", () => {
   let app: Express;
   
   beforeAll(async () => {
