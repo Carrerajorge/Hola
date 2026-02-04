@@ -81,7 +81,7 @@ export default function LandingPage() {
               <span className="text-gradient-premium">ayudarte?</span>
             </h1>
             <p className="text-lg text-zinc-400 max-w-xl mx-auto">
-              El asistente de IA más inteligente para crear, investigar y aprender
+              El asistente de IA más inteligente para crear, investigar y comprender
             </p>
           </div>
 
