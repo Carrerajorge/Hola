@@ -68,6 +68,25 @@ describe('academicSearchFallback', () => {
     expect(keys.size).toBe(out.length);
   });
 
+  it('uses maxSources to set provider limits (so 50 requested can actually be returned)', async () => {
+    const ss = { data: [] };
+    const cr = { message: { items: [] } };
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ss, text: async () => JSON.stringify(ss) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => cr, text: async () => JSON.stringify(cr) });
+    (globalThis as any).fetch = fetchMock;
+
+    await academicSearchFallback({ query: 'neural networks', maxSources: 50 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [u1] = fetchMock.mock.calls[0];
+    const [u2] = fetchMock.mock.calls[1];
+    const urls = [String(u1), String(u2)].join(' ');
+    expect(urls).toMatch(/limit=50/);
+    expect(urls).toMatch(/rows=50/);
+  });
+
   it('returns [] for empty query', async () => {
     mockFetchOnce({});
     const out = await academicSearchFallback({ query: '   ', maxSources: 10 });

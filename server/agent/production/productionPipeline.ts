@@ -275,6 +275,16 @@ export class ProductionPipeline extends EventEmitter {
         }
     }
 
+    private inferDesiredSourcesCount(text: string): number | null {
+        const t = (text || '').toLowerCase();
+        // Common patterns: "50 artículos", "50 papers", "50 fuentes", etc.
+        const m = t.match(/(?:^|\D)(\d{2,3})\s*(?:art\w*|papers?|fuentes?|sources?)/i);
+        if (!m) return null;
+        const n = Number(m[1]);
+        if (!Number.isFinite(n) || n < 1) return null;
+        return Math.max(1, Math.min(n, 50));
+    }
+
     private async stageResearch(): Promise<void> {
         if (this.workOrder.sourcePolicy === 'none') {
             this.updateStage('research', 'skipped', 100, 'Research not required');
@@ -337,9 +347,21 @@ export class ProductionPipeline extends EventEmitter {
         if (this.evidencePack.sources.length === 0 && (this.workOrder.sourcePolicy === 'web' || this.workOrder.sourcePolicy === 'both')) {
             try {
                 this.updateStage('research', 'running', 90, 'No sources from research agent; querying academic indexes...');
+                const desired = this.inferDesiredSourcesCount(this.workOrder.topic) || 0;
+                const budgetMax = this.workOrder.budget.maxSearchQueries || 20;
+                // If the user explicitly asked for N sources and we're producing Excel,
+                // honor that up to a hard cap (50) even if budgetMax is lower.
+                const maxSources = Math.max(
+                    10,
+                    Math.min(
+                        50,
+                        Math.max(budgetMax, desired, this.workOrder.deliverables.includes('excel') ? 50 : 0)
+                    )
+                );
+
                 const academicSources = await academicSearchFallback({
                     query: this.workOrder.topic,
-                    maxSources: Math.max(10, Math.min(this.workOrder.budget.maxSearchQueries || 20, 50)),
+                    maxSources,
                 });
                 if (academicSources.length > 0) {
                     this.evidencePack.sources = academicSources;

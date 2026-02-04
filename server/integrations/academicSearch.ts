@@ -148,8 +148,10 @@ export async function academicSearchFallback(opts: { query: string; maxSources: 
 
   // Parallelize and then de-dup by DOI/URL/title.
   const [ss, cr] = await Promise.allSettled([
-    semanticScholarSearch(query, Math.min(25, maxSources)),
-    crossrefSearch(query, Math.min(25, maxSources)),
+    // Ask each provider for up to maxSources (API caps at 100).
+    // We dedupe across providers afterwards.
+    semanticScholarSearch(query, Math.min(100, maxSources)),
+    crossrefSearch(query, Math.min(100, maxSources)),
   ]);
 
   const raw: AcademicSource[] = [];
