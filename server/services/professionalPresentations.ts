@@ -847,7 +847,7 @@ export class ProfessionalPresentationGenerator {
 
   private createQuoteSlide(slide: any, config: PresentationSlide): void {
     // Large quote marks
-    slide.addText(""", {
+    slide.addText("“", {
       x: 0.5,
       y: 1,
       w: 1,
