@@ -145,6 +145,9 @@ jobs:
           # E2E suite uses mocked flows; the webServer boot requires these to be present.
           DATABASE_URL: "postgres://e2e:e2e@localhost:5432/e2e"
           SESSION_SECRET: "ci-e2e-session-secret"
+          # Prevent server from crashing at module-load when OpenAI client is constructed.
+          # This is a dummy key for CI only; E2E tests should not make real provider calls.
+          OPENAI_API_KEY: "ci_dummy_key"
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v4
