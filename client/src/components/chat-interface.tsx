@@ -5666,6 +5666,18 @@ IMPORTANTE:
                       className="mt-6 justify-center max-w-xl"
                     />
                   )}
+                  {/* Terms and Privacy notice */}
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.6 }}
+                    className="text-xs text-muted-foreground/60 text-center mt-6 max-w-md"
+                  >
+                    Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
+                    <a href="/terms" className="underline hover:text-muted-foreground transition-colors">Términos</a>
+                    {" "}y reconoces que leíste nuestra{" "}
+                    <a href="/privacy-policy" className="underline hover:text-muted-foreground transition-colors">Política de privacidad</a>.
+                  </motion.p>
                 </>
               )}
             </div>

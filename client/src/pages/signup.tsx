@@ -209,9 +209,9 @@ export default function SignupPage() {
 
           <p className="text-center text-xs text-muted-foreground mt-6">
             Al crear una cuenta, aceptas nuestros{" "}
-            <a href="#" className="text-primary hover:underline">Términos de servicio</a>
+            <span onClick={() => setLocation("/terms")} className="text-primary hover:underline cursor-pointer">Términos de servicio</span>
             {" "}y{" "}
-            <a href="#" className="text-primary hover:underline">Política de privacidad</a>
+            <span onClick={() => setLocation("/privacy-policy")} className="text-primary hover:underline cursor-pointer">Política de privacidad</span>
           </p>
         </div>
       </div>
