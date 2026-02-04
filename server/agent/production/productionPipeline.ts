@@ -621,7 +621,16 @@ export class ProductionPipeline extends EventEmitter {
         if (deliverables.includes('excel')) {
             this.updateStage('render', 'running', (completed / deliverables.length) * 100, 'Generating Excel workbook...');
 
-            const excelData = this.workOrder.excelData || [['No data']];
+            const excelDataRaw: any = (this.workOrder as any).excelData;
+            const excelData: any[][] = this.normalizeExcelData(
+                excelDataRaw,
+                this.evidencePack?.sources || [],
+                {
+                    // A) 1 fila por artículo (schema fijo y testeable)
+                    fixedSchema: 'articles_v1',
+                }
+            );
+
             const excelResult = await createExcelFromData(excelData, {
                 title: this.workOrder.topic,
                 theme: 'professional',
@@ -633,7 +642,10 @@ export class ProductionPipeline extends EventEmitter {
                 buffer: excelResult.buffer,
                 mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 size: excelResult.buffer.length,
-                metadata: {},
+                metadata: {
+                    rows: Math.max(0, excelData.length - 1),
+                    columns: excelData[0]?.length || 0,
+                },
             });
 
             completed++;
@@ -692,6 +704,117 @@ export class ProductionPipeline extends EventEmitter {
     // ============================================================================
     // Helper Methods
     // ============================================================================
+
+    private normalizeExcelData(
+        excelDataRaw: any,
+        sources: any[],
+        opts: { fixedSchema?: 'articles_v1' } = {}
+    ): any[][] {
+        // Primary goal: always return a valid any[][] (never null) to avoid runtime crashes.
+        // Secondary: enforce a fixed schema when user wants A) 1 row per article.
+
+        const fixedSchema = opts.fixedSchema;
+
+        const is2DArray = (v: any): v is any[][] =>
+            Array.isArray(v) && (v.length === 0 || Array.isArray(v[0]));
+
+        const coerceTo2DFromRows = (rows: any[]): any[][] => {
+            // rows: Array<object> → [headers, ...values]
+            const objects = rows.filter(r => r && typeof r === 'object' && !Array.isArray(r));
+            if (objects.length === 0) return [];
+
+            const headerSet = new Set<string>();
+            for (const obj of objects) {
+                for (const k of Object.keys(obj)) headerSet.add(k);
+            }
+            const headers = Array.from(headerSet);
+            if (headers.length === 0) return [];
+
+            const data: any[][] = [headers];
+            for (const obj of objects) {
+                data.push(headers.map(h => (obj as any)[h] ?? ''));
+            }
+            return data;
+        };
+
+        const buildArticlesSchemaV1 = (srcs: any[]): any[][] => {
+            const headers = ['Título', 'Autores', 'Año', 'Revista/Conferencia', 'DOI', 'URL', 'Resumen', 'Cita'];
+            const rows: any[][] = [headers];
+
+            const safeText = (v: any) => {
+                if (v == null) return '';
+                if (typeof v === 'string') return v;
+                if (typeof v === 'number') return String(v);
+                if (Array.isArray(v)) return v.map(x => safeText(x)).filter(Boolean).join(', ');
+                if (typeof v === 'object') {
+                    // common patterns
+                    if ((v as any).name) return safeText((v as any).name);
+                    if ((v as any).text) return safeText((v as any).text);
+                    if ((v as any).title) return safeText((v as any).title);
+                }
+                return String(v);
+            };
+
+            for (const s of Array.isArray(srcs) ? srcs : []) {
+                if (!s) continue;
+                const title = safeText(s.title || s.paperTitle || s.name);
+                const authors = safeText(s.authors || s.author || s.creators);
+                const year = safeText(s.year || s.publicationYear || s.dateYear);
+                const venue = safeText(s.venue || s.journal || s.conference || s.publisher);
+                const doi = safeText(s.doi || s.DOI);
+                const url = safeText(s.url || s.link || s.href);
+                const abstract = safeText(s.abstract || s.summary || s.snippet);
+                const citation = safeText(s.citation || s.cite || s.bibtex);
+
+                // Keep at least title/url/snippet if available
+                if (!title && !url && !abstract) continue;
+
+                rows.push([title, authors, year, venue, doi, url, abstract, citation]);
+            }
+
+            return rows.length > 1 ? rows : [headers, ...[['(Sin resultados)', '', '', '', '', '', '', '']]];
+        };
+
+        // 1) If fixed schema requested, prefer building from sources when available.
+        if (fixedSchema === 'articles_v1' && Array.isArray(sources) && sources.length > 0) {
+            return buildArticlesSchemaV1(sources);
+        }
+
+        // 2) If we already have 2D data, sanitize it.
+        if (is2DArray(excelDataRaw)) {
+            const cleaned = (excelDataRaw as any[][])
+                .filter(r => Array.isArray(r))
+                .map(r => r.map(c => (c == null ? '' : c)));
+            return cleaned.length > 0 ? cleaned : [['No data']];
+        }
+
+        // 3) If it's an array of objects/rows, coerce.
+        if (Array.isArray(excelDataRaw)) {
+            const coerced = coerceTo2DFromRows(excelDataRaw);
+            if (coerced.length > 0) return coerced;
+        }
+
+        // 4) Common shapes: { headers, rows }
+        if (excelDataRaw && typeof excelDataRaw === 'object') {
+            const headers = (excelDataRaw as any).headers;
+            const rows = (excelDataRaw as any).rows;
+            if (Array.isArray(headers) && Array.isArray(rows)) {
+                const matrix: any[][] = [headers.map((h: any) => (h == null ? '' : String(h)))];
+                for (const r of rows) {
+                    if (Array.isArray(r)) matrix.push(r.map((c: any) => (c == null ? '' : c)));
+                    else if (r && typeof r === 'object') matrix.push(headers.map((h: any) => (r as any)[h] ?? ''));
+                }
+                return matrix.length > 0 ? matrix : [['No data']];
+            }
+        }
+
+        // 5) Fallback: if sources exist, still build schema.
+        if (Array.isArray(sources) && sources.length > 0) {
+            return buildArticlesSchemaV1(sources);
+        }
+
+        return [['No data']];
+    }
 
     private contentSpecToMarkdown(): string {
         if (!this.contentSpec) {

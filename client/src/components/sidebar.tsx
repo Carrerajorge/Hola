@@ -52,6 +52,7 @@ import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
 
 import { Chat } from "@/hooks/use-chats";
+import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
@@ -83,6 +84,7 @@ interface SidebarProps {
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
   onOpenSkills?: () => void;
+  onOpenWhatsAppConnect?: () => void;
   onOpenCodex?: () => void;
   onOpenLibrary?: () => void;
   processingChatIds?: string[];
@@ -218,6 +220,7 @@ export function Sidebar({
   onOpenGpts,
   onOpenApps,
   onOpenSkills,
+  onOpenWhatsAppConnect,
   onOpenCodex,
   onOpenLibrary,
   processingChatIds = [],
@@ -232,6 +235,7 @@ export function Sidebar({
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const { pinnedGpts, unpinGpt } = usePinnedGpts();
+  const { status: waStatus } = useWhatsAppWebStatus(true);
   const handleLogout = () => {
     logout();
   };
@@ -614,6 +618,26 @@ export function Sidebar({
           <LayoutGrid className="h-4 w-4" />
           Aplicaciones
         </Button>
+
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenWhatsAppConnect}
+          data-testid="button-whatsapp-connect"
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span className="flex-1 text-left">WhatsApp (QR)</span>
+          <span
+            className={cn(
+              "h-2.5 w-2.5 rounded-full",
+              waStatus.state === 'connected' && 'bg-green-500',
+              (waStatus.state === 'connecting' || waStatus.state === 'qr') && 'bg-amber-500',
+              waStatus.state === 'disconnected' && 'bg-red-500'
+            )}
+            title={`WhatsApp: ${waStatus.state}`}
+          />
+        </Button>
+
         <Button
           variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-blue-500 hover:text-blue-600 hover:bg-blue-50/50"

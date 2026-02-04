@@ -426,6 +426,8 @@ export async function registerRoutes(
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
   app.use("/api/integrations/google/gmail", createGmailRouter());
+  const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
+  app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
