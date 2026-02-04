@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe } from "lucide-react";
+import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
   const [inputValue, setInputValue] = useState("");
   const [showPromo, setShowPromo] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleSubmit = () => {
     if (inputValue.trim()) {
@@ -49,6 +50,7 @@ export default function LandingPage() {
         </nav>
 
         <div className="flex items-center gap-3">
+          {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
             className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
               border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-all duration-300"
@@ -68,8 +70,64 @@ export default function LandingPage() {
           <Button variant="ghost" size="icon" className="rounded-full text-zinc-400 hover:text-white hover:bg-white/10">
             <HelpCircle className="h-5 w-5" />
           </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-zinc-200 hover:text-white hover:bg-white/10 md:hidden"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
+            aria-expanded={mobileMenuOpen}
+            data-testid="button-mobile-menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
         </div>
       </header>
+
+      {/* Mobile dropdown menu (overlay) */}
+      {mobileMenuOpen && (
+        <div className="md:hidden">
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/40"
+            aria-label="Cerrar menú"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div
+            className="fixed z-50 top-16 right-4 w-64 rounded-2xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl p-2"
+            role="menu"
+            data-testid="mobile-menu"
+          >
+            {[
+              { label: "Sobre nosotros", to: "/about" },
+              { label: "Aprender", to: "/learn" },
+              { label: "Business", to: "/business" },
+              { label: "Precios", to: "/pricing" },
+              { label: "Imágenes", to: "/login" },
+              { label: "Descargar", to: "/download" },
+            ].map((item) => (
+              <button
+                key={item.to}
+                type="button"
+                className={
+                  "w-full text-left px-3 py-2 rounded-xl text-sm transition-colors " +
+                  (item.label === "Imágenes"
+                    ? "text-purple-300 hover:text-purple-200 hover:bg-white/10"
+                    : "text-zinc-200 hover:text-white hover:bg-white/10")
+                }
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setLocation(item.to);
+                }}
+                role="menuitem"
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
