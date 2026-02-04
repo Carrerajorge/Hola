@@ -230,7 +230,10 @@ export function PricingPlansSection(props: {
               <div
                 key={`${activeTab}:${plan.name}`}
                 className={cn(
-                  "rounded-xl border p-6 flex flex-col",
+                  // In light mode the pricing page background is still dark/gradient; give cards an opaque surface
+                  // so dark text remains readable. In dark mode keep the glassy look.
+                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/85 text-zinc-900 border-black/10",
+                  "dark:bg-white/5 dark:text-white dark:border-white/10",
                   plan.highlight && "border-primary/50 shadow-lg",
                 )}
                 data-testid={`plan-card-${plan.name.toLowerCase()}`}
@@ -242,8 +245,8 @@ export function PricingPlansSection(props: {
                       variant="secondary"
                       className={cn(
                         "text-xs",
-                        plan.badge === "NUEVO" && "bg-green-100 text-green-700",
-                        plan.badge === "RECOMENDADO" && "bg-primary/10 text-primary",
+                        plan.badge === "NUEVO" && "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300",
+                        plan.badge === "RECOMENDADO" && "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary",
                       )}
                       data-testid="badge-secondary"
                     >
