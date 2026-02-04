@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express, { Express, Request, Response } from 'express';
+import request from 'supertest';
 
 vi.mock('../storage', () => ({
   storage: {
+    getFile: vi.fn(),
     createChatMessageAnalysis: vi.fn(),
     getChatMessageAnalysisByUploadId: vi.fn(),
     updateChatMessageAnalysis: vi.fn(),
@@ -100,31 +102,13 @@ describe('Document Analysis Feature', () => {
   describe('Chat Routes - POST /uploads/:uploadId/analyze', () => {
     it('should return 404 for non-existent upload', async () => {
       vi.mocked(getUpload).mockResolvedValue(undefined);
+      // AnalysisService checks storage.getFile first
+      vi.mocked(storage.getFile as any).mockResolvedValue(undefined);
 
-      const response = await fetch('http://localhost:5000/api/chat/uploads/non-existent-id/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: 'all' }),
-      });
-
-      if (response.status === 404) {
-        expect(response.status).toBe(404);
-      } else {
-        const mockReq = {
-          params: { uploadId: 'non-existent-id' },
-          body: { scope: 'all' },
-          user: { id: 'test-user' }
-        } as any;
-        
-        const mockRes = {
-          status: vi.fn().mockReturnThis(),
-          json: vi.fn(),
-        } as any;
-
-        vi.mocked(getUpload).mockResolvedValue(undefined);
-        
-        expect(vi.mocked(getUpload)).toBeDefined();
-      }
+      await request(app)
+        .post('/api/chat/uploads/non-existent-id/analyze')
+        .send({ scope: 'all' })
+        .expect(404);
     });
 
     it('should handle spreadsheet files correctly with scope=all', async () => {
