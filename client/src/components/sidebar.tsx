@@ -1043,7 +1043,11 @@ export function Sidebar({
                     {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
-                    {user?.email === "infosiragpt@gmail.com" ? "ENTERPRISE" : "Cuenta personal"}
+                    {(() => {
+                      // Avoid hardcoding plan by email. Use server-provided plan when available.
+                      const plan = ((user as any)?.plan || "free").toString().toLowerCase();
+                      return plan === "free" ? "Cuenta personal" : plan.toUpperCase();
+                    })()}
                   </span>
                 </div>
               </button>

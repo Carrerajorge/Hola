@@ -25,6 +25,7 @@ import {
   ChevronRight
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { getPlanLabel } from "@/lib/planUtils";
 import { cn } from "@/lib/utils";
 
 export default function ProfilePage() {
@@ -101,7 +102,14 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-center sm:justify-start gap-2 mt-3">
                   <Badge variant="secondary" className="gap-1">
                     <Sparkles className="h-3 w-3" />
-                    {user?.email === "infosiragpt@gmail.com" ? "Enterprise" : "Free"}
+                    {getPlanLabel({
+                      plan: (user as any)?.plan,
+                      role: (user as any)?.role,
+                      subscriptionStatus: (user as any)?.subscriptionStatus,
+                      subscriptionPlan: (user as any)?.subscriptionPlan,
+                      subscriptionPeriodEnd: (user as any)?.subscriptionPeriodEnd,
+                      subscriptionExpiresAt: (user as any)?.subscriptionExpiresAt,
+                    })}
                   </Badge>
                   <Badge variant="outline" className="gap-1 text-green-600">
                     <CheckCircle2 className="h-3 w-3" />
