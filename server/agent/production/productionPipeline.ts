@@ -68,6 +68,17 @@ const PIPELINE_STAGES: PipelineStage[] = [
 // ============================================================================
 
 export class ProductionPipeline extends EventEmitter {
+    private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => reject(new Error(`TIMEOUT: ${label} after ${timeoutMs}ms`)), timeoutMs);
+        });
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+        }
+    }
     private workOrder: WorkOrder;
     private stageProgress: Map<PipelineStage, StageProgress>;
     private artifacts: Artifact[] = [];
@@ -271,20 +282,42 @@ export class ProductionPipeline extends EventEmitter {
 
         this.updateStage('research', 'running', 0, 'Researching topic...');
 
-        const result = await researchAgent.execute({
-            id: uuidv4(),
-            type: 'deep_research',
-            input: {
-                topic: this.workOrder.topic,
-                questions: this.workOrder.metadata?.keyQuestions || [],
-                sourcePolicy: this.workOrder.sourcePolicy,
-                maxSources: this.workOrder.budget.maxSearchQueries,
-            },
-            description: `Research topic: ${this.workOrder.topic}`,
-            priority: 'medium',
-            retries: 0,
-            maxRetries: 3,
-        });
+        const researchTimeoutMs = Math.max(15_000, Math.min((this.workOrder.budget.timeoutMinutes || 10) * 60_000, 120_000));
+
+        let result: any;
+        try {
+            result = await this.withTimeout(
+                researchAgent.execute({
+                    id: uuidv4(),
+                    type: 'deep_research',
+                    input: {
+                        topic: this.workOrder.topic,
+                        questions: this.workOrder.metadata?.keyQuestions || [],
+                        sourcePolicy: this.workOrder.sourcePolicy,
+                        maxSources: this.workOrder.budget.maxSearchQueries,
+                    },
+                    description: `Research topic: ${this.workOrder.topic}`,
+                    priority: 'medium',
+                    retries: 0,
+                    maxRetries: 3,
+                }),
+                researchTimeoutMs,
+                `production.researchAgent.execute(${this.workOrder.topic.slice(0, 60)})`
+            );
+        } catch (error: any) {
+            console.warn('[ProductionPipeline] Research stage timed out/failed, continuing without sources:', error?.message || error);
+            this.evidencePack = {
+                sources: [],
+                notes: [],
+                dataPoints: [],
+                gaps: [this.workOrder.topic],
+                limitations: [
+                    `Research failed or timed out (${error?.message || 'unknown'}). Document generated without web evidence.`
+                ],
+            };
+            this.updateStage('research', 'complete', 100, 'Research skipped (timeout/failure)');
+            return;
+        }
 
         this.updateStage('research', 'running', 80, 'Processing research results...');
 
@@ -303,19 +336,28 @@ export class ProductionPipeline extends EventEmitter {
     private async stageAnalysis(): Promise<void> {
         this.updateStage('analysis', 'running', 0, 'Analyzing evidence...');
 
-        const result = await contentAgent.execute({
-            id: uuidv4(),
-            type: 'analyze',
-            input: {
-                topic: this.workOrder.topic,
-                evidence: this.evidencePack,
-                outline: this.contentSpec?.sections,
-            },
-            description: `Analyze evidence for: ${this.workOrder.topic}`,
-            priority: 'medium',
-            retries: 0,
-            maxRetries: 3,
-        });
+        const analysisTimeoutMs = Math.max(
+            15_000,
+            Math.min((this.workOrder.budget.timeoutMinutes || 10) * 60_000, 180_000)
+        );
+
+        const result = await this.withTimeout(
+            contentAgent.execute({
+                id: uuidv4(),
+                type: 'analyze',
+                input: {
+                    topic: this.workOrder.topic,
+                    evidence: this.evidencePack,
+                    outline: this.contentSpec?.sections,
+                },
+                description: `Analyze evidence for: ${this.workOrder.topic}`,
+                priority: 'medium',
+                retries: 0,
+                maxRetries: 3,
+            }),
+            analysisTimeoutMs,
+            `production.contentAgent.execute(analyze:${this.workOrder.topic.slice(0, 60)})`
+        );
 
         if (result.success && result.output?.insights) {
             // Merge insights into content spec
@@ -351,24 +393,33 @@ export class ProductionPipeline extends EventEmitter {
                 `Writing: ${sectionAny.title?.substring(0, 50) || 'Section'}...`
             );
 
-            const result = await documentAgent.execute({
-                id: uuidv4(),
-                type: 'write_section',
-                input: {
-                    section: {
-                        title: sectionAny.title,
-                        objective: sectionAny.objective,
-                        targetWordCount: sectionAny.targetWordCount || 200,
+            const writeTimeoutMs = Math.max(
+                15_000,
+                Math.min((this.workOrder.budget.timeoutMinutes || 10) * 60_000, 180_000)
+            );
+
+            const result = await this.withTimeout(
+                documentAgent.execute({
+                    id: uuidv4(),
+                    type: 'write_section',
+                    input: {
+                        section: {
+                            title: sectionAny.title,
+                            objective: sectionAny.objective,
+                            targetWordCount: sectionAny.targetWordCount || 200,
+                        },
+                        evidence: this.evidencePack,
+                        tone: this.workOrder.tone,
+                        citationStyle: this.workOrder.citationStyle,
                     },
-                    evidence: this.evidencePack,
-                    tone: this.workOrder.tone,
-                    citationStyle: this.workOrder.citationStyle,
-                },
-                description: `Write section: ${sectionAny.title || 'Untitled'}`,
-                priority: 'medium',
-                retries: 0,
-                maxRetries: 3,
-            });
+                    description: `Write section: ${sectionAny.title || 'Untitled'}`,
+                    priority: 'medium',
+                    retries: 0,
+                    maxRetries: 3,
+                }),
+                writeTimeoutMs,
+                `production.documentAgent.execute(write_section:${(sectionAny.title || 'Untitled').slice(0, 60)})`
+            );
 
             if (result.success && (result.output?.content || result.output?.result)) {
                 const content = result.output.content || result.output.result || '';
@@ -436,19 +487,28 @@ export class ProductionPipeline extends EventEmitter {
     private async stageQA(): Promise<void> {
         this.updateStage('qa', 'running', 0, 'Running quality checks...');
 
-        const result = await qaAgent.execute({
-            id: uuidv4(),
-            type: 'validate_output',
-            input: {
-                content: this.contentSpec,
-                workOrder: this.workOrder,
-                evidence: this.evidencePack,
-            },
-            description: `Validate output for: ${this.workOrder.topic}`,
-            priority: 'medium',
-            retries: 0,
-            maxRetries: 3,
-        });
+        const qaTimeoutMs = Math.max(
+            15_000,
+            Math.min((this.workOrder.budget.timeoutMinutes || 10) * 60_000, 180_000)
+        );
+
+        const result = await this.withTimeout(
+            qaAgent.execute({
+                id: uuidv4(),
+                type: 'validate_output',
+                input: {
+                    content: this.contentSpec,
+                    workOrder: this.workOrder,
+                    evidence: this.evidencePack,
+                },
+                description: `Validate output for: ${this.workOrder.topic}`,
+                priority: 'medium',
+                retries: 0,
+                maxRetries: 3,
+            }),
+            qaTimeoutMs,
+            `production.qaAgent.execute(validate_output:${this.workOrder.topic.slice(0, 60)})`
+        );
 
         this.qaReport = {
             overallScore: result.output?.score || 0,
