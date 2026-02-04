@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -33,12 +33,7 @@ export function WhatsAppConnectDialog({
   const [status, setStatus] = useState<Status>({ state: 'disconnected' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const qrDataUrl = useMemo(() => {
-    if (status.state !== 'qr') return null;
-    // Convert qr string to an image data URL for easy rendering
-    return QRCode.toDataURL(status.qr, { margin: 1, width: 260 }).catch(() => null);
-  }, [status]);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const refreshStatus = async () => {
     const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/status`);
@@ -86,6 +81,26 @@ export function WhatsAppConnectDialog({
     return () => clearInterval(t);
   }, [open]);
 
+  useEffect(() => {
+    if (status.state !== 'qr') {
+      setQrDataUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    void QRCode.toDataURL(status.qr, { margin: 1, width: 260 })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -110,9 +125,8 @@ export function WhatsAppConnectDialog({
           {status.state === 'qr' && (
             <div className="flex flex-col items-center gap-3">
               <div className={cn('rounded-xl border bg-white p-3', 'w-fit')}>
-                {/* @ts-ignore */}
                 <img
-                  src={(qrDataUrl as any) || ''}
+                  src={qrDataUrl || ''}
                   alt="WhatsApp QR"
                   className="h-[260px] w-[260px]"
                 />
