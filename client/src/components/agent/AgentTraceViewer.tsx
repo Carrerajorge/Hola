@@ -25,7 +25,13 @@ interface AgentTraceViewerProps {
   onClose?: () => void;
 }
 
-const statusConfig = {
+const statusConfig: Record<TraceStep['status'], {
+  icon: typeof Clock;
+  color: string;
+  bg: string;
+  label: string;
+  animate?: boolean;
+}> = {
   pending: { icon: Clock, color: 'text-muted-foreground', bg: 'bg-muted', label: 'Pendiente' },
   running: { icon: Loader2, color: 'text-blue-500', bg: 'bg-blue-500/10', label: 'Ejecutando', animate: true },
   completed: { icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10', label: 'Completado' },

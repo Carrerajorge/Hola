@@ -499,7 +499,7 @@ const CodeArtifact = memo(function CodeArtifact({
   const language = artifact.language || artifact.data?.language ||
     artifact.name?.split('.').pop() || "text";
 
-  const { highlightedHtml, isLoading } = useAsyncHighlight(code, language);
+  const { html, isLoading } = useAsyncHighlight(code, language);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -574,7 +574,7 @@ const CodeArtifact = memo(function CodeArtifact({
           <div
             className="p-4 text-sm font-mono"
             dangerouslySetInnerHTML={{
-              __html: sanitizeHtml(highlightedHtml || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`)
+              __html: sanitizeHtml(html || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`)
             }}
           />
         )}

@@ -373,12 +373,14 @@ export function ChatInterface({
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
 
-  const userPlanInfo = useMemo(() => user ? {
-    plan: user.plan || 'free',
-    isAdmin: (user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'),
+  const userPlanInfo = useMemo(() => {
+    if (!user) return null;
+    const plan = user.plan || 'free';
+    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'));
     // isPaid = true only if plan is NOT 'free' AND status is 'active'
-    isPaid: (user.plan && user.plan !== 'free') && (user?.status === 'active')
-  } : null, [user]);
+    const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
+    return { plan, isAdmin, isPaid };
+  }, [user]);
 
   // Upgrade prompt for free users after 3rd query
   const {
@@ -387,7 +389,7 @@ export function ChatInterface({
     incrementQuery,
     closePrompt: closeUpgradePrompt,
     isFreeUser,
-  } = useUpgradePrompt(user?.plan);
+  } = useUpgradePrompt(user?.plan ?? undefined);
   
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
@@ -4468,7 +4470,7 @@ IMPORTANTE:
                     // Capture webSources from done event
                     if (data.webSources && Array.isArray(data.webSources)) {
                       streamWebSources = data.webSources;
-                      console.debug('[SSE] Captured webSources:', streamWebSources.length);
+                      console.debug('[SSE] Captured webSources:', streamWebSources ? streamWebSources.length : 0);
                     }
                     streamComplete = true;
                     break;

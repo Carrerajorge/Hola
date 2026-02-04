@@ -174,8 +174,8 @@ export function extractTextFromChildren(children: React.ReactNode): string {
         return children.map(extractTextFromChildren).join('');
     }
 
-    if (typeof children === 'object' && 'props' in children) {
-        return extractTextFromChildren((children as React.ReactElement).props.children);
+    if (React.isValidElement(children)) {
+        return extractTextFromChildren((children as React.ReactElement<{ children?: React.ReactNode }>).props.children);
     }
 
     return '';
@@ -203,8 +203,8 @@ export function extractTableData(children: React.ReactNode): string[][] {
             return;
         }
 
-        if (typeof node === 'object' && 'type' in node && 'props' in node) {
-            const element = node as React.ReactElement;
+        if (React.isValidElement(node)) {
+            const element = node as React.ReactElement<any>;
 
             if (element.type === 'tr' || (typeof element.type === 'function' && element.type.name === 'tr')) {
                 const row: string[] = [];

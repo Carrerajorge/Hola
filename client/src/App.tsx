@@ -182,7 +182,7 @@ function App() {
         <SettingsProvider>
           <ModelAvailabilityProvider>
             <TooltipProvider>
-              <SkipLink targetId="main-content" />
+              <SkipLink />
               <OfflineIndicator />
               {/* AuthCallbackHandler removed, moved to AuthProvider */}
               <GlobalKeyboardShortcuts />

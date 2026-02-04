@@ -168,7 +168,7 @@ export const MathRenderer = memo(function MathRenderer({
         await loadMathJax();
         if (versionRef.current !== currentVersion || !containerRef.current) return;
         
-        const sanitizedLatex = sanitizeMathInput(state.latex);
+        const sanitizedLatex = sanitizeMathInput(state.latex ?? "");
         const mathContent = state.displayMode 
           ? `$$${sanitizedLatex}$$` 
           : `$${sanitizedLatex}$`;

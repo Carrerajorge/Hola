@@ -183,7 +183,7 @@ export function CodePlayground({
         lastRun: null,
     });
 
-    const iframeRef = useRef<HTMLIFrameElement>(null);
+    const iframeRef = useRef<HTMLIFrameElement | null>(null);
     const runTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // ======== Code Execution ========
@@ -455,7 +455,7 @@ async function executeJS(code: string): Promise<ExecutionResult> {
 
 function executeHTML(
     code: string,
-    iframeRef: React.RefObject<HTMLIFrameElement>
+    iframeRef: React.RefObject<HTMLIFrameElement | null>
 ): ExecutionResult {
     if (iframeRef.current) {
         iframeRef.current.srcdoc = code;
