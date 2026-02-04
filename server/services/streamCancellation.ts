@@ -212,7 +212,7 @@ export async function* withCancellation<T>(
 export async function fetchWithCancellation(
     url: string,
     options: RequestInit & { streamId?: string; userId?: number; model?: string }
-): Promise<Response> {
+): Promise<globalThis.Response> {
     const controller = options.streamId
         ? registerStream(options.streamId, options.userId || 0, options.model || '')
         : new AbortController();

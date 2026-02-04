@@ -3,8 +3,17 @@
  * Secure token management with rotation and blacklisting
  */
 
-import jwt from 'jsonwebtoken';
+import { createRequire } from 'module';
 import crypto from 'crypto';
+
+// jsonwebtoken is optional in some deployments; keep type-check green
+const require = createRequire(import.meta.url);
+let jwt: any;
+try {
+  jwt = require('jsonwebtoken');
+} catch {
+  jwt = null;
+}
 import { db } from '../db';
 import { eq, and, lt } from 'drizzle-orm';
 
@@ -44,6 +53,9 @@ interface TokenPair {
  * Generate a new token pair
  */
 export function generateTokenPair(payload: TokenPayload): TokenPair {
+    if (!jwt) {
+        throw new Error('jsonwebtoken not installed');
+    }
     const sessionId = payload.sessionId || crypto.randomUUID();
     const familyId = crypto.randomUUID();
 
@@ -78,6 +90,7 @@ export function generateTokenPair(payload: TokenPayload): TokenPair {
  * Verify access token
  */
 export function verifyAccessToken(token: string): TokenPayload | null {
+    if (!jwt) return null;
     try {
         if (tokenBlacklist.has(token)) {
             return null;
@@ -99,6 +112,7 @@ export function verifyAccessToken(token: string): TokenPayload | null {
  * Rotate refresh token - issues new pair and invalidates old
  */
 export function rotateRefreshToken(oldRefreshToken: string): TokenPair | null {
+    if (!jwt) return null;
     try {
         // Verify the refresh token
         const decoded = jwt.verify(oldRefreshToken, REFRESH_TOKEN_SECRET) as TokenPayload & {

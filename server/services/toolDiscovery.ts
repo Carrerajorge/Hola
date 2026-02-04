@@ -185,12 +185,15 @@ export class ToolDiscoveryService {
         for (const [path, methods] of Object.entries(spec.paths)) {
             for (const [method, details] of Object.entries(methods as any)) {
                 if (method === 'get' || method === 'post') {
+                    const op: any = details as any;
                     const tool = this.registerTool({
-                        name: details.operationId || `${method}_${path.replace(/\//g, '_')}`,
-                        description: details.summary || details.description || `${method.toUpperCase()} ${path}`,
+                        name: op.operationId || `${method}_${path.replace(/\//g, '_')}`,
+                        description: op.summary || op.description || `${method.toUpperCase()} ${path}`,
                         category: "integration",
-                        capabilities: this.extractCapabilities(details.description || ""),
-                        inputSchema: this.extractInputSchema(details.parameters || [], details.requestBody),
+                        capabilities: this.extractCapabilities(op.description || ""),
+                        inputSchema: this.extractInputSchema(op.parameters || [], op.requestBody),
+                        // (moved above to use op.*)
+                        
                         outputSchema: { type: "object", description: "API response" },
                         examples: [],
                         enabled: true,

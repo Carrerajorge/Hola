@@ -472,7 +472,7 @@ export class ToolExecutionEngine extends EventEmitter {
       setTimeout(() => reject(new Error(`TypeScript tool execution timed out after ${timeout}ms`)), timeout);
     });
 
-    const executionPromise = tool.invoke(input);
+    const executionPromise = (tool as any).invoke(input);
 
     const result = await Promise.race([executionPromise, timeoutPromise]);
 

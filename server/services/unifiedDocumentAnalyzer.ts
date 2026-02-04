@@ -285,8 +285,8 @@ export async function queueDocuments(
 /**
  * Get analysis status
  */
-export function getAnalysisStatus(jobId: string): UploadJob | undefined {
-    return getUploadQueue().getJob(jobId);
+export async function getAnalysisStatus(jobId: string) {
+    return await getUploadQueue().getJob(jobId);
 }
 
 /**

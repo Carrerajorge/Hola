@@ -9,17 +9,20 @@ import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../stripeClient";
 import { randomUUID } from "crypto";
 
-// Dynamic import for nodemailer (optional dependency)
+import { createRequire } from 'module';
+
+// Optional dependency: nodemailer
+const require = createRequire(import.meta.url);
 let nodemailerModule: any = null;
-async function getNodemailer() {
+function getNodemailer() {
   if (!nodemailerModule) {
     try {
-      nodemailerModule = await import("nodemailer");
+      nodemailerModule = require('nodemailer');
     } catch {
-      console.log("nodemailer not installed, email notifications disabled");
+      console.log('nodemailer not installed, email notifications disabled');
     }
   }
-  return nodemailerModule?.default || nodemailerModule;
+  return nodemailerModule;
 }
 
 // ============================================
@@ -186,7 +189,7 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionI
     return {
       plan: (user.plan as SubscriptionInfo["plan"]) || "free",
       status: (user.status as SubscriptionInfo["status"]) || "inactive",
-      currentPeriodEnd: user.subscriptionEndDate ? new Date(user.subscriptionEndDate) : undefined,
+      currentPeriodEnd: user.subscriptionPeriodEnd ? new Date(user.subscriptionPeriodEnd) : undefined,
       stripeCustomerId: user.stripeCustomerId || undefined,
       stripeSubscriptionId: user.stripeSubscriptionId || undefined,
     };
@@ -205,7 +208,7 @@ export async function updateUserSubscription(
       .set({
         plan: subscription.plan,
         status: subscription.status,
-        subscriptionEndDate: subscription.currentPeriodEnd?.toISOString(),
+        subscriptionPeriodEnd: subscription.currentPeriodEnd,
         stripeCustomerId: subscription.stripeCustomerId,
         stripeSubscriptionId: subscription.stripeSubscriptionId,
         updatedAt: new Date(),
@@ -532,7 +535,7 @@ export async function handleSubscriptionCreated(subscription: any, eventId?: str
     plan: planName as SubscriptionInfo["plan"],
     status: "active",
     stripeSubscriptionId: subscription.id,
-    currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+    currentPeriodEnd: new Date(((subscription as any).current_period_end ?? 0) * 1000),
   });
   
   // Get user info for notification
@@ -542,7 +545,7 @@ export async function handleSubscriptionCreated(subscription: any, eventId?: str
     await notifyAdminOfPurchase({
       userId,
       userEmail: user.email || "unknown",
-      userName: user.displayName || user.name || undefined,
+      userName: (user as any).displayName || (user as any).name || user.fullName || [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
       plan: planName,
       amount: subscription.items.data[0]?.price?.unit_amount || 0,
       currency: subscription.currency || "usd",
@@ -582,7 +585,7 @@ export async function handleSubscriptionUpdated(subscription: any, eventId?: str
   
   await updateUserSubscription(userId, {
     status,
-    currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+    currentPeriodEnd: new Date(((subscription as any).current_period_end ?? 0) * 1000),
   });
   
   if (eventId) {
@@ -627,7 +630,7 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
     if (userId) {
       await updateUserSubscription(userId, {
         status: "active",
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        currentPeriodEnd: new Date(((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000),
       });
       
       // For recurring payments (not first payment), send notification
@@ -638,7 +641,7 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
           await notifyAdminOfPurchase({
             userId,
             userEmail: user.email || "unknown",
-            userName: user.displayName || user.name || undefined,
+            userName: (user as any).displayName || (user as any).name || user.fullName || [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
             plan: planName,
             amount: invoice.amount_paid || subscription.items.data[0]?.price?.unit_amount || 0,
             currency: invoice.currency || "usd",
