@@ -1,61 +1,12 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, Check, Sparkles, Zap, Shield, Crown, Star } from "lucide-react";
+import { PricingPlansSection } from "@/components/pricing/plans-section";
+import { ChevronLeft, Sparkles } from "lucide-react";
 
 export default function PricingPage() {
   const [, setLocation] = useLocation();
 
-  const plans = [
-    {
-      name: "Gratis",
-      price: "0",
-      description: "Perfecto para comenzar",
-      features: [
-        "Chat ilimitado con IA",
-        "Generación básica de imágenes",
-        "Acceso a modelos estándar",
-        "5 archivos por chat",
-        "Historial de 7 días"
-      ],
-      cta: "Comenzar gratis",
-      popular: false,
-      gradient: "from-zinc-500 to-zinc-600"
-    },
-    {
-      name: "Pro",
-      price: "19.99",
-      description: "Para profesionales y equipos",
-      features: [
-        "Todo lo de Gratis, más:",
-        "Modelos avanzados (GPT-4, Claude, Gemini)",
-        "Generación ilimitada de imágenes",
-        "Creación de documentos (Word, Excel, PPT)",
-        "Modo agente con herramientas",
-        "100GB de almacenamiento",
-        "Soporte prioritario 24/7"
-      ],
-      cta: "Iniciar prueba gratis",
-      popular: true,
-      gradient: "from-purple-500 to-pink-500"
-    },
-    {
-      name: "Enterprise",
-      price: "Contactar",
-      description: "Soluciones a medida",
-      features: [
-        "Todo lo de Pro, más:",
-        "API access ilimitado",
-        "Modelos personalizados",
-        "SSO y seguridad avanzada",
-        "SLA garantizado 99.9%",
-        "Gerente de cuenta dedicado",
-        "Integración con sistemas internos"
-      ],
-      cta: "Contactar ventas",
-      popular: false,
-      gradient: "from-amber-500 to-orange-500"
-    }
-  ];
+  // Plans are rendered via <PricingPlansSection /> to match the in-app upgrade dialog.
 
   return (
     <div className="min-h-screen gradient-animated flex flex-col relative overflow-hidden">
@@ -95,60 +46,12 @@ export default function PricingPage() {
             </p>
           </section>
 
-          {/* Pricing Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 fade-in-up fade-in-up-delay-1">
-            {plans.map((plan, i) => (
-              <div
-                key={plan.name}
-                className={`relative glass-premium p-8 rounded-3xl border transition-all duration-300 hover:scale-[1.02] ${
-                  plan.popular
-                    ? "border-purple-500/50 shadow-lg shadow-purple-500/20"
-                    : "border-white/10 hover:border-white/20"
-                }`}
-              >
-                {plan.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-xs font-medium text-white flex items-center gap-1">
-                    <Star className="h-3 w-3" />
-                    Más popular
-                  </div>
-                )}
-
-                <div className={`inline-flex p-3 rounded-xl bg-gradient-to-br ${plan.gradient} mb-4`}>
-                  {plan.name === "Gratis" && <Zap className="h-6 w-6 text-white" />}
-                  {plan.name === "Pro" && <Crown className="h-6 w-6 text-white" />}
-                  {plan.name === "Enterprise" && <Shield className="h-6 w-6 text-white" />}
-                </div>
-
-                <h3 className="text-2xl font-bold text-white mb-2">{plan.name}</h3>
-                <p className="text-sm text-zinc-400 mb-4">{plan.description}</p>
-
-                <div className="flex items-baseline gap-1 mb-6">
-                  {plan.price !== "Contactar" && <span className="text-sm text-zinc-400">$</span>}
-                  <span className="text-4xl font-bold text-white">{plan.price}</span>
-                  {plan.price !== "Contactar" && <span className="text-sm text-zinc-400">/mes</span>}
-                </div>
-
-                <ul className="space-y-3 mb-8">
-                  {plan.features.map((feature, j) => (
-                    <li key={j} className="flex items-start gap-2 text-sm text-zinc-300">
-                      <Check className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-
-                <Button
-                  onClick={() => setLocation("/signup")}
-                  className={`w-full rounded-full ${
-                    plan.popular
-                      ? "bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white"
-                      : "bg-white/10 hover:bg-white/20 text-white border border-white/20"
-                  }`}
-                >
-                  {plan.cta}
-                </Button>
-              </div>
-            ))}
+          {/* Plans (match in-app upgrade dialog) */}
+          <div className="fade-in-up fade-in-up-delay-1">
+            <PricingPlansSection
+              onSelectPlan={() => setLocation("/signup")}
+              showTabs
+            />
           </div>
 
           {/* FAQ Section */}
