@@ -803,6 +803,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub;
+      // Always use a secure, session-bound identifier for LLM calls (works for both authed and anonymous users).
+      const llmUserId = getOrCreateSecureUserId(req);
 
       // GPT Session Contract Resolution for streaming
       // Priority: session_id (reuse existing) > gptId (create new)
