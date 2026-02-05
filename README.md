@@ -53,6 +53,7 @@ The server serves the API and the client on the same port (default: `5000` unles
 ## Testing
 
 ```bash
+npm run lint
 npm run type-check
 npm run test:run
 ```
@@ -78,4 +79,3 @@ Please report vulnerabilities privately. See `SECURITY.md`.
 ## License
 
 MIT. See `LICENSE`.
-

@@ -35,6 +35,7 @@ npm run dev
 Before opening a PR, run:
 
 ```bash
+npm run lint
 npm run type-check
 npm run test:run
 npm run build
@@ -50,4 +51,3 @@ npm run build
 ## Reporting Security Issues
 
 Please do not open public issues for security vulnerabilities. See `SECURITY.md`.
-
