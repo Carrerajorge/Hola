@@ -156,6 +156,13 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // In non-Replit production deployments (e.g., VPS), REPL_ID may be unset.
+  // Do not crash the server if OIDC is not configured.
+  if (!process.env.REPL_ID) {
+    console.warn('[Auth] REPL_ID is not set; Replit OIDC auth is disabled.');
+    return;
+  }
+
   const config = await getOidcConfig();
 
   const verify: VerifyFunction = async (
@@ -353,6 +360,14 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  // If Replit OIDC isn't configured, don't crash on token refresh paths.
+  if (!process.env.REPL_ID) {
+    return res.status(503).json({
+      message: "Authentication is not configured",
+      code: "AUTH_NOT_CONFIGURED",
+    });
+  }
+
   const user = req.user as any;
   const requestId = `auth-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
