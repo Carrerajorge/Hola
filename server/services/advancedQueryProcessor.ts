@@ -388,7 +388,6 @@ const ACADEMIC_CORRECTIONS: Record<string, string> = {
   "therefor": "therefore",
   "tommorow": "tomorrow",
   "truely": "truly",
-  "untill": "until",
   "wierd": "weird",
   
   // Spanish typos
@@ -412,7 +411,6 @@ const ACADEMIC_CORRECTIONS: Record<string, string> = {
   // Portuguese typos
   "pesquisa": "pesquisa",
   "desenvolvimento": "desenvolvimento",
-  "tecnologia": "tecnologia",
   "educacao": "educação",
   "comunicacao": "comunicação",
   "informacao": "informação"
