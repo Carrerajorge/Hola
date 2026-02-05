@@ -325,9 +325,14 @@ export class SuperAgentOrchestrator extends EventEmitter {
     if (!this.state) return;
 
     const requirements = this.state.contract.requirements;
-    const researchDecision = shouldResearch(this.state.contract.original_prompt);
+    const originalPrompt = this.state.contract.original_prompt;
+    const researchDecision = shouldResearch(originalPrompt);
 
-    if (this.config.allowResearch && (researchDecision.shouldResearch || requirements.min_sources > 0)) {
+    // Hard no-search guardrail: if the user explicitly asks "sin buscar / sin fuentes / no busques",
+    // we must never enter research phases even if upstream routing mis-classifies intent.
+    const noSearchRequested = /\b(sin\s+buscar|no\s+busques|sin\s+fuentes|no\s+uses\s+fuentes|no\s+investigues)\b/i.test(originalPrompt);
+
+    if (!noSearchRequested && this.config.allowResearch && (researchDecision.shouldResearch || requirements.min_sources > 0)) {
       this.checkAbort();
       await this.executeSignalsPhase();
       this.checkAbort();
