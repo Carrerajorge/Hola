@@ -321,6 +321,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
     }
   }
 
+  private isNoSearchRequested(): boolean {
+    const prompt = this.state?.contract.original_prompt ?? "";
+    return /\b(sin\s+buscar|no\s+busques|sin\s+fuentes|no\s+uses\s+fuentes|no\s+investigues)\b/i.test(prompt);
+  }
+
   private async executePhases(): Promise<void> {
     if (!this.state) return;
 
@@ -328,9 +333,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const originalPrompt = this.state.contract.original_prompt;
     const researchDecision = shouldResearch(originalPrompt);
 
-    // Hard no-search guardrail: if the user explicitly asks "sin buscar / sin fuentes / no busques",
-    // we must never enter research phases even if upstream routing mis-classifies intent.
-    const noSearchRequested = /\b(sin\s+buscar|no\s+busques|sin\s+fuentes|no\s+uses\s+fuentes|no\s+investigues)\b/i.test(originalPrompt);
+    // Hard no-search guardrail: never research if the user explicitly forbids it.
+    const noSearchRequested = this.isNoSearchRequested();
 
     if (!noSearchRequested && this.config.allowResearch && (researchDecision.shouldResearch || requirements.min_sources > 0)) {
       this.checkAbort();
@@ -425,6 +429,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
   private async executeSignalsPhase(): Promise<void> {
     if (!this.state) return;
+
+    if (this.isNoSearchRequested()) {
+      this.emitThought("Guardrail activo: el usuario pidió 'sin buscar/sin fuentes'. Omitiendo fase signals.");
+      return;
+    }
 
     this.state.phase = "signals";
     this.emitSSE("phase_started", {
@@ -830,6 +839,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
   private async executeDeepPhase(): Promise<void> {
     if (!this.state || this.state.sources.length === 0) return;
+
+    if (this.isNoSearchRequested()) {
+      this.emitThought("Guardrail activo: el usuario pidió 'sin buscar/sin fuentes'. Omitiendo fase deep.");
+      return;
+    }
 
     this.state.phase = "deep";
     this.emitSSE("phase_started", {
@@ -1352,6 +1366,10 @@ export class SuperAgentOrchestrator extends EventEmitter {
   private async executeRetryActions(actions: string[]): Promise<void> {
     for (const action of actions) {
       if (action === "expand_search_queries") {
+        if (this.isNoSearchRequested()) {
+          this.emitThought("Guardrail activo: se bloquea 'expand_search_queries' porque el usuario pidió no buscar.");
+          continue;
+        }
         await this.executeSignalsPhase();
       } else if (action.startsWith("retry_create_")) {
         const docType = action.replace("retry_create_", "") as "docx" | "xlsx";
