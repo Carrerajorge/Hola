@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -234,6 +235,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
+  const isAdmin = isAdminUser(user as any);
   const { pinnedGpts, unpinGpt } = usePinnedGpts();
   const { status: waStatus } = useWhatsAppWebStatus(true);
   const handleLogout = () => {
@@ -1056,7 +1058,7 @@ export function Sidebar({
                 <div className="relative">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
-                      {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                      {isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   {/* Online status indicator */}
@@ -1064,7 +1066,7 @@ export function Sidebar({
                 </div>
                 <div className="flex flex-1 flex-col overflow-hidden text-left">
                   <span className="truncate text-sm font-medium">
-                    {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
+                    {isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
                     {(() => {
@@ -1083,7 +1085,7 @@ export function Sidebar({
                   <User className="h-4 w-4" />
                   Perfil
                 </Button>
-                {user?.role === "admin" && (
+                {isAdmin && (
                   <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
                     <CreditCard className="h-4 w-4" />
                     Facturación
@@ -1110,7 +1112,7 @@ export function Sidebar({
                   Mis Memorias
                 </Button>
 
-                {user?.role === "admin" && (
+                {isAdmin && (
                   <>
                     <Separator className="my-1.5" />
                     <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">

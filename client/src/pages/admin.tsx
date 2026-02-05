@@ -78,6 +78,7 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
@@ -4996,13 +4997,15 @@ export default function AdminPage() {
     }
   });
 
+  const isAdmin = isAdminUser(currentUser as any);
+
   // Redirect non-admin users
   useEffect(() => {
-    if (!isLoadingUser && currentUser && currentUser.role !== "admin") {
+    if (!isLoadingUser && currentUser && !isAdmin) {
       console.warn("[Admin] Access denied - user is not admin:", currentUser.email);
       setLocation("/");
     }
-  }, [currentUser, isLoadingUser, setLocation]);
+  }, [currentUser, isLoadingUser, isAdmin, setLocation]);
 
   // Show loading while checking auth
   if (isLoadingUser) {
@@ -5014,7 +5017,7 @@ export default function AdminPage() {
   }
 
   // Block access if not admin
-  if (!currentUser || currentUser.role !== "admin") {
+  if (!currentUser || !isAdmin) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
         <Shield className="h-16 w-16 text-red-500" />
