@@ -474,6 +474,29 @@ export function createFilesRouter() {
 
   router.get("/objects/:objectPath(*)", async (req, res) => {
     try {
+      // LOCAL FALLBACK: In development, /api/objects/upload can return storage paths like
+      // /objects/uploads/<uuid> when the Replit object storage sidecar is unavailable.
+      // Serve those files directly from disk so the client can preview attachments.
+      if (req.path.startsWith("/objects/uploads/")) {
+        const fs = await import("fs");
+        const path = await import("path");
+        const objectId = req.path.replace("/objects/uploads/", "");
+        const uploadsDir = path.default.resolve(process.cwd(), "uploads");
+        const localFilePath = path.default.resolve(uploadsDir, objectId);
+        const safePrefix = uploadsDir + path.default.sep;
+
+        // Prevent path traversal outside uploads/.
+        if (!localFilePath.startsWith(safePrefix)) {
+          return res.sendStatus(404);
+        }
+
+        if (!fs.default.existsSync(localFilePath)) {
+          return res.sendStatus(404);
+        }
+
+        return res.sendFile(localFilePath);
+      }
+
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
       objectStorageService.downloadObject(objectFile, res);
     } catch (error) {

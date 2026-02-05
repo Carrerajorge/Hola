@@ -113,6 +113,29 @@ export interface Message {
   retrievalSteps?: { id: string; label: string; status: "pending" | "active" | "complete" | "error"; detail?: string }[];
 }
 
+function sanitizeAttachmentsForServer(
+  attachments: Message["attachments"],
+): Message["attachments"] | undefined {
+  if (!attachments || attachments.length === 0) return attachments || undefined;
+
+  return attachments.map((att) => {
+    const next: any = { ...att };
+
+    // Avoid sending huge base64 previews through JSON (server has a tight body limit).
+    if (typeof next.imageUrl === "string" && next.imageUrl.startsWith("data:")) {
+      next.imageUrl = next.storagePath || undefined;
+    }
+
+    // Don't send extracted file content inline for uploaded files. The backend can fetch
+    // the original bytes via storagePath/fileId.
+    if ((next.storagePath || next.fileId) && typeof next.content === "string") {
+      next.content = undefined;
+    }
+
+    return next;
+  });
+}
+
 export interface Chat {
   id: string;
   stableKey: string; // Stable key for React that doesn't change when pending -> real ID
@@ -706,7 +729,7 @@ export function useChats() {
                       content: msg.content,
                       requestId: msg.requestId,
                       userMessageId: msg.userMessageId,
-                      attachments: msg.attachments
+                      attachments: sanitizeAttachmentsForServer(msg.attachments)
                     }));
 
                     const res = await fetch("/api/chats", {
@@ -830,7 +853,7 @@ export function useChats() {
               requestId: msg.requestId,
               clientRequestId,
               userMessageId: msg.userMessageId,
-              attachments: msg.attachments,
+              attachments: sanitizeAttachmentsForServer(msg.attachments),
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
@@ -1076,7 +1099,7 @@ export function useChats() {
             requestId: message.requestId,
             clientRequestId, // For run-based idempotency
             userMessageId: message.userMessageId,
-            attachments: message.attachments,
+            attachments: sanitizeAttachmentsForServer(message.attachments),
             sources: message.sources,
             figmaDiagram: message.figmaDiagram,
             googleFormPreview: message.googleFormPreview,
