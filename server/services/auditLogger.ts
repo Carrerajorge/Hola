@@ -5,9 +5,12 @@
 
 import { Request } from "express";
 import { storage } from "../storage";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 export interface AuditContext {
   userId?: string;
+  email?: string;
+  role?: string;
   ipAddress?: string;
   userAgent?: string;
   sessionId?: string;
@@ -27,7 +30,15 @@ export interface AuditLogOptions {
  * Extract audit context from Express request
  */
 export function extractAuditContext(req: Request): AuditContext {
-  const userId = (req as any).user?.id || (req as any).userId || null;
+  const anyReq = req as any;
+  const userId = getSecureUserId(req) || anyReq.userId || null;
+  const email =
+    anyReq.user?.claims?.email ||
+    anyReq.user?.email ||
+    anyReq.session?.passport?.user?.claims?.email ||
+    anyReq.session?.passport?.user?.email ||
+    null;
+  const role = anyReq.user?.role || anyReq.session?.passport?.user?.role || null;
   const ipAddress = 
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
     (req.headers["x-real-ip"] as string) ||
@@ -35,11 +46,13 @@ export function extractAuditContext(req: Request): AuditContext {
     req.ip ||
     "unknown";
   const userAgent = req.headers["user-agent"] || "unknown";
-  const sessionId = req.cookies?.sessionId || (req as any).sessionID || null;
-  const requestId = (req as any).requestId || req.headers["x-request-id"] as string || null;
+  const sessionId = (req as any).sessionID || null;
+  const requestId = anyReq.requestId || (req.headers["x-request-id"] as string) || null;
 
   return {
     userId,
+    email,
+    role,
     ipAddress,
     userAgent,
     sessionId,
@@ -66,6 +79,8 @@ export async function createAuditLogEntry(
         ...options.details,
         severity: options.severity || "info",
         category: options.category || "system",
+        actorEmail: context.email || undefined,
+        actorRole: context.role || undefined,
         sessionId: context.sessionId,
         requestId: context.requestId,
         timestamp: new Date().toISOString(),

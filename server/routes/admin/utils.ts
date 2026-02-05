@@ -3,7 +3,7 @@ import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { db } from "../../db";
 import { users, excelDocuments } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 // SECURITY: Admin email moved to environment variable
@@ -62,16 +62,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
             
             // Fallback: check by email if userId didn't find admin
             if (!dbUser?.role && userEmail) {
-                const result = await db.select({ role: users.role, email: users.email, id: users.id })
-                    .from(users).where(eq(users.email, userEmail));
+                const normalizedEmail = userEmail.toLowerCase().trim();
+                const result = await db
+                    .select({ role: users.role, email: users.email, id: users.id })
+                    .from(users)
+                    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+                    .limit(1);
                 dbUser = result[0];
-                
-                // Also try case-insensitive search
-                if (!dbUser) {
-                    const allUsers = await db.select({ role: users.role, email: users.email, id: users.id })
-                        .from(users);
-                    dbUser = allUsers.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
-                }
             }
             
             isAdmin = dbUser?.role === "admin";

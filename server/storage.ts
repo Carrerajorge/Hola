@@ -1195,13 +1195,22 @@ export class MemStorage implements IStorage {
   }
 
   async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }> {
-    const allUsers = await dbRead.select().from(users);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const total = allUsers.length;
-    const active = allUsers.filter(u => u.status === "active").length;
-    const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
-    return { total, active, newThisMonth };
+
+    const [row] = await dbRead
+      .select({
+        total: sql<number>`count(*)`,
+        active: sql<number>`count(*) filter (where ${users.status} = 'active')`,
+        newThisMonth: sql<number>`count(*) filter (where ${users.createdAt} >= ${monthStart})`,
+      })
+      .from(users);
+
+    return {
+      total: Number(row?.total ?? 0),
+      active: Number(row?.active ?? 0),
+      newThisMonth: Number(row?.newThisMonth ?? 0),
+    };
   }
 
   // Admin: AI Models
@@ -1296,14 +1305,22 @@ export class MemStorage implements IStorage {
   }
 
   async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
-    const allPayments = await dbRead.select().from(payments);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const completedPayments = allPayments.filter(p => p.status === "completed");
-    const thisMonthPayments = completedPayments.filter(p => p.createdAt >= monthStart);
-    const total = completedPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const thisMonth = thisMonthPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    return { total: total.toFixed(2), thisMonth: thisMonth.toFixed(2), count: completedPayments.length };
+
+    const [row] = await dbRead
+      .select({
+        total: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed'), 0)`,
+        thisMonth: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed' and ${payments.createdAt} >= ${monthStart}), 0)`,
+        count: sql<number>`count(*) filter (where ${payments.status} = 'completed')`,
+      })
+      .from(payments);
+
+    return {
+      total: Number(row?.total ?? 0).toFixed(2),
+      thisMonth: Number(row?.thisMonth ?? 0).toFixed(2),
+      count: Number(row?.count ?? 0),
+    };
   }
 
   // Admin: Invoices
@@ -1381,8 +1398,12 @@ export class MemStorage implements IStorage {
   async getDashboardMetrics(): Promise<{ users: number; queries: number; revenue: string; uptime: number }> {
     const userStats = await this.getUserStats();
     const paymentStats = await this.getPaymentStats();
-    const allUsers = await dbRead.select().from(users);
-    const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
+    const [row] = await dbRead
+      .select({
+        totalQueries: sql<number>`coalesce(sum(${users.queryCount}), 0)`,
+      })
+      .from(users);
+    const totalQueries = Number(row?.totalQueries ?? 0);
     return {
       users: userStats.total,
       queries: totalQueries,
