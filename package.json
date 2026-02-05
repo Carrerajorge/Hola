@@ -1,6 +1,8 @@
 {
-  "name": "rest-express",
+  "name": "iliagpt",
   "version": "1.0.0",
+  "private": true,
+  "description": "Full-stack AI chat + agentic automation platform",
   "type": "module",
   "license": "MIT",
   "scripts": {

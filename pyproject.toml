@@ -1,7 +1,7 @@
 [project]
-name = "repl-nix-workspace"
+name = "iliagpt"
 version = "0.1.0"
-description = "Add your description here"
+description = "ILIAGPT Python services and tooling"
 requires-python = ">=3.11"
 dependencies = [
     "aiofiles>=25.1.0",
