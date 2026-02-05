@@ -242,7 +242,10 @@ export async function registerRoutes(
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     app.get("/api/auth/google", passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
-      prompt: "select_account",
+      // Ensure Google issues a refresh_token (needed for long-lived access).
+      // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
+      accessType: "offline",
+      prompt: "consent select_account",
     }));
     app.get("/api/auth/google/callback",
       passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
