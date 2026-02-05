@@ -4,7 +4,17 @@ import { apiFetch } from "@/lib/apiClient";
 export interface UserSettings {
   // Display
   appearance: "system" | "light" | "dark";
-  accentColor: "default" | "blue" | "green" | "purple" | "orange" | "pink";
+  accentColor:
+    | "default"
+    | "blue"
+    | "green"
+    | "purple"
+    | "orange"
+    | "pink"
+    | "red"
+    | "teal"
+    | "yellow"
+    | "indigo";
   fontSize: "small" | "medium" | "large";
   density: "compact" | "comfortable" | "spacious";
   
@@ -407,6 +417,10 @@ export function applyAccentColor(color: UserSettings["accentColor"]) {
     purple: { light: "271 81% 56%", dark: "271 81% 66%" },
     orange: { light: "25 95% 53%", dark: "25 95% 63%" },
     pink: { light: "330 81% 60%", dark: "330 81% 70%" },
+    red: { light: "0 84% 60%", dark: "0 84% 70%" },
+    teal: { light: "173 80% 40%", dark: "173 80% 50%" },
+    yellow: { light: "48 96% 53%", dark: "48 96% 63%" },
+    indigo: { light: "239 84% 67%", dark: "239 84% 77%" },
   };
   
   const isDark = root.classList.contains("dark");

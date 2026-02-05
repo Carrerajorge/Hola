@@ -6,6 +6,7 @@ import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
@@ -70,6 +71,7 @@ function GlobalKeyboardShortcuts() {
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { chats } = useChats();
+  const { settings } = useSettingsContext();
 
   const handleNewChat = useCallback(() => {
     setLocation("/");
@@ -111,7 +113,7 @@ function GlobalKeyboardShortcuts() {
     { key: "k", ctrl: true, shift: true, action: handleOpenToolCatalog, description: "Tool Catalog" },
     { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
-  ]);
+  ], { enabled: settings.keyboardShortcuts });
 
   return (
     <>

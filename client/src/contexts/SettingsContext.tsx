@@ -40,11 +40,75 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [settings.appearance]);
+  }, [settings.appearance, settings.accentColor]);
 
   useEffect(() => {
     applyAccentColor(settings.accentColor);
   }, [settings.accentColor, settings.appearance]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    // Accessibility
+    root.classList.toggle("high-contrast", settings.highContrast);
+    root.classList.toggle("reduce-motion", settings.reducedMotion);
+
+    // Font size: scale the app consistently (Tailwind uses rem units).
+    root.style.fontSize =
+      settings.fontSize === "small"
+        ? "14px"
+        : settings.fontSize === "large"
+          ? "18px"
+          : "16px";
+
+    // Density: expose a few control sizing vars used by shared UI components.
+    const density = settings.density;
+    root.dataset.density = density;
+
+    const varsByDensity: Record<typeof density, Record<string, string>> = {
+      compact: {
+        "--ui-control-h": "2rem",
+        "--ui-control-h-sm": "1.75rem",
+        "--ui-control-h-lg": "2.25rem",
+        "--ui-control-icon": "2rem",
+        "--ui-control-px": "0.75rem",
+        "--ui-control-px-sm": "0.5rem",
+        "--ui-control-px-lg": "1rem",
+        "--ui-control-py": "0.375rem",
+        "--ui-control-py-sm": "0.25rem",
+        "--ui-control-py-lg": "0.5rem",
+      },
+      comfortable: {
+        "--ui-control-h": "2.25rem",
+        "--ui-control-h-sm": "2rem",
+        "--ui-control-h-lg": "2.5rem",
+        "--ui-control-icon": "2.25rem",
+        "--ui-control-px": "1rem",
+        "--ui-control-px-sm": "0.75rem",
+        "--ui-control-px-lg": "2rem",
+        "--ui-control-py": "0.5rem",
+        "--ui-control-py-sm": "0.375rem",
+        "--ui-control-py-lg": "0.625rem",
+      },
+      spacious: {
+        "--ui-control-h": "2.5rem",
+        "--ui-control-h-sm": "2.25rem",
+        "--ui-control-h-lg": "2.75rem",
+        "--ui-control-icon": "2.5rem",
+        "--ui-control-px": "1.25rem",
+        "--ui-control-px-sm": "1rem",
+        "--ui-control-px-lg": "2.25rem",
+        "--ui-control-py": "0.75rem",
+        "--ui-control-py-sm": "0.5rem",
+        "--ui-control-py-lg": "0.875rem",
+      },
+    };
+
+    const vars = varsByDensity[density];
+    for (const [key, value] of Object.entries(vars)) {
+      root.style.setProperty(key, value);
+    }
+  }, [settings.highContrast, settings.reducedMotion, settings.fontSize, settings.density]);
 
   const wrappedUpdateSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
     updateSetting(key, value);

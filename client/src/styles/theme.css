@@ -92,6 +92,18 @@
   --overlay: 0 0% 0% / 0.4;
 
   --font-sans: 'Geist', 'Inter', sans-serif;
+
+  /* UI sizing (used by Settings -> Density). Defaults match "comfortable". */
+  --ui-control-h: 2.25rem;
+  --ui-control-h-sm: 2rem;
+  --ui-control-h-lg: 2.5rem;
+  --ui-control-icon: 2.25rem;
+  --ui-control-px: 1rem;
+  --ui-control-px-sm: 0.75rem;
+  --ui-control-px-lg: 2rem;
+  --ui-control-py: 0.5rem;
+  --ui-control-py-sm: 0.375rem;
+  --ui-control-py-lg: 0.625rem;
 }
 
 .dark {
