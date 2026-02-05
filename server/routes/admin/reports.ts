@@ -2,6 +2,9 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import ExcelJS from "exceljs";
+import * as fs from "node:fs/promises";
+import path from "node:path";
 
 export const reportsRouter = Router();
 
@@ -269,19 +272,17 @@ reportsRouter.post("/generate", async (req, res) => {
 
                 rowCount = data.length;
 
-                // Save to file
-                const fs = require("fs").promises;
-                const path = require("path");
+                // Save to file (report.id ensures uniqueness across runs)
                 const reportsDir = path.join(process.cwd(), "generated_reports");
                 await fs.mkdir(reportsDir, { recursive: true });
 
-                const timestamp = Date.now();
-                const fileName = `${reportType}_${timestamp}.${format}`;
+                const normalizedFormat = String(format || "json").toLowerCase();
+                const fileName = `${report.id}.${normalizedFormat}`;
                 const filePath = path.join(reportsDir, fileName);
 
-                if (format === "json") {
-                    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-                } else if (format === "csv") {
+                if (normalizedFormat === "json") {
+                    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+                } else if (normalizedFormat === "csv") {
                     // Simple CSV generation
                     if (data.length > 0) {
                         const headers = Object.keys(data[0]);
@@ -294,16 +295,34 @@ reportsRouter.post("/generate", async (req, res) => {
                                 return String(val).replace(/,/g, ";");
                             }).join(","));
                         }
-                        await fs.writeFile(filePath, csvRows.join("\n"));
+                        await fs.writeFile(filePath, csvRows.join("\n"), "utf-8");
                     } else {
-                        await fs.writeFile(filePath, "");
+                        await fs.writeFile(filePath, "", "utf-8");
                     }
+                } else if (normalizedFormat === "xlsx") {
+                    const workbook = new ExcelJS.Workbook();
+                    const sheet = workbook.addWorksheet(reportType.substring(0, 31) || "Report");
+
+                    const keys = data.length > 0 ? Object.keys(data[0]) : [];
+                    sheet.columns = keys.map((key) => ({ header: key, key, width: Math.min(40, Math.max(12, key.length + 2)) }));
+                    sheet.getRow(1).font = { bold: true };
+
+                    for (const row of data) {
+                        // Ensure we only include known keys to keep column order stable.
+                        const record: Record<string, any> = {};
+                        for (const key of keys) record[key] = row?.[key];
+                        sheet.addRow(record);
+                    }
+
+                    await workbook.xlsx.writeFile(filePath);
+                } else {
+                    throw new Error(`Unsupported report format: ${normalizedFormat}`);
                 }
 
                 // Update report status
                 await storage.updateGeneratedReport(report.id, {
                     status: "completed",
-                    filePath: `/api/admin/reports/download/${report.id}`,
+                    filePath: fileName,
                     resultSummary: { rowCount },
                     completedAt: new Date()
                 });
@@ -333,24 +352,39 @@ reportsRouter.get("/download/:id", async (req, res) => {
             return res.status(400).json({ error: "Report is not ready for download" });
         }
 
-        const fs = require("fs").promises;
-        const path = require("path");
-
         const reportsDir = path.join(process.cwd(), "generated_reports");
-        const files = await fs.readdir(reportsDir);
-        const reportFile = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${report.format}`));
 
-        if (!reportFile) {
+        const normalizedFormat = String(report.format || "json").toLowerCase();
+        const preferredFile = report.filePath ? path.resolve(reportsDir, report.filePath) : null;
+        const safePrefix = path.resolve(reportsDir) + path.sep;
+
+        let filePath: string | null = null;
+        if (preferredFile && preferredFile.startsWith(safePrefix)) {
+            const exists = await fs.stat(preferredFile).then(() => true).catch(() => false);
+            if (exists) filePath = preferredFile;
+        }
+
+        // Backward compatibility: older reports used name-based search and stored an API URL in filePath.
+        if (!filePath) {
+            const files = await fs.readdir(reportsDir).catch(() => []);
+            const found = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${normalizedFormat}`));
+            if (found) filePath = path.join(reportsDir, found);
+        }
+
+        if (!filePath) {
             return res.status(404).json({ error: "Report file not found" });
         }
 
-        const filePath = path.join(reportsDir, reportFile);
-        const content = await fs.readFile(filePath, "utf-8");
+        const buffer = await fs.readFile(filePath);
+        const contentType =
+            normalizedFormat === "json" ? "application/json" :
+            normalizedFormat === "csv" ? "text/csv" :
+            normalizedFormat === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+            "application/octet-stream";
 
-        const contentType = report.format === "json" ? "application/json" : "text/csv";
         res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.${report.format}"`);
-        res.send(content);
+        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.${normalizedFormat}"`);
+        res.send(buffer);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
