@@ -6,11 +6,36 @@ import { rm, readFile, writeFile } from "fs/promises";
 // which helps cold start times
 const allowlist: string[] = [];
 
+async function bumpBuiltSwCleanupVersion() {
+  // Ensure the built SW cleanup script changes on each production build.
+  // This breaks the cache-cycle for users who still have an older Service Worker
+  // that serves stale HTML/JS after deploys.
+  const swCleanupPath = "dist/public/sw-cleanup.js";
+  const src = await readFile(swCleanupPath, "utf-8");
+
+  const version = `build-${Date.now()}`;
+  const next = src.replace(
+    /var APP_VERSION = '([^']*)';/,
+    `var APP_VERSION = '${version}';`
+  );
+
+  if (next === src) {
+    throw new Error(
+      `[build] Failed to bump APP_VERSION in ${swCleanupPath} (pattern not found)`
+    );
+  }
+
+  await writeFile(swCleanupPath, next, "utf-8");
+  console.log(`[build] dist sw-cleanup APP_VERSION -> ${version}`);
+}
+
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
   await viteBuild();
+
+  await bumpBuiltSwCleanupVersion();
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
