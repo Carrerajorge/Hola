@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface UserSettings {
   // Display
@@ -228,7 +229,6 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
 
 async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`);
     if (!response.ok) {
       if (response.status === 401) {
@@ -246,7 +246,6 @@ async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null
 
 async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 'userId'>): Promise<boolean> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`, {
       method: 'PUT',
       headers: {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense, lazy } from "react";
 import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
@@ -17,7 +17,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import Editor from "@monaco-editor/react";
+
+const MonacoEditorLazy = lazy(() => import("@monaco-editor/react"));
 
 interface CodeArtifact {
   id: string;
@@ -303,25 +304,33 @@ export function CodeExecutionBlock({
 
       {isExpanded && (
         <div className="h-[400px] border-b border-border/30">
-          <Editor
-            height="100%"
-            defaultLanguage={language}
-            value={editableCode}
-            theme="vs-dark"
-            onChange={(value) => {
-              setEditableCode(value || "");
-              setIsDirty(true);
-            }}
-            options={{
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              fontSize: 13,
-              fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
-              padding: { top: 16, bottom: 16 },
-              lineNumbers: "on",
-              renderLineHighlight: "none",
-            }}
-          />
+          <Suspense
+            fallback={
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                Cargando editor...
+              </div>
+            }
+          >
+            <MonacoEditorLazy
+              height="100%"
+              defaultLanguage={language}
+              value={editableCode}
+              theme="vs-dark"
+              onChange={(value) => {
+                setEditableCode(value || "");
+                setIsDirty(true);
+              }}
+              options={{
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                fontSize: 13,
+                fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+                padding: { top: 16, bottom: 16 },
+                lineNumbers: "on",
+                renderLineHighlight: "none",
+              }}
+            />
+          </Suspense>
         </div>
       )}
 
