@@ -46,6 +46,7 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
 import {
   Sparkles,
   CheckSquare,
@@ -1172,7 +1173,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { settings, updateSetting } = useSettingsContext();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const { availableModels } = useModelAvailability();
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -1519,9 +1521,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                      <SelectItem value="grok-3-fast">Grok 3 Fast</SelectItem>
+                      {availableModels.length > 0 ? (
+                        availableModels.map((m) => (
+                          <SelectItem key={m.id} value={m.modelId}>
+                            {m.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <>
+                          <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                          <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                          <SelectItem value="grok-3-fast">Grok 3 Fast</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1803,7 +1815,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               ILIAGPT puede programarse para ejecutarse nuevamente después de completar una tarea.
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
-            <Button variant="outline" data-testid="button-manage-schedules">
+            <Button
+              variant="outline"
+              onClick={() => toast({
+                title: "Programaciones",
+                description: "Para programar ejecuciones, usa el menú ⋯ en una conversación. La vista de administración estará disponible pronto."
+              })}
+              data-testid="button-manage-schedules"
+            >
               Administrar
             </Button>
           </div>
@@ -1850,6 +1869,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <button
                 className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                onClick={() => toast({
+                  title: "Dispositivos de confianza",
+                  description: "Esta vista estará disponible pronto."
+                })}
                 data-testid="security-trusted-devices"
               >
                 <span className="text-sm">Dispositivos de confianza</span>
@@ -2037,7 +2060,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center gap-3 py-2">
                 <Mail className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm">usuario@ejemplo.com</span>
+                <span className="text-sm">{user?.email || "Sin correo"}</span>
               </div>
 
               <div className="flex items-center gap-3 py-2">
