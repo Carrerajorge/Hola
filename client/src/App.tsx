@@ -47,6 +47,8 @@ const ProfilePage = lazy(() => import("@/pages/profile"));
 const BillingPage = lazy(() => import("@/pages/billing"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PrivacyPolicyPage = lazy(() => import("@/pages/privacy-policy"));
+const TermsPage = lazy(() => import("@/pages/terms"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
 const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
@@ -153,6 +155,8 @@ function Router() {
             <Route path="/billing" component={BillingPage} />
             <Route path="/settings" component={SettingsPage} />
             <Route path="/privacy" component={PrivacyPage} />
+            <Route path="/privacy-policy" component={PrivacyPolicyPage} />
+            <Route path="/terms" component={TermsPage} />
             <Route path="/admin" component={AdminPage} />
             <Route path="/admin/health" component={SystemHealthPage} />
             <Route path="/workspace-settings" component={WorkspaceSettingsPage} />

@@ -122,7 +122,12 @@ export default function PrivacyPage() {
                     <p className="text-sm text-muted-foreground">Leer términos completos</p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" data-testid="button-privacy-policy">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="button-privacy-policy"
+                  onClick={() => setLocation("/privacy-policy")}
+                >
                   Ver
                 </Button>
               </div>

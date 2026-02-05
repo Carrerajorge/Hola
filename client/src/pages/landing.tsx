@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
@@ -322,11 +322,10 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-white/10 backdrop-blur-sm">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Términos</a>
+        <Link href="/terms" className="text-zinc-400 hover:text-white underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</a>.
+        <Link href="/privacy-policy" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</Link>.
       </footer>
     </div>
   );
 }
-
