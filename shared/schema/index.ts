@@ -8,6 +8,7 @@ export * from "./files";
 export * from "./agent";
 export * from "./library";
 export * from "./memory";
+export * from "./knowledge";
 export * from "./org";
 export * from "./workspace";
 

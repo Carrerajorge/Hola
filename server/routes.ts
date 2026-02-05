@@ -84,6 +84,7 @@ import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
 import { apiKeysRouter } from "./routes/apiKeysRouter";
 import { memoryRouter } from "./routes/memoryRouter";
+import { knowledgeBaseRouter } from "./routes/knowledgeBaseRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
@@ -469,6 +470,7 @@ export async function registerRoutes(
   app.use("/api/2fa", twoFactorRouter);
   app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/memory", memoryRouter);
+  app.use("/api/kb", knowledgeBaseRouter);
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
   app.use("/api/admin/automations", automationsRouter);
   app.use("/api/academic", academicSearchRouter); // Scopus + Scholar academic search
