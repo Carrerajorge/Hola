@@ -7,6 +7,7 @@ services:
       - PORT=5000
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
       - REDIS_URL=redis://redis:6379
+      - SANDBOX_ROOT=/tmp/sandbox_workspace
       # Add other keys from .env here or mount .env file
     env_file:
       - .env.production
@@ -26,6 +27,7 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
       - REDIS_URL=redis://redis:6379
+      - SANDBOX_ROOT=/tmp/sandbox_workspace
       # Add other keys from .env here
     env_file:
       - .env.production
