@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,16 @@ export default function LandingPage() {
   const [inputValue, setInputValue] = useState("");
   const [showPromo, setShowPromo] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    // Prevent background scroll while the mobile drawer is open.
+    if (!mobileMenuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileMenuOpen]);
 
   const handleSubmit = () => {
     if (inputValue.trim()) {
@@ -87,20 +97,34 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* Mobile dropdown menu (overlay) */}
-      {mobileMenuOpen && (
-        <div className="md:hidden">
-          <button
-            type="button"
-            className="fixed inset-0 z-40 bg-black/40"
-            aria-label="Cerrar menú"
-            onClick={() => setMobileMenuOpen(false)}
-          />
-          <div
-            className="fixed z-50 top-16 right-4 w-64 rounded-2xl border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl p-2"
-            role="menu"
-            data-testid="mobile-menu"
-          >
+      {/* Mobile menu: left drawer + scrim (keeps header clickable so user can close via hamburger) */}
+      <div
+        className={
+          "md:hidden" +
+          (mobileMenuOpen ? "" : " pointer-events-none")
+        }
+        aria-hidden={!mobileMenuOpen}
+      >
+        {/* Scrim blocks interactions with the page, but starts below the header so the hamburger stays clickable */}
+        <div
+          className={
+            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/50 transition-opacity duration-200 " +
+            (mobileMenuOpen ? "opacity-100" : "opacity-0")
+          }
+        />
+
+        {/* Drawer */}
+        <div
+          className={
+            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl " +
+            "transition-transform duration-200 ease-out " +
+            (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
+          }
+          role="menu"
+          aria-label="Menú"
+          data-testid="mobile-menu"
+        >
+          <div className="p-2">
             {[
               { label: "Sobre nosotros", to: "/about" },
               { label: "Aprender", to: "/learn" },
@@ -113,7 +137,7 @@ export default function LandingPage() {
                 key={item.to}
                 type="button"
                 className={
-                  "w-full text-left px-3 py-2 rounded-xl text-sm transition-colors " +
+                  "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
                   (item.label === "Imágenes"
                     ? "text-purple-300 hover:text-purple-200 hover:bg-white/10"
                     : "text-zinc-200 hover:text-white hover:bg-white/10")
@@ -129,7 +153,7 @@ export default function LandingPage() {
             ))}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Main Content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
