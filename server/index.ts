@@ -148,6 +148,8 @@ export function log(message: string, source = "express") {
     // Setup Full-Text Search
     const { setupFts } = await import("./lib/fts");
     await setupFts();
+    const { setupKnowledgeBase } = await import("./lib/knowledgeSetup");
+    await setupKnowledgeBase();
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }

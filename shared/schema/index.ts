@@ -10,4 +10,4 @@ export * from "./library";
 export * from "./memory";
 export * from "./org";
 export * from "./workspace";
-
+export * from "./knowledge";

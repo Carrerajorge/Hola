@@ -91,6 +91,7 @@ import * as crypto from "crypto";
 import { randomUUID } from "crypto";
 import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
+import { knowledgeBaseService } from "./services/knowledgeBase";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -644,6 +645,18 @@ export class MemStorage implements IStorage {
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const [result] = await db.insert(chatMessages).values(message).returning();
     await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    if (message.role === "user" || message.role === "assistant") {
+      queueMicrotask(() => {
+        knowledgeBaseService.ingestChatMessage({
+          chatId: message.chatId,
+          messageId: result.id,
+          role: message.role,
+          content: message.content,
+        }).catch((error) => {
+          console.warn("[Knowledge] Failed to ingest chat message:", error?.message || error);
+        });
+      });
+    }
     return result;
   }
 
@@ -2626,6 +2639,18 @@ export class MemStorage implements IStorage {
   // Conversation Documents - Persistent document context
   async createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument> {
     const [result] = await db.insert(conversationDocuments).values(doc).returning();
+    if (doc.extractedText && doc.extractedText.trim().length > 0) {
+      queueMicrotask(() => {
+        knowledgeBaseService.ingestConversationDocument({
+          chatId: doc.chatId,
+          documentId: result.id,
+          fileName: doc.fileName,
+          content: doc.extractedText || "",
+        }).catch((error) => {
+          console.warn("[Knowledge] Failed to ingest conversation document:", error?.message || error);
+        });
+      });
+    }
     return result;
   }
 

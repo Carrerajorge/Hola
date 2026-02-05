@@ -72,6 +72,7 @@ import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
+import { getSuperAgentCoverage } from "./services/superAgentCoverage";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
@@ -84,6 +85,7 @@ import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
 import { apiKeysRouter } from "./routes/apiKeysRouter";
 import { memoryRouter } from "./routes/memoryRouter";
+import { knowledgeRouter } from "./routes/knowledgeRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
@@ -469,6 +471,7 @@ export async function registerRoutes(
   app.use("/api/2fa", twoFactorRouter);
   app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/memory", memoryRouter);
+  app.use("/api/knowledge", knowledgeRouter);
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
   app.use("/api/admin/automations", automationsRouter);
   app.use("/api/academic", academicSearchRouter); // Scopus + Scholar academic search
@@ -929,6 +932,24 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load agents",
+      });
+    }
+  });
+
+  // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
+  app.get("/api/super-agent/capabilities", (_req: Request, res: Response) => {
+    try {
+      const { summary, capabilities } = getSuperAgentCoverage();
+      res.json({
+        success: true,
+        summary,
+        capabilities,
+      });
+    } catch (error: any) {
+      console.error("[SuperAgentCapabilities] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to compute super agent coverage",
       });
     }
   });

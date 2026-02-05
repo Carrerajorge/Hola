@@ -20,6 +20,7 @@ import { getStorageService } from "./storage"; // NEW
 import { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } from "./intentGuard";
 import { DeterministicPipeline } from "../agent/pipelines/deterministicPipeline";
 import OpenAI from "openai";
+import { knowledgeBaseService } from "./knowledgeBase";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -1701,6 +1702,19 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           { query: lastUserMessage.content }, null, "error", Date.now() - ragStartTime, String(error));
         console.error("RAG search error:", error);
       }
+    }
+  }
+
+  // Knowledge Base contextualization (opt-out via env)
+  const knowledgeContextEnabled = process.env.KNOWLEDGE_CONTEXT_ENABLED !== "false";
+  if (knowledgeContextEnabled && userId && lastUserMessage) {
+    try {
+      const knowledgeContext = await knowledgeBaseService.buildContext(userId, lastUserMessage.content, 5);
+      if (knowledgeContext) {
+        contextInfo += knowledgeContext;
+      }
+    } catch (error) {
+      console.warn("[Knowledge] Context build failed:", (error as Error)?.message || error);
     }
   }
 
