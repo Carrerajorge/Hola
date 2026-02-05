@@ -1,7 +1,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SuperAgentOrchestrator } from '../orchestrator';
-import { PromptUnderstanding } from '../../promptUnderstanding';
+
+let SuperAgentOrchestrator: typeof import('../orchestrator').SuperAgentOrchestrator;
 
 // Mock PromptUnderstanding
 vi.mock('../../promptUnderstanding', () => {
@@ -21,8 +21,32 @@ vi.mock('../../promptUnderstanding', () => {
     };
 });
 
+// Mock RequestUnderstanding gate so unit tests don't hit real LLM providers.
+vi.mock('../../requestUnderstanding', () => ({
+    requestUnderstandingAgent: {
+        buildBrief: vi.fn().mockResolvedValue({
+            intent: 'research',
+            subtasks: ['search', 'summarize'],
+            deliverable: { type: 'answer', format: 'text' },
+            audience: { who: 'internal', tone: 'neutral' },
+            restrictions: [],
+            data_provided: [],
+            assumptions: [],
+            success_criteria: ['returns brief'],
+            risks: [],
+            ambiguities: [],
+            blocker: { is_blocked: false, question: null }
+        })
+    }
+}));
+
 // Mock dependencies that might be imported
 vi.mock('../../../lib/openai', () => ({
+    // llmGateway imports both `openai` and `MODELS` from this module.
+    MODELS: {
+        TEXT: 'test-text-model',
+        VISION: 'test-vision-model'
+    },
     openai: {
         chat: {
             completions: {
@@ -68,10 +92,12 @@ vi.mock('../wosClient', () => ({
 }));
 
 describe('SuperAgentOrchestrator', () => {
-    let orchestrator: SuperAgentOrchestrator;
+    let orchestrator: InstanceType<typeof SuperAgentOrchestrator>;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.clearAllMocks();
+        ({ SuperAgentOrchestrator } = await import('../orchestrator'));
+
         orchestrator = new SuperAgentOrchestrator('test-session-id', {
             maxIterations: 1,
             emitHeartbeat: false,

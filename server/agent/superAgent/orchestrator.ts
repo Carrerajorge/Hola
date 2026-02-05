@@ -19,6 +19,7 @@ import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, Scopus
 import { searchWos, WosArticle } from "./wosClient";
 import { runAcademicPipeline, candidatesToSourceSignals, PipelineResult, PipelineConfig } from "./academicPipeline";
 import { PromptUnderstanding, UserSpec, TaskSpec } from "../promptUnderstanding";
+import { requestUnderstandingAgent } from "../requestUnderstanding";
 
 function isWosConfigured(): boolean {
   return !!process.env.WOS_API_KEY;
@@ -203,6 +204,52 @@ export class SuperAgentOrchestrator extends EventEmitter {
       }
 
       this.emitThought("Analizando solicitud del usuario...");
+
+      // === Mandatory Request-Understanding Gate (Brief) ===
+      const brief = await requestUnderstandingAgent.buildBrief({ text: prompt });
+      this.emitSSE("brief", brief);
+
+      if (brief.blocker?.is_blocked) {
+        const question = (brief.blocker.question || "").trim() || "¿Puede aclarar el punto bloqueador para poder completar el encargo?";
+        // Return immediately with a single clarification question
+        this.state = ExecutionStateSchema.parse({
+          contract: this.convertSpecToContract({
+            goal: brief.intent.primary_intent,
+            tasks: [],
+            inputs_provided: {},
+            missing_inputs: [],
+            constraints: [],
+            success_criteria: [],
+            assumptions: [],
+            risks: [],
+            questions: [question],
+            confidence: brief.intent.confidence,
+          } as any, prompt),
+          phase: "completed",
+          sources: [],
+          sources_count: 0,
+          deep_sources: [],
+          artifacts: [],
+          tool_results: [],
+          iteration: 0,
+          max_iterations: this.config.maxIterations,
+          acceptance_results: [],
+          started_at: Date.now(),
+          completed_at: Date.now(),
+          final_response: question,
+        });
+
+        this.emitSSE("final", {
+          response: question,
+          sources_count: 0,
+          artifacts: [],
+          duration_ms: 0,
+          iterations: 0,
+        });
+
+        return this.state;
+      }
+
       console.log("[SuperAgent] Orchestrator using PromptUnderstanding for:", prompt.substring(0, 50));
       const processingResult = await this.promptUnderstanding.processFullPrompt(prompt, { useLLM: true });
 
