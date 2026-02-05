@@ -290,11 +290,10 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-white/10 backdrop-blur-sm">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Términos</a>
+        <a href="/terms" className="text-zinc-400 hover:text-white underline transition-colors">Términos</a>
         {" "}y reconoces que leíste nuestra{" "}
-        <a href="#" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</a>.
+        <a href="/privacy" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</a>.
       </footer>
     </div>
   );
 }
-
