@@ -23,6 +23,7 @@ import {
 } from "../integrations/gmailApi";
 import { whatsappWebManager } from "../integrations/whatsappWeb";
 import { storage } from "../storage";
+import { superAgentMissingTools } from "./superAgentMissingTools";
 
 // ============================================================================
 // CALCULATOR TOOL
@@ -1300,6 +1301,9 @@ export const extendedTools: ToolDefinition[] = [
     whatsappWebDisconnectTool,
     whatsappWebSendTextTool,
     whatsappWebFetchChatTool,
+
+    // Close remaining gaps from Super Agente Digital 100 (missing capabilities)
+    ...superAgentMissingTools,
 ];
 
 export default extendedTools;

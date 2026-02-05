@@ -53,3 +53,5 @@ artifacts/node_modules_backup/
 artifacts/Test_*.txt
 artifacts/*.log
 artifacts/*.tmp
+artifacts/*.zip
+artifacts/*.ics
