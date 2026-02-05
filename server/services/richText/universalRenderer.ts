@@ -375,8 +375,12 @@ function renderImageToDocx(
   const data = resolveImageData(block.src);
   if (!data) return [];
 
-  const width = block.width ?? 400;
-  const height = block.height ?? 300;
+  const dimensions = getImageDimensions(data);
+  const { width, height } = getScaledImageDimensions(
+    block.width,
+    block.height,
+    dimensions
+  );
   const imageRun = new ImageRun({
     data,
     transformation: {
@@ -411,6 +415,79 @@ function renderImageToDocx(
   }
 
   return paragraphs;
+}
+
+function getImageDimensions(
+  data: Buffer
+): { width: number; height: number } | null {
+  if (data.length < 24) return null;
+
+  if (data.slice(1, 4).toString("ascii") === "PNG") {
+    return {
+      width: data.readUInt32BE(16),
+      height: data.readUInt32BE(20),
+    };
+  }
+
+  if (data[0] === 0xff && data[1] === 0xd8) {
+    let offset = 2;
+    while (offset < data.length) {
+      if (data[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = data[offset + 1];
+      if (marker === 0xc0 || marker === 0xc2) {
+        const height = data.readUInt16BE(offset + 5);
+        const width = data.readUInt16BE(offset + 7);
+        return { width, height };
+      }
+      const segmentLength = data.readUInt16BE(offset + 2);
+      if (segmentLength <= 0) break;
+      offset += 2 + segmentLength;
+    }
+  }
+
+  return null;
+}
+
+function getScaledImageDimensions(
+  width: number | undefined,
+  height: number | undefined,
+  dimensions: { width: number; height: number } | null
+): { width: number; height: number } {
+  const fallbackWidth = 400;
+  const fallbackHeight = 300;
+  const maxWidth = 600;
+
+  if (width && height) {
+    const clampedWidth = Math.min(width, maxWidth);
+    const scale = clampedWidth / width;
+    return { width: clampedWidth, height: Math.round(height * scale) };
+  }
+
+  if (dimensions) {
+    if (width) {
+      const clampedWidth = Math.min(width, maxWidth);
+      return {
+        width: clampedWidth,
+        height: Math.round((clampedWidth * dimensions.height) / dimensions.width),
+      };
+    }
+
+    if (height) {
+      const derivedWidth = Math.round((height * dimensions.width) / dimensions.height);
+      const clampedWidth = Math.min(derivedWidth, maxWidth);
+      const scale = clampedWidth / derivedWidth;
+      return { width: clampedWidth, height: Math.round(height * scale) };
+    }
+
+    const clampedWidth = Math.min(dimensions.width, maxWidth);
+    const scale = clampedWidth / dimensions.width;
+    return { width: clampedWidth, height: Math.round(dimensions.height * scale) };
+  }
+
+  return { width: fallbackWidth, height: fallbackHeight };
 }
 
 function getDocxAlignment(
