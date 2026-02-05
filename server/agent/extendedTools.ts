@@ -21,6 +21,8 @@ import {
     gmailSend,
     gmailMarkRead,
 } from "../integrations/gmailApi";
+import { whatsappWebManager } from "../integrations/whatsappWeb";
+import { storage } from "../storage";
 
 // ============================================================================
 // CALCULATOR TOOL
@@ -1058,6 +1060,222 @@ const gmailMarkReadTool: ToolDefinition = {
 };
 
 // ============================================================================
+// WHATSAPP WEB TOOLS (REAL)
+// ============================================================================
+
+const whatsappStatusSchema = z.object({});
+
+const whatsappWebStatusTool: ToolDefinition = {
+    name: "whatsapp_web_status",
+    description: "Get current WhatsApp Web connection status for the current user (disconnected/connecting/qr/connected).",
+    inputSchema: whatsappStatusSchema,
+    capabilities: ["requires_network"],
+    execute: async (_input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const status = whatsappWebManager.getStatus(context.userId);
+            return {
+                success: true,
+                output: status,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp status",
+                    content: JSON.stringify(status, null, 2),
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_STATUS_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappConnectSchema = z.object({});
+
+const whatsappWebConnectTool: ToolDefinition = {
+    name: "whatsapp_web_connect",
+    description: "Start/continue WhatsApp Web linking for the current user. Returns QR when required.",
+    inputSchema: whatsappConnectSchema,
+    capabilities: ["requires_network", "accesses_external_api"],
+    execute: async (_input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const status = await whatsappWebManager.start(context.userId);
+            return {
+                success: true,
+                output: status,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp connect",
+                    content: JSON.stringify(status, null, 2),
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_CONNECT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappDisconnectSchema = z.object({});
+
+const whatsappWebDisconnectTool: ToolDefinition = {
+    name: "whatsapp_web_disconnect",
+    description: "Disconnect WhatsApp Web session for the current user.",
+    inputSchema: whatsappDisconnectSchema,
+    capabilities: ["requires_network", "accesses_external_api"],
+    execute: async (_input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            await whatsappWebManager.disconnect(context.userId);
+            return {
+                success: true,
+                output: { success: true },
+                artifacts: [],
+                previews: [{ type: "text", title: "WhatsApp disconnect", content: "Disconnected" }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_DISCONNECT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappSendTextSchema = z.object({
+    to: z.string().min(1).describe("Recipient JID (e.g., '1234567890@s.whatsapp.net') or phone-derived JID used by your integration."),
+    text: z.string().min(1).describe("Message text"),
+});
+
+const whatsappWebSendTextTool: ToolDefinition = {
+    name: "whatsapp_web_send_text",
+    description: "Send a WhatsApp message via the linked WhatsApp Web session (requires confirmation by policy in higher layers).",
+    inputSchema: whatsappSendTextSchema,
+    capabilities: ["requires_network", "accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            await whatsappWebManager.sendText(context.userId, String(input.to), String(input.text));
+            return {
+                success: true,
+                output: { success: true },
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp message sent",
+                    content: `To: ${input.to}\nText: ${String(input.text).slice(0, 500)}`,
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_SEND_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappFetchChatSchema = z.object({
+    remoteJid: z.string().min(1).describe("Remote JID (chat id) used by the WhatsApp integration (e.g. '1234567890@s.whatsapp.net')."),
+    limit: z.number().int().min(1).max(100).optional().default(20),
+});
+
+function safeWhatsAppChatId(userId: string, remoteJid: string): string {
+    const raw = `wa_${userId}_${remoteJid}`;
+    return raw.replace(/[^a-zA-Z0-9_\\-]/g, "_").slice(0, 200);
+}
+
+const whatsappWebFetchChatTool: ToolDefinition = {
+    name: "whatsapp_web_fetch_chat",
+    description: "Fetch recent mirrored WhatsApp messages stored in IliaGPT for a given remoteJid.",
+    inputSchema: whatsappFetchChatSchema,
+    capabilities: [],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const chatId = safeWhatsAppChatId(context.userId, String(input.remoteJid));
+            const existing = await storage.getChat(chatId);
+            if (!existing) {
+                return {
+                    success: true,
+                    output: { chatId, messages: [], note: "No mirrored chat found for this remoteJid yet." },
+                    artifacts: [],
+                    previews: [{ type: "text", title: "WhatsApp chat", content: "No mirrored chat found yet." }],
+                    logs: [],
+                    metrics: { durationMs: Date.now() - startTime },
+                };
+            }
+
+            const all = await storage.getChatMessages(chatId);
+            const messages = (all || []).slice(-Number(input.limit || 20)).map((m: any) => ({
+                role: m.role,
+                content: m.content,
+                createdAt: m.createdAt,
+                metadata: m.metadata,
+            }));
+
+            return {
+                success: true,
+                output: { chatId, messages, count: messages.length },
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: `WhatsApp chat (${messages.length})`,
+                    content: messages.map((m: any) => `${m.role}: ${String(m.content || "").slice(0, 300)}`).join("\n") || "No messages",
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_FETCH_CHAT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+// ============================================================================
 // EXPORT ALL TOOLS
 // ============================================================================
 
@@ -1075,6 +1293,13 @@ export const extendedTools: ToolDefinition[] = [
     gmailFetchTool,
     gmailSendTool,
     gmailMarkReadTool,
+
+    // WhatsApp Web (real)
+    whatsappWebStatusTool,
+    whatsappWebConnectTool,
+    whatsappWebDisconnectTool,
+    whatsappWebSendTextTool,
+    whatsappWebFetchChatTool,
 ];
 
 export default extendedTools;

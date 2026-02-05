@@ -149,6 +149,48 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
     maxRetries: 2,
     deniedByDefault: false,
   },
+
+  // WhatsApp Web (work productivity)
+  whatsapp_web_status: {
+    capabilities: ["requires_network"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 15000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  whatsapp_web_connect: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  whatsapp_web_disconnect: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 30000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  whatsapp_web_send_text: {
+    capabilities: ["requires_network", "accesses_external_api", "high_risk"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 45000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  whatsapp_web_fetch_chat: {
+    capabilities: [],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 20000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
 };
 
 export interface PolicyCheckResult {

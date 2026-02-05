@@ -72,7 +72,7 @@ import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
-import { getSuperAgentCoverage } from "./services/superAgentCoverage";
+import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
@@ -937,13 +937,19 @@ export async function registerRoutes(
   });
 
   // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
-  app.get("/api/super-agent/capabilities", (_req: Request, res: Response) => {
+  // Query: ?source=combined|runtime|langgraph
+  app.get("/api/super-agent/capabilities", async (req: Request, res: Response) => {
     try {
-      const { summary, capabilities } = getSuperAgentCoverage();
+      const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
+      const source: SuperAgentCoverageSource =
+        rawSource === "langgraph" || rawSource === "runtime" || rawSource === "combined"
+          ? rawSource
+          : "combined";
+
+      const report = await getSuperAgentCoverageReport(source);
       res.json({
         success: true,
-        summary,
-        capabilities,
+        ...report,
       });
     } catch (error: any) {
       console.error("[SuperAgentCapabilities] Error:", error);
