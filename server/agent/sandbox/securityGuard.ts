@@ -96,7 +96,7 @@ export class SecurityGuard {
   ]);
 
   constructor(sandboxRoot?: string) {
-    this.sandboxRoot = sandboxRoot || path.join(process.cwd(), "sandbox_workspace");
+    this.sandboxRoot = sandboxRoot || process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace");
     this.criticalPatterns = SecurityGuard.CRITICAL_BLOCKED_PATTERNS;
     this.mediumPatterns = SecurityGuard.MEDIUM_RISK_PATTERNS;
   }

@@ -37,7 +37,7 @@ export class SandboxEnvironment implements ISandboxService {
 
   constructor(config?: Partial<EnvironmentConfig>) {
     const defaultConfig: EnvironmentConfig = {
-      workspaceRoot: path.join(process.cwd(), "sandbox_workspace"),
+      workspaceRoot: process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace"),
       stateDirectory: ".state",
       tempDirectory: ".tmp",
       enableSecurity: true,

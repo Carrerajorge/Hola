@@ -18,7 +18,7 @@ export class FileManager {
   };
 
   constructor(sandboxRoot?: string, securityGuard?: SecurityGuard, maxFileSize: number = 100 * 1024 * 1024) {
-    this.sandboxRoot = sandboxRoot || path.join(process.cwd(), "sandbox_workspace");
+    this.sandboxRoot = sandboxRoot || process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace");
     this.security = securityGuard ?? new SecurityGuard(this.sandboxRoot);
     this.maxFileSize = maxFileSize;
 

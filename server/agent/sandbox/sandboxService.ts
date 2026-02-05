@@ -36,7 +36,7 @@ export class SandboxService {
     if (!this.globalSandbox) {
       this.globalSandbox = new SandboxEnvironment({
         ...this.defaultConfig,
-        workspaceRoot: path.join(process.cwd(), "sandbox_workspace"),
+        workspaceRoot: process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace"),
       });
       return this.globalSandbox.initialize();
     }
@@ -62,7 +62,7 @@ export class SandboxService {
     if (!session) {
       const sandbox = new SandboxEnvironment({
         ...this.defaultConfig,
-        workspaceRoot: path.join(process.cwd(), "sandbox_workspace", "runs", runId),
+        workspaceRoot: path.join(process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace"), "runs", runId),
       });
       await sandbox.initialize();
       session = {

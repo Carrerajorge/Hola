@@ -35,7 +35,7 @@ export class StateManager {
   private static readonly PACKAGES_FILE = "installed_packages.json";
 
   constructor(options: Partial<StateManagerConfig> = {}) {
-    this.stateDir = options.stateDirectory || path.join(process.cwd(), "sandbox_workspace", ".state");
+    this.stateDir = options.stateDirectory || path.join(process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace"), ".state");
     this.autoSave = options.autoSave ?? true;
     this.saveInterval = options.saveInterval ?? 60000;
     this.maxHistoryEntries = options.maxHistoryEntries ?? 10000;
