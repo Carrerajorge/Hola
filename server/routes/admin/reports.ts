@@ -5,6 +5,72 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 import ExcelJS from "exceljs";
 import * as fs from "node:fs/promises";
 import path from "node:path";
+import PDFDocument from "pdfkit";
+
+function toSafeDownloadBaseName(value: string | null | undefined): string {
+    const input = (value || "").trim();
+    const sanitized = input
+        .replace(/[^a-zA-Z0-9._-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 200);
+    return sanitized || "report";
+}
+
+function toPdfText(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+async function generateSimplePdfReport(title: string, rows: Array<Record<string, unknown>>): Promise<Buffer> {
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const chunks: Buffer[] = [];
+
+    doc.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+
+    const done = new Promise<Buffer>((resolve, reject) => {
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+    });
+
+    doc.fontSize(20).text(title);
+    doc.moveDown(0.25);
+    doc.fontSize(10).fillColor("gray").text(`Generated: ${new Date().toISOString()} | Rows: ${rows.length}`);
+    doc.fillColor("black");
+    doc.moveDown();
+
+    const keys = rows.length > 0 ? Object.keys(rows[0] || {}) : [];
+    const maxRows = 200;
+    const slice = rows.slice(0, maxRows);
+    if (rows.length > maxRows) {
+        doc.fontSize(10).fillColor("gray").text(`Showing first ${maxRows} rows (PDF export is summary-friendly).`);
+        doc.fillColor("black");
+        doc.moveDown();
+    }
+
+    for (let idx = 0; idx < slice.length; idx++) {
+        const row = slice[idx];
+        doc.fontSize(12).text(`Row ${idx + 1}`, { underline: true });
+        doc.moveDown(0.25);
+        for (const key of keys) {
+            doc.fontSize(10).text(`${key}: ${toPdfText(row?.[key])}`);
+        }
+        doc.moveDown();
+
+        const pageBottom = doc.page.height - doc.page.margins.bottom;
+        if (doc.y > pageBottom - 60) doc.addPage();
+    }
+
+    doc.end();
+    return done;
+}
 
 export const reportsRouter = Router();
 
@@ -315,6 +381,9 @@ reportsRouter.post("/generate", async (req, res) => {
                     }
 
                     await workbook.xlsx.writeFile(filePath);
+                } else if (normalizedFormat === "pdf") {
+                    const pdf = await generateSimplePdfReport(reportName, data as Array<Record<string, unknown>>);
+                    await fs.writeFile(filePath, pdf);
                 } else {
                     throw new Error(`Unsupported report format: ${normalizedFormat}`);
                 }
@@ -380,82 +449,13 @@ reportsRouter.get("/download/:id", async (req, res) => {
             normalizedFormat === "json" ? "application/json" :
             normalizedFormat === "csv" ? "text/csv" :
             normalizedFormat === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+            normalizedFormat === "pdf" ? "application/pdf" :
             "application/octet-stream";
 
         res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.${normalizedFormat}"`);
+        const downloadName = `${toSafeDownloadBaseName(report.name)}.${normalizedFormat}`;
+        res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
         res.send(buffer);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Generate PDF report
-reportsRouter.post("/generate-pdf/:id", async (req, res) => {
-    try {
-        const report = await storage.getGeneratedReport(req.params.id);
-        if (!report) {
-            return res.status(404).json({ error: "Report not found" });
-        }
-
-        // Simple HTML-to-PDF using template
-        const fs = require("fs").promises;
-        const path = require("path");
-
-        const reportsDir = path.join(process.cwd(), "generated_reports");
-        const files = await fs.readdir(reportsDir).catch(() => []);
-        const jsonFile = files.find((f: string) => f.includes(report.type) && f.endsWith('.json'));
-
-        let data: any[] = [];
-        if (jsonFile) {
-            const content = await fs.readFile(path.join(reportsDir, jsonFile), "utf-8");
-            data = JSON.parse(content);
-        }
-
-        // Generate HTML for PDF
-        const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>${report.name}</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 40px; }
-        h1 { color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: #667eea; color: white; padding: 12px; text-align: left; }
-        td { padding: 10px; border-bottom: 1px solid #ddd; }
-        tr:nth-child(even) { background: #f9f9f9; }
-        .footer { margin-top: 40px; color: #666; font-size: 12px; }
-    </style>
-</head>
-<body>
-    <h1>${report.name}</h1>
-    <p>Generado: ${new Date().toLocaleDateString('es')}</p>
-    <p>Total de registros: ${data.length}</p>
-    
-    <table>
-        <thead>
-            <tr>${data.length > 0 ? Object.keys(data[0]).map(k => `<th>${k}</th>`).join('') : ''}</tr>
-        </thead>
-        <tbody>
-            ${data.slice(0, 100).map(row => 
-                `<tr>${Object.values(row).map(v => `<td>${v ?? ''}</td>`).join('')}</tr>`
-            ).join('')}
-        </tbody>
-    </table>
-    
-    <div class="footer">
-        <p>IliaGPT - Reporte generado automáticamente</p>
-    </div>
-</body>
-</html>`;
-
-        // Return HTML that can be printed to PDF by browser
-        res.setHeader("Content-Type", "text/html");
-        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.html"`);
-        res.send(htmlContent);
-
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

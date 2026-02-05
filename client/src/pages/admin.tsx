@@ -3523,6 +3523,7 @@ function ReportsSection() {
                     <SelectItem value="json">JSON</SelectItem>
                     <SelectItem value="csv">CSV</SelectItem>
                     <SelectItem value="xlsx">Excel (XLSX)</SelectItem>
+                    <SelectItem value="pdf">PDF</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
