@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -1370,6 +1371,73 @@ export function useChats() {
     }));
   }, []);
 
+
+
+  // Live WhatsApp mirroring: keep the UI in sync when messages arrive via WhatsApp (no refresh needed).
+  useEffect(() => {
+    return whatsappWebEventStream.subscribe({
+      onMessage: (evt) => {
+        const chatId = evt.chat.id;
+        const msg = evt.message;
+
+        const createdAt = new Date(msg.createdAt);
+        const ts = evt.chat.updatedAt ? new Date(evt.chat.updatedAt).getTime() : (isNaN(createdAt.getTime()) ? Date.now() : createdAt.getTime());
+
+        const incoming: Message = {
+          id: msg.id,
+          role: (msg.role as any) || "user",
+          content: String(msg.content || ""),
+          timestamp: isNaN(createdAt.getTime()) ? new Date() : createdAt,
+          requestId: msg.requestId || undefined,
+          userMessageId: msg.userMessageId || undefined,
+          metadata: (msg.metadata as any) || undefined,
+        };
+
+        if (incoming.requestId) {
+          markRequestPersisted(incoming.requestId);
+        }
+
+        setChats((prev) => {
+          const existingIdx = prev.findIndex((c) => c.id === chatId);
+          if (existingIdx >= 0) {
+            const existing = prev[existingIdx];
+            const alreadyHas = existing.messages.some((m) =>
+              m.id === incoming.id || (!!incoming.requestId && m.requestId === incoming.requestId)
+            );
+            if (alreadyHas) return prev;
+
+            const updated: Chat = {
+              ...existing,
+              title: evt.chat.title || existing.title,
+              archived: evt.chat.archived ?? existing.archived,
+              hidden: evt.chat.hidden ?? existing.hidden,
+              pinned: evt.chat.pinned ?? existing.pinned,
+              pinnedAt: evt.chat.pinnedAt ?? existing.pinnedAt,
+              messages: [...existing.messages, incoming],
+              timestamp: ts,
+            };
+
+            const next = [...prev];
+            next[existingIdx] = updated;
+            return next;
+          }
+
+          const newChat: Chat = {
+            id: chatId,
+            stableKey: `stable-${chatId}`,
+            title: evt.chat.title || `WhatsApp: ${chatId}`,
+            timestamp: ts,
+            messages: [incoming],
+            archived: !!evt.chat.archived,
+            hidden: !!evt.chat.hidden,
+            pinned: !!evt.chat.pinned,
+            pinnedAt: evt.chat.pinnedAt ?? undefined,
+          };
+          return [newChat, ...prev];
+        });
+      },
+    });
+  }, []);
   const activeChat = chats.find(c => c.id === activeChatId) || null;
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);
