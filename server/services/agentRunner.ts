@@ -300,7 +300,8 @@ export class AgentRunner extends EventEmitter {
 
   private async decideNextAction(): Promise<{ action: string; tool: string; input: Record<string, any> }> {
     // In tests we must be deterministic and avoid external network calls.
-    if (process.env.NODE_ENV === "test") {
+    // Vitest doesn't always set NODE_ENV="test" reliably, so also detect VITEST.
+    if (process.env.NODE_ENV === "test" || process.env.VITEST) {
       return this.heuristicNextAction();
     }
 
@@ -470,7 +471,8 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     this.logStructured("debug", "tool_executing", { run_id: this.runId, tool: toolName, input });
 
     // In tests, avoid any sandbox/network tool execution to prevent flakiness/timeouts.
-    if (process.env.NODE_ENV === "test") {
+    // Vitest doesn't always set NODE_ENV="test" reliably, so also detect VITEST.
+    if (process.env.NODE_ENV === "test" || process.env.VITEST) {
       const t = toolName;
       if (t === "search" || t === "web_search" || t === "open_url" || t === "browser") {
         return { success: true, data: { mocked: true, tool: t, input } };
@@ -623,7 +625,8 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
   private async generatePlan(objective: string): Promise<string[]> {
     // In tests we must be deterministic and avoid external calls.
-    if (process.env.NODE_ENV === "test") {
+    // Vitest doesn't always set NODE_ENV="test" reliably, so also detect VITEST.
+    if (process.env.NODE_ENV === "test" || process.env.VITEST) {
       return this.heuristicPlan(objective);
     }
 

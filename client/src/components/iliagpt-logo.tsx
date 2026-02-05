@@ -12,7 +12,7 @@ export function IliaGPTLogo({ size = 32, className = "" }: IliaGPTLogoProps) {
       alt="IliaGPT Logo" 
       width={size} 
       height={size}
-      className={`${className} dark:invert dark:brightness-100`}
+      className={`${className} dark:invert dark:brightness-200 dark:contrast-200`}
       style={{ 
         objectFit: "contain",
         borderRadius: "6px"
