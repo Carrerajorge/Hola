@@ -5,7 +5,20 @@ import { eq, inArray, sql, and, gte, lte, like } from 'drizzle-orm';
 import { LRUCache } from 'lru-cache';
 import crypto from 'crypto';
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+let geminiClient: GoogleGenAI | null = null;
+let geminiClientKey = '';
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+  if (!geminiClient || geminiClientKey !== apiKey) {
+    geminiClient = new GoogleGenAI({ apiKey });
+    geminiClientKey = apiKey;
+  }
+  return geminiClient;
+}
 
 const EMBEDDING_MODEL = 'text-embedding-004';
 const LLM_MODEL = 'gemini-2.0-flash';
@@ -117,7 +130,7 @@ async function computeSentenceEmbeddings(sentences: string[]): Promise<number[][
         if (cached) return cached;
         
         try {
-          const result = await genAI.models.embedContent({
+          const result = await getGeminiClient().models.embedContent({
             model: EMBEDDING_MODEL,
             contents: [{ role: 'user', parts: [{ text: sentence }] }],
           });
@@ -334,15 +347,15 @@ JSON:`;
 
   try {
     const [hydeResult, subQueryResult, filterResult] = await Promise.all([
-      genAI.models.generateContent({
+      getGeminiClient().models.generateContent({
         model: LLM_MODEL,
         contents: [{ role: 'user', parts: [{ text: hydePrompt }] }],
       }),
-      genAI.models.generateContent({
+      getGeminiClient().models.generateContent({
         model: LLM_MODEL,
         contents: [{ role: 'user', parts: [{ text: subQueryPrompt }] }],
       }),
-      genAI.models.generateContent({
+      getGeminiClient().models.generateContent({
         model: LLM_MODEL,
         contents: [{ role: 'user', parts: [{ text: filterPrompt }] }],
       })
@@ -544,7 +557,7 @@ async function generateQueryEmbedding(query: string): Promise<number[]> {
   if (cached) return cached;
   
   try {
-    const result = await genAI.models.embedContent({
+    const result = await getGeminiClient().models.embedContent({
       model: EMBEDDING_MODEL,
       contents: [{ role: 'user', parts: [{ text: query }] }],
     });
@@ -574,7 +587,7 @@ ${chunks.slice(0, 20).map((c, i) => `[Pasaje ${i + 1}]: ${c.content.slice(0, 300
 Puntuaciones (solo números separados por comas):`;
 
   try {
-    const result = await genAI.models.generateContent({
+    const result = await getGeminiClient().models.generateContent({
       model: LLM_MODEL,
       contents: [{ role: 'user', parts: [{ text: rerankPrompt }] }],
     });
@@ -658,7 +671,7 @@ ${chunks.map((c, i) => `[Pasaje ${i + 1}]:\n${c.content}`).join('\n\n---\n\n')}
 Para cada pasaje, devuelve SOLO las oraciones relevantes (mantén numeración):`;
 
   try {
-    const result = await genAI.models.generateContent({
+    const result = await getGeminiClient().models.generateContent({
       model: LLM_MODEL,
       contents: [{ role: 'user', parts: [{ text: compressionPrompt }] }],
     });
@@ -731,7 +744,7 @@ SUFICIENTE: [sí/no]
 SEGUIMIENTO: [pregunta de seguimiento si es necesario, o "ninguno"]`;
 
   try {
-    const result = await genAI.models.generateContent({
+    const result = await getGeminiClient().models.generateContent({
       model: LLM_MODEL,
       contents: [{ role: 'user', parts: [{ text: checkPrompt }] }],
     });
@@ -839,7 +852,7 @@ ${query}
 ## Tu respuesta (con citas):`;
 
   try {
-    const result = await genAI.models.generateContent({
+    const result = await getGeminiClient().models.generateContent({
       model: LLM_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
     });
@@ -899,7 +912,7 @@ Respuesta dada: ${answer.slice(0, 500)}
 Genera 3 preguntas de seguimiento cortas y específicas (una por línea):`;
 
   try {
-    const result = await genAI.models.generateContent({
+    const result = await getGeminiClient().models.generateContent({
       model: LLM_MODEL,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
     });

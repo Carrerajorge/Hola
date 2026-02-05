@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { Response } from "express";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
@@ -7,8 +6,7 @@ import type { RequestSpec } from "./requestSpec";
 import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifactRenderer";
 import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { getGeminiClient } from "../lib/gemini";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -496,6 +494,19 @@ export async function executeAgentLoop(
   options: AgentExecutorOptions
 ): Promise<void> {
   const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
+
+  let ai: any;
+  try {
+    ai = getGeminiClient();
+  } catch (error: any) {
+    writeSse(res, "error", {
+      error: {
+        code: "GEMINI_API_KEY_MISSING",
+        message: error?.message || "Gemini API key is required for agent execution",
+      }
+    });
+    return;
+  }
 
   const tools = getToolsForIntent(requestSpec.intent);
   const toolContext: ToolContext = { userId, chatId, runId };

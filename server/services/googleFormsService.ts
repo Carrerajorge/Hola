@@ -2,7 +2,20 @@ import { google, forms_v1 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let geminiClient: GoogleGenAI | null = null;
+let geminiClientKey = "";
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+  if (!geminiClient || geminiClientKey !== apiKey) {
+    geminiClient = new GoogleGenAI({ apiKey });
+    geminiClientKey = apiKey;
+  }
+  return geminiClient;
+}
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
@@ -164,7 +177,7 @@ Tipos de preguntas disponibles:
 Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos de preguntas.`;
 
   try {
-    const response = await genAI.models.generateContent({
+    const response = await getGeminiClient().models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
         { role: "user", parts: [{ text: `${systemPrompt}\n\nPrompt del usuario: ${prompt}${customTitle ? `\nTítulo preferido: ${customTitle}` : ""}` }] }

@@ -1,6 +1,19 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let geminiClient: GoogleGenAI | null = null;
+let geminiClientKey = "";
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+  if (!geminiClient || geminiClientKey !== apiKey) {
+    geminiClient = new GoogleGenAI({ apiKey });
+    geminiClientKey = apiKey;
+  }
+  return geminiClient;
+}
 
 export const GEMINI_MODELS = {
   FLASH_PREVIEW: "gemini-3-flash-preview",
@@ -34,6 +47,7 @@ export async function geminiChat(
   options: GeminiChatOptions = {}
 ): Promise<GeminiResponse> {
   const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+  const ai = getGeminiClient();
   
   const contents = messages.map(msg => ({
     role: msg.role,
@@ -70,6 +84,7 @@ export async function* geminiStreamChat(
   options: GeminiChatOptions = {}
 ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
   const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+  const ai = getGeminiClient();
   
   const contents = messages.map(msg => ({
     role: msg.role,
@@ -103,4 +118,4 @@ export async function* geminiStreamChat(
   }
 }
 
-export { ai as geminiClient };
+export { getGeminiClient };

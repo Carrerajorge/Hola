@@ -1,4 +1,4 @@
-import { geminiClient, GEMINI_MODELS } from "../lib/gemini";
+import { getGeminiClient, GEMINI_MODELS } from "../lib/gemini";
 import { 
   validateExcelSpec, 
   validateDocSpec,
@@ -224,7 +224,7 @@ export async function callGeminiForSpec(
   systemPrompt: string,
   userPrompt: string
 ): Promise<string> {
-  const result = await geminiClient.models.generateContent({
+  const result = await getGeminiClient().models.generateContent({
     model: GEMINI_MODELS.FLASH,
     contents: [
       {

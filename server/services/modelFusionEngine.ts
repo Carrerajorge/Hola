@@ -57,9 +57,20 @@ const grokClient = new OpenAI({
     baseURL: "https://api.x.ai/v1",
 });
 
-const geminiAI = new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
-});
+let geminiAI: GoogleGenAI | null = null;
+let geminiAIKey = "";
+
+function getGeminiClient(): GoogleGenAI {
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not configured");
+    }
+    if (!geminiAI || geminiAIKey !== apiKey) {
+        geminiAI = new GoogleGenAI({ apiKey });
+        geminiAIKey = apiKey;
+    }
+    return geminiAI;
+}
 
 // ============== Model Specs ==============
 
@@ -145,7 +156,7 @@ async function callGemini(
 ): Promise<{ content: string; latencyMs: number }> {
     const start = Date.now();
 
-    const geminiModel = geminiAI.models.generateContent({
+    const geminiModel = getGeminiClient().models.generateContent({
         model,
         contents: prompt,
     });
@@ -381,7 +392,7 @@ export async function fuseVisionModels(
                     weight: spec.weight ?? 1,
                 };
             } else {
-                const model = geminiAI.models.generateContent({
+                const model = getGeminiClient().models.generateContent({
                     model: spec.model,
                     contents: [
                         { text: prompt },

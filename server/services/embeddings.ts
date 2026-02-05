@@ -1,7 +1,19 @@
-import { GoogleGenAI } from "@google/genai";
 import * as crypto from "crypto";
+import { GoogleGenAI } from "@google/genai";
+import { generateEmbedding as localEmbedding } from "../embeddingService";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let geminiClient: GoogleGenAI | null = null;
+let geminiClientKey = "";
+
+function getGeminiClient(): GoogleGenAI | null {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+    if (!geminiClient || geminiClientKey !== apiKey) {
+        geminiClient = new GoogleGenAI({ apiKey });
+        geminiClientKey = apiKey;
+    }
+    return geminiClient;
+}
 
 const EMBEDDING_MODEL = "text-embedding-004";
 const EMBEDDING_CACHE_SIZE = 1000;
@@ -47,11 +59,16 @@ export async function getEmbedding(text: string): Promise<number[]> {
         return embeddingCache.get(hash)!;
     }
 
+    const client = getGeminiClient();
+    if (!client) {
+        return localEmbedding(safeText);
+    }
+
     // Improvement #4: Rate Limiting
     await limiter.acquire();
 
     try {
-        const result = await ai.models.embedContent({
+        const result = await client.models.embedContent({
             model: EMBEDDING_MODEL,
             contents: [
                 {
