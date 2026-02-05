@@ -13,7 +13,34 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email'
 ];
 
-const pendingStates = new Map<string, { userId: string; expiresAt: number }>();
+type GmailOAuthState = { state: string; userId: string; expiresAt: number };
+
+async function saveSession(req: Request): Promise<void> {
+  const session = (req as any).session;
+  if (!session?.save) return;
+  await new Promise<void>((resolve, reject) =>
+    session.save((err: any) => (err ? reject(err) : resolve()))
+  );
+}
+
+function setGmailOAuthState(req: Request, userId: string, state: string) {
+  const session = (req as any).session;
+  if (!session) return;
+  const data: GmailOAuthState = {
+    state,
+    userId,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+  session.gmailOauth = data;
+}
+
+function consumeGmailOAuthState(req: Request): GmailOAuthState | null {
+  const session = (req as any).session;
+  const data = session?.gmailOauth;
+  if (!data?.state || !data?.userId || !data?.expiresAt) return null;
+  delete session.gmailOauth;
+  return data as GmailOAuthState;
+}
 
 function getOAuth2Client() {
   // Determine the correct domain for OAuth callback
@@ -55,17 +82,15 @@ router.get('/start', async (req: Request, res: Response) => {
   }
 
   const state = crypto.randomBytes(32).toString('hex');
-  pendingStates.set(state, { 
-    userId, 
-    expiresAt: Date.now() + 10 * 60 * 1000
-  });
+  setGmailOAuthState(req, userId, state);
+  await saveSession(req);
 
   const oauth2Client = getOAuth2Client();
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     state,
-    prompt: 'consent'
+    prompt: 'consent',
   });
 
   // Redirect directly to Google OAuth (for browser navigation)
@@ -83,17 +108,15 @@ router.get('/start-json', async (req: Request, res: Response) => {
   }
 
   const state = crypto.randomBytes(32).toString('hex');
-  pendingStates.set(state, { 
-    userId, 
-    expiresAt: Date.now() + 10 * 60 * 1000
-  });
+  setGmailOAuthState(req, userId, state);
+  await saveSession(req);
 
   const oauth2Client = getOAuth2Client();
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: GMAIL_SCOPES,
     state,
-    prompt: 'consent'
+    prompt: 'consent',
   });
 
   res.json({ authUrl });
@@ -112,14 +135,25 @@ router.get('/callback', async (req: Request, res: Response) => {
     return;
   }
 
-  const pending = pendingStates.get(String(state));
-  if (!pending || pending.expiresAt < Date.now()) {
-    pendingStates.delete(String(state));
+  const pending = consumeGmailOAuthState(req);
+  if (!pending || pending.expiresAt < Date.now() || pending.state !== String(state)) {
     res.redirect('/?gmail_error=invalid_state');
     return;
   }
 
-  pendingStates.delete(String(state));
+  await saveSession(req);
+
+  // User must still be authenticated (session is our source of truth)
+  const user = (req as any).user;
+  const currentUserId = user?.claims?.sub;
+  if (!currentUserId) {
+    res.redirect('/?auth_required=gmail');
+    return;
+  }
+  if (currentUserId !== pending.userId) {
+    res.redirect('/?gmail_error=invalid_state');
+    return;
+  }
 
   try {
     const oauth2Client = getOAuth2Client();
@@ -135,12 +169,20 @@ router.get('/callback', async (req: Request, res: Response) => {
       return;
     }
 
+    const existingToken = tokens.refresh_token ? null : await storage.getGmailOAuthToken(currentUserId);
+    const refreshToken = tokens.refresh_token || existingToken?.refreshToken;
+    const accessToken = tokens.access_token;
+    if (!accessToken || !refreshToken) {
+      res.redirect('/?gmail_error=missing_refresh_token');
+      return;
+    }
+
     await storage.saveGmailOAuthToken({
       userId: pending.userId,
       accountEmail: email,
-      accessToken: tokens.access_token!,
-      refreshToken: tokens.refresh_token!,
-      expiresAt: new Date(tokens.expiry_date!),
+      accessToken,
+      refreshToken,
+      expiresAt: new Date(tokens.expiry_date || Date.now() + 3600 * 1000),
       scopes: GMAIL_SCOPES
     });
 
@@ -257,15 +299,5 @@ router.post('/disconnect', async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-setInterval(() => {
-  const now = Date.now();
-  const entries = Array.from(pendingStates.entries());
-  for (const [state, data] of entries) {
-    if (data.expiresAt < now) {
-      pendingStates.delete(state);
-    }
-  }
-}, 60000);
 
 export default router;

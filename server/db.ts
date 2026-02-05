@@ -373,3 +373,80 @@ export async function verifyDatabaseConnection(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Ensures critical auth-related schema exists before we start serving traffic.
+ *
+ * Why: Drizzle selects explicit columns (not `SELECT *`). If a deploy introduces a
+ * new column in the schema but the DB wasn't migrated yet, auth endpoints can
+ * hard-fail with `column ... does not exist` (HTTP 500).
+ *
+ * This function is intentionally idempotent and safe to re-run.
+ */
+export async function ensureAuthSchema(): Promise<void> {
+  const startTime = Date.now();
+  let client: PoolClient | null = null;
+
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Used by phone auth and returned by Drizzle selects on `users`.
+    await client.query(`
+      ALTER TABLE "users"
+        ADD COLUMN IF NOT EXISTS "phone_verified" text DEFAULT 'false'
+    `);
+    await client.query(`
+      UPDATE "users"
+      SET "phone_verified" = 'false'
+      WHERE "phone_verified" IS NULL
+    `);
+
+    // Used by OAuth token storage (Passport strategies) and TokenManager.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "auth_tokens" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        "user_id" varchar NOT NULL REFERENCES "public"."users"("id") ON DELETE cascade,
+        "provider" varchar(50) NOT NULL,
+        "access_token" text NOT NULL,
+        "refresh_token" text,
+        "expires_at" bigint,
+        "scope" text,
+        "created_at" timestamp DEFAULT now() NOT NULL,
+        "updated_at" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS "auth_tokens_user_provider_idx"
+      ON "auth_tokens" USING btree ("user_id","provider")
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "auth_tokens_unique_user_provider"
+      ON "auth_tokens" USING btree ("user_id","provider")
+    `);
+
+    await client.query('COMMIT');
+    Logger.info(`[DB] ensureAuthSchema OK (${Date.now() - startTime}ms)`);
+  } catch (error: any) {
+    try {
+      if (client) await client.query('ROLLBACK');
+    } catch {
+      // ignore rollback errors
+    }
+
+    Logger.error(
+      `[DB] ensureAuthSchema failed: ${error?.message || String(error)}`,
+      error,
+    );
+    throw error;
+  } finally {
+    if (client) {
+      try {
+        client.release();
+      } catch {
+        // ignore release errors
+      }
+    }
+  }
+}

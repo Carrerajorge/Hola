@@ -11,7 +11,7 @@
  */
 
 import { users, type User } from "@shared/schema";
-import { db } from "../../db";
+import { db, ensureAuthSchema } from "../../db";
 import { eq, or } from "drizzle-orm";
 
 export type UpsertUser = {
@@ -35,11 +35,25 @@ export interface IAuthStorage {
 }
 
 class AuthStorage implements IAuthStorage {
+  private isUndefinedColumnError(error: any, columnName: string): boolean {
+    return (
+      error?.code === "42703" &&
+      typeof error?.message === "string" &&
+      error.message.includes(columnName)
+    );
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, id));
       return user;
     } catch (error: any) {
+      if (this.isUndefinedColumnError(error, "phone_verified")) {
+        console.warn("[AuthStorage] Detected missing column phone_verified; attempting schema repair...");
+        await ensureAuthSchema();
+        const [user] = await db.select().from(users).where(eq(users.id, id));
+        return user;
+      }
       console.error(`[AuthStorage] getUser failed for id=${id}:`, error.message);
       throw error;
     }
@@ -50,6 +64,12 @@ class AuthStorage implements IAuthStorage {
       const [user] = await db.select().from(users).where(eq(users.email, email));
       return user;
     } catch (error: any) {
+      if (this.isUndefinedColumnError(error, "phone_verified")) {
+        console.warn("[AuthStorage] Detected missing column phone_verified; attempting schema repair...");
+        await ensureAuthSchema();
+        const [user] = await db.select().from(users).where(eq(users.email, email));
+        return user;
+      }
       console.error(`[AuthStorage] getUserByEmail failed for email=${email}:`, error.message);
       throw error;
     }

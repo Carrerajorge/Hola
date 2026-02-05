@@ -49,6 +49,8 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                 clientSecret: env.GOOGLE_CLIENT_SECRET,
                 callbackURL: `${env.BASE_URL}/api/auth/google/callback`,
                 scope: ["openid", "email", "profile"],
+                // Enables OAuth2 state parameter handling via the session (CSRF protection).
+                state: true,
                 passReqToCallback: true,
             },
             async (req, accessToken, refreshToken, profile, done) => {
@@ -99,13 +101,18 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                     }
 
                     // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "google", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        // Google typically expires in 1 hour (3599 seconds)
-                        expiry_date: Date.now() + 3600 * 1000,
-                        scope: "openid email profile"
-                    });
+                    try {
+                        await tokenManager.saveTokens(user.id, "google", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            // Google typically expires in 1 hour (3599 seconds)
+                            expiry_date: Date.now() + 3600 * 1000,
+                            scope: "openid email profile"
+                        });
+                    } catch (tokenError) {
+                        // Token persistence should not block login. We can force re-auth later if needed.
+                        Logger.error(`[Passport] Failed to persist Google tokens for ${user.id}`, tokenError);
+                    }
 
                     return done(null, user);
                 } catch (error) {
@@ -156,12 +163,16 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
                     }
 
                     // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "microsoft", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        expiry_date: Date.now() + 3600 * 1000,
-                        scope: "openid profile email User.Read offline_access"
-                    });
+                    try {
+                        await tokenManager.saveTokens(user.id, "microsoft", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            expiry_date: Date.now() + 3600 * 1000,
+                            scope: "openid profile email User.Read offline_access"
+                        });
+                    } catch (tokenError) {
+                        Logger.error(`[Passport] Failed to persist Microsoft tokens for ${user.id}`, tokenError);
+                    }
 
                     return done(null, user);
 
@@ -210,12 +221,16 @@ if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
                     }
 
                     // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "auth0", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
-                        scope: "openid email profile offline_access"
-                    });
+                    try {
+                        await tokenManager.saveTokens(user.id, "auth0", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
+                            scope: "openid email profile offline_access"
+                        });
+                    } catch (tokenError) {
+                        Logger.error(`[Passport] Failed to persist Auth0 tokens for ${user.id}`, tokenError);
+                    }
 
                     return done(null, user);
 

@@ -35,16 +35,21 @@ ssh "$VPS_USER@$VPS_HOST" "
     echo '⚙️  PASO 5: Configurando variables de entorno...'
     if [ ! -f .env.production ] || ! grep -q 'DATABASE_URL' .env.production; then
         echo 'Creando .env.production...'
-        cat > .env.production <<'ENDOFENV'
+        SESSION_SECRET_VALUE=$(openssl rand -hex 32 2>/dev/null || node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+        TOKEN_ENCRYPTION_KEY_VALUE=$(openssl rand -hex 32 2>/dev/null || node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+        cat > .env.production <<ENDOFENV
 PORT=5001
 NODE_ENV=production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat
-SESSION_SECRET=supersecret123456789abcdefghij12
+SESSION_SECRET=$SESSION_SECRET_VALUE
+TOKEN_ENCRYPTION_KEY=$TOKEN_ENCRYPTION_KEY_VALUE
 ENDOFENV
     else
         echo '.env.production ya existe y tiene DATABASE_URL'
     fi
-    cat .env.production
+    echo '📋 .env.production (redacted):'
+    awk -F= 'BEGIN{redact["DATABASE_URL"]=1; redact["SESSION_SECRET"]=1; redact["TOKEN_ENCRYPTION_KEY"]=1; redact["GOOGLE_CLIENT_SECRET"]=1; redact["MICROSOFT_CLIENT_SECRET"]=1; redact["AUTH0_CLIENT_SECRET"]=1; redact["OPENAI_API_KEY"]=1; redact["GEMINI_API_KEY"]=1; redact["XAI_API_KEY"]=1; redact["ANTHROPIC_API_KEY"]=1; redact["STRIPE_SECRET_KEY"]=1; redact["STRIPE_WEBHOOK_SECRET"]=1; redact["RESEND_API_KEY"]=1; redact["TWILIO_AUTH_TOKEN"]=1; redact["ADMIN_PASSWORD"]=1}
+      {k=$1; if (redact[k]) print k"=***REDACTED***"; else print $0}' .env.production
 
     echo ''
     echo '🗄️  PASO 6: Sincronizando base de datos...'

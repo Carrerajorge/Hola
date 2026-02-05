@@ -92,6 +92,7 @@ import { randomUUID } from "crypto";
 import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
 import { knowledgeBaseService } from "./services/knowledgeBase";
+import { decryptSecretMaybe, encryptSecret } from "./lib/secretCrypto";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -1826,28 +1827,75 @@ export class MemStorage implements IStorage {
   async getGmailOAuthToken(userId: string): Promise<GmailOAuthToken | null> {
     const [token] = await dbRead.select().from(gmailOAuthTokens)
       .where(eq(gmailOAuthTokens.userId, userId));
-    return token || null;
+    if (!token) return null;
+
+    const accessToken = decryptSecretMaybe(token.accessToken);
+    const refreshToken = decryptSecretMaybe(token.refreshToken);
+    if (accessToken === null || refreshToken === null) {
+      console.warn(`[Storage] Gmail OAuth token for user ${userId} could not be decrypted; forcing reconnect`);
+      return null;
+    }
+
+    // Lazy migration: if a plaintext token is found but encryption is configured, re-encrypt at rest.
+    // This keeps backward compatibility while converging to an encrypted-at-rest posture.
+    if (process.env.TOKEN_ENCRYPTION_KEY && (token.accessToken === accessToken || token.refreshToken === refreshToken)) {
+      try {
+        await db.update(gmailOAuthTokens)
+          .set({
+            accessToken: encryptSecret(accessToken),
+            refreshToken: encryptSecret(refreshToken),
+            updatedAt: new Date(),
+          })
+          .where(eq(gmailOAuthTokens.id, token.id));
+      } catch (e: any) {
+        console.warn(`[Storage] Failed to re-encrypt Gmail OAuth token at rest for user ${userId}:`, e?.message || e);
+      }
+    }
+
+    return { ...token, accessToken, refreshToken };
   }
 
   async saveGmailOAuthToken(token: InsertGmailOAuthToken): Promise<GmailOAuthToken> {
-    const existing = await this.getGmailOAuthToken(token.userId);
-    if (existing) {
+    const encrypted: InsertGmailOAuthToken = {
+      ...token,
+      accessToken: encryptSecret(token.accessToken),
+      refreshToken: encryptSecret(token.refreshToken),
+    };
+
+    // Existence check must not depend on decryption (backward compatible)
+    const [existingRow] = await dbRead.select({ id: gmailOAuthTokens.id }).from(gmailOAuthTokens)
+      .where(eq(gmailOAuthTokens.userId, token.userId));
+
+    if (existingRow) {
       const [updated] = await db.update(gmailOAuthTokens)
-        .set({ ...token, updatedAt: new Date() })
+        .set({ ...encrypted, updatedAt: new Date() })
         .where(eq(gmailOAuthTokens.userId, token.userId))
         .returning();
-      return updated;
+
+      // Return plaintext values to callers
+      return { ...updated, accessToken: token.accessToken, refreshToken: token.refreshToken };
     }
-    const [result] = await db.insert(gmailOAuthTokens).values(token).returning();
-    return result;
+
+    const [result] = await db.insert(gmailOAuthTokens).values(encrypted).returning();
+    return { ...result, accessToken: token.accessToken, refreshToken: token.refreshToken };
   }
 
   async updateGmailOAuthToken(userId: string, updates: Partial<InsertGmailOAuthToken>): Promise<GmailOAuthToken | null> {
+    const encryptedUpdates: Partial<InsertGmailOAuthToken> = { ...updates };
+    if (typeof updates.accessToken === 'string') encryptedUpdates.accessToken = encryptSecret(updates.accessToken);
+    if (typeof updates.refreshToken === 'string') encryptedUpdates.refreshToken = encryptSecret(updates.refreshToken);
+
     const [result] = await db.update(gmailOAuthTokens)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...encryptedUpdates, updatedAt: new Date() })
       .where(eq(gmailOAuthTokens.userId, userId))
       .returning();
-    return result || null;
+    if (!result) return null;
+
+    const accessToken = decryptSecretMaybe(result.accessToken);
+    const refreshToken = decryptSecretMaybe(result.refreshToken);
+    if (accessToken === null || refreshToken === null) return null;
+
+    return { ...result, accessToken, refreshToken };
   }
 
   async deleteGmailOAuthToken(userId: string): Promise<void> {

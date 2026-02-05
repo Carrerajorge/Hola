@@ -21,6 +21,9 @@ const envSchema = z.object({
 
   BASE_URL: z.string().default("http://localhost:5000"),
 
+  // Token encryption (required for storing OAuth tokens securely in production)
+  TOKEN_ENCRYPTION_KEY: z.string().min(32, "TOKEN_ENCRYPTION_KEY must be at least 32 characters").optional(),
+
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_TENANT_ID: z.string().optional(),
@@ -59,6 +62,27 @@ function validateEnv() {
     if (data.GEMINI_API_KEY) providers.push("Gemini");
     if (data.OPENAI_API_KEY) providers.push("OpenAI");
     console.log(`✅ LLM Providers configured: ${providers.join(", ")}`);
+  }
+
+  // Session hardening: require a strong secret in production, warn in other envs.
+  if (data.NODE_ENV === "production" && data.SESSION_SECRET.length < 32) {
+    console.error("❌ SESSION_SECRET must be at least 32 characters in production.");
+    process.exit(1);
+  }
+  if (data.NODE_ENV !== "production" && data.NODE_ENV !== "test" && data.SESSION_SECRET.length < 32) {
+    console.warn("⚠️  WARNING: SESSION_SECRET should be at least 32 characters.");
+  }
+
+  // Security hardening: require a dedicated encryption key if OAuth token storage is enabled in production.
+  // TokenManager falls back to a default key if unset, which is not acceptable for production.
+  const oauthEnabled = Boolean(
+    (data.GOOGLE_CLIENT_ID && data.GOOGLE_CLIENT_SECRET) ||
+    (data.MICROSOFT_CLIENT_ID && data.MICROSOFT_CLIENT_SECRET) ||
+    (data.AUTH0_DOMAIN && data.AUTH0_CLIENT_ID && data.AUTH0_CLIENT_SECRET)
+  );
+  if (data.NODE_ENV === "production" && oauthEnabled && !data.TOKEN_ENCRYPTION_KEY) {
+    console.error("❌ TOKEN_ENCRYPTION_KEY is required in production when OAuth is enabled.");
+    process.exit(1);
   }
 
   return data;

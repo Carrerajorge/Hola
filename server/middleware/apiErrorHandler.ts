@@ -2,8 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { Logger } from "../lib/logger";
 
-
-
 // RFC 7807 Problem Details
 interface ProblemDetails {
     type: string;
@@ -28,11 +26,14 @@ export const apiErrorHandler = (
 
     const path = req.path;
     const method = req.method;
+    const traceId = res.locals?.traceId || res.locals?.requestId;
+    const isProduction = process.env.NODE_ENV === "production";
 
     // Default Error Status and Message
     let status = err.status || err.statusCode || 500;
     let title = "Internal Server Error";
-    let detail = err.message || "An unexpected error occurred.";
+    const rawDetail = err?.message || "An unexpected error occurred.";
+    let detail = rawDetail;
     let errors: Record<string, string[]> | undefined;
 
     // Handle Zod Validation Errors
@@ -55,9 +56,14 @@ export const apiErrorHandler = (
 
     // Log strict errors
     if (status >= 500) {
-        Logger.error(`[APIErrorHandler] [${method}] ${path} - ${title}: ${detail}`, err);
+        Logger.error(`[APIErrorHandler] [${method}] ${path} - ${title}: ${rawDetail}`, err);
     } else {
         Logger.warn(`[APIErrorHandler] [${method}] ${path} - ${title}: ${detail}`);
+    }
+
+    // Do not leak internal error details in production.
+    if (isProduction && status >= 500) {
+        detail = "An unexpected error occurred.";
     }
 
     // Construct Response
@@ -69,12 +75,16 @@ export const apiErrorHandler = (
         instance: path,
     };
 
+    if (traceId) {
+        problem.traceId = traceId;
+    }
+
     if (errors) {
         problem.errors = errors;
     }
 
     // Include stack trace in development
-    if (process.env.NODE_ENV !== 'production' && status >= 500) {
+    if (!isProduction && status >= 500) {
         problem.stack = err.stack;
     }
 

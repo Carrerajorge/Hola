@@ -20,7 +20,7 @@ import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
-import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
+import { verifyDatabaseConnection, ensureAuthSchema, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
 import helmet from "helmet";
 import hpp from "hpp";
 import { apiSecurityHeaders } from "./middleware/securityHeaders";
@@ -142,6 +142,15 @@ export function log(message: string, source = "express") {
 
   if (dbConnected) {
     log("Database connection verified successfully");
+
+    // Prevent deploy-time schema drift from taking down auth endpoints (e.g., missing columns).
+    try {
+      await ensureAuthSchema();
+    } catch (error) {
+      Logger.error("[FATAL] Failed to ensure auth schema; refusing to start", error as any);
+      if (isProduction) process.exit(1);
+    }
+
     startHealthChecks();
     log("Database health checks started");
 
