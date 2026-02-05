@@ -726,37 +726,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       );
       console.log(`[Stream API] Context augmented: ${clientMessages.length} client msgs -> ${messages.length} total`);
 
-      // DOC TOOL PRODUCTION MODE: When Word/Excel/PPT tool is selected (or legacy docTool object is present), activate production directly.
-      // Supported inputs:
-      // - docTool: "word"|"excel"|"ppt"
-      // - docTool: { type: "production" } (legacy) → infer desired artifact from message
-      const docToolValue: any = docTool;
-      const docToolKind: string | null =
-        typeof docToolValue === 'string'
-          ? docToolValue
-          : (docToolValue && typeof docToolValue === 'object' && typeof docToolValue.type === 'string')
-            ? docToolValue.type
-            : null;
+      // DOC TOOL PRODUCTION MODE: When Word/Excel/PPT tool is selected, activate production directly
+      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+        console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: docTool=${docTool} - activating production mode directly`);
 
-      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
-      const userMessageText = lastUserMessage?.content || '';
+        const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+        const userMessageText = lastUserMessage?.content || '';
 
-      const inferToolFromMessage = (text: string): 'word' | 'excel' | 'ppt' => {
-        const t = (text || '').toLowerCase();
-        if (/(\bexcel\b|\.xlsx\b|hoja\s+de\s+c[aá]lculo|spreadsheet)/i.test(t)) return 'excel';
-        if (/(\bppt\b|pptx\b|powerpoint|presentaci[oó]n|diapositivas|slides?)/i.test(t)) return 'ppt';
-        return 'word';
-      };
-
-      const requestedDocTool: 'word' | 'excel' | 'ppt' | null =
-        docToolKind === 'word' || docToolKind === 'excel' || docToolKind === 'ppt'
-          ? (docToolKind as any)
-          : (docToolKind === 'production' ? inferToolFromMessage(userMessageText) : null);
-
-      if (requestedDocTool) {
-        console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: docTool=${JSON.stringify(docTool)} → ${requestedDocTool} - activating production mode directly`);
-
-        // Map tool to corresponding intent
+        // Map docTool to corresponding intent
         const toolToIntent = {
           'word': 'CREATE_DOCUMENT' as const,
           'excel': 'CREATE_SPREADSHEET' as const,
@@ -764,14 +741,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         };
 
         const syntheticIntent: IntentResult = {
-          intent: toolToIntent[requestedDocTool] || 'CREATE_DOCUMENT',
+          intent: toolToIntent[docTool as keyof typeof toolToIntent] || 'CREATE_DOCUMENT',
           confidence: 1.0, // Full confidence since user explicitly selected tool
           slots: {
-            topic: userMessageText,
+            topic: userMessageText
           },
-          output_format: requestedDocTool,
+          output_format: docTool,
           language_detected: 'es',
-          normalized_text: userMessageText,
+          normalized_text: userMessageText
         };
 
         try {
@@ -868,7 +845,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       } : null;
 
       // Get the last user message for PARE routing
-      // (Already computed above as lastUserMessage/userMessageText for docTool handling.)
+      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+      const userMessageText = lastUserMessage?.content || '';
 
       // Run Intent Router FIRST for NLU-based intent classification
       let intentResult: IntentResult | null = null;

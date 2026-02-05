@@ -21,6 +21,38 @@ export default function LandingPage() {
     };
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    // Close drawer on Escape (desktop / mobile keyboards)
+    if (!mobileMenuOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMenuOpen(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    // Close drawer with browser back (Android back button / history back)
+    if (!mobileMenuOpen) return;
+
+    const stateKey = "mobile-menu-open";
+    const currentState = window.history.state;
+
+    // Only push a state if we aren't already in one created for this menu.
+    if (!currentState || currentState[stateKey] !== true) {
+      window.history.pushState({ ...(currentState || {}), [stateKey]: true }, "");
+    }
+
+    const onPopState = () => {
+      setMobileMenuOpen(false);
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [mobileMenuOpen]);
+
   const handleSubmit = () => {
     if (inputValue.trim()) {
       setLocation("/login");
