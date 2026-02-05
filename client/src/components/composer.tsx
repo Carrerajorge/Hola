@@ -1032,7 +1032,7 @@ export function Composer({
             placeholder={placeholder}
             aria-label="Message input"
             aria-describedby="composer-hint"
-            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
+            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
             rows={1}
           />
 
