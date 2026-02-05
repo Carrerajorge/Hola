@@ -3,20 +3,15 @@ import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-type Status =
-  | { state: 'disconnected' }
-  | { state: 'connecting' }
-  | { state: 'qr'; qr: string }
-  | { state: 'connected'; me?: { id?: string; name?: string } };
+import { apiFetch } from '@/lib/apiClient';
+import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-web-events';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await apiFetch(path, {
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   });
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   if (!res.ok || json?.success === false) {
     throw new Error(json?.error || `Request failed (${res.status})`);
   }
@@ -30,13 +25,13 @@ export function WhatsAppConnectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [status, setStatus] = useState<Status>({ state: 'disconnected' });
+  const [status, setStatus] = useState<WhatsAppWebStatus>({ state: 'disconnected' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const refreshStatus = async () => {
-    const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/status`);
+    const res = await api<{ success: true; status: WhatsAppWebStatus }>(`/api/integrations/whatsapp/web/status`);
     setStatus(res.status);
   };
 
@@ -44,7 +39,7 @@ export function WhatsAppConnectDialog({
     setBusy(true);
     setError(null);
     try {
-      const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/connect/start`, {
+      const res = await api<{ success: true; status: WhatsAppWebStatus }>(`/api/integrations/whatsapp/web/connect/start`, {
         method: 'POST',
         body: JSON.stringify({}),
       });
@@ -74,11 +69,15 @@ export function WhatsAppConnectDialog({
 
   useEffect(() => {
     if (!open) return;
-    void refreshStatus();
-    const t = setInterval(() => {
-      void refreshStatus().catch(() => null);
-    }, 1200);
-    return () => clearInterval(t);
+    const unsub = whatsappWebEventStream.subscribe({
+      onStatus: (s) => {
+        setStatus(s);
+        setError(null);
+      },
+      onError: (msg) => setError(msg),
+    });
+    void refreshStatus().catch(() => null);
+    return unsub;
   }, [open]);
 
   useEffect(() => {
