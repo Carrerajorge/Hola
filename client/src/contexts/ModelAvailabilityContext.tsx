@@ -106,9 +106,17 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   // Initialize selected model from Settings -> Default Model.
   useEffect(() => {
     if (selectedModelId) return;
-    if (!settings.defaultModel) return;
-    const target = enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel);
-    if (target) setSelectedModelIdState(target.id);
+    const target = settings.defaultModel
+      ? enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel)
+      : undefined;
+    if (target) {
+      setSelectedModelIdState(target.id);
+      return;
+    }
+    if (enabledModels[0]) {
+      // Fall back to the first enabled model so the rest of the app has a stable selection.
+      setSelectedModelIdState(enabledModels[0].id);
+    }
   }, [enabledModels, selectedModelId, settings.defaultModel]);
 
   // Keep Settings -> Default Model in sync with the selector.

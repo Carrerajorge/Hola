@@ -59,6 +59,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { chatLogger } from "@/lib/logger";
+import { isAdminUser } from "@/lib/admin";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -381,11 +382,7 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = user.plan || 'free';
-    const isAdmin = Boolean(
-      (user as any)?.isAdmin ||
-      user?.role === "admin" ||
-      (user?.email?.toLowerCase?.() === "carrerajorge874@gmail.com")
-    );
+    const isAdmin = isAdminUser(user as any);
     // isPaid = true only if plan is NOT 'free' AND status is 'active'
     const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
     return { plan, isAdmin, isPaid };
@@ -1858,34 +1855,40 @@ export function ChatInterface({
     streamingContentRef.current = "";
     setStreamingContent("");
 
-    try {
-      abortControllerRef.current = new AbortController();
+	    try {
+	      abortControllerRef.current = new AbortController();
 
-      let chatHistory = contextUpToUser.map(m => ({
-        role: m.role,
-        content: m.content
-      }));
+	      let chatHistory = contextUpToUser.map(m => ({
+	        role: m.role,
+	        content: m.content
+	      }));
 
-      if (instruction) {
-        chatHistory = [
-          ...chatHistory,
-          { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }
-        ];
-      }
+	      const lastUserForSkill = [...contextUpToUser].reverse().find(m => m.role === "user")?.content || "";
+	      const skillInvocation = parseSkillInvocation(lastUserForSkill);
+	      const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
+	      const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
+
+	      if (instruction) {
+	        chatHistory = [
+	          ...chatHistory,
+	          { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }
+	        ];
+	      }
 
       const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
-        body: JSON.stringify({
-          messages: chatHistory,
-          chatId,
-          conversationId: chatId,
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
-        signal: abortControllerRef.current.signal
-      });
+	        body: JSON.stringify({
+	          messages: chatHistory,
+	          chatId,
+	          conversationId: chatId,
+	          provider: selectedProvider,
+	          model: selectedModel,
+	          skill: activeSkillPayload,
+	        }),
+	        signal: abortControllerRef.current.signal
+	      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -2010,7 +2013,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, onSendMessage, updateStreamingProgress, settings.autoPlayResponses, handleReadAloud]);
+	  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, onSendMessage, updateStreamingProgress, settings.autoPlayResponses, handleReadAloud, userSkills]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
@@ -2614,19 +2617,25 @@ export function ChatInterface({
       setInput("");
       setAiState("thinking");
       streamingContentRef.current = "";
-      setStreamingContent("");
-      
-      try {
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            model: "grok-3"
-          })
-        });
-        
-        if (!response.ok) {
+	      setStreamingContent("");
+	      
+	      try {
+	        const skillInvocation = parseSkillInvocation(cleanInput);
+	        const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
+	        const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
+
+	        const response = await fetch("/api/chat/stream", {
+	          method: "POST",
+	          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	          credentials: "include",
+	          body: JSON.stringify({
+	            messages: [{ role: "user", content: cleanInput }],
+	            model: "grok-3",
+	            skill: activeSkillPayload,
+	          })
+	        });
+	        
+	        if (!response.ok) {
           console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
           setAiState("idle");
           return;
@@ -2855,20 +2864,24 @@ export function ChatInterface({
       setStreamingContent("");
       
       try {
-        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
-        const cleanInput = userInput.replace(/^🌐\s*/, "");
-        
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            model: selectedModel || "grok-3",
-            forceWebSearch: isWebSearch,
-            webSearchAuto: isWebSearch,
-            skill: activeSkillPayload,
-          })
-        });
+	        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+	        const cleanInput = userInput.replace(/^🌐\s*/, "");
+	        
+	        const response = await fetch("/api/chat/stream", {
+	          method: "POST",
+	          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	          credentials: "include",
+	          body: JSON.stringify({
+	            messages: [{ role: "user", content: cleanInput }],
+	            chatId,
+	            conversationId: chatId,
+	            model: selectedModel || "grok-3",
+	            forceWebSearch: isWebSearch,
+	            webSearchAuto: isWebSearch,
+	            docTool: selectedDocTool || null,
+	            skill: activeSkillPayload,
+	          })
+	        });
         
         if (!response.ok) {
           console.error("[EMERGENCY BYPASS] API error:", response.status);
@@ -2883,51 +2896,133 @@ export function ChatInterface({
           return;
         }
         
-        // Read the SSE stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        setAiState("responding");
-        
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  updateStreamingProgress(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors for incomplete JSON
-              }
-            }
-          }
-        }
-        
-        // Create assistant message with full response
-        const assistantMsg: Message = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: fullContent || "No se recibió respuesta del servidor.",
-          timestamp: new Date(),
-          userMessageId: userMsgId
-        };
-        onSendMessage(assistantMsg);
-        if (settings.autoPlayResponses && fullContent) {
-          handleReadAloud(assistantMsg.id, fullContent);
-        }
-        streamingContentRef.current = "";
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[EMERGENCY BYPASS] Completed successfully");
-        return;
+	        // Read the SSE stream (robust parsing: supports production + citations/artifacts)
+	        const reader = response.body?.getReader();
+	        if (!reader) throw new Error("No response body");
+
+	        const decoder = new TextDecoder();
+	        let buffer = "";
+	        let fullContent = "";
+	        let currentEventType = "chunk";
+	        let streamComplete = false;
+	        let finalRequestId: string | undefined;
+	        let finalWebSources: any[] | undefined;
+	        let finalArtifact: any | undefined;
+
+	        setAiState("responding");
+	        
+	        while (!streamComplete) {
+	          const { done, value } = await reader.read();
+	          if (done) break;
+	          
+	          buffer += decoder.decode(value, { stream: true });
+	          const lines = buffer.split("\n");
+	          buffer = lines.pop() || "";
+
+	          for (const line of lines) {
+	            const trimmedLine = line.trim();
+	            if (!trimmedLine) continue;
+
+	            if (trimmedLine.startsWith("event: ")) {
+	              currentEventType = trimmedLine.slice(7).trim();
+	              continue;
+	            }
+
+	            if (!trimmedLine.startsWith("data: ")) continue;
+
+	            const dataStr = trimmedLine.slice(6);
+	            if (dataStr === "[DONE]") {
+	              streamComplete = true;
+	              continue;
+	            }
+
+	            let data: any;
+	            try {
+	              data = JSON.parse(dataStr);
+	            } catch (_e) {
+	              continue;
+	            }
+
+	            if (currentEventType === "chunk" || currentEventType === "text") {
+	              const content = data.content || "";
+	              if (content) {
+	                fullContent += content;
+	                updateStreamingProgress(fullContent);
+	              }
+	              continue;
+	            }
+
+	            if (currentEventType === "production_start") {
+	              setAiState("agent_working");
+	              setAiProcessSteps([{
+	                id: "init",
+	                step: "init",
+	                title: `Iniciando producción: ${data.topic || "Documento"}`,
+	                status: "pending",
+	                description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+	              }]);
+	              continue;
+	            }
+
+	            if (currentEventType === "production_event") {
+	              setAiProcessSteps((prev: any[]) => {
+	                const newSteps = [...prev];
+	                const lastStep = newSteps[newSteps.length - 1];
+	                if (lastStep && lastStep.status === "pending" && data.message) {
+	                  lastStep.title = data.message;
+	                } else {
+	                  newSteps.push({
+	                    id: `step-${Date.now()}`,
+	                    title: data.message || "Procesando...",
+	                    status: "pending",
+	                    description: data.stage
+	                  });
+	                }
+	                return newSteps;
+	              });
+	              continue;
+	            }
+
+	            if (currentEventType === "production_complete") {
+	              setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+	              continue;
+	            }
+
+	            if (currentEventType === "done" || currentEventType === "finish" || data.done === true) {
+	              finalRequestId = data.requestId || finalRequestId;
+	              finalWebSources = data.webSources || finalWebSources;
+	              finalArtifact = data.artifact || finalArtifact;
+	              streamComplete = true;
+	              continue;
+	            }
+
+	            if (currentEventType === "error") {
+	              throw new Error(data.message || "Stream error");
+	            }
+	          }
+	        }
+	        
+	        // Create assistant message with full response
+	        const assistantMsg: Message = {
+	          id: `assistant-${Date.now()}`,
+	          role: "assistant",
+	          content: fullContent || (finalArtifact ? "✅ Listo. He generado el archivo solicitado." : "No se recibió respuesta del servidor."),
+	          timestamp: new Date(),
+	          requestId: finalRequestId || generateRequestId(),
+	          userMessageId: userMsgId,
+	          webSources: finalWebSources,
+	          artifact: finalArtifact,
+	        };
+	        onSendMessage(assistantMsg);
+	        if (settings.autoPlayResponses && fullContent) {
+	          handleReadAloud(assistantMsg.id, fullContent);
+	        }
+	        streamingContentRef.current = "";
+	        setStreamingContent("");
+	        setAiProcessSteps([]);
+	        setAiState("idle");
+	        console.error("[EMERGENCY BYPASS] Completed successfully");
+	        return;
       } catch (error) {
         console.error("[EMERGENCY BYPASS] Error:", error);
         const errorMsg: Message = {
