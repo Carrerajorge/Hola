@@ -49,6 +49,9 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                 clientSecret: env.GOOGLE_CLIENT_SECRET,
                 callbackURL: `${env.BASE_URL}/api/auth/google/callback`,
                 scope: ["openid", "email", "profile"],
+                // Request refresh tokens (Google often only returns refresh_token on the first consent)
+                accessType: "offline",
+                prompt: "consent",
                 passReqToCallback: true,
             },
             async (req, accessToken, refreshToken, profile, done) => {
