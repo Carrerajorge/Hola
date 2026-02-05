@@ -52,17 +52,14 @@ RUN adduser --system --uid 1001 iliagpt
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Copy only necessary files
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/migrations ./migrations
+# Copy only necessary files (avoid expensive chown -R by setting ownership during copy)
+COPY --from=builder --chown=iliagpt:nodejs /app/dist ./dist
+COPY --from=builder --chown=iliagpt:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=iliagpt:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=iliagpt:nodejs /app/migrations ./migrations
 
 # Copy public assets
-COPY --from=builder /app/client/public ./client/public
-
-# Set ownership to non-root user
-RUN chown -R iliagpt:nodejs /app
+COPY --from=builder --chown=iliagpt:nodejs /app/client/public ./client/public
 
 # Switch to non-root user
 USER iliagpt
