@@ -54,6 +54,7 @@ const STOPWORDS = new Set([
   "nuevo", "nuevos", "antiguo", "antiguos",
   "profesional", "profesionales",
   "importante", "importantes",
+  "curso", "estado",
 ]);
 
 const EXPANSIONS: Record<string, string[]> = {
@@ -97,6 +98,8 @@ const EXPANSIONS: Record<string, string[]> = {
   traducir: ["translate", "translation"],
   analizar: ["analyze", "analysis"],
   generar: ["generate", "create", "build"],
+  limpiar: ["clean", "cleanup", "sanitize"],
+  transformar: ["transform", "convert"],
 
   correo: ["email", "mail"],
   correos: ["email", "emails", "mail", "gmail", "inbox"],
@@ -120,6 +123,9 @@ const EXPANSIONS: Record<string, string[]> = {
   archivos: ["file", "files", "document"],
   archivo: ["file", "document"],
   documento: ["document", "doc", "docx"],
+  documentos: ["documents", "document", "doc", "docx"],
+  articulos: ["article", "articles"],
+  articulo: ["article", "articles"],
   word: ["docx", "documento"],
   excel: ["xlsx", "spreadsheet", "hoja"],
   powerpoint: ["pptx", "presentacion", "slides"],
@@ -154,6 +160,16 @@ const EXPANSIONS: Record<string, string[]> = {
   programacion: ["code", "dev"],
   datos: ["data", "analytics", "analysis"],
   memoria: ["memory", "context", "history"],
+  historial: ["history", "log", "timeline"],
+  conversaciones: ["conversation", "chat", "messages"],
+  proyectos: ["project", "projects"],
+  contactos: ["contacts", "crm"],
+  relaciones: ["relationships", "relations"],
+  anticipar: ["anticipate", "predict", "forecast"],
+  necesidades: ["needs", "requirements"],
+  feedback: ["feedback"],
+  conocimiento: ["knowledge", "kb", "wiki"],
+  personal: ["personal", "user"],
   aprendizaje: ["learning", "feedback"],
   integraciones: ["integration", "api", "webhook"],
   base: ["database", "db", "sql"],
