@@ -609,11 +609,9 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
 
-    try {
-      return await breaker.execute(() => this.executeOnProviderNoBreaker(provider, messages, options, startTime));
-    } catch (error) {
-      throw error;
-    }
+    return breaker.execute(() =>
+      this.executeOnProviderNoBreaker(provider, messages, options, startTime)
+    );
   }
 
   private async executeOnProviderNoBreaker(

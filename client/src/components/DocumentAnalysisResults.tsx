@@ -400,15 +400,15 @@ function TablePreview({ table }: { table: Table }) {
 
 
 function AnomaliesSection({ anomalies }: { anomalies: Anomaly[] }) {
-  if (!anomalies || anomalies.length === 0) return null;
-
   const groupedAnomalies = useMemo(() => {
     const groups: Record<string, Anomaly[]> = { high: [], medium: [], low: [] };
-    anomalies.forEach((a) => {
+    (anomalies || []).forEach((a) => {
       groups[a.severity].push(a);
     });
     return groups;
   }, [anomalies]);
+
+  if (!anomalies || anomalies.length === 0) return null;
 
   const severityOrder: Array<'high' | 'medium' | 'low'> = ['high', 'medium', 'low'];
 

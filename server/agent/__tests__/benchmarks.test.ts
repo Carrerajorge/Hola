@@ -4,9 +4,13 @@ import { RunStateMachine } from "../stateMachine";
 import { ToolRegistry } from "../toolRegistry";
 import { MetricsCollector } from "../metricsCollector";
 
+// Benchmarks are inherently flaky on shared CI runners. Opt-in locally.
+const RUN_PERF_TESTS = process.env.RUN_PERF_TESTS === "true";
+const perfIt = RUN_PERF_TESTS ? it : it.skip;
+
 describe("Performance Benchmarks - Agent Infrastructure", () => {
   describe("State Machine Performance", () => {
-    it("should complete 1000 valid transitions in < 100ms", () => {
+    perfIt("should complete 1000 valid transitions in < 100ms", () => {
       const start = performance.now();
       
       for (let i = 0; i < 1000; i++) {
@@ -24,7 +28,7 @@ describe("Performance Benchmarks - Agent Infrastructure", () => {
   });
   
   describe("Metrics Collector Performance", () => {
-    it("should record 10000 metrics in < 200ms", () => {
+    perfIt("should record 10000 metrics in < 200ms", () => {
       const collector = new MetricsCollector();
       const start = performance.now();
       
@@ -42,7 +46,7 @@ describe("Performance Benchmarks - Agent Infrastructure", () => {
       expect(elapsed).toBeLessThan(200);
     });
     
-    it("should retrieve metrics summary in < 50ms", () => {
+    perfIt("should retrieve metrics summary in < 50ms", () => {
       const collector = new MetricsCollector();
       for (let i = 0; i < 5000; i++) {
         collector.record({
@@ -63,7 +67,7 @@ describe("Performance Benchmarks - Agent Infrastructure", () => {
   });
   
   describe("Tool Registry Performance", () => {
-    it("should handle 100 concurrent mock tool calls in < 500ms", async () => {
+    perfIt("should handle 100 concurrent mock tool calls in < 500ms", async () => {
       const registry = new ToolRegistry();
       registry.register({
         name: "perf_mock",
@@ -91,7 +95,7 @@ describe("Performance Benchmarks - Agent Infrastructure", () => {
   });
   
   describe("Memory Usage", () => {
-    it("should not exceed 50MB for 10000 events", () => {
+    perfIt("should not exceed 50MB for 10000 events", () => {
       const initialMemory = process.memoryUsage().heapUsed;
       const collector = new MetricsCollector();
       

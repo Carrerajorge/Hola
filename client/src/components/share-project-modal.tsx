@@ -30,27 +30,32 @@ export function ShareProjectModal({
     const [email, setEmail] = useState("");
     const [invitedEmails, setInvitedEmails] = useState<string[]>([]);
 
-    if (!project) return null;
-
     // Generate shareable link (simulated)
-    const shareLink = `${window.location.origin}/shared/project/${project.id}`;
+    const shareLink =
+        project && typeof window !== "undefined"
+            ? `${window.location.origin}/shared/project/${project.id}`
+            : "";
 
     const handleCopyLink = useCallback(() => {
+        if (!shareLink) return;
         navigator.clipboard.writeText(shareLink);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     }, [shareLink]);
 
     const handleInvite = useCallback(() => {
-        if (email.trim() && email.includes("@")) {
-            setInvitedEmails([...invitedEmails, email.trim()]);
+        const trimmed = email.trim();
+        if (trimmed && trimmed.includes("@")) {
+            setInvitedEmails((prev) => [...prev, trimmed]);
             setEmail("");
         }
-    }, [email, invitedEmails]);
+    }, [email]);
 
     const handleRemoveInvite = useCallback((emailToRemove: string) => {
-        setInvitedEmails(invitedEmails.filter(e => e !== emailToRemove));
-    }, [invitedEmails]);
+        setInvitedEmails((prev) => prev.filter((e) => e !== emailToRemove));
+    }, []);
+
+    if (!project) return null;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>

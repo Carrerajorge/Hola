@@ -323,7 +323,7 @@ export function useOfflineMode(config: OfflineConfig = {}) {
         let used = 0;
 
         for (const key in localStorage) {
-            if (localStorage.hasOwnProperty(key)) {
+            if (Object.prototype.hasOwnProperty.call(localStorage, key)) {
                 used += localStorage[key].length * 2; // UTF-16
             }
         }

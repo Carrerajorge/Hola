@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { ZodSchema, ZodError } from 'zod';
-import { fromZodError } from 'zod-validation-error';
+import { fromZodError } from 'zod-validation-error/v3';
 import { ValidationError } from '../utils/errors';
 
 type ValidatedRequest = Request & {
