@@ -3,6 +3,8 @@ import { type AuthenticatedRequest } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { db } from "./db";
+import { users } from "@shared/schema";
 import { ObjectStorageService } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { env } from "./config/env";
@@ -89,6 +91,7 @@ import { knowledgeRouter } from "./routes/knowledgeRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
+import { createSkillsRouter } from "./routes/skillsRouter";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
@@ -379,6 +382,27 @@ export async function registerRoutes(
     }
 
     const anonUserId = session?.anonUserId ?? null;
+
+    // Ensure a DB user exists for anonymous sessions so FK-backed tables (api_logs, user_settings, etc.) can reference it.
+    if (anonUserId) {
+      try {
+        await db
+          .insert(users)
+          .values({
+            id: anonUserId,
+            username: `Guest-${anonUserId.slice(0, 4)}`,
+            authProvider: "anonymous",
+            role: "user",
+            plan: "free",
+            status: "active",
+          })
+          .onConflictDoNothing();
+      } catch (e: any) {
+        // If DB is unavailable in dev, identity should still work.
+        console.warn("[SessionIdentity] Failed to ensure anon user row:", e?.message || e);
+      }
+    }
+
     res.json({
       userId: anonUserId,
       token: anonUserId ? generateAnonToken(anonUserId) : null,
@@ -425,6 +449,7 @@ export async function registerRoutes(
   app.use(createWorkspaceRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
+  app.use("/api/skills", createSkillsRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
   app.use("/api/integrations/google/gmail", createGmailRouter());

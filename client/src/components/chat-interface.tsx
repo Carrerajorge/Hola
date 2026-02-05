@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
-import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
@@ -117,8 +117,11 @@ import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 import { useChats } from "@/hooks/use-chats";
+import { useUserSkills } from "@/hooks/use-user-skills";
+import { findEnabledSkillByName, parseSkillCreateCommand, parseSkillInvocation } from "@/lib/skillCommands";
 import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
 import { useProjects } from "@/hooks/use-projects";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
@@ -368,7 +371,9 @@ export function ChatInterface({
   }, [selectedProjectId, projects, getProject]);
 
   const { user } = useAuth();
+  const { settings } = useSettingsContext();
   const { toast } = useToast();
+  const { skills: userSkills, createSkill } = useUserSkills();
   
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
@@ -376,11 +381,26 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = user.plan || 'free';
-    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'));
+    const isAdmin = Boolean(
+      (user as any)?.isAdmin ||
+      user?.role === "admin" ||
+      (user?.email?.toLowerCase?.() === "carrerajorge874@gmail.com")
+    );
     // isPaid = true only if plan is NOT 'free' AND status is 'active'
     const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
     return { plan, isAdmin, isPaid };
   }, [user]);
+
+  const speechLocale = useMemo(() => {
+    const code = settings.spokenLanguage;
+    if (!code || code === "auto") return navigator.language || "es-ES";
+    if (code === "es") return "es-ES";
+    if (code === "en") return "en-US";
+    if (code === "fr") return "fr-FR";
+    if (code === "de") return "de-DE";
+    if (code === "pt") return "pt-PT";
+    return navigator.language || "es-ES";
+  }, [settings.spokenLanguage]);
 
   // Upgrade prompt for free users after 3rd query
   const {
@@ -1332,6 +1352,16 @@ export function ChatInterface({
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
 
+  const updateStreamingProgress = useCallback((content: string) => {
+    // Always keep the ref updated (used by Stop/Cancellation and background streaming).
+    streamingContentRef.current = content;
+
+    // Only render partial tokens when the user enabled streaming in Settings.
+    if (settings.streamResponses) {
+      setStreamingContent(content);
+    }
+  }, [settings.streamResponses]);
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1455,7 +1485,7 @@ export function ChatInterface({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'es-ES';
+    recognition.lang = speechLocale;
 
     let finalTranscript = '';
     let interimTranscript = '';
@@ -1801,12 +1831,16 @@ export function ChatInterface({
     } else {
       speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(content);
+      utterance.lang = speechLocale;
+      utterance.rate = settings.voiceSpeed ?? 1;
+      utterance.volume = settings.voiceVolume ?? 1;
+      utterance.pitch = settings.voice === "ember" ? 1.2 : settings.voice === "breeze" ? 0.9 : 1;
       utterance.onend = () => setSpeakingMessageId(null);
       utterance.onerror = () => setSpeakingMessageId(null);
       speechSynthesis.speak(utterance);
       setSpeakingMessageId(msgId);
     }
-  }, [speakingMessageId]);
+  }, [speakingMessageId, speechLocale, settings.voiceSpeed, settings.voiceVolume, settings.voice]);
 
   const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);
@@ -1897,8 +1931,7 @@ export function ChatInterface({
                 const content = data.content || "";
                 if (content) {
                   fullContent += content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
+                  updateStreamingProgress(fullContent);
                 }
               } else if (currentEventType === "production_start") {
                 setAiState("agent_working");
@@ -1940,6 +1973,9 @@ export function ChatInterface({
                   artifact: data.artifact
                 };
                 onSendMessage(finalMsg);
+                if (settings.autoPlayResponses && fullContent) {
+                  handleReadAloud(finalMsg.id, fullContent);
+                }
                 streamComplete = true;
               } else if (currentEventType === "error") {
                 throw new Error(data.message || "Stream error");
@@ -1974,7 +2010,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
+  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, onSendMessage, updateStreamingProgress, settings.autoPlayResponses, handleReadAloud]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
@@ -2119,6 +2155,9 @@ export function ChatInterface({
           webSources: data.webSources,
         };
         onSendMessage(aiMsg);
+        if (settings.autoPlayResponses) {
+          handleReadAloud(aiMsg.id, aiMsg.content);
+        }
       }
 
       setAiState("idle");
@@ -2141,7 +2180,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  }, [editContent, messages, chatId, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage]);
+  }, [editContent, messages, chatId, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage, settings.autoPlayResponses, handleReadAloud]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -2574,6 +2613,8 @@ export function ChatInterface({
       console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
       setInput("");
       setAiState("thinking");
+      streamingContentRef.current = "";
+      setStreamingContent("");
       
       try {
         const response = await fetch("/api/chat/stream", {
@@ -2609,7 +2650,7 @@ export function ChatInterface({
                 const data = JSON.parse(line.slice(6));
                 if (data.content) {
                   fullContent += data.content;
-                  setStreamingContent(fullContent);
+                  updateStreamingProgress(fullContent);
                 }
               } catch (e) {
                 // Ignore parse errors
@@ -2626,6 +2667,10 @@ export function ChatInterface({
           timestamp: new Date()
         };
         onSendMessage(assistantMsg);
+        if (settings.autoPlayResponses && fullContent) {
+          handleReadAloud(assistantMsg.id, fullContent);
+        }
+        streamingContentRef.current = "";
         setStreamingContent("");
         setAiState("idle");
         console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
@@ -2662,6 +2707,70 @@ export function ChatInterface({
       setInput("");
       return;
     }
+
+    // Slash command: create a custom skill from a single prompt.
+    // Usage: "/skill crea un skill que ..."
+    const skillCreatePrompt = parseSkillCreateCommand(input);
+    if (skillCreatePrompt !== null) {
+      const prompt = skillCreatePrompt.trim();
+      if (!prompt) {
+        toast({
+          title: "Crear Skill",
+          description: 'Usa: "/skill <describe la habilidad>"',
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setInput("");
+      toast({ title: "Crear Skill", description: "Generando skill..." });
+
+      try {
+        const resp = await apiFetch("/api/skills/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err?.error || `Error ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        const generated = data?.skill;
+        if (!generated?.name || !generated?.instructions || !generated?.description) {
+          throw new Error("Respuesta inválida del servidor");
+        }
+
+        createSkill({
+          name: generated.name,
+          description: generated.description,
+          instructions: generated.instructions,
+          category: generated.category || "custom",
+          enabled: true,
+          features: Array.isArray(generated.features) ? generated.features : [],
+        });
+
+        toast({
+          title: "Skill creado",
+          description: `Listo: ${generated.name}. Úsalo con @${generated.name} o @{${generated.name}} al inicio del mensaje.`,
+        });
+      } catch (e: any) {
+        toast({
+          title: "No se pudo crear el skill",
+          description: e?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      }
+
+      return;
+    }
+
+    // Skill invocation (optional): "@SkillName ..." or "@{Skill Name} ..."
+    const skillInvocation = parseSkillInvocation(input);
+    const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
+    const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
 
     console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
 
@@ -2756,7 +2865,8 @@ export function ChatInterface({
             messages: [{ role: "user", content: cleanInput }],
             model: selectedModel || "grok-3",
             forceWebSearch: isWebSearch,
-            webSearchAuto: isWebSearch
+            webSearchAuto: isWebSearch,
+            skill: activeSkillPayload,
           })
         });
         
@@ -2792,8 +2902,7 @@ export function ChatInterface({
                 const data = JSON.parse(line.slice(6));
                 if (data.content) {
                   fullContent += data.content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
+                  updateStreamingProgress(fullContent);
                 }
               } catch (e) {
                 // Ignore parse errors for incomplete JSON
@@ -2811,6 +2920,9 @@ export function ChatInterface({
           userMessageId: userMsgId
         };
         onSendMessage(assistantMsg);
+        if (settings.autoPlayResponses && fullContent) {
+          handleReadAloud(assistantMsg.id, fullContent);
+        }
         streamingContentRef.current = "";
         setStreamingContent("");
         setAiState("idle");
@@ -3159,7 +3271,8 @@ export function ChatInterface({
               provider: selectedProvider,
               model: selectedModel,
               lastImageBase64,
-              lastImageId
+              lastImageId,
+              skill: activeSkillPayload,
             }),
             signal: abortControllerRef.current.signal
           });
@@ -3218,8 +3331,7 @@ export function ChatInterface({
                     const content = data.content || "";
                     if (content) {
                       fullContent += content;
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     }
                   } else if (currentEventType === "production_start") {
                     setAiState("agent_working");
@@ -3265,6 +3377,9 @@ export function ChatInterface({
                       webSources: data.webSources,
                     };
                     onSendMessage(aiMsg);
+                    if (settings.autoPlayResponses && fullContent) {
+                      handleReadAloud(aiMsg.id, fullContent);
+                    }
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
                   }
@@ -4439,7 +4554,8 @@ IMPORTANTE:
                 chatId: chatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null
+                docTool: selectedDocTool || null,
+                skill: activeSkillPayload,
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -4555,8 +4671,7 @@ IMPORTANTE:
                       pptStreaming.processChunk(data.content);
                     } else if (isExcelMode && shouldWriteToDoc) {
                       // Excel mode: show streaming indicator in chat, data goes to Excel at end
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
                       try {
                         // Word mode: Cumulative HTML mode
@@ -4569,8 +4684,7 @@ IMPORTANTE:
                       }
                     } else {
                       // Normal chat mode - update streaming content
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     }
                   }
 
@@ -4861,8 +4975,7 @@ IMPORTANTE:
                 if (currentIndex < fullContent.length) {
                   const chunkSize = Math.floor(Math.random() * 5) + 3;
                   currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-                  streamingContentRef.current = fullContent.slice(0, currentIndex);
-                  setStreamingContent(fullContent.slice(0, currentIndex));
+                  updateStreamingProgress(fullContent.slice(0, currentIndex));
                 } else {
                   if (streamIntervalRef.current) {
                     clearInterval(streamIntervalRef.current);
@@ -4882,6 +4995,9 @@ IMPORTANTE:
                     uncertaintyReason: detectUncertainty(fullContent).reason,
                   };
                   onSendMessage(aiMsg);
+                  if (settings.autoPlayResponses && fullContent) {
+                    handleReadAloud(aiMsg.id, fullContent);
+                  }
 
                   streamingContentRef.current = "";
                   setStreamingContent("");
@@ -4968,8 +5084,7 @@ IMPORTANTE:
                   if (originalChatId) {
                     appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
                   }
-                  streamingContentRef.current = newContent;
-                  setStreamingContent(newContent);
+                  updateStreamingProgress(newContent);
                 }
                 currentIndex += chunkSize;
               } else {
@@ -4999,6 +5114,9 @@ IMPORTANTE:
                     userMessageId: userMsgId,
                   };
                   onSendMessage(confirmMsg);
+                  if (settings.autoPlayResponses) {
+                    handleReadAloud(confirmMsg.id, confirmMsg.content);
+                  }
                 } else {
                   const uncertainty = detectUncertainty(fullContent);
                   const aiMsg: Message = {
@@ -5015,6 +5133,9 @@ IMPORTANTE:
                     uncertaintyReason: uncertainty.reason,
                   };
                   onSendMessage(aiMsg);
+                  if (settings.autoPlayResponses && fullContent) {
+                    handleReadAloud(aiMsg.id, fullContent);
+                  }
                 }
 
                 streamingContentRef.current = "";

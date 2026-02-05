@@ -33,6 +33,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../types/express";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 
@@ -199,6 +200,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub;
+      const llmUserId = getOrCreateSecureUserId(req);
 
       // CONTEXT FIX: Augment client messages with server-side history
       const messages = await conversationMemoryManager.augmentWithHistory(
@@ -577,7 +579,20 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const {
+        messages: clientMessages,
+        conversationId,
+        runId,
+        chatId,
+        attachments,
+        gptId,
+        model,
+        session_id,
+        docTool,
+        forceWebSearch,
+        webSearchAuto,
+        skill,
+      } = req.body;
 
       // DEBUG: Log all incoming request parameters for docTool verification
       console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}, forceWebSearch: ${forceWebSearch}`);
@@ -1234,6 +1249,17 @@ CONTENIDO DE LOS DOCUMENTOS:
 ${attachmentContext}`;
       }
 
+      // Optional user skill context (client-provided). Treated as user preference; never overrides system policies.
+      if (skill && typeof skill === "object") {
+        const skillName = typeof (skill as any).name === "string" ? (skill as any).name.trim() : "";
+        const skillInstructions = typeof (skill as any).instructions === "string" ? (skill as any).instructions.trim() : "";
+        if (skillInstructions) {
+          systemContent += `\n\nSKILL ACTIVO (Preferencia del usuario): ${skillName || "Skill personalizado"}\n` +
+            `${skillInstructions}\n\n` +
+            `Sigue este skill para responder, pero SIEMPRE prioriza las políticas y el prompt del sistema si hubiera conflicto.`;
+        }
+      }
+
       const systemMessage = {
         role: "system" as const,
         content: systemContent
@@ -1319,7 +1345,7 @@ ${attachmentContext}`;
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
-          userId: userId || conversationId || "anonymous",
+          userId: llmUserId,
           requestId,
           disableImageGeneration: hasAttachments,
           maxTokens: effectiveMaxTokens,
@@ -2062,9 +2088,10 @@ ${documentText}`;
         // Call LLM with strict DATA_MODE (no tools, no image generation)
         const user = (req as AuthenticatedRequest).user;
         const userId = user?.claims?.sub;
+        const llmUserId = getOrCreateSecureUserId(req);
 
         const streamGenerator = llmGateway.streamChat(llmMessages, {
-          userId: userId || conversationId || "anonymous",
+          userId: llmUserId,
           requestId,
           disableImageGeneration: true,  // HARD BLOCK
         });
