@@ -1926,6 +1926,9 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const exportPayments = (format: "csv" | "xlsx") => {
+    window.open(`/api/admin/finance/payments/export?format=${format}`, "_blank", "noopener,noreferrer");
+  };
 
   const { data: paymentsData, isLoading } = useQuery({
     queryKey: ["/api/admin/finance/payments"],
@@ -1951,7 +1954,19 @@ function PaymentsSection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Payments</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">Payments</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportPayments("csv")} data-testid="button-export-payments-csv">
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportPayments("xlsx")} data-testid="button-export-payments-xlsx">
+            <Download className="h-4 w-4 mr-2" />
+            Export Excel
+          </Button>
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
@@ -2000,6 +2015,9 @@ function InvoicesSection() {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
+  const exportInvoices = (format: "csv" | "xlsx") => {
+    window.open(`/api/admin/finance/invoices/export?format=${format}`, "_blank", "noopener,noreferrer");
+  };
 
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ["/api/admin/finance/invoices"],
@@ -2035,44 +2053,54 @@ function InvoicesSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Invoices ({invoices.length})</h2>
-        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogTrigger asChild>
-            <Button size="sm" data-testid="button-create-invoice">
-              <Plus className="h-4 w-4 mr-2" />
-              Crear factura
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Crear factura</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Número de factura</Label>
-                <Input 
-                  placeholder="INV-2024-001" 
-                  value={newInvoice.invoiceNumber}
-                  onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Importe</Label>
-                <Input 
-                  placeholder="99.00" 
-                  value={newInvoice.amount}
-                  onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
-                />
-              </div>
-              <Button 
-                className="w-full" 
-                onClick={() => createInvoiceMutation.mutate(newInvoice)}
-                disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
-              >
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => exportInvoices("csv")} data-testid="button-export-invoices-csv">
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportInvoices("xlsx")} data-testid="button-export-invoices-xlsx">
+            <Download className="h-4 w-4 mr-2" />
+            Export Excel
+          </Button>
+          <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+            <DialogTrigger asChild>
+              <Button size="sm" data-testid="button-create-invoice">
+                <Plus className="h-4 w-4 mr-2" />
                 Crear factura
               </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Crear factura</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Número de factura</Label>
+                  <Input 
+                    placeholder="INV-2024-001" 
+                    value={newInvoice.invoiceNumber}
+                    onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Importe</Label>
+                  <Input 
+                    placeholder="99.00" 
+                    value={newInvoice.amount}
+                    onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
+                  />
+                </div>
+                <Button 
+                  className="w-full" 
+                  onClick={() => createInvoiceMutation.mutate(newInvoice)}
+                  disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+                >
+                  Crear factura
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
       <div className="rounded-lg border">
         <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
