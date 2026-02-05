@@ -722,7 +722,7 @@ export class MemStorage implements IStorage {
   }
 
   async createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }> {
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // Create chat first
       const [createdChat] = await tx.insert(chats).values(chat).returning();
 
@@ -742,6 +742,23 @@ export class MemStorage implements IStorage {
 
       return { chat: createdChat, messages: savedMessages };
     });
+    if (result.messages.length > 0) {
+      queueMicrotask(() => {
+        for (const msg of result.messages) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            knowledgeBaseService.ingestChatMessage({
+              chatId: result.chat.id,
+              messageId: msg.id,
+              role: msg.role,
+              content: msg.content,
+            }).catch((error) => {
+              console.warn("[Knowledge] Failed to ingest chat message:", error?.message || error);
+            });
+          }
+        }
+      });
+    }
+    return result;
   }
 
   async saveDocumentToChat(chatId: string, document: { type: string; title: string; content: string }): Promise<ChatMessage> {

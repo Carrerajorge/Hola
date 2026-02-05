@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { db, dbRead } from "../db";
-import { knowledgeNodes, knowledgeEdges, chats } from "@shared/schema";
+import { knowledgeNodes, knowledgeEdges, chats, chatMessages, conversationDocuments } from "@shared/schema";
 import type { InsertKnowledgeNode, KnowledgeNode, InsertKnowledgeEdge, KnowledgeEdge } from "@shared/schema/knowledge";
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { generateEmbedding } from "../embeddingService";
@@ -35,6 +35,9 @@ class KnowledgeBaseService {
     private meiliUrl = "";
     private meiliKey = "";
     private meiliIndex = "knowledge_nodes";
+    private meiliSettingsApplied = false;
+    private ingestEnabled = process.env.KNOWLEDGE_INGEST_ENABLED !== "false";
+    private ingestWebEnabled = process.env.KNOWLEDGE_INGEST_WEB !== "false";
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
@@ -42,6 +45,8 @@ class KnowledgeBaseService {
         this.meiliUrl = process.env.MEILI_URL || process.env.MEILISEARCH_URL || "";
         this.meiliKey = process.env.MEILI_API_KEY || "";
         this.meiliConfigured = Boolean(this.meiliUrl);
+        this.ingestEnabled = process.env.KNOWLEDGE_INGEST_ENABLED !== "false";
+        this.ingestWebEnabled = process.env.KNOWLEDGE_INGEST_WEB !== "false";
         this.initialized = true;
     }
 
@@ -56,13 +61,23 @@ class KnowledgeBaseService {
         return `${stamp}-${rand}`;
     }
 
+    private normalizeSourceId(value?: string | null): string | null {
+        if (!value) return null;
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        return trimmed.length > 255 ? trimmed.slice(0, 255) : trimmed;
+    }
+
     private async ensureMeiliIndex(): Promise<boolean> {
         if (!this.meiliConfigured) return false;
         try {
             const res = await fetch(`${this.meiliUrl}/indexes/${this.meiliIndex}`, {
                 headers: this.meiliKey ? { "Authorization": `Bearer ${this.meiliKey}` } : undefined,
             });
-            if (res.ok) return true;
+            if (res.ok) {
+                await this.configureMeiliIndex();
+                return true;
+            }
             if (res.status !== 404) return false;
 
             const createRes = await fetch(`${this.meiliUrl}/indexes`, {
@@ -73,9 +88,32 @@ class KnowledgeBaseService {
                 },
                 body: JSON.stringify({ uid: this.meiliIndex, primaryKey: "id" }),
             });
-            return createRes.ok;
+            if (!createRes.ok) return false;
+            await this.configureMeiliIndex();
+            return true;
         } catch {
             return false;
+        }
+    }
+
+    private async configureMeiliIndex(): Promise<void> {
+        if (!this.meiliConfigured || this.meiliSettingsApplied) return;
+        try {
+            await fetch(`${this.meiliUrl}/indexes/${this.meiliIndex}/settings`, {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(this.meiliKey ? { "Authorization": `Bearer ${this.meiliKey}` } : {}),
+                },
+                body: JSON.stringify({
+                    filterableAttributes: ["userId", "nodeType", "tags", "sourceType", "sourceId"],
+                    searchableAttributes: ["title", "content", "tags"],
+                    sortableAttributes: ["createdAt", "updatedAt"],
+                }),
+            });
+            this.meiliSettingsApplied = true;
+        } catch {
+            // Ignore Meili settings errors (non-blocking)
         }
     }
 
@@ -200,7 +238,27 @@ class KnowledgeBaseService {
     async createNode(userId: string, payload: InsertKnowledgeNode): Promise<KnowledgeNode> {
         await this.initialize();
         const now = new Date();
-        const contentHash = this.buildContentHash(payload.content);
+        const normalizedSourceId = this.normalizeSourceId(payload.sourceId);
+        const contentHash = this.buildContentHash(`${payload.title}\n${payload.content}`);
+
+        if (normalizedSourceId) {
+            const existingBySource = await dbRead.select()
+                .from(knowledgeNodes)
+                .where(and(
+                    eq(knowledgeNodes.userId, userId),
+                    eq(knowledgeNodes.sourceType, payload.sourceType || "manual"),
+                    eq(knowledgeNodes.sourceId, normalizedSourceId)
+                ))
+                .limit(1);
+
+            if (existingBySource.length > 0) {
+                const node = existingBySource[0];
+                await db.update(knowledgeNodes)
+                    .set({ updatedAt: now })
+                    .where(eq(knowledgeNodes.id, node.id));
+                return node;
+            }
+        }
 
         const existing = await dbRead.select()
             .from(knowledgeNodes)
@@ -224,14 +282,35 @@ class KnowledgeBaseService {
             content: payload.content,
             nodeType: payload.nodeType || "note",
             sourceType: payload.sourceType || "manual",
-            sourceId: payload.sourceId || null,
+            sourceId: normalizedSourceId,
             tags: payload.tags || [],
             embedding,
             contentHash,
             metadata: payload.metadata || {},
             importance: payload.importance ?? 0.5,
             zettelId,
-        }).returning();
+        }).onConflictDoNothing().returning();
+
+        if (!node) {
+            const fallback = normalizedSourceId
+                ? await dbRead.select()
+                    .from(knowledgeNodes)
+                    .where(and(
+                        eq(knowledgeNodes.userId, userId),
+                        eq(knowledgeNodes.sourceType, payload.sourceType || "manual"),
+                        eq(knowledgeNodes.sourceId, normalizedSourceId)
+                    ))
+                    .limit(1)
+                : await dbRead.select()
+                    .from(knowledgeNodes)
+                    .where(and(eq(knowledgeNodes.userId, userId), eq(knowledgeNodes.contentHash, contentHash)))
+                    .limit(1);
+
+            if (!fallback[0]) {
+                throw new Error("Failed to create knowledge node");
+            }
+            return fallback[0];
+        }
 
         await this.indexInMeili(node);
         await this.linkReferencesFromContent(userId, node.id, node.content);
@@ -396,6 +475,7 @@ class KnowledgeBaseService {
         content: string;
     }): Promise<void> {
         await this.initialize();
+        if (!this.ingestEnabled) return;
         const { chatId, messageId, role, content } = params;
         const [chat] = await dbRead.select({ userId: chats.userId })
             .from(chats)
@@ -422,6 +502,7 @@ class KnowledgeBaseService {
         content: string;
     }): Promise<void> {
         await this.initialize();
+        if (!this.ingestEnabled) return;
         const { chatId, documentId, fileName, content } = params;
         const [chat] = await dbRead.select({ userId: chats.userId })
             .from(chats)
@@ -438,6 +519,127 @@ class KnowledgeBaseService {
             sourceId: documentId,
             metadata: { chatId, fileName },
         });
+    }
+
+    async ingestWebSources(
+        userId: string,
+        query: string,
+        sources: Array<{
+            title?: string;
+            url?: string;
+            content?: string;
+            snippet?: string;
+            siteName?: string;
+            publishedDate?: string;
+        }>,
+        options: { maxItems?: number; nodeType?: string; sourceType?: string } = {}
+    ): Promise<void> {
+        await this.initialize();
+        if (!this.ingestEnabled || !this.ingestWebEnabled) return;
+        if (!sources || sources.length === 0) return;
+
+        const { maxItems = 3, nodeType = "web", sourceType = "web" } = options;
+        const trimmedSources = sources.slice(0, maxItems);
+
+        for (const source of trimmedSources) {
+            const title = source.title || source.siteName || source.url || "Fuente web";
+            const rawContent = source.content || source.snippet || "";
+            const content = rawContent.length > 2000 ? rawContent.slice(0, 2000) : rawContent;
+            if (!content.trim()) continue;
+
+            await this.createNode(userId, {
+                title,
+                content,
+                nodeType,
+                sourceType,
+                sourceId: this.normalizeSourceId(source.url || source.title || ""),
+                tags: [sourceType],
+                metadata: {
+                    query,
+                    url: source.url,
+                    siteName: source.siteName,
+                    publishedDate: source.publishedDate,
+                },
+            });
+        }
+    }
+
+    async backfillUser(
+        userId: string,
+        options: { limit?: number; since?: string; includeDocuments?: boolean } = {}
+    ): Promise<{ messages: number; documents: number }> {
+        await this.initialize();
+        if (!this.ingestEnabled) return { messages: 0, documents: 0 };
+
+        const { limit = 200, since, includeDocuments = true } = options;
+        const sinceDate = since ? new Date(since) : undefined;
+
+        const messageConditions: any[] = [eq(chats.userId, userId)];
+        if (sinceDate) {
+            messageConditions.push(sql`${chatMessages.createdAt} >= ${sinceDate}`);
+        }
+
+        const messageRows = await dbRead
+            .select({
+                id: chatMessages.id,
+                chatId: chatMessages.chatId,
+                role: chatMessages.role,
+                content: chatMessages.content,
+            })
+            .from(chatMessages)
+            .innerJoin(chats, eq(chatMessages.chatId, chats.id))
+            .where(and(...messageConditions))
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(limit);
+
+        let messagesIngested = 0;
+        for (const row of messageRows) {
+            const title = row.role === "user" ? "Mensaje del usuario" : "Respuesta del asistente";
+            await this.createNode(userId, {
+                title,
+                content: row.content,
+                nodeType: "conversation",
+                sourceType: "conversation",
+                sourceId: row.id,
+                metadata: { chatId: row.chatId, role: row.role },
+            });
+            messagesIngested += 1;
+        }
+
+        let documentsIngested = 0;
+        if (includeDocuments) {
+            const docConditions: any[] = [eq(chats.userId, userId)];
+            if (sinceDate) {
+                docConditions.push(sql`${conversationDocuments.createdAt} >= ${sinceDate}`);
+            }
+            const documentRows = await dbRead
+                .select({
+                    id: conversationDocuments.id,
+                    chatId: conversationDocuments.chatId,
+                    fileName: conversationDocuments.fileName,
+                    extractedText: conversationDocuments.extractedText,
+                })
+                .from(conversationDocuments)
+                .innerJoin(chats, eq(conversationDocuments.chatId, chats.id))
+                .where(and(...docConditions))
+                .orderBy(desc(conversationDocuments.createdAt))
+                .limit(limit);
+
+            for (const doc of documentRows) {
+                if (!doc.extractedText) continue;
+                await this.createNode(userId, {
+                    title: doc.fileName,
+                    content: doc.extractedText,
+                    nodeType: "document",
+                    sourceType: "document",
+                    sourceId: doc.id,
+                    metadata: { chatId: doc.chatId, fileName: doc.fileName },
+                });
+                documentsIngested += 1;
+            }
+        }
+
+        return { messages: messagesIngested, documents: documentsIngested };
     }
 
     async exportToObsidian(userId: string, options: KnowledgeExportOptions): Promise<{ exported: number; outputDir: string }> {

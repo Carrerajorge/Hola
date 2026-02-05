@@ -50,6 +50,7 @@ export async function setupKnowledgeBase(): Promise<void> {
         await client.query(`DROP INDEX IF EXISTS knowledge_nodes_zettel_idx;`);
         await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_nodes_user_zettel_idx ON knowledge_nodes(user_id, zettel_id);`);
         await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_nodes_user_hash_idx ON knowledge_nodes(user_id, content_hash);`);
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS knowledge_nodes_user_source_idx ON knowledge_nodes(user_id, source_type, source_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS knowledge_nodes_user_idx ON knowledge_nodes(user_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS knowledge_nodes_type_idx ON knowledge_nodes(node_type);`);
         await client.query(`CREATE INDEX IF NOT EXISTS knowledge_nodes_source_idx ON knowledge_nodes(source_type, source_id);`);

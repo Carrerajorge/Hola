@@ -129,3 +129,21 @@ knowledgeRouter.post("/export", async (req, res) => {
         return res.status(500).json({ error: error?.message || "Failed to export" });
     }
 });
+
+knowledgeRouter.post("/backfill", async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        if (!userId) return res.status(401).json({ error: "Not authenticated" });
+
+        const { limit, since, includeDocuments } = req.body || {};
+        const result = await knowledgeBaseService.backfillUser(userId, {
+            limit: typeof limit === "number" ? limit : undefined,
+            since: typeof since === "string" ? since : undefined,
+            includeDocuments: typeof includeDocuments === "boolean" ? includeDocuments : true,
+        });
+
+        return res.json(result);
+    } catch (error: any) {
+        return res.status(500).json({ error: error?.message || "Failed to backfill" });
+    }
+});

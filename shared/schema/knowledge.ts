@@ -61,6 +61,7 @@ export const knowledgeNodes = pgTable("knowledge_nodes", {
     index("knowledge_nodes_tags_idx").using("gin", table.tags),
     index("knowledge_nodes_embedding_idx").using("hnsw", sql`${table.embedding} vector_cosine_ops`),
     uniqueIndex("knowledge_nodes_user_hash_idx").on(table.userId, table.contentHash),
+    uniqueIndex("knowledge_nodes_user_source_idx").on(table.userId, table.sourceType, table.sourceId),
 ]);
 
 export const insertKnowledgeNodeSchema = createInsertSchema(knowledgeNodes).omit({

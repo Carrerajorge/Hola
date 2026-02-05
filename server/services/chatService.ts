@@ -1593,6 +1593,23 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               p.journal, 
               p.doi ? `https://doi.org/${p.doi}` : undefined
             ));
+
+          if (userId) {
+            knowledgeBaseService.ingestWebSources(
+              userId,
+              lastUserMessage.content,
+              engineResult.papers.map(p => ({
+                title: p.title,
+                url: p.url || (p.doi ? `https://doi.org/${p.doi}` : undefined),
+                content: p.abstract || "",
+                siteName: p.journal,
+                publishedDate: p.year ? String(p.year) : undefined,
+              })),
+              { nodeType: "reference", sourceType: "academic" }
+            ).catch((error) => {
+              console.warn("[Knowledge] Academic ingest failed:", (error as Error)?.message || error);
+            });
+          }
             
           console.log(`[ChatService:AcademicEngine] Found ${engineResult.papers.length} papers from ${engineResult.sources.map(s => s.name).join(", ")} in ${engineResult.searchTime}ms`);
         }
@@ -1646,6 +1663,24 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             searchResults.results.map((r, i) =>
               `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
             ).join("\n");
+        }
+
+        if (userId) {
+          const ingestSources = (searchResults.contents.length > 0
+            ? searchResults.contents
+            : searchResults.results.map(r => ({
+                title: r.title,
+                url: r.url,
+                snippet: r.snippet,
+                siteName: r.siteName,
+                publishedDate: r.publishedDate,
+              }))
+          ) as Array<{ title?: string; url?: string; content?: string; snippet?: string; siteName?: string; publishedDate?: string }>;
+
+          knowledgeBaseService.ingestWebSources(userId, lastUserMessage.content, ingestSources)
+            .catch((error) => {
+              console.warn("[Knowledge] Web ingest failed:", (error as Error)?.message || error);
+            });
         }
       } catch (error) {
         await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
