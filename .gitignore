@@ -6,6 +6,29 @@ vite.config.ts.*
 *.tar.gz
 
 # =============================================================================
+# REPO HYGIENE: Keep runtime/generated data out of git
+# =============================================================================
+
+# Runtime data (uploads, generated artifacts, temp)
+artifacts/
+uploads/
+Downloads/
+.local/
+
+# Test artifacts / reports
+test_results/
+test-results/
+playwright-report/
+e2e-reports/
+coverage/
+
+# Generated logs captured during local debugging
+tsc_*.log
+curl_*.txt
+user_router_errors.log
+verify.log
+
+# =============================================================================
 # SECURITY: Aggressive patterns to prevent secret leaks
 # =============================================================================
 
