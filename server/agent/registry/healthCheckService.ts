@@ -487,7 +487,7 @@ class HealthCheckService extends EventEmitter {
       },
       filesystem: async () => {
         try {
-          const testPath = path.join(process.cwd(), "sandbox_workspace");
+          const testPath = process.env.SANDBOX_ROOT || path.join(process.cwd(), "sandbox_workspace");
           await fs.promises.access(testPath, fs.constants.R_OK | fs.constants.W_OK);
           return true;
         } catch {

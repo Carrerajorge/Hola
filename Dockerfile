@@ -61,6 +61,9 @@ COPY --from=builder --chown=iliagpt:nodejs /app/migrations ./migrations
 # Copy public assets
 COPY --from=builder --chown=iliagpt:nodejs /app/client/public ./client/public
 
+# Ensure sandbox workspace exists and is writable by the non-root user
+RUN mkdir -p /app/sandbox_workspace && chown iliagpt:nodejs /app/sandbox_workspace
+
 # Switch to non-root user
 USER iliagpt
 
