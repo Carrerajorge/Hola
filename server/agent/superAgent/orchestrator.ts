@@ -56,10 +56,20 @@ function wosArticlesToSourceSignals(articles: WosArticle[]): SourceSignal[] {
 
 
 export interface OrchestratorConfig {
+  /** Upper bound for internal orchestration loops */
   maxIterations: number;
+  /** Emit heartbeat SSE events */
   emitHeartbeat: boolean;
   heartbeatIntervalMs: number;
+  /** Enforce contract (e.g., min sources) */
   enforceContract: boolean;
+
+  /** Allow research/sourcing phases (signals/deep dive). If false, we never call search tools. */
+  allowResearch: boolean;
+  /** Hard cap on tool_call events emitted/executed by the orchestrator */
+  maxToolCalls: number;
+  /** Hard cap on total runtime (ms) per run */
+  maxRuntimeMs: number;
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -67,6 +77,9 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   emitHeartbeat: true,
   heartbeatIntervalMs: 5000,
   enforceContract: true,
+  allowResearch: true,
+  maxToolCalls: 25,
+  maxRuntimeMs: 2 * 60 * 1000,
 };
 
 export class SuperAgentOrchestrator extends EventEmitter {
@@ -77,12 +90,15 @@ export class SuperAgentOrchestrator extends EventEmitter {
   private eventCounter: number = 0;
   private abortSignal?: AbortSignal;
   private promptUnderstanding: PromptUnderstanding;
+  private startedAtMs: number = Date.now();
+  private toolCallsCount: number = 0;
 
   constructor(sessionId: string, config: Partial<OrchestratorConfig> = {}) {
     super();
     this.sessionId = sessionId;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.promptUnderstanding = new PromptUnderstanding();
+    this.startedAtMs = Date.now();
   }
 
   private emitSSE(eventType: SSEEventType, data: unknown): void {
@@ -95,6 +111,19 @@ export class SuperAgentOrchestrator extends EventEmitter {
     };
 
     this.emit("sse", event);
+  }
+
+  private emitToolCall(data: unknown): void {
+    this.toolCallsCount++;
+    if (this.toolCallsCount > this.config.maxToolCalls) {
+      this.emitSSE("contract_violation", {
+        message: `Tool call limit exceeded: ${this.toolCallsCount}/${this.config.maxToolCalls}`,
+        maxToolCalls: this.config.maxToolCalls,
+      });
+      throw new Error(`Límite de herramientas excedido (${this.config.maxToolCalls})`);
+    }
+
+    this.emitSSE("tool_call", data);
   }
 
   private startHeartbeat(): void {
@@ -118,6 +147,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
   }
 
   private checkAbort(): void {
+    const elapsed = Date.now() - this.startedAtMs;
+    if (elapsed > this.config.maxRuntimeMs) {
+      this.stopHeartbeat();
+      throw new Error(`Ejecución excedió el tiempo máximo (${this.config.maxRuntimeMs} ms)`);
+    }
+
     if (this.abortSignal?.aborted) {
       this.stopHeartbeat();
       throw new Error("Ejecución cancelada por el usuario");
@@ -292,7 +327,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const requirements = this.state.contract.requirements;
     const researchDecision = shouldResearch(this.state.contract.original_prompt);
 
-    if (researchDecision.shouldResearch || requirements.min_sources > 0) {
+    if (this.config.allowResearch && (researchDecision.shouldResearch || requirements.min_sources > 0)) {
       this.checkAbort();
       await this.executeSignalsPhase();
       this.checkAbort();
@@ -425,7 +460,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const yearRange = { start: params.yearStart, end: params.yearEnd };
     const isLatamOnly = this.isLatamOnlyRequest(this.state.contract.original_prompt);
 
-    this.emitSSE("tool_call", {
+    this.emitToolCall({
       id: "tc_signals_openalex",
       tool: "academic_pipeline",
       input: { query: searchTopic, target: targetCount, yearRange, regionFilter: isLatamOnly ? "latam" : "global" },
@@ -608,7 +643,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     if (useScopus) sources.push("Scopus");
     if (useWos) sources.push("Web of Science");
 
-    this.emitSSE("tool_call", {
+    this.emitToolCall({
       id: "tc_signals",
       tool: "search_academic_parallel",
       input: { query: searchTopic, target: targetCount, yearRange, sources },
@@ -735,7 +770,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
       ? researchDecision.searchQueries
       : [this.extractSearchTopic(this.state.contract.original_prompt)];
 
-    this.emitSSE("tool_call", {
+    this.emitToolCall({
       id: "tc_signals",
       tool: "search_web_parallel",
       input: { queries, target: targetCount },
@@ -805,7 +840,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
 
-    this.emitSSE("tool_call", {
+    this.emitToolCall({
       id: "tc_deep",
       tool: "fetch_url_parallel",
       input: { urls: topSources.map(s => s.url) },
@@ -880,7 +915,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     });
 
     for (const docType of this.state.contract.requirements.must_create) {
-      this.emitSSE("tool_call", {
+      this.emitToolCall({
         id: `tc_create_${docType}`,
         tool: `create_${docType}`,
         input: {},
@@ -1260,7 +1295,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
     this.emitThought(`Verificación de Calidad (Iteración ${this.state.iteration}): Evaluando cumplimiento de contrato y consistencia.`);
 
-    this.emitSSE("tool_call", {
+    this.emitToolCall({
       id: "tc_quality_gate",
       tool: "quality_gate",
       input: { iteration: this.state.iteration },

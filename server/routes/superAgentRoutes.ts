@@ -226,11 +226,23 @@ router.post("/super/stream", async (req: Request, res: Response) => {
       console.warn("[SuperAgent] Redis not available, SSE-only mode");
     }
 
+    // M2 (autopilot limitado): hard guardrails derived from user prompt + options
+    const noSearchRequested = /\b(sin\s+buscar|no\s+busques|sin\s+fuentes|no\s+uses\s+fuentes|no\s+investigues)\b/i.test(prompt);
+
+    const requestedIterations = options?.max_iterations ?? 3;
+    const maxIterations = noSearchRequested ? 1 : requestedIterations;
+    const enforceContract = noSearchRequested ? false : (options?.enforce_min_sources ?? true);
+
     const agent = createSuperAgent(sessionId, {
-      maxIterations: options?.max_iterations ?? 3,
+      maxIterations,
       emitHeartbeat: true,
       heartbeatIntervalMs: 5000,
-      enforceContract: options?.enforce_min_sources ?? true,
+      enforceContract,
+      // If user explicitly says "sin buscar/sin fuentes", do not run research phases at all.
+      allowResearch: !noSearchRequested,
+      // Hard caps (can be exposed later via API options)
+      maxToolCalls: 25,
+      maxRuntimeMs: 2 * 60 * 1000,
     });
 
     let redisAvailable = redisClient?.isReady ?? false;
