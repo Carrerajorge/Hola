@@ -28,10 +28,6 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Set build-time environment variables
-ARG DATABASE_URL
-ARG NODE_ENV=production
-
 ENV NODE_ENV=production
 
 # Build the application
@@ -45,24 +41,25 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 
 # Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 iliagpt
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 iliagpt
 
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Copy only necessary files
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/migrations ./migrations
+# Copy only necessary files with correct ownership (avoid slow chown -R)
+COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
+COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
+COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
 
 # Copy public assets
-COPY --from=builder /app/client/public ./client/public
+COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 
-# Set ownership to non-root user
-RUN chown -R iliagpt:nodejs /app
+# Ensure runtime-writable directories exist for non-root user
+RUN mkdir -p /app/sandbox_workspace /app/artifacts \
+  && chown -R iliagpt:nodejs /app/sandbox_workspace /app/artifacts
 
 # Switch to non-root user
 USER iliagpt
@@ -70,9 +67,9 @@ USER iliagpt
 # Expose port
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:5000/api/health || exit 1
+# Health check (use IPv4 to avoid localhost -> ::1 issues; use -qO- not -q0-)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:5000/health >/dev/null 2>&1 || exit 1
 
-# Start command
-CMD ["node", "dist/server/index.js"]
+# Start command: build emits dist/index.mjs and a wrapper dist/index.cjs
+CMD ["node", "dist/index.cjs"]
