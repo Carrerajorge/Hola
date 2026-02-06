@@ -1,9 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 import * as crypto from "crypto";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const isTestEnv =
+    process.env.NODE_ENV === "test" ||
+    !!process.env.VITEST_WORKER_ID ||
+    !!process.env.VITEST_POOL_ID;
 
-const EMBEDDING_MODEL = "text-embedding-004";
+// Avoid network calls during tests.
+const ai = !isTestEnv && process.env.GEMINI_API_KEY
+    ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+    : null;
+
+// Configurable because some projects/keys don't have `text-embedding-004`.
+const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
 const EMBEDDING_CACHE_SIZE = 1000;
 
 // Simple in-memory cache
@@ -36,6 +45,35 @@ class Semaphore {
 
 const limiter = new Semaphore(CONCURRENCY_LIMIT);
 
+function generateFallbackEmbedding(text: string): number[] {
+    const DIMENSIONS = 768;
+    const embedding = new Array(DIMENSIONS).fill(0);
+
+    const words = text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, " ")
+        .split(/\s+/)
+        .filter(w => w.length > 2);
+
+    for (let idx = 0; idx < words.length; idx++) {
+        const word = words[idx];
+        let hash = 0;
+        for (let i = 0; i < word.length; i++) {
+            hash = ((hash << 5) - hash) + word.charCodeAt(i);
+            hash = hash & hash;
+        }
+        const position = Math.abs(hash) % DIMENSIONS;
+        embedding[position] += 1 / (idx + 1);
+    }
+
+    const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+    if (magnitude > 0) {
+        for (let i = 0; i < embedding.length; i++) embedding[i] /= magnitude;
+    }
+
+    return embedding;
+}
+
 export async function getEmbedding(text: string): Promise<number[]> {
     // 1. Truncate to avoid 400 Bad Request (Token limit)
     // Improvement #7: Chunking/Truncation
@@ -51,6 +89,12 @@ export async function getEmbedding(text: string): Promise<number[]> {
     await limiter.acquire();
 
     try {
+        if (!ai) {
+            const embedding = generateFallbackEmbedding(safeText);
+            embeddingCache.set(hash, embedding);
+            return embedding;
+        }
+
         const result = await ai.models.embedContent({
             model: EMBEDDING_MODEL,
             contents: [

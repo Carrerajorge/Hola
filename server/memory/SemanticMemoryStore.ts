@@ -68,8 +68,10 @@ class EmbeddingProvider {
         if (cached) return cached;
 
         try {
-            // Use Gemini embeddings if available
-            if (process.env.GEMINI_API_KEY) {
+            const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.VITEST_WORKER_ID || !!process.env.VITEST_POOL_ID;
+
+            // Use Gemini embeddings if available (avoid network calls during tests)
+            if (process.env.GEMINI_API_KEY && !isTestEnv) {
                 const embedding = await this.getGeminiEmbedding(text);
                 this.cacheEmbedding(cacheKey, embedding);
                 return embedding;
@@ -93,7 +95,7 @@ class EmbeddingProvider {
 
     private async getGeminiEmbedding(text: string): Promise<number[]> {
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${process.env.GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001"}:embedContent?key=${process.env.GEMINI_API_KEY}`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
