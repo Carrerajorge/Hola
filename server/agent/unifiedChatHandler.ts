@@ -185,9 +185,15 @@ export async function createUnifiedRun(
     .reverse()
     .find(m => m.role === 'user')?.content || '';
 
+  // agent_mode_runs.message_id + request_spec_history.message_id both FK to chat_messages.id (UUID).
+  // Some callers historically passed provisional ids like "msg_<timestamp>".
+  // Normalize to avoid FK violations (best-effort logging only; chat should still work).
+  const isUuid = (value?: string) => !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const normalizedMessageId = isUuid(request.messageId) ? request.messageId : undefined;
+
   const requestSpec = createRequestSpec({
     chatId: request.chatId,
-    messageId: request.messageId,
+    messageId: normalizedMessageId,
     userId: request.userId,
     rawMessage: lastUserMessage,
     attachments: request.attachments,
@@ -214,7 +220,7 @@ export async function createUnifiedRun(
     await db.insert(agentModeRuns).values({
       id: runId,
       chatId: request.chatId,
-      messageId: request.messageId,
+      messageId: normalizedMessageId,
       userId: request.userId,
       status: 'planning',
       idempotencyKey: requestSpec.id,

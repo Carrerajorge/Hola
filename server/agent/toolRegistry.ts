@@ -1104,21 +1104,9 @@ const shellCommandTool: ToolDefinition = {
       };
     }
 
-    // Dangerous command patterns: require explicit confirmation (not a blanket block).
-    // This matches the requirements doc: dangerous operations require explicit user confirmation.
-    const dangerousPatterns: Array<{ pattern: RegExp; reason: string }> = [
-      // Match any rm invocation that includes both -r and -f flags (combined or separate: -rf, -fr, -r -f, etc.).
-      { pattern: /\brm\b[\s\S]*-\S*r\S*f/i, reason: "rm -rf" },
-      { pattern: /\bmkfs(\.|\s)/i, reason: "mkfs" },
-      { pattern: /\bdd\b\s+if=/i, reason: "dd if=" },
-      { pattern: />\s*\/dev\//i, reason: "> /dev/*" },
-      { pattern: /\bsudo\b/i, reason: "sudo" },
-      { pattern: /\bchmod\b\s+777\b/i, reason: "chmod 777" },
-      { pattern: /\b(curl|wget)\b.*\|\s*sh\b/i, reason: "curl|sh / wget|sh" },
-      { pattern: /\b(shutdown|reboot)\b/i, reason: "shutdown/reboot" },
-    ];
+    const { getDangerousShellMatch, getShellSandboxMode } = await import("./security/shellCommandPolicy");
 
-    const matchedDanger = dangerousPatterns.find((d) => d.pattern.test(cmd));
+    const matchedDanger = getDangerousShellMatch(cmd);
     if (matchedDanger && context.isConfirmed !== true) {
       return {
         success: false,
@@ -1146,10 +1134,9 @@ const shellCommandTool: ToolDefinition = {
 
     const timeoutMs = Math.min(Math.max(Number(input.timeout ?? 30000), 1000), 60000);
 
-    // Sandbox mode (v1): host (default) or docker.
-    // NOTE: docker mode requires that the runtime has access to the Docker daemon
-    // (typically via /var/run/docker.sock) and that the `docker` CLI is available.
-    const sandboxMode = (process.env.SHELL_COMMAND_SANDBOX_MODE || "host").toLowerCase();
+    // Sandbox mode: host | docker | runner.
+    // Stable default: in production, default to runner (docker-isolated service).
+    const sandboxMode = getShellSandboxMode();
     const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
 
     const runnerUrl = process.env.SHELL_COMMAND_RUNNER_URL || "http://sandbox-runner:8080";
