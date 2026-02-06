@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
+import { useStreamChat } from "@/hooks/use-stream-chat";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
@@ -1337,6 +1338,16 @@ export function ChatInterface({
     setAiProcessSteps,
   });
 
+  // All-in-one streaming hook: fetch + SSE parse + RAF throttle + atomic finalize
+  const streamChat = useStreamChat({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1817,156 +1828,62 @@ export function ChatInterface({
     }
 
     setRegeneratingMsgIndex(null);
-    setAiState("thinking");
-    streamingContentRef.current = "";
-    setStreamingContent("");
 
-    try {
-      abortControllerRef.current = new AbortController();
+    let chatHistory = contextUpToUser.map(m => ({ role: m.role, content: m.content }));
+    if (instruction) {
+      chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
+    }
 
-      let chatHistory = contextUpToUser.map(m => ({
-        role: m.role,
-        content: m.content
-      }));
-
-      if (instruction) {
-        chatHistory = [
-          ...chatHistory,
-          { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }
-        ];
-      }
-
-      const response = await fetch("/api/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-        credentials: "include",
-        body: JSON.stringify({
-          messages: chatHistory,
-          chatId,
-          conversationId: chatId,
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
-        signal: abortControllerRef.current.signal
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Error ${response.status}`);
-      }
-
-      setAiState("responding");
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
-      let currentEventType = "chunk";
-      let streamComplete = false;
-
-      while (!streamComplete) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-
-          if (trimmedLine.startsWith("event: ")) {
-            currentEventType = trimmedLine.slice(7).trim();
-          } else if (trimmedLine.startsWith("data: ")) {
-            const dataStr = trimmedLine.slice(6);
-            if (dataStr === "[DONE]") {
-              streamComplete = true;
-              continue;
+    await streamChat.stream("/api/chat/stream", {
+      chatId,
+      body: {
+        messages: chatHistory,
+        chatId,
+        conversationId: chatId,
+        provider: selectedProvider,
+        model: selectedModel,
+      },
+      onEvent: (eventType, data) => {
+        if (eventType === "production_start") {
+          setAiState("agent_working");
+          setAiProcessSteps([{
+            id: "init", step: "init",
+            title: `Iniciando producción: ${data.topic || "Documento"}`,
+            status: "pending",
+            description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+          }]);
+        } else if (eventType === "production_event") {
+          setAiProcessSteps((prev: any[]) => {
+            const newSteps = [...prev];
+            const lastStep = newSteps[newSteps.length - 1];
+            if (lastStep?.status === "pending" && data.message) {
+              lastStep.title = data.message;
+            } else {
+              newSteps.push({ id: `step-${Date.now()}`, title: data.message || "Procesando...", status: "pending", description: data.stage });
             }
-
-            try {
-              const data = JSON.parse(dataStr);
-
-              if (currentEventType === "chunk" || currentEventType === "text") {
-                const content = data.content || "";
-                if (content) {
-                  fullContent += content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
-                }
-              } else if (currentEventType === "production_start") {
-                setAiState("agent_working");
-                setAiProcessSteps([{
-                  id: "init",
-                  step: "init",
-                  title: `Iniciando producción: ${data.topic || "Documento"}`,
-                  status: "pending",
-                  description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                }]);
-              } else if (currentEventType === "production_event") {
-                setAiProcessSteps((prev: any[]) => {
-                  const newSteps = [...prev];
-                  const lastStep = newSteps[newSteps.length - 1];
-                  if (lastStep && lastStep.status === "pending" && data.message) {
-                    lastStep.title = data.message;
-                  } else {
-                    newSteps.push({
-                      id: `step-${Date.now()}`,
-                      title: data.message || "Procesando...",
-                      status: "pending",
-                      description: data.stage
-                    });
-                  }
-                  return newSteps;
-                });
-              } else if (currentEventType === "production_complete") {
-                setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-              } else if (currentEventType === "done" || currentEventType === "finish") {
-                streamTransition.finalize({
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: fullContent,
-                  timestamp: new Date(),
-                  requestId: data.requestId || generateRequestId(),
-                  userMessageId: undefined,
-                  webSources: data.webSources,
-                  artifact: data.artifact
-                });
-                streamComplete = true;
-              } else if (currentEventType === "error") {
-                throw new Error(data.message || "Stream error");
-              }
-            } catch (parseError) {
-              console.warn("SSE parse error:", parseError);
-            }
-          }
+            return newSteps;
+          });
+        } else if (eventType === "production_complete") {
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
         }
-      }
-
-      // If no explicit done event, just clean up streaming state
-      if (!streamComplete) {
-        streamingContentRef.current = "";
-        setStreamingContent("");
-        setAiState("idle");
-      }
-      abortControllerRef.current = null;
-
-    } catch (error: any) {
-      if (error.name === "AbortError") return;
-      console.error("Regenerate error:", error);
-
-      streamTransition.finalize({
+      },
+      buildFinalMessage: (content, data) => ({
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content,
+        timestamp: new Date(),
+        requestId: data?.requestId || generateRequestId(),
+        webSources: data?.webSources,
+        artifact: data?.artifact,
+      }),
+      buildErrorMessage: (error) => ({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
         timestamp: new Date(),
         requestId: generateRequestId(),
-      });
-      abortControllerRef.current = null;
-    }
+      }),
+    });
   }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
@@ -2563,75 +2480,30 @@ export function ChatInterface({
     
     // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
     if (input.trim().startsWith("!")) {
-      const cleanInput = input.trim().substring(1); // Remove the "!" prefix
-      console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
+      const cleanInput = input.trim().substring(1);
       setInput("");
-      setAiState("thinking");
-      
-      try {
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-        if (chatId?.startsWith("pending-")) {
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-        }
 
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            chatId: effectiveChatIdForStream,
-            conversationId: effectiveChatIdForStream,
-            model: selectedModel || "grok-3"
-          })
-        });
-        
-        if (!response.ok) {
-          console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
-          setAiState("idle");
-          return;
-        }
-        
-        // Read the stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  setStreamingContent(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-        
-        // Finalize: atomically show message and clear streaming
-        streamTransition.finalize({
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+        },
+        buildFinalMessage: (content) => ({
           id: `emergency-${Date.now()}`,
           role: "assistant",
-          content: fullContent || "No response received",
-          timestamp: new Date()
-        });
-        return;
-      } catch (error) {
-        console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
-        setAiState("idle");
-        return;
-      }
+          content: content || "No response received",
+          timestamp: new Date(),
+        }),
+      });
+      return;
     }
     
     // MOCK CITATION TRIGGER FOR VERIFICATION
@@ -2714,97 +2586,41 @@ export function ChatInterface({
       };
       onSendMessage(userMessage);
       
-      setAiState("thinking");
-      streamingContentRef.current = "";
-      setStreamingContent("");
-      
-      try {
-        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
-        const cleanInput = userInput.replace(/^🌐\s*/, "");
-        
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-        if (chatId?.startsWith("pending-")) {
-          // Upgrade pending client-only chat id to a real stable chat id for server persistence.
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-        }
+      // Stream the response using the all-in-one hook
+      // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
+      const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+      const cleanInput = userInput.replace(/^🌐\s*/, "");
 
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            chatId: effectiveChatIdForStream,
-            conversationId: effectiveChatIdForStream,
-            model: selectedModel || "grok-3",
-            forceWebSearch: isWebSearch,
-            webSearchAuto: isWebSearch
-          })
-        });
-        
-        if (!response.ok) {
-          console.error("[EMERGENCY BYPASS] API error:", response.status);
-          const errorMsg: Message = {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
-            timestamp: new Date()
-          };
-          onSendMessage(errorMsg);
-          setAiState("idle");
-          return;
-        }
-        
-        // Read the SSE stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        let sseBuffer = "";
-        setAiState("responding");
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
 
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          sseBuffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors for incomplete JSON
-              }
-            }
-          }
-        }
-
-        // Atomically transition from streaming to finalized message
-        streamTransition.finalize({
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+          forceWebSearch: isWebSearch,
+          webSearchAuto: isWebSearch,
+        },
+        buildFinalMessage: (fullContent) => ({
           id: `assistant-${Date.now()}`,
           role: "assistant",
           content: fullContent || "No se recibió respuesta del servidor.",
           timestamp: new Date(),
-          userMessageId: userMsgId
-        });
-        return;
-      } catch (error) {
-        console.error("[EMERGENCY BYPASS] Error:", error);
-        streamTransition.finalize({
+          userMessageId: userMsgId,
+        }),
+        buildErrorMessage: () => ({
           id: `error-${Date.now()}`,
           role: "assistant",
           content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
-          timestamp: new Date()
-        });
-        return;
-      }
+          timestamp: new Date(),
+        }),
+      });
+      return;
     }
 
     // Handle Agent mode - show in chat, not side panel
