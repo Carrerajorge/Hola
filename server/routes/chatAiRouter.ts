@@ -1295,7 +1295,9 @@ ${attachmentContext}`;
           status: 'pending',
           runId: claimedRun?.id,
           userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,
-          requestId: claimedRun ? undefined : requestId,
+          // chat_messages has a global UNIQUE(request_id). The user message above uses requestId,
+          // so the assistant placeholder must NOT reuse it.
+          requestId: claimedRun ? undefined : `${requestId}:assistant`,
         });
         assistantMessageId = assistantMessage.id;
 
