@@ -1,7 +1,7 @@
 import type { ExpoConfig } from 'expo/config';
 
 const config: ExpoConfig = {
-  name: 'Iliagpt',
+  name: 'IliaGPT',
   slug: 'iliagpt',
   scheme: 'iliagpt',
   version: '1.0.0',
