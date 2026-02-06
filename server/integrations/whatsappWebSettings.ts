@@ -8,6 +8,7 @@ export type WhatsAppWebSettingsV1 = {
     enabled: boolean;
     controllersOnly: boolean;
     allowAgenticTools: boolean;
+    mentionOnly: boolean; // Only reply when the message starts with "ILIA ..."
   };
   controllers: string[]; // WhatsApp JIDs allowed to control auto-replies (e.g. "123@s.whatsapp.net")
   pairing?: {
@@ -71,6 +72,7 @@ function defaultSettings(): WhatsAppWebSettings {
       enabled: false,
       controllersOnly: true,
       allowAgenticTools: false,
+      mentionOnly: true,
     },
     controllers: [],
     updatedAt: Date.now(),
@@ -226,7 +228,7 @@ export function removeController(userId: string, jid: string): WhatsAppWebSettin
 
 export function maskJid(jid: string): string {
   const raw = String(jid || '');
-  const digits = raw.replace(/\\D/g, '');
+  const digits = raw.replace(/\D/g, '');
   if (digits.length >= 6) {
     const last4 = digits.slice(-4);
     return raw.replace(digits, `***${last4}`);
@@ -239,6 +241,7 @@ export function settingsForClient(settings: WhatsAppWebSettings): {
   autoReplyEnabled: boolean;
   controllersOnly: boolean;
   allowAgenticTools: boolean;
+  mentionOnly: boolean;
   controllers: Array<{ jid: string; masked: string }>;
   pairingActive: boolean;
   pairingExpiresAt: number | null;
@@ -249,6 +252,7 @@ export function settingsForClient(settings: WhatsAppWebSettings): {
     autoReplyEnabled: !!settings.autoReply.enabled,
     controllersOnly: !!settings.autoReply.controllersOnly,
     allowAgenticTools: !!settings.autoReply.allowAgenticTools,
+    mentionOnly: !!settings.autoReply.mentionOnly,
     controllers: settings.controllers.map((jid) => ({ jid, masked: maskJid(jid) })),
     pairingActive,
     pairingExpiresAt: pairingActive ? settings.pairing!.expiresAt : null,

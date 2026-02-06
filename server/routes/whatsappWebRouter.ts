@@ -5,6 +5,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { whatsappWebManager } from '../integrations/whatsappWeb';
 import { whatsappWebSseHub } from '../integrations/whatsappWebSse';
 import { chunkText, isGroupJid, MemorySseResponse } from '../integrations/whatsappWebAutoReply';
+import { parseWhatsAppCommand, stripIliaMentionPrefix } from '../integrations/whatsappWebCommands';
 import {
   generatePairingCode,
   isController as isWhatsAppController,
@@ -34,33 +35,6 @@ function safeChatId(userId: string, remoteJid: string): string {
   return raw.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 200);
 }
 
-type WhatsAppInboundCommand =
-  | { type: 'pair'; code: string }
-  | { type: 'help' }
-  | { type: 'status' }
-  | { type: 'stop' }
-  | { type: 'start' }
-  | { type: 'unpair' }
-  | { type: 'none' };
-
-function parseInboundCommand(text: string): WhatsAppInboundCommand {
-  const t = String(text || '').trim();
-  if (!t) return { type: 'none' };
-  const up = t.toUpperCase();
-
-  // Allow either: "PAIR 123456" or "ILIA PAIR 123456" or "/pair 123456"
-  const pairMatch = up.match(/^(?:ILIA\s+)?(?:\/?PAIR|\/?EMPAREJAR|\/?VINCULAR)\s+([A-Z0-9]{4,12})$/i);
-  if (pairMatch?.[1]) return { type: 'pair', code: pairMatch[1] };
-
-  if (/^(?:ILIA\s+)?(?:\/?HELP|\/?AYUDA)$/.test(up)) return { type: 'help' };
-  if (/^(?:ILIA\s+)?(?:\/?STATUS|\/?ESTADO)$/.test(up)) return { type: 'status' };
-  if (/^(?:ILIA\s+)?(?:\/?STOP|\/?DETENER|\/?PARAR|\/?PAUSA)$/.test(up)) return { type: 'stop' };
-  if (/^(?:ILIA\s+)?(?:\/?START|\/?INICIAR|\/?CONTINUAR)$/.test(up)) return { type: 'start' };
-  if (/^(?:ILIA\s+)?(?:\/?UNPAIR|\/?DESVINCULAR|\/?SALIR)$/.test(up)) return { type: 'unpair' };
-
-  return { type: 'none' };
-}
-
 const pairingLimiter = new RateLimiterMemory({ points: 5, duration: 10 * 60 }); // 5 attempts / 10 min
 const commandLimiter = new RateLimiterMemory({ points: 12, duration: 60 }); // 12 commands / minute
 const autoReplyLimiter = new RateLimiterMemory({ points: 6, duration: 60 }); // 6 replies / minute per controller contact
@@ -78,6 +52,45 @@ function enqueueAutoReply(chatId: string, fn: () => Promise<void>): void {
       }
     });
   autoReplyQueueByChat.set(chatId, next);
+}
+
+const CHAT_LIST_CACHE_TTL_MS = 30 * 60 * 1000;
+const lastChatListByController = new Map<string, { ids: string[]; createdAt: number }>();
+function controllerCacheKey(userId: string, controllerJid: string): string {
+  return `${userId}:${controllerJid}`;
+}
+
+function asBoolText(v: unknown): boolean {
+  return String(v || '').toLowerCase() === 'true';
+}
+
+function truncateOneLine(text: string, maxLen = 80): string {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen - 1) + '…';
+}
+
+async function refreshControllerChatList(userId: string, controllerJid: string): Promise<any[]> {
+  const key = controllerCacheKey(userId, controllerJid);
+  const now = Date.now();
+
+  const all = await storage.getChats(userId);
+  const visible = all.filter((c: any) => !asBoolText(c.hidden));
+  const ids = visible.slice(0, 50).map((c: any) => c.id);
+  lastChatListByController.set(key, { ids, createdAt: now });
+  return visible.slice(0, 50) as any[];
+}
+
+async function getControllerChatIds(userId: string, controllerJid: string): Promise<string[]> {
+  const key = controllerCacheKey(userId, controllerJid);
+  const cached = lastChatListByController.get(key);
+  if (cached && (Date.now() - cached.createdAt) < CHAT_LIST_CACHE_TTL_MS && cached.ids.length > 0) {
+    return cached.ids;
+  }
+
+  const chats = await refreshControllerChatList(userId, controllerJid);
+  return chats.map((c: any) => c.id);
 }
 
 export function createWhatsAppWebRouter(): Router {
@@ -131,11 +144,12 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const { autoReplyEnabled, controllersOnly, allowAgenticTools } = req.body || {};
+    const { autoReplyEnabled, controllersOnly, allowAgenticTools, mentionOnly } = req.body || {};
     const autoReplyPatch: Record<string, boolean> = {};
     if (typeof autoReplyEnabled === 'boolean') autoReplyPatch.enabled = autoReplyEnabled;
     if (typeof controllersOnly === 'boolean') autoReplyPatch.controllersOnly = controllersOnly;
     if (typeof allowAgenticTools === 'boolean') autoReplyPatch.allowAgenticTools = allowAgenticTools;
+    if (typeof mentionOnly === 'boolean') autoReplyPatch.mentionOnly = mentionOnly;
 
     const next = updateWhatsAppWebSettings(
       userId,
@@ -215,6 +229,21 @@ async function persistAndBroadcastAssistantMessage(opts: {
       requestId: saved.requestId,
       userMessageId: saved.userMessageId,
       metadata: saved.metadata,
+    },
+  });
+}
+
+function broadcastChatUpdate(userId: string, chat: any): void {
+  if (!chat?.id) return;
+  whatsappWebSseHub.broadcast(userId, 'wa_chat_update', {
+    chat: {
+      id: chat.id,
+      title: chat.title,
+      archived: asBoolText(chat.archived),
+      hidden: asBoolText(chat.hidden),
+      pinned: asBoolText(chat.pinned),
+      pinnedAt: chat.pinnedAt instanceof Date ? chat.pinnedAt.toISOString() : chat.pinnedAt,
+      updatedAt: chat.updatedAt instanceof Date ? chat.updatedAt.toISOString() : new Date().toISOString(),
     },
   });
 }
@@ -365,6 +394,7 @@ async function autoReplyFromWhatsApp(opts: {
       // Extra guardrails for WhatsApp channel.
       systemPrompt: 'Estás respondiendo por WhatsApp. Mantén respuestas concisas. Evita pedir datos sensibles. ' +
         'Si una acción es riesgosa, explica y pide que lo hagan desde el panel web.',
+      channel: 'whatsapp_web',
     });
 
     const assistantText = memRes.chunks
@@ -482,7 +512,10 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
 
     const settings = loadWhatsAppWebSettings(userId);
     const controller = isWhatsAppController(settings, msg.from);
-    const cmd = parseInboundCommand(safeInboundText);
+    const cmd = parseWhatsAppCommand(safeInboundText);
+
+    // Safety: do not accept pairing/commands/auto-replies from group chats.
+    if (isGroupJid(msg.from)) return;
 
     // Commands are only honored from controllers, except pairing.
     if (cmd.type !== 'none') {
@@ -511,14 +544,21 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
     }
 
     if (cmd.type === 'help' && controller) {
+      const s = loadWhatsAppWebSettings(userId);
+      const mentionHint = s.autoReply.mentionOnly ? 'Tip: para que ILIA responda, escriba \"ILIA <mensaje>\".' : '';
       const help = [
         'Comandos ILIA (WhatsApp):',
         '- STATUS / ESTADO',
         '- STOP / PAUSA',
         '- START / CONTINUAR',
         '- UNPAIR / DESVINCULAR',
+        '- CHATS (lista chats recientes)',
+        '- OPEN <n> (ver chat n)',
+        '- PIN <n> / UNPIN <n>',
+        '- ARCHIVE <n> / UNARCHIVE <n>',
         '- !agent <texto> (solo si habilitó herramientas en la web)',
-      ].join('\n');
+        mentionHint,
+      ].filter(Boolean).join('\n');
       await whatsappWebManager.sendText(userId, msg.from, help);
       await persistAndBroadcastAssistantMessage({
         userId,
@@ -537,6 +577,7 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
       const text = [
         `WhatsApp: ${status.state}`,
         `Auto-reply: ${s.autoReply.enabled ? 'ON' : 'OFF'} (${s.autoReply.controllersOnly ? 'controllers' : 'all'})`,
+        `Mention-only: ${s.autoReply.mentionOnly ? 'ON' : 'OFF'}`,
         `Tools/agent: ${s.autoReply.allowAgenticTools ? 'ON' : 'OFF'}`,
         `Controllers: ${s.controllers.length}`,
       ].join('\n');
@@ -598,12 +639,220 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
       return;
     }
 
+    if (cmd.type === 'chats' && controller) {
+      const chats = await refreshControllerChatList(userId, msg.from);
+      const limit = Math.min(Math.max(cmd.limit || 10, 1), 20);
+      const items = chats.slice(0, limit);
+
+      const lines = items.map((c: any, idx: number) => {
+        const flags: string[] = [];
+        if (String(c.id || '').startsWith('wa_')) flags.push('WA');
+        if (asBoolText(c.pinned)) flags.push('PIN');
+        if (asBoolText(c.archived)) flags.push('ARCH');
+        const prefix = flags.length ? `[${flags.join('][')}] ` : '';
+        const title = truncateOneLine(c.title || '(sin titulo)', 60) || '(sin titulo)';
+        return `${idx + 1}) ${prefix}${title}`;
+      });
+
+      const text = lines.length
+        ? `Chats recientes:\n${lines.join('\n')}\n\nUse: OPEN 1, PIN 1, ARCHIVE 1, UNARCHIVE 1`
+        : 'No hay chats.';
+
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_chats_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'chats' },
+      });
+      return;
+    }
+
+    if (cmd.type === 'open' && controller) {
+      const ids = await getControllerChatIds(userId, msg.from);
+      const idx = cmd.index;
+      if (!idx || idx < 1 || idx > ids.length) {
+        const msgText = 'Índice inválido. Envíe CHATS para ver la lista y luego use OPEN <n>, PIN <n>, ARCHIVE <n>, etc.';
+        for (const part of chunkText(msgText, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+        await persistAndBroadcastAssistantMessage({
+          userId,
+          chatId,
+          chatTitle: chat.title,
+          content: msgText,
+          requestId: `wa_bad_index_${Date.now()}`,
+          metadata: { channel: 'whatsapp_web', to: msg.from, command: 'open' },
+        });
+        return;
+      }
+
+      const targetChatId = ids[idx - 1];
+      const target = targetChatId ? await storage.getChat(targetChatId) : null;
+      if (!target) {
+        lastChatListByController.delete(controllerCacheKey(userId, msg.from));
+        const msgText = 'Chat no encontrado. Envíe CHATS para regenerar la lista.';
+        for (const part of chunkText(msgText, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+        await persistAndBroadcastAssistantMessage({
+          userId,
+          chatId,
+          chatTitle: chat.title,
+          content: msgText,
+          requestId: `wa_open_missing_${Date.now()}`,
+          metadata: { channel: 'whatsapp_web', to: msg.from, command: 'open' },
+        });
+        return;
+      }
+
+      const last = await storage.getChatMessages(targetChatId, { limit: 3, orderBy: 'desc' } as any);
+      const lastChrono = [...last].reverse();
+      const msgLines = lastChrono.map((m: any) => `- ${m.role}: ${truncateOneLine(m.content || '', 120)}`).join('\n');
+
+      const text = [
+        `Chat #${idx}: ${truncateOneLine(target.title || '(sin titulo)', 80) || '(sin titulo)'}`,
+        `Pinned: ${asBoolText(target.pinned) ? 'yes' : 'no'}`,
+        `Archived: ${asBoolText(target.archived) ? 'yes' : 'no'}`,
+        msgLines ? `Ultimos mensajes:\n${msgLines}` : 'Sin mensajes.',
+      ].join('\n');
+
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_open_${targetChatId}_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'open', targetChatId },
+      });
+      return;
+    }
+
+    if (cmd.type === 'pin' && controller) {
+      const ids = await getControllerChatIds(userId, msg.from);
+      const idx = cmd.index;
+      if (!idx || idx < 1 || idx > ids.length) {
+        await whatsappWebManager.sendText(userId, msg.from, 'Índice inválido. Envíe CHATS y luego PIN <n>.');
+        return;
+      }
+      const targetChatId = ids[idx - 1];
+      lastChatListByController.delete(controllerCacheKey(userId, msg.from));
+      const updated = targetChatId ? await storage.updateChat(targetChatId, { pinned: 'true', pinnedAt: new Date() } as any) : null;
+      if (updated) broadcastChatUpdate(userId, updated);
+      const text = updated ? `OK. Fijado #${idx}: ${truncateOneLine(updated.title || '', 80) || targetChatId}` : 'No se pudo fijar el chat.';
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_pin_${targetChatId || 'missing'}_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'pin', targetChatId },
+      });
+      return;
+    }
+
+    if (cmd.type === 'unpin' && controller) {
+      const ids = await getControllerChatIds(userId, msg.from);
+      const idx = cmd.index;
+      if (!idx || idx < 1 || idx > ids.length) {
+        await whatsappWebManager.sendText(userId, msg.from, 'Índice inválido. Envíe CHATS y luego UNPIN <n>.');
+        return;
+      }
+      const targetChatId = ids[idx - 1];
+      lastChatListByController.delete(controllerCacheKey(userId, msg.from));
+      const updated = targetChatId ? await storage.updateChat(targetChatId, { pinned: 'false', pinnedAt: null } as any) : null;
+      if (updated) broadcastChatUpdate(userId, updated);
+      const text = updated ? `OK. Desfijado #${idx}: ${truncateOneLine(updated.title || '', 80) || targetChatId}` : 'No se pudo desfijar el chat.';
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_unpin_${targetChatId || 'missing'}_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'unpin', targetChatId },
+      });
+      return;
+    }
+
+    if (cmd.type === 'archive' && controller) {
+      const ids = await getControllerChatIds(userId, msg.from);
+      const idx = cmd.index;
+      if (!idx || idx < 1 || idx > ids.length) {
+        await whatsappWebManager.sendText(userId, msg.from, 'Índice inválido. Envíe CHATS y luego ARCHIVE <n>.');
+        return;
+      }
+      const targetChatId = ids[idx - 1];
+      lastChatListByController.delete(controllerCacheKey(userId, msg.from));
+      const updated = targetChatId ? await storage.updateChat(targetChatId, { archived: 'true' } as any) : null;
+      if (updated) broadcastChatUpdate(userId, updated);
+      const text = updated ? `OK. Archivado #${idx}: ${truncateOneLine(updated.title || '', 80) || targetChatId}` : 'No se pudo archivar el chat.';
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_archive_${targetChatId || 'missing'}_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'archive', targetChatId },
+      });
+      return;
+    }
+
+    if (cmd.type === 'unarchive' && controller) {
+      const ids = await getControllerChatIds(userId, msg.from);
+      const idx = cmd.index;
+      if (!idx || idx < 1 || idx > ids.length) {
+        await whatsappWebManager.sendText(userId, msg.from, 'Índice inválido. Envíe CHATS y luego UNARCHIVE <n>.');
+        return;
+      }
+      const targetChatId = ids[idx - 1];
+      lastChatListByController.delete(controllerCacheKey(userId, msg.from));
+      const updated = targetChatId ? await storage.updateChat(targetChatId, { archived: 'false' } as any) : null;
+      if (updated) broadcastChatUpdate(userId, updated);
+      const text = updated ? `OK. Desarchivado #${idx}: ${truncateOneLine(updated.title || '', 80) || targetChatId}` : 'No se pudo desarchivar el chat.';
+      for (const part of chunkText(text, 1400)) await whatsappWebManager.sendText(userId, msg.from, part);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: text,
+        requestId: `wa_unarchive_${targetChatId || 'missing'}_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, command: 'unarchive', targetChatId },
+      });
+      return;
+    }
+
     // Auto-reply security gate:
     // - Off by default, opt-in required (via UI or pairing).
     // - Default: only controllers can trigger replies.
     if (!settings.autoReply.enabled) return;
     if (settings.autoReply.controllersOnly && !controller) return;
     if (isGroupJid(msg.from)) return;
+
+    const decision = safeInboundText.trim().toUpperCase();
+    const isDecision = decision === 'CONFIRM' || decision === 'CANCEL';
+    const { mentioned, cleanedText } = stripIliaMentionPrefix(safeInboundText);
+    const textForAutoReply = mentioned ? cleanedText : safeInboundText;
+    const wantsAgent = /^\s*!agent\b/i.test(textForAutoReply);
+
+    // Mention-only safety: ignore non-mention, non-command messages.
+    if (settings.autoReply.mentionOnly && !mentioned && !wantsAgent && !isDecision) return;
+
+    // If controller pings "ILIA" with no content, provide a tiny hint instead of invoking the model.
+    if (mentioned && !textForAutoReply) {
+      const msgText = 'Listo. Envíe: "ILIA <mensaje>" (o HELP para comandos).';
+      await whatsappWebManager.sendText(userId, msg.from, msgText);
+      await persistAndBroadcastAssistantMessage({
+        userId,
+        chatId,
+        chatTitle: chat.title,
+        content: msgText,
+        requestId: `wa_ilia_ping_${Date.now()}`,
+        metadata: { channel: 'whatsapp_web', to: msg.from, mode: 'ping' },
+      });
+      return;
+    }
 
     try { await autoReplyLimiter.consume(`${userId}:${msg.from}`); } catch { return; }
 
@@ -612,7 +861,7 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
         userId,
         fromJid: msg.from,
         chatId,
-        inboundText: safeInboundText,
+        inboundText: textForAutoReply,
         chatTitle: chat.title,
         settings: loadWhatsAppWebSettings(userId),
       });

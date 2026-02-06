@@ -17,6 +17,62 @@ const adminUpdateDataControlsSchema = z.object({
     chatHistoryEnabled: z.boolean().optional(),
 });
 
+const adminUpdateUserSchema = z.object({
+    // Keep this allowlist tight: never allow patching password/totpSecret/etc via a generic PATCH.
+    plan: z.enum(["free", "pro", "enterprise"]).optional(),
+    role: z.enum(["user", "admin", "superadmin", "team_admin", "moderator", "editor", "viewer", "api_only"]).optional(),
+    status: z.enum(["active", "inactive", "suspended", "pending_verification", "blocked", "deleted"]).optional(),
+    tokensLimit: z.number().int().positive().optional(),
+    internalNotes: z.string().max(10_000).optional(),
+    tags: z.array(z.string().max(64)).max(50).optional(),
+}).strict();
+
+const adminBlockUserSchema = z.object({
+    reason: z.string().min(3).max(200),
+}).strict();
+
+const adminClearChatsSchema = z.object({
+    reason: z.string().min(3).max(200),
+}).strict();
+
+// Never return sensitive fields (password, totpSecret, tokens) from admin endpoints.
+const adminUserFields = {
+    id: users.id,
+    email: users.email,
+    username: users.username,
+    firstName: users.firstName,
+    lastName: users.lastName,
+    fullName: users.fullName,
+    profileImageUrl: users.profileImageUrl,
+    phone: users.phone,
+    company: users.company,
+    role: users.role,
+    plan: users.plan,
+    status: users.status,
+    queryCount: users.queryCount,
+    tokensConsumed: users.tokensConsumed,
+    tokensLimit: users.tokensLimit,
+    creditsBalance: users.creditsBalance,
+    authProvider: users.authProvider,
+    emailVerified: users.emailVerified,
+    phoneVerified: users.phoneVerified,
+    is2faEnabled: users.is2faEnabled,
+    totpEnabled: users.totpEnabled,
+    loginCount: users.loginCount,
+    internalNotes: users.internalNotes,
+    tags: users.tags,
+    orgId: users.orgId,
+    networkAccessEnabled: users.networkAccessEnabled,
+    createdAt: users.createdAt,
+    updatedAt: users.updatedAt,
+    lastLoginAt: users.lastLoginAt,
+};
+
+async function getAdminUserById(id: string) {
+    const [row] = await dbRead.select(adminUserFields).from(users).where(eq(users.id, id)).limit(1);
+    return row || null;
+}
+
 export const usersRouter = Router();
 
 // GET /api/admin/users - List with pagination, search, and filters
@@ -72,8 +128,8 @@ usersRouter.get("/", async (req, res) => {
         const orderClause = sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
 
         const usersQuery = whereClause
-            ? dbRead.select().from(users).where(whereClause)
-            : dbRead.select().from(users);
+            ? dbRead.select(adminUserFields).from(users).where(whereClause)
+            : dbRead.select(adminUserFields).from(users);
 
         const countQuery = whereClause
             ? dbRead.select({ count: sql<number>`count(*)` }).from(users).where(whereClause)
@@ -109,6 +165,63 @@ usersRouter.get("/stats", async (req, res) => {
     try {
         const stats = await storage.getUserStats();
         res.json(stats);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Export endpoints (must be declared before /:id to avoid route shadowing)
+usersRouter.get("/export", async (req, res) => {
+    try {
+        const { format = "json", limit = "5000" } = req.query as Record<string, string>;
+        const limitNum = Math.min(Math.max(parseInt(limit, 10) || 5000, 1), 50000);
+
+        // Safety: exporting "all users" doesn't scale; export the most recent N users.
+        const exportedUsers = await dbRead
+            .select({
+                id: users.id,
+                email: users.email,
+                username: users.username,
+                firstName: users.firstName,
+                lastName: users.lastName,
+                fullName: users.fullName,
+                plan: users.plan,
+                role: users.role,
+                status: users.status,
+                queryCount: users.queryCount,
+                tokensConsumed: users.tokensConsumed,
+                createdAt: users.createdAt,
+                lastLoginAt: users.lastLoginAt,
+            })
+            .from(users)
+            .orderBy(desc(users.createdAt), desc(users.id))
+            .limit(limitNum);
+
+        if (format === "csv") {
+            const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
+            const csvRows = [headers.join(",")];
+            exportedUsers.forEach(u => {
+                csvRows.push([
+                    u.id,
+                    u.email || "",
+                    u.fullName || `${u.firstName || ""} ${u.lastName || ""}`.trim(),
+                    u.plan || "",
+                    u.role || "",
+                    u.status || "",
+                    u.queryCount || 0,
+                    u.tokensConsumed || 0,
+                    u.createdAt?.toISOString() || "",
+                    u.lastLoginAt?.toISOString() || ""
+                ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+            });
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.csv`);
+            res.send(csvRows.join("\n"));
+        } else {
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
+            res.json(exportedUsers);
+        }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -227,13 +340,14 @@ usersRouter.patch("/:id/data-controls", validateBody(adminUpdateDataControlsSche
 });
 
 // POST /api/admin/users/:id/chats/delete-all - Clear user chat history (soft delete)
-usersRouter.post("/:id/chats/delete-all", async (req, res) => {
+usersRouter.post("/:id/chats/delete-all", validateBody(adminClearChatsSchema), async (req, res) => {
     try {
         const { id } = req.params;
         const user = await storage.getUser(id);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
+        const { reason } = req.body as z.infer<typeof adminClearChatsSchema>;
 
         const count = await storage.softDeleteAllChats(id);
 
@@ -248,7 +362,7 @@ usersRouter.post("/:id/chats/delete-all", async (req, res) => {
             action: "admin.user_chats_delete_all",
             resource: "chats",
             resourceId: id,
-            details: { targetEmail: user.email, count },
+            details: { targetEmail: user.email, count, reason },
             category: "admin",
             severity: "critical",
         });
@@ -272,7 +386,7 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
         plan: plan || "free",
         role: role || "user",
         status: "active"
-    }).returning();
+    }).returning(adminUserFields);
     
     // Enhanced audit log with full context
     await auditLog(req, {
@@ -287,21 +401,31 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
     res.json(user);
 }));
 
-usersRouter.patch("/:id", async (req, res) => {
+usersRouter.patch("/:id", validateBody(adminUpdateUserSchema), async (req, res) => {
     try {
-        const previousUser = await storage.getUserById(req.params.id);
-        const user = await storage.updateUser(req.params.id, req.body);
-        if (!user) {
+        const id = req.params.id;
+        const updates = req.body as z.infer<typeof adminUpdateUserSchema>;
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: "No updates provided" });
+        }
+
+        const previousUser = await getAdminUserById(id);
+        if (!previousUser) {
             return res.status(404).json({ error: "User not found" });
         }
+
+        const [user] = await db.update(users)
+            .set({ ...updates, updatedAt: new Date() })
+            .where(eq(users.id, id))
+            .returning(adminUserFields);
         
         // Enhanced audit log with before/after details
         await auditLog(req, {
             action: AuditActions.USER_UPDATED,
             resource: "users",
-            resourceId: req.params.id,
+            resourceId: id,
             details: { 
-                changes: req.body,
+                changes: updates,
                 previousValues: previousUser ? {
                     email: previousUser.email,
                     role: previousUser.role,
@@ -322,7 +446,7 @@ usersRouter.patch("/:id", async (req, res) => {
 
 usersRouter.delete("/:id", async (req, res) => {
     try {
-        const userToDelete = await storage.getUserById(req.params.id);
+        const userToDelete = await getAdminUserById(req.params.id);
         await storage.deleteUser(req.params.id);
         
         // Enhanced audit log with deleted user info
@@ -351,7 +475,7 @@ usersRouter.delete("/:id", async (req, res) => {
 // GET /api/admin/users/:id - Get single user details
 usersRouter.get("/:id", async (req, res) => {
     try {
-        const user = await storage.getUser(req.params.id);
+        const user = await getAdminUserById(req.params.id);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -362,18 +486,19 @@ usersRouter.get("/:id", async (req, res) => {
 });
 
 // POST /api/admin/users/:id/block - Block a user
-usersRouter.post("/:id/block", async (req, res) => {
+usersRouter.post("/:id/block", validateBody(adminBlockUserSchema), async (req, res) => {
     try {
-        const { reason } = req.body || {};
-        const previousUser = await storage.getUser(req.params.id);
-        const user = await storage.updateUser(req.params.id, { 
-            status: "blocked",
-            blockedAt: new Date(),
-            blockReason: reason || "Blocked by admin"
-        });
-        if (!user) {
+        const { reason } = req.body as z.infer<typeof adminBlockUserSchema>;
+        const previousUser = await getAdminUserById(req.params.id);
+        if (!previousUser) {
             return res.status(404).json({ error: "User not found" });
         }
+
+        const [user] = await db.update(users)
+            .set({ status: "blocked", updatedAt: new Date() })
+            .where(eq(users.id, req.params.id))
+            .returning(adminUserFields);
+
         await auditLog(req, {
             action: AuditActions.USER_BLOCKED,
             resource: "users",
@@ -395,15 +520,14 @@ usersRouter.post("/:id/block", async (req, res) => {
 // POST /api/admin/users/:id/unblock - Unblock a user
 usersRouter.post("/:id/unblock", async (req, res) => {
     try {
-        const previousUser = await storage.getUser(req.params.id);
-        const user = await storage.updateUser(req.params.id, { 
-            status: "active",
-            blockedAt: null,
-            blockReason: null
-        });
-        if (!user) {
+        const previousUser = await getAdminUserById(req.params.id);
+        if (!previousUser) {
             return res.status(404).json({ error: "User not found" });
         }
+        const [user] = await db.update(users)
+            .set({ status: "active", updatedAt: new Date() })
+            .where(eq(users.id, req.params.id))
+            .returning(adminUserFields);
         await auditLog(req, {
             action: AuditActions.USER_UNBLOCKED,
             resource: "users",
@@ -428,11 +552,14 @@ usersRouter.patch("/:id/role", async (req, res) => {
         if (!role || !["user", "admin", "moderator"].includes(role)) {
             return res.status(400).json({ error: "Invalid role. Must be: user, admin, or moderator" });
         }
-        const previousUser = await storage.getUser(req.params.id);
-        const user = await storage.updateUser(req.params.id, { role });
-        if (!user) {
+        const previousUser = await getAdminUserById(req.params.id);
+        if (!previousUser) {
             return res.status(404).json({ error: "User not found" });
         }
+        const [user] = await db.update(users)
+            .set({ role, updatedAt: new Date() })
+            .where(eq(users.id, req.params.id))
+            .returning(adminUserFields);
         await storage.createAuditLog({
             action: "user_role_change",
             resource: "users",
@@ -449,7 +576,7 @@ usersRouter.patch("/:id/role", async (req, res) => {
 usersRouter.get("/:id/conversations", async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await storage.getUser(userId);
+        const user = await getAdminUserById(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -489,7 +616,7 @@ usersRouter.get("/:id/conversations", async (req, res) => {
 usersRouter.delete("/:id/conversations", async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await storage.getUser(userId);
+        const user = await getAdminUserById(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -519,7 +646,7 @@ usersRouter.delete("/:id/conversations", async (req, res) => {
 usersRouter.post("/:id/impersonate", async (req, res) => {
     try {
         const userId = req.params.id;
-        const user = await storage.getUser(userId);
+        const user = await getAdminUserById(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -561,7 +688,7 @@ usersRouter.post("/:id/reset", async (req, res) => {
         const userId = req.params.id;
         const { deleteConversations = true, resetStats = false } = req.body;
 
-        const user = await storage.getUser(userId);
+        const user = await getAdminUserById(userId);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -597,63 +724,6 @@ usersRouter.post("/:id/reset", async (req, res) => {
             deletedConversations,
             statsReset: resetStats
         });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Export endpoints
-usersRouter.get("/export", async (req, res) => {
-    try {
-        const { format = "json", limit = "5000" } = req.query as Record<string, string>;
-        const limitNum = Math.min(Math.max(parseInt(limit, 10) || 5000, 1), 50000);
-
-        // Safety: exporting "all users" doesn't scale; export the most recent N users.
-        const exportedUsers = await dbRead
-            .select({
-                id: users.id,
-                email: users.email,
-                username: users.username,
-                firstName: users.firstName,
-                lastName: users.lastName,
-                fullName: users.fullName,
-                plan: users.plan,
-                role: users.role,
-                status: users.status,
-                queryCount: users.queryCount,
-                tokensConsumed: users.tokensConsumed,
-                createdAt: users.createdAt,
-                lastLoginAt: users.lastLoginAt,
-            })
-            .from(users)
-            .orderBy(desc(users.createdAt), desc(users.id))
-            .limit(limitNum);
-
-        if (format === "csv") {
-            const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
-            const csvRows = [headers.join(",")];
-            exportedUsers.forEach(u => {
-                csvRows.push([
-                    u.id,
-                    u.email || "",
-                    u.fullName || `${u.firstName || ""} ${u.lastName || ""}`.trim(),
-                    u.plan || "",
-                    u.role || "",
-                    u.status || "",
-                    u.queryCount || 0,
-                    u.tokensConsumed || 0,
-                    u.createdAt?.toISOString() || "",
-                    u.lastLoginAt?.toISOString() || ""
-                ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
-            });
-            res.setHeader("Content-Type", "text/csv");
-            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.csv`);
-            res.send(csvRows.join("\n"));
-        } else {
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
-            res.json(exportedUsers);
-        }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

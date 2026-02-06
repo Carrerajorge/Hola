@@ -19,6 +19,7 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
 const BILLING_MANAGER_ROLES = new Set(["admin", "superadmin", "team_admin"]);
 const BILLING_CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
 const billingContactCooldown = new Map<string, number>();
+const billingContactIpCooldown = new Map<string, number>();
 
 function requireStripeProductSeedingEnabled(_req: any, res: any, next: any) {
   const flag = String(process.env.ALLOW_STRIPE_PRODUCT_SEEDING || "").trim().toLowerCase();
@@ -720,12 +721,16 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      const body = z
+      const parsedBody = z
         .object({
           enabled: z.boolean(),
           thresholdPercent: z.number().int().min(1).max(100).default(80),
         })
-        .parse(req.body);
+        .safeParse(req.body);
+      if (!parsedBody.success) {
+        return res.status(400).json({ error: "Invalid request body", code: "INVALID_BODY" });
+      }
+      const body = parsedBody.data;
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
@@ -865,13 +870,17 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      const body = z
+      const parsedBody = z
         .object({
           message: z.string().trim().min(5).max(2000),
           action: z.string().trim().max(100).optional(),
           source: z.string().trim().max(100).optional(),
         })
-        .parse(req.body);
+        .safeParse(req.body);
+      if (!parsedBody.success) {
+        return res.status(400).json({ error: "Invalid request body", code: "INVALID_BODY" });
+      }
+      const body = parsedBody.data;
 
       const adminEmail = String(process.env.ADMIN_EMAIL || "").trim();
       const recipientEmailParsed = z.string().email().safeParse(adminEmail);
@@ -880,8 +889,19 @@ export function createStripeRouter() {
       }
 
       const nowMs = Date.now();
-      const lastMs = billingContactCooldown.get(userId) || 0;
-      const remainingMs = BILLING_CONTACT_COOLDOWN_MS - (nowMs - lastMs);
+      const ip =
+        ((req.headers["x-forwarded-for"] as string) || "").split(",")[0]?.trim() ||
+        (req.headers["x-real-ip"] as string) ||
+        req.ip ||
+        "";
+
+      const lastUserMs = billingContactCooldown.get(userId) || 0;
+      const remainingUserMs = BILLING_CONTACT_COOLDOWN_MS - (nowMs - lastUserMs);
+
+      const lastIpMs = ip ? (billingContactIpCooldown.get(ip) || 0) : 0;
+      const remainingIpMs = ip ? BILLING_CONTACT_COOLDOWN_MS - (nowMs - lastIpMs) : 0;
+
+      const remainingMs = Math.max(remainingUserMs, remainingIpMs);
       if (remainingMs > 0) {
         const retryAfterSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
         return res.status(429).json({
@@ -891,28 +911,55 @@ export function createStripeRouter() {
         });
       }
       billingContactCooldown.set(userId, nowMs);
+      if (ip) billingContactIpCooldown.set(ip, nowMs);
+
+      // Best-effort cleanup so these Maps don't grow unbounded in long-lived processes.
+      if (billingContactCooldown.size > 5000) {
+        for (const [k, v] of billingContactCooldown.entries()) {
+          if (nowMs - v > BILLING_CONTACT_COOLDOWN_MS) billingContactCooldown.delete(k);
+        }
+        if (billingContactCooldown.size > 5000) billingContactCooldown.clear();
+      }
+      if (billingContactIpCooldown.size > 5000) {
+        for (const [k, v] of billingContactIpCooldown.entries()) {
+          if (nowMs - v > BILLING_CONTACT_COOLDOWN_MS) billingContactIpCooldown.delete(k);
+        }
+        if (billingContactIpCooldown.size > 5000) billingContactIpCooldown.clear();
+      }
 
       const actorEmail = getActorEmail(req) || null;
       const actorRole = getActorRole(req) || null;
-      const action = body.action ? String(body.action) : "billing_help";
+      const action = body.action ? String(body.action) : "support_request";
+      const actionLabelMap: Record<string, string> = {
+        workspace_settings: "Workspace: ajustes",
+        workspace_name: "Workspace: nombre",
+        workspace_logo: "Workspace: logotipo",
+        workspace_billing: "Facturacion: general",
+        manage_plan: "Facturacion: administrar plan",
+        billing_portal: "Facturacion: portal",
+        add_credits: "Facturacion: agregar creditos",
+        credit_alerts: "Facturacion: alertas",
+        billing_menu: "Facturacion: menu",
+      };
+      const actionLabel = actionLabelMap[action] || action;
 
       const safeMessage = body.message;
       const html = `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <h2>Solicitud de soporte: Facturación</h2>
+          <h2>Solicitud al administrador</h2>
           <p><strong>Usuario:</strong> ${escapeHtml(String(actorEmail || userId))}</p>
           <p><strong>Rol:</strong> ${escapeHtml(String(actorRole || "unknown"))}</p>
-          <p><strong>Accion:</strong> ${escapeHtml(String(action))}</p>
+          <p><strong>Accion:</strong> ${escapeHtml(String(actionLabel))}</p>
           <p><strong>Fecha:</strong> ${escapeHtml(new Date().toISOString())}</p>
           <hr />
           <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 12px; border-radius: 6px;">${escapeHtml(safeMessage)}</pre>
         </div>
       `;
-      const text = `Solicitud de soporte: Facturacion\nUsuario: ${actorEmail || userId}\nRol: ${actorRole || "unknown"}\nAccion: ${action}\nFecha: ${new Date().toISOString()}\n\n${safeMessage}`;
+      const text = `Solicitud al administrador\nUsuario: ${actorEmail || userId}\nRol: ${actorRole || "unknown"}\nAccion: ${actionLabel}\nFecha: ${new Date().toISOString()}\n\n${safeMessage}`;
 
       const result = await sendEmail({
         to: adminEmail,
-        subject: "Solicitud: Facturacion (IliaGPT)",
+        subject: `Solicitud: ${actionLabel} (IliaGPT)`,
         html,
         text,
       });

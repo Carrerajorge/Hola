@@ -1,13 +1,13 @@
 export type WhatsAppWebStatus =
-  | { state: "disconnected" }
-  | { state: "connecting" }
-  | { state: "qr"; qr: string }
-  | { state: "connected"; me?: { id?: string; name?: string } };
+  | { state: 'disconnected' }
+  | { state: 'connecting' }
+  | { state: 'qr'; qr: string }
+  | { state: 'connected'; me?: { id?: string; name?: string } };
 
 export type WhatsAppWebMirroredChat = {
   id: string;
   title: string;
-  channel?: "whatsapp_web";
+  channel?: 'whatsapp_web';
   archived?: boolean;
   hidden?: boolean;
   pinned?: boolean;
@@ -17,7 +17,7 @@ export type WhatsAppWebMirroredChat = {
 
 export type WhatsAppWebMirroredMessage = {
   id: string;
-  role: "user" | "assistant" | string;
+  role: 'user' | 'assistant' | string;
   content: string;
   createdAt: string;
   requestId?: string | null;
@@ -30,16 +30,21 @@ export type WhatsAppWebMirroredMessageEvent = {
   message: WhatsAppWebMirroredMessage;
 };
 
+export type WhatsAppWebChatUpdateEvent = {
+  chat: WhatsAppWebMirroredChat;
+};
+
 type Listener = {
   onStatus?: (status: WhatsAppWebStatus) => void;
   onMessage?: (event: WhatsAppWebMirroredMessageEvent) => void;
+  onChatUpdate?: (event: WhatsAppWebChatUpdateEvent) => void;
   onError?: (message: string) => void;
 };
 
 class WhatsAppWebEventStream {
   private es: EventSource | null = null;
   private listeners = new Set<Listener>();
-  private lastStatus: WhatsAppWebStatus = { state: "disconnected" };
+  private lastStatus: WhatsAppWebStatus = { state: 'disconnected' };
   private lastError: string | null = null;
 
   subscribe(listener: Listener): () => void {
@@ -67,16 +72,17 @@ class WhatsAppWebEventStream {
 
   private ensureConnected(): void {
     if (this.es) return;
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
 
     // EventSource will auto-reconnect. We keep one shared connection for the whole app.
-    this.es = new EventSource("/api/integrations/whatsapp/web/events", {
+    this.es = new EventSource('/api/integrations/whatsapp/web/events', {
       withCredentials: true,
-    } as any);
+    });
 
-    this.es.addEventListener("wa_status", (ev: MessageEvent) => {
+    this.es.addEventListener('wa_status', (ev: MessageEvent) => {
       try {
-        const parsed = JSON.parse(String(ev.data || "{}"));
-        const status = (parsed?.status || { state: "disconnected" }) as WhatsAppWebStatus;
+        const parsed = JSON.parse(String(ev.data || '{}'));
+        const status = (parsed?.status || { state: 'disconnected' }) as WhatsAppWebStatus;
         this.lastStatus = status;
         this.lastError = null;
         for (const l of this.listeners) l.onStatus?.(status);
@@ -85,9 +91,9 @@ class WhatsAppWebEventStream {
       }
     });
 
-    this.es.addEventListener("wa_message", (ev: MessageEvent) => {
+    this.es.addEventListener('wa_message', (ev: MessageEvent) => {
       try {
-        const parsed = JSON.parse(String(ev.data || "{}")) as WhatsAppWebMirroredMessageEvent;
+        const parsed = JSON.parse(String(ev.data || '{}')) as WhatsAppWebMirroredMessageEvent;
         if (!parsed?.chat?.id || !parsed?.message?.id) return;
         this.lastError = null;
         for (const l of this.listeners) l.onMessage?.(parsed);
@@ -96,19 +102,30 @@ class WhatsAppWebEventStream {
       }
     });
 
+    this.es.addEventListener('wa_chat_update', (ev: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(String(ev.data || '{}')) as WhatsAppWebChatUpdateEvent;
+        if (!parsed?.chat?.id) return;
+        this.lastError = null;
+        for (const l of this.listeners) l.onChatUpdate?.(parsed);
+      } catch {
+        // ignore
+      }
+    });
+
     // Heartbeats keep the connection alive through proxies. No-op on the client.
-    this.es.addEventListener("heartbeat", () => {
+    this.es.addEventListener('heartbeat', () => {
       this.lastError = null;
     });
 
-    this.es.addEventListener("open", () => {
+    this.es.addEventListener('open', () => {
       this.lastError = null;
     });
 
-    this.es.addEventListener("error", () => {
+    this.es.addEventListener('error', () => {
       // EventSource errors are intentionally opaque; it will retry automatically.
       if (this.lastError) return;
-      this.lastError = "WhatsApp stream connection lost. Reconnecting...";
+      this.lastError = 'WhatsApp stream connection lost. Reconnecting...';
       for (const l of this.listeners) l.onError?.(this.lastError);
     });
   }

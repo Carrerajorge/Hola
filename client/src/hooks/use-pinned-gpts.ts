@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "./use-auth";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface PinnedGpt {
   id: string;
@@ -24,7 +25,7 @@ export function usePinnedGpts() {
     queryKey: ["/api/users", user?.id, "sidebar-gpts"],
     queryFn: async () => {
       if (!user?.id) return [];
-      const res = await fetch(`/api/users/${user.id}/sidebar-gpts`);
+      const res = await apiFetch(`/api/users/${user.id}/sidebar-gpts`);
       if (!res.ok) throw new Error("Failed to fetch pinned GPTs");
       return res.json();
     },
@@ -34,7 +35,7 @@ export function usePinnedGpts() {
   const pinMutation = useMutation({
     mutationFn: async ({ gptId, displayOrder }: { gptId: string; displayOrder?: number }) => {
       if (!user?.id) throw new Error("User not authenticated");
-      const res = await fetch(`/api/users/${user.id}/sidebar-gpts`, {
+      const res = await apiFetch(`/api/users/${user.id}/sidebar-gpts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ gptId, displayOrder }),
@@ -50,7 +51,7 @@ export function usePinnedGpts() {
   const unpinMutation = useMutation({
     mutationFn: async (gptId: string) => {
       if (!user?.id) throw new Error("User not authenticated");
-      const res = await fetch(`/api/users/${user.id}/sidebar-gpts/${gptId}`, {
+      const res = await apiFetch(`/api/users/${user.id}/sidebar-gpts/${gptId}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to unpin GPT");

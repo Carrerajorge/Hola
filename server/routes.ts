@@ -1812,6 +1812,25 @@ export async function registerRoutes(
       try {
         const data = JSON.parse(message.toString());
         if (data.type === "subscribe" && data.sessionId) {
+          // Enforce session ownership: only the creator can subscribe to the stream.
+          const userId = ws.userId;
+          if (!userId) {
+            ws.send(JSON.stringify({ type: "auth_error", error: "Authentication required" }));
+            ws.close(4001, "Unauthorized");
+            return;
+          }
+          const session = browserSessionManager.getSession(data.sessionId);
+          if (!session) {
+            ws.send(JSON.stringify({ type: "not_found", error: "Session not found", code: "BROWSER_SESSION_NOT_FOUND" }));
+            ws.close(4004, "Not Found");
+            return;
+          }
+          if (!browserSessionManager.isSessionOwnedBy(data.sessionId, userId)) {
+            ws.send(JSON.stringify({ type: "forbidden", error: "Forbidden", code: "BROWSER_SESSION_FORBIDDEN" }));
+            ws.close(4003, "Forbidden");
+            return;
+          }
+
           subscribedSessionId = data.sessionId;
           if (!browserClients.has(data.sessionId)) {
             browserClients.set(data.sessionId, new Set());

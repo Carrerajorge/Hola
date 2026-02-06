@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { users } from "../../shared/schema";
 import { hashPassword } from "../utils/password";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 async function setAdminCredentials() {
     const email = (process.env.ADMIN_EMAIL || "").trim();
@@ -10,34 +10,40 @@ async function setAdminCredentials() {
         console.error("ADMIN_EMAIL and ADMIN_PASSWORD must be set to run this script.");
         process.exit(1);
     }
+    const normalizedEmail = email.toLowerCase().trim();
     const hashedPassword = await hashPassword(passwordPlain);
 
-    console.log(`Setting admin credentials for ${email}...`);
+    console.log(`Setting admin credentials for ${normalizedEmail}...`);
 
     try {
         const [existingUser] = await db
             .select()
             .from(users)
-            .where(eq(users.email, email));
+            .where(sql`lower(${users.email}) = ${normalizedEmail}`)
+            .limit(1);
 
         if (existingUser) {
             console.log("User exists. Updating password and role...");
             await db
                 .update(users)
                 .set({
+                    email: normalizedEmail,
                     password: hashedPassword,
                     role: "admin",
+                    status: "active",
+                    emailVerified: "true",
                 })
                 .where(eq(users.id, existingUser.id));
             console.log("User updated successfully.");
         } else {
             console.log("User does not exist. Creating new admin user...");
             await db.insert(users).values({
-                email,
+                email: normalizedEmail,
                 password: hashedPassword,
-                username: email.split("@")[0],
+                username: normalizedEmail.split("@")[0],
                 role: "admin",
                 status: "active",
+                emailVerified: "true",
                 authProvider: "email",
             });
             console.log("User created successfully.");

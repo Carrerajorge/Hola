@@ -114,6 +114,29 @@ export interface Message {
   retrievalSteps?: { id: string; label: string; status: "pending" | "active" | "complete" | "error"; detail?: string }[];
 }
 
+function sanitizeAttachmentsForServer(
+  attachments: Message["attachments"],
+): Message["attachments"] | undefined {
+  if (!attachments || attachments.length === 0) return attachments || undefined;
+
+  return attachments.map((att) => {
+    const next: any = { ...att };
+
+    // Avoid sending huge base64 previews through JSON (server has a tight body limit).
+    if (typeof next.imageUrl === "string" && next.imageUrl.startsWith("data:")) {
+      next.imageUrl = next.storagePath || undefined;
+    }
+
+    // Don't send extracted file content inline for uploaded files. The backend can fetch
+    // the original bytes via storagePath/fileId.
+    if ((next.storagePath || next.fileId) && typeof next.content === "string") {
+      next.content = undefined;
+    }
+
+    return next;
+  });
+}
+
 export interface Chat {
   id: string;
   stableKey: string; // Stable key for React that doesn't change when pending -> real ID
@@ -580,9 +603,6 @@ export function useChats() {
   const [isLoading, setIsLoading] = useState(true);
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
-  const getFirstVisibleChatId = useCallback((list: Chat[]): string | null => {
-    return list.find(c => !c.hidden)?.id || null;
-  }, []);
 
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
@@ -668,7 +688,7 @@ export function useChats() {
         }
         // Only auto-select first chat if user hasn't manually selected/deselected
         if (!userHasSelectedRef.current && !activeChatId) {
-          setActiveChatId(getFirstVisibleChatId(serverChats));
+          setActiveChatId(serverChats[0]?.id || null);
         }
       } else {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -710,7 +730,7 @@ export function useChats() {
                       content: msg.content,
                       requestId: msg.requestId,
                       userMessageId: msg.userMessageId,
-                      attachments: msg.attachments
+                      attachments: sanitizeAttachmentsForServer(msg.attachments)
                     }));
 
                     const res = await fetch("/api/chats", {
@@ -764,7 +784,7 @@ export function useChats() {
             setChats(restored);
             // Only auto-select first chat if user hasn't manually selected/deselected
             if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {
-              setActiveChatId(getFirstVisibleChatId(restored));
+              setActiveChatId(restored[0]?.id || null);
             }
           } catch (e) {
             console.error("Failed to parse local chats", e);
@@ -777,38 +797,6 @@ export function useChats() {
 
     initChats();
   }, []);
-
-  // Allow other parts of the app to trigger a chat list refresh (e.g. after "Delete all chats").
-  useEffect(() => {
-    const handleReload = async () => {
-      try {
-        userHasSelectedRef.current = false;
-        setIsLoading(true);
-
-        const serverChats = await loadChatsFromServer();
-        if (serverChats && serverChats.length > 0) {
-          setChats(serverChats);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
-          } catch (e) {
-            console.warn("Failed to cache chats to localStorage:", e);
-            localStorage.removeItem(STORAGE_KEY);
-          }
-          setActiveChatId(getFirstVisibleChatId(serverChats));
-          return;
-        }
-
-        setChats([]);
-        setActiveChatId(null);
-        localStorage.removeItem(STORAGE_KEY);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    window.addEventListener("iliagpt:chats-reload", handleReload);
-    return () => window.removeEventListener("iliagpt:chats-reload", handleReload);
-  }, [getFirstVisibleChatId, loadChatsFromServer]);
 
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
@@ -866,7 +854,7 @@ export function useChats() {
               requestId: msg.requestId,
               clientRequestId,
               userMessageId: msg.userMessageId,
-              attachments: msg.attachments,
+              attachments: sanitizeAttachmentsForServer(msg.attachments),
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
@@ -1112,7 +1100,7 @@ export function useChats() {
             requestId: message.requestId,
             clientRequestId, // For run-based idempotency
             userMessageId: message.userMessageId,
-            attachments: message.attachments,
+            attachments: sanitizeAttachmentsForServer(message.attachments),
             sources: message.sources,
             figmaDiagram: message.figmaDiagram,
             googleFormPreview: message.googleFormPreview,
@@ -1446,9 +1434,44 @@ export function useChats() {
           return [newChat, ...prev];
         });
       },
+      onChatUpdate: (evt) => {
+        const chatId = evt.chat.id;
+        const ts = evt.chat.updatedAt ? new Date(evt.chat.updatedAt).getTime() : Date.now();
+
+        setChats((prev) => {
+          const existingIdx = prev.findIndex((c) => c.id === chatId);
+          if (existingIdx >= 0) {
+            const existing = prev[existingIdx];
+            const updated: Chat = {
+              ...existing,
+              title: evt.chat.title || existing.title,
+              archived: evt.chat.archived ?? existing.archived,
+              hidden: evt.chat.hidden ?? existing.hidden,
+              pinned: evt.chat.pinned ?? existing.pinned,
+              pinnedAt: evt.chat.pinnedAt ?? existing.pinnedAt,
+              timestamp: ts,
+            };
+            const next = [...prev];
+            next[existingIdx] = updated;
+            return next;
+          }
+
+          const newChat: Chat = {
+            id: chatId,
+            stableKey: `stable-${chatId}`,
+            title: evt.chat.title || `Chat: ${chatId}`,
+            timestamp: ts,
+            messages: [],
+            archived: !!evt.chat.archived,
+            hidden: !!evt.chat.hidden,
+            pinned: !!evt.chat.pinned,
+            pinnedAt: evt.chat.pinnedAt ?? undefined,
+          };
+          return [newChat, ...prev];
+        });
+      },
     });
   }, []);
-
   const activeChat = chats.find(c => c.id === activeChatId) || null;
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);

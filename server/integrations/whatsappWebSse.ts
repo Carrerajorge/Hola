@@ -1,7 +1,7 @@
-import { randomUUID } from "crypto";
-import type { Response } from "express";
+import { randomUUID } from 'crypto';
+import type { Response } from 'express';
 
-export type WhatsAppWebSseEventName = "wa_status" | "wa_message" | "heartbeat";
+export type WhatsAppWebSseEventName = 'wa_status' | 'wa_message' | 'wa_chat_update' | 'heartbeat';
 
 export interface WhatsAppWebSseClient {
   id: string;
@@ -26,10 +26,10 @@ class WhatsAppWebSseHub {
     const clientId = randomUUID();
 
     res.status(200);
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
     const client: WhatsAppWebSseClient = {
@@ -46,14 +46,14 @@ class WhatsAppWebSseHub {
 
     // Initial comment to ensure the connection is "hot".
     try {
-      res.write(": connected\n\n");
+      res.write(': connected\n\n');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (res as any).flush?.();
     } catch {
       // ignore
     }
 
-    res.on("close", () => {
+    res.on('close', () => {
       this.removeClient(userId, clientId);
     });
 
@@ -90,11 +90,11 @@ class WhatsAppWebSseHub {
     if (this.heartbeatInterval) return;
     this.heartbeatInterval = setInterval(() => {
       for (const userId of this.clientsByUser.keys()) {
-        this.broadcast(userId, "heartbeat", { ts: Date.now() });
+        this.broadcast(userId, 'heartbeat', { ts: Date.now() });
       }
     }, 30000);
+    this.heartbeatInterval.unref?.();
   }
 }
 
 export const whatsappWebSseHub = new WhatsAppWebSseHub();
-

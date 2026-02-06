@@ -52,7 +52,8 @@ export const webNavigateTool: ToolDefinition = {
       sessionId = await browserSessionManager.createSession(
         `Navigate to ${url}`,
         { timeout },
-        undefined
+        undefined,
+        context.userId || null
       );
       console.log("WEB_NAVIGATE: Session created:", sessionId);
       

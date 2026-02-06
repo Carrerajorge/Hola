@@ -195,7 +195,7 @@ function NotificationsSection() {
   const { data: eventTypes, isLoading: isLoadingEventTypes } = useQuery<NotificationEventType[]>({
     queryKey: ['/api/notification-event-types'],
     queryFn: async () => {
-      const res = await fetch('/api/notification-event-types');
+      const res = await apiFetch('/api/notification-event-types');
       if (!res.ok) throw new Error('Failed to fetch event types');
       return res.json();
     },
@@ -204,7 +204,7 @@ function NotificationsSection() {
   const { data: preferences, isLoading: isLoadingPreferences } = useQuery<NotificationPreference[]>({
     queryKey: ['/api/users', userId, 'notification-preferences'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/notification-preferences`);
+      const res = await apiFetch(`/api/users/${userId}/notification-preferences`);
       if (!res.ok) throw new Error('Failed to fetch preferences');
       return res.json();
     },
@@ -213,7 +213,7 @@ function NotificationsSection() {
 
   const updatePreference = useMutation({
     mutationFn: async (data: { eventTypeId: string; channels?: string; enabled?: boolean }) => {
-      const res = await fetch(`/api/users/${userId}/notification-preferences`, {
+      const res = await apiFetch(`/api/users/${userId}/notification-preferences`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -461,6 +461,7 @@ interface PrivacySettings {
 function AppsSection() {
   const { user } = useAuth();
   const userId = user?.id;
+  const isAuthedUser = !!userId && !(user as any)?.isAnonymous;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -468,26 +469,27 @@ function AppsSection() {
   const { data: integrationsData, isLoading: isLoadingIntegrations, refetch } = useQuery<IntegrationsData>({
     queryKey: ['/api/users', userId, 'integrations'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/integrations`);
+      const res = await apiFetch(`/api/users/${userId}/integrations`);
       if (!res.ok) throw new Error('Failed to fetch integrations');
       return res.json();
     },
-    enabled: !!userId,
+    enabled: isAuthedUser,
   });
 
   const { data: logsData, isLoading: isLoadingLogs } = useQuery<ToolCallLog[]>({
     queryKey: ['/api/users', userId, 'integrations', 'logs'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/integrations/logs?limit=10`);
+      const res = await apiFetch(`/api/users/${userId}/integrations/logs?limit=10`);
       if (!res.ok) throw new Error('Failed to fetch logs');
       return res.json();
     },
-    enabled: !!userId,
+    enabled: isAuthedUser,
   });
 
   const updatePolicy = useMutation({
     mutationFn: async (data: Partial<IntegrationPolicy>) => {
-      const res = await fetch(`/api/users/${userId}/integrations/policy`, {
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/integrations/policy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -506,7 +508,8 @@ function AppsSection() {
 
   const connectProvider = useMutation({
     mutationFn: async (providerId: string) => {
-      const res = await fetch(`/api/users/${userId}/integrations/${providerId}/connect`, {
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/integrations/${providerId}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -524,7 +527,8 @@ function AppsSection() {
 
   const disconnectProvider = useMutation({
     mutationFn: async (providerId: string) => {
-      const res = await fetch(`/api/users/${userId}/integrations/${providerId}/disconnect`, {
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/integrations/${providerId}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -848,6 +852,7 @@ function AppsSection() {
 function DataControlsSection() {
   const { user } = useAuth();
   const userId = user?.id;
+  const isAuthedUser = !!userId && !(user as any)?.isAnonymous;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [showArchivedDialog, setShowArchivedDialog] = useState(false);
@@ -862,7 +867,7 @@ function DataControlsSection() {
   }>({
     queryKey: ['/api/users', userId, 'privacy'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/privacy`, { credentials: 'include' });
+      const res = await apiFetch(`/api/users/${userId}/privacy`);
       if (!res.ok) throw new Error('Failed to fetch privacy settings');
       return res.json();
     },
@@ -872,7 +877,7 @@ function DataControlsSection() {
   const { data: settingsData, isLoading: isLoadingSettings } = useQuery<any>({
     queryKey: ['/api/users', userId, 'settings'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/settings`, { credentials: 'include' });
+      const res = await apiFetch(`/api/users/${userId}/settings`);
       if (!res.ok) throw new Error('Failed to fetch user settings');
       return res.json();
     },
@@ -895,29 +900,28 @@ function DataControlsSection() {
   const { data: sharedLinks = [], isLoading: isLoadingLinks } = useQuery<SharedLink[]>({
     queryKey: ['/api/users', userId, 'shared-links'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/shared-links`, { credentials: 'include' });
+      const res = await apiFetch(`/api/users/${userId}/shared-links`);
       if (!res.ok) throw new Error('Failed to fetch shared links');
       return res.json();
     },
-    enabled: !!userId,
+    enabled: isAuthedUser,
   });
 
   const { data: archivedChats = [], isLoading: isLoadingArchived } = useQuery<ArchivedChat[]>({
     queryKey: ['/api/users', userId, 'chats', 'archived'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/archived`, { credentials: 'include' });
+      const res = await apiFetch(`/api/users/${userId}/chats/archived`);
       if (!res.ok) throw new Error('Failed to fetch archived chats');
       return res.json();
     },
-    enabled: !!userId,
+    enabled: isAuthedUser,
   });
 
   const updatePrivacy = useMutation({
     mutationFn: async (data: Partial<PrivacySettings>) => {
-      const res = await fetch(`/api/users/${userId}/privacy`, {
+      const res = await apiFetch(`/api/users/${userId}/privacy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to update');
@@ -934,10 +938,9 @@ function DataControlsSection() {
 
   const updateFeatureFlags = useMutation({
     mutationFn: async (patch: { chatHistoryEnabled?: boolean }) => {
-      const res = await fetch(`/api/users/${userId}/settings`, {
+      const res = await apiFetch(`/api/users/${userId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ featureFlags: patch }),
       });
       if (!res.ok) throw new Error('Failed to update settings');
@@ -955,7 +958,8 @@ function DataControlsSection() {
 
   const revokeLink = useMutation({
     mutationFn: async (linkId: string) => {
-      const res = await fetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE', credentials: 'include' });
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to revoke');
       return res.json();
     },
@@ -967,7 +971,8 @@ function DataControlsSection() {
 
   const unarchiveChat = useMutation({
     mutationFn: async (chatId: string) => {
-      const res = await fetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST', credentials: 'include' });
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to unarchive');
       return res.json();
     },
@@ -980,7 +985,8 @@ function DataControlsSection() {
 
   const archiveAll = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST', credentials: 'include' });
+      if (!isAuthedUser) throw new Error("Unauthorized");
+      const res = await apiFetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to archive all');
       return res.json();
     },
@@ -994,7 +1000,7 @@ function DataControlsSection() {
 
   const deleteAll = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST', credentials: 'include' });
+      const res = await apiFetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to delete all');
       return res.json();
     },
@@ -1101,6 +1107,7 @@ function DataControlsSection() {
             variant="outline"
             size="sm"
             onClick={() => setShowSharedLinksDialog(true)}
+            disabled={!isAuthedUser}
             data-testid="button-manage-links"
           >
             Administrar
@@ -1153,6 +1160,7 @@ function DataControlsSection() {
               variant="outline"
               size="sm"
               onClick={() => setShowArchivedDialog(true)}
+              disabled={!isAuthedUser}
               data-testid="button-manage-archived"
             >
               Administrar
@@ -1165,7 +1173,7 @@ function DataControlsSection() {
               variant="outline"
               size="sm"
               onClick={() => setShowArchiveConfirm(true)}
-              disabled={archiveAll.isPending}
+              disabled={!isAuthedUser || archiveAll.isPending}
               data-testid="button-archive-all"
             >
               {archiveAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Archivar todo"}
@@ -1179,7 +1187,7 @@ function DataControlsSection() {
               size="sm"
               className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
               onClick={() => setShowDeleteConfirm(true)}
-              disabled={deleteAll.isPending}
+              disabled={!userId || deleteAll.isPending}
               data-testid="button-delete-all"
             >
               {deleteAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar todo"}
@@ -1310,7 +1318,7 @@ function DataControlsSection() {
 	          <AlertDialogHeader>
 	            <AlertDialogTitle>¿Eliminar todos los chats?</AlertDialogTitle>
 	            <AlertDialogDescription>
-	              Esta acción eliminará todos tus chats. Tendrás un período de recuperación antes de que se eliminen permanentemente.
+	              Esta acción eliminará todos tus chats. Tendrás un período de recuperación de 30 días antes de que se eliminen permanentemente.
 	            </AlertDialogDescription>
 	          </AlertDialogHeader>
 	          <AlertDialogFooter>

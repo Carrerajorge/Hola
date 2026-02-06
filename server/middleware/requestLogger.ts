@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { nanoid } from "nanoid";
 import { runWithContext, getTraceId as getTraceIdFromContext, CorrelationContext } from "./correlationContext";
 import { createLogger } from "../utils/logger";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 const logger = createLogger("http");
 
@@ -23,7 +24,7 @@ export function requestLoggerMiddleware(
   const context: CorrelationContext = {
     traceId,
     startTime,
-    userId: (req as any).user?.id,
+    userId: getSecureUserId(req) || undefined,
   };
 
   runWithContext(context, () => {

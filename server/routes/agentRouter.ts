@@ -7,7 +7,7 @@ import { agentModeRuns, agentModeSteps } from "@shared/schema";
 import { agentOrchestrator, agentManager, guardrails } from "../agent";
 import { agentQueue } from "../agent/queue/agentQueue";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
-import { getSecureUserId } from "../lib/anonUserHelper";
+import { getOrCreateSecureUserId, getSecureUserId } from "../lib/anonUserHelper";
 
 export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, event: SessionEvent) => void) {
   const router = Router();
@@ -32,6 +32,20 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     return { userId };
   }
 
+  function requireOwnedBrowserSession(res: any, sessionId: string, userId: string): boolean {
+    // First check existence to return 404 (not 403) for unknown sessions.
+    const session = browserSessionManager.getSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: "Session not found", code: "BROWSER_SESSION_NOT_FOUND" });
+      return false;
+    }
+    if (!browserSessionManager.isSessionOwnedBy(sessionId, userId)) {
+      res.status(403).json({ error: "Forbidden", code: "BROWSER_SESSION_FORBIDDEN" });
+      return false;
+    }
+    return true;
+  }
+
   router.post("/agent/runs", async (req, res) => {
     try {
       let { chatId, message, attachments } = req.body;
@@ -41,7 +55,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       }
 
       const runId = randomUUID();
-      const userId = "anonymous";
+      const userId = getOrCreateSecureUserId(req);
 
       if (!chatId || chatId.startsWith("pending-") || chatId === "") {
         const newChatId = randomUUID();
@@ -64,7 +78,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         await db.insert(agentModeRuns).values({
           id: runId,
           chatId: chatId,
-          userId: null,
+          userId: userId && !userId.startsWith("anon_") ? userId : null,
           status: "queued"
         });
       } catch (dbError: any) {
@@ -345,7 +359,8 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         config || {},
         (event: SessionEvent) => {
           broadcastBrowserEvent(event.sessionId, event);
-        }
+        },
+        access.userId
       );
 
       browserSessionManager.startScreenshotStreaming(sessionId, 1500);
@@ -361,6 +376,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const { url } = req.body;
       const validation = await guardrails.validateAction(req.params.id, "navigate", url);
@@ -378,6 +394,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const { selector } = req.body;
       const validation = await guardrails.validateAction(req.params.id, "click", selector);
@@ -395,6 +412,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const { selector, text } = req.body;
       const validation = await guardrails.validateAction(req.params.id, "type", selector, { text });
@@ -412,6 +430,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const { direction, amount } = req.body;
       const validation = await guardrails.validateAction(req.params.id, "scroll", "page");
@@ -429,6 +448,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const state = await browserSessionManager.getPageState(req.params.id);
       if (!state) {
@@ -444,6 +464,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const screenshot = await browserSessionManager.getScreenshot(req.params.id);
       if (!screenshot) {
@@ -459,6 +480,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       const session = browserSessionManager.getSession(req.params.id);
       if (!session) {
@@ -474,6 +496,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       await browserSessionManager.closeSession(req.params.id);
       res.json({ success: true });
@@ -486,6 +509,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     try {
       const access = await requireRemoteBrowserAccess(req, res);
       if (!access) return;
+      if (!requireOwnedBrowserSession(res, req.params.id, access.userId)) return;
 
       browserSessionManager.cancelSession(req.params.id);
       res.json({ success: true });

@@ -15,6 +15,7 @@ import {
 
 interface ActiveSession {
   id: string;
+  ownerUserId: string | null;
   browser: Browser;
   context: BrowserContext;
   page: Page;
@@ -36,7 +37,8 @@ class BrowserSessionManager {
   async createSession(
     objective: string,
     config: Partial<SessionConfig> = {},
-    onEvent?: SessionEventCallback
+    onEvent?: SessionEventCallback,
+    ownerUserId: string | null = null
   ): Promise<string> {
     const sessionConfig = { ...DEFAULT_SESSION_CONFIG, ...config };
     const sessionId = crypto.randomUUID();
@@ -64,6 +66,7 @@ class BrowserSessionManager {
 
     const session: ActiveSession = {
       id: sessionId,
+      ownerUserId,
       browser,
       context,
       page,
@@ -95,6 +98,16 @@ class BrowserSessionManager {
     });
 
     return sessionId;
+  }
+
+  getSessionOwner(sessionId: string): string | null {
+    const session = this.sessions.get(sessionId);
+    return session?.ownerUserId || null;
+  }
+
+  isSessionOwnedBy(sessionId: string, userId: string): boolean {
+    const owner = this.getSessionOwner(sessionId);
+    return !!owner && owner === userId;
   }
 
   private setupNetworkCapture(session: ActiveSession): void {

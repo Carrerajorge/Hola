@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").toLowerCase().trim();
-const SYSTEM_ADMIN_ROLES = new Set(["admin", "superadmin"]);
+const SYSTEM_ADMIN_ROLES = new Set(["admin", "superadmin", "team_admin"]);
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {

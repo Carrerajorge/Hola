@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import { cache } from '../lib/cache';
 import { createAlert } from '../lib/alertManager';
 import { logger } from '../utils/logger';
+import { getSecureUserId } from '../lib/anonUserHelper';
 
 // Rate limit configurations for different endpoints
 const RATE_LIMIT_CONFIGS = {
@@ -98,7 +99,7 @@ function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRed
  * Combines user ID (if authenticated) with IP for uniqueness
  */
 function getRateLimitKey(req: Request): string {
-    const userId = (req as any).user?.id;
+    const userId = getSecureUserId(req);
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
 
     // Authenticated users get their own bucket
@@ -194,7 +195,7 @@ export function createCustomRateLimiter(options: {
 
     return async (req: Request, res: Response, next: NextFunction) => {
         // Use user ID if authenticated, else IP
-        const userId = (req as any).user?.id;
+        const userId = getSecureUserId(req);
         const ip = req.ip || req.socket.remoteAddress || 'unknown';
         const key = userId ? `user_${userId}` : `ip_${ip}`;
 
@@ -251,7 +252,7 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
 
     // Check if user is admin (claims.role or role property depending on object structure)
     const role = String(user?.claims?.role || user?.role || "").toLowerCase().trim();
-    const isAdmin = role === "admin" || role === "superadmin";
+    const isAdmin = role === "admin" || role === "superadmin" || role === "team_admin";
 
     // In development, be more permissive - BYPASS rate limiting entirely
     const isDev = process.env.NODE_ENV === 'development';

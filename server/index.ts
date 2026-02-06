@@ -7,6 +7,7 @@ import { createServer } from "http";
 import { requestTracerMiddleware } from "./lib/requestTracer";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { startAggregator } from "./services/analyticsAggregator";
+import { startChatRetentionJob } from "./services/chatRetention";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection, ensureAuthSchema, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
@@ -230,6 +231,9 @@ export function log(message: string, source = "express") {
     log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
     log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
     startAggregator();
+    if (dbConnected) {
+      startChatRetentionJob();
+    }
     await seedProductionData();
 
     // Setup graceful shutdown with connection draining

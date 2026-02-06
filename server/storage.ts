@@ -710,6 +710,7 @@ export class MemStorage implements IStorage {
 	      JOIN chats c ON m.chat_id = c.id
 	      WHERE c.user_id = ${userId}
 	      AND c.deleted_at IS NULL
+	      AND coalesce(c.hidden, 'false') <> 'true'
 	      AND m.search_vector @@ websearch_to_tsquery('spanish', ${sanitizedQuery})
 	      ORDER BY ts_rank(m.search_vector, websearch_to_tsquery('spanish', ${sanitizedQuery})) DESC
 	      LIMIT 50

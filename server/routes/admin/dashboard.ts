@@ -3,7 +3,7 @@ import { storage } from "../../storage";
 import { llmGateway } from "../../lib/llmGateway";
 import { getRealtimeMetrics, getExtendedDashboardStats } from "../../services/realtimeMetrics";
 import { dbRead } from "../../db";
-import { auditLogs, chats, invoices, platformSettings, reports, users } from "@shared/schema";
+import { auditLogs, chats, generatedReports, invoices, platformSettings, scheduledReports, users } from "@shared/schema";
 import { and, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 
 export const dashboardRouter = Router();
@@ -38,6 +38,7 @@ dashboardRouter.get("/", async (req, res) => {
             queryStats,
             recentAuditLogs,
             reportStats,
+            scheduledReportStats,
             settingsStats,
             securityAlerts24h,
             healthStatus
@@ -54,7 +55,11 @@ dashboardRouter.get("/", async (req, res) => {
                 totalQueries: sql<number>`coalesce(sum(${users.queryCount}), 0)`,
             }).from(users),
             storage.getAuditLogs(10),
-            dbRead.select({ total: sql<number>`count(*)` }).from(reports),
+            dbRead.select({ total: sql<number>`count(*)` }).from(generatedReports),
+            dbRead.select({
+                total: sql<number>`count(*)`,
+                active: sql<number>`count(*) filter (where ${scheduledReports.isActive} = 'true')`,
+            }).from(scheduledReports),
             dbRead.select({
                 total: sql<number>`count(*)`,
                 categories: sql<number>`count(distinct ${platformSettings.category})`,
@@ -86,6 +91,7 @@ dashboardRouter.get("/", async (req, res) => {
         const activeModels = aiModels.filter(m => m.status === "active").length;
         const securityAlerts = Number(securityAlerts24h[0]?.count || 0);
         const totalReports = Number(reportStats[0]?.total || 0);
+        const activeScheduledReports = Number((scheduledReportStats as any)?.[0]?.active || 0);
         const totalSettings = Number(settingsStats[0]?.total || 0);
         const settingsCategories = Number(settingsStats[0]?.categories || 0);
 
@@ -124,7 +130,7 @@ dashboardRouter.get("/", async (req, res) => {
             },
             reports: {
                 total: totalReports,
-                scheduled: 0 // scheduledReports not linked in storage.getReports()
+                scheduled: activeScheduledReports
             },
             settings: {
                 total: totalSettings,

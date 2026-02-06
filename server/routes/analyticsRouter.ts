@@ -5,12 +5,26 @@ import { getSecureUserId } from "../lib/anonUserHelper";
 import { storage } from "../storage";
 import { validateBody } from "../middleware/validateRequest";
 
+const metadataSchema = z.record(z.union([
+  z.string().max(512),
+  z.number(),
+  z.boolean(),
+  z.null(),
+])).optional();
+
 const trackSchema = z.object({
   eventType: z.enum(["page_view", "action", "chat_query"]),
-  sessionId: z.string().min(1).optional(),
-  page: z.string().min(1).optional(),
-  action: z.string().min(1).optional(),
-  metadata: z.record(z.any()).optional(),
+  sessionId: z.string().min(1).max(128).optional(),
+  page: z.string().min(1).max(512).optional(),
+  action: z.string().min(1).max(128).optional(),
+  metadata: metadataSchema,
+}).superRefine((value, ctx) => {
+  if (value.eventType === "page_view" && !value.page) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "page is required for page_view", path: ["page"] });
+  }
+  if (value.eventType === "action" && !value.action) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "action is required for action", path: ["action"] });
+  }
 });
 
 export function createAnalyticsRouter(): Router {
@@ -21,6 +35,13 @@ export function createAnalyticsRouter(): Router {
     try {
       const userId = getSecureUserId(req) || undefined;
       const { eventType, sessionId, page, action, metadata } = req.body as z.infer<typeof trackSchema>;
+
+      // Respect browser privacy signals.
+      const dnt = String(req.headers["dnt"] || "");
+      const gpc = String(req.headers["sec-gpc"] || "");
+      if (dnt === "1" || gpc === "1") {
+        return res.json({ success: true, recorded: false, skipped: "do_not_track" });
+      }
 
       // Default to enabled, but respect user opt-out.
       if (userId && !userId.startsWith("anon_")) {
@@ -49,4 +70,3 @@ export function createAnalyticsRouter(): Router {
 
   return router;
 }
-

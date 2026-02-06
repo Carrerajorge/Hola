@@ -29,6 +29,7 @@ function sanitizeUser(user: any): any {
   const isAdmin =
     role === "admin" ||
     role === "superadmin" ||
+    role === "team_admin" ||
     (!!adminEmail && !!userEmail && userEmail === adminEmail);
 
   // Include a computed flag so the frontend can gate admin UX consistently with server rules.

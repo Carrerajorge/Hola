@@ -1,55 +1,56 @@
-
 import { db } from "../server/db";
 import { users } from "../shared/schema";
-import { eq } from "drizzle-orm";
-import bcrypt from "bcrypt";
-
-const TARGET_EMAIL = "Carrerajorge874@gmail.com"; // Fixing potential typo in user request based on seed file
-const TARGET_PASSWORD = "2022212"; // New password requested by user
+import { eq, sql } from "drizzle-orm";
+import { hashPassword } from "../server/utils/password";
 
 async function restoreAdmin() {
-    console.log(`[restore] Starting admin restoration for ${TARGET_EMAIL}...`);
+    const emailRaw = (process.env.ADMIN_EMAIL || "").trim();
+    const passwordPlain = String(process.env.ADMIN_PASSWORD || "");
+    if (!emailRaw || !passwordPlain) {
+        console.error("[restore] ADMIN_EMAIL and ADMIN_PASSWORD must be set to run this script.");
+        process.exit(1);
+    }
+
+    const normalizedEmail = emailRaw.toLowerCase().trim();
+    console.log(`[restore] Ensuring admin user exists for ${normalizedEmail}...`);
 
     try {
-        const hashedPassword = await bcrypt.hash(TARGET_PASSWORD, 12);
+        const hashedPassword = await hashPassword(passwordPlain);
 
-        // Check if user exists
-        const existingUser = await db
-            .select()
+        const [existingUser] = await db
+            .select({ id: users.id, email: users.email })
             .from(users)
-            .where(eq(users.email, TARGET_EMAIL))
+            .where(sql`lower(${users.email}) = ${normalizedEmail}`)
             .limit(1);
 
-        if (existingUser.length > 0) {
-            console.log(`[restore] User found. Updating password and role...`);
+        if (existingUser?.id) {
             await db
                 .update(users)
                 .set({
+                    email: normalizedEmail,
                     role: "admin",
                     password: hashedPassword,
                     status: "active",
-                    emailVerified: "true"
+                    emailVerified: "true",
                 })
-                .where(eq(users.email, TARGET_EMAIL));
-            console.log(`[restore] ✅ SUCCESS: User ${TARGET_EMAIL} updated to admin with new password.`);
+                .where(eq(users.id, existingUser.id));
+            console.log(`[restore] ✅ Updated user ${normalizedEmail} to admin (password rotated).`);
         } else {
-            console.log(`[restore] User NOT found. Creating new admin user...`);
             await db.insert(users).values({
-                email: TARGET_EMAIL,
+                email: normalizedEmail,
                 password: hashedPassword,
                 role: "admin",
-                username: "admin_restored",
+                username: normalizedEmail.split("@")[0] || "admin",
                 firstName: "Admin",
                 lastName: "User",
                 status: "active",
                 emailVerified: "true",
-                authProvider: "email"
+                authProvider: "email",
             });
-            console.log(`[restore] ✅ SUCCESS: Created new admin user ${TARGET_EMAIL}.`);
+            console.log(`[restore] ✅ Created admin user ${normalizedEmail}.`);
         }
-
     } catch (error) {
-        console.error(`[restore] ❌ ERROR: Failed to restore admin:`, error);
+        console.error("[restore] ❌ Failed to restore admin:", error);
         process.exit(1);
     }
 

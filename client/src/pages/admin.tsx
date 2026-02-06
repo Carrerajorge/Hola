@@ -92,6 +92,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/apiClient";
 import { format } from "date-fns";
 import { isAdminUser } from "@/lib/admin";
+import { parseAdminSectionQuery, useAdminSectionUrlSync } from "@/hooks/use-admin-section-url-sync";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
@@ -283,7 +284,17 @@ function DashboardSection({
           <p className="text-2xl font-bold">€{parseFloat(d.payments?.total || "0").toLocaleString()}</p>
           <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
             <span>€{parseFloat(d.payments?.thisMonth || "0").toLocaleString()} este mes</span>
-            <span>{d.payments?.count || 0} transacciones</span>
+            <button
+              type="button"
+              className="hover:underline underline-offset-4"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate?.("payments", { query: { status: "completed" } });
+              }}
+              title="Open completed payments"
+            >
+              {d.payments?.count || 0} transacciones
+            </button>
           </div>
         </div>
 
@@ -300,8 +311,28 @@ function DashboardSection({
           </div>
           <p className="text-2xl font-bold">{d.invoices?.total || 0}</p>
           <div className="flex items-center gap-4 mt-2 text-xs">
-            <span className="text-yellow-600">{d.invoices?.pending || 0} pendientes</span>
-            <span className="text-green-600">{d.invoices?.paid || 0} pagadas</span>
+            <button
+              type="button"
+              className="text-yellow-600 hover:underline underline-offset-4"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate?.("invoices", { query: { status: "pending" } });
+              }}
+              title="Open pending invoices"
+            >
+              {d.invoices?.pending || 0} pendientes
+            </button>
+            <button
+              type="button"
+              className="text-green-600 hover:underline underline-offset-4"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate?.("invoices", { query: { status: "paid" } });
+              }}
+              title="Open paid invoices"
+            >
+              {d.invoices?.paid || 0} pagadas
+            </button>
           </div>
         </div>
 
@@ -588,7 +619,7 @@ function UsersSection({ onOpenUser }: { onOpenUser?: (userId: string) => void })
     }, 300);
   };
 
-  const { data: usersData, isLoading, refetch } = useQuery({
+  const { data: usersData, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: [
       "/api/admin/users",
       currentPage,
@@ -615,7 +646,11 @@ function UsersSection({ onOpenUser }: { onOpenUser?: (userId: string) => void })
       if (filters.excludeAdmin) params.set("exclude_admin", "true");
 
       const res = await apiFetch(`/api/admin/users?${params}`, { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load users");
+      }
+      return json;
     }
   });
 
@@ -711,7 +746,8 @@ function UsersSection({ onOpenUser }: { onOpenUser?: (userId: string) => void })
   };
 
   const handleExport = (format: "csv" | "json") => {
-    window.open(`/api/admin/users/export?format=${format}`, "_blank");
+    const win = window.open(`/api/admin/users/export?format=${format}`, "_blank");
+    if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
   };
 
   const users = Array.isArray(usersData) ? usersData : usersData?.users || [];
@@ -774,8 +810,21 @@ function UsersSection({ onOpenUser }: { onOpenUser?: (userId: string) => void })
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar los usuarios</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
   return (
-      <div className="space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Users ({totalUsers})</h2>
         <div className="flex items-center gap-2">
@@ -784,6 +833,7 @@ function UsersSection({ onOpenUser }: { onOpenUser?: (userId: string) => void })
             size="sm"
             onClick={() => refetch()}
             title="Refresh"
+            disabled={isFetching}
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -1293,7 +1343,7 @@ function ConversationsSection({
     }
   });
 
-  const { data: conversationsData, isLoading, refetch } = useQuery({
+  const { data: conversationsData, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["/api/admin/conversations", page, filters, sortBy, sortOrder],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "20", sortBy, sortOrder });
@@ -1306,16 +1356,31 @@ function ConversationsSection({
       if (filters.minTokens) params.set("minTokens", filters.minTokens);
       if (filters.maxTokens) params.set("maxTokens", filters.maxTokens);
       const res = await apiFetch(`/api/admin/conversations?${params}`, { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load conversations");
+      }
+      return json;
     }
   });
 
-  const { data: conversationDetail, isLoading: loadingDetail } = useQuery({
+  const {
+    data: conversationDetail,
+    isLoading: loadingDetail,
+    isError: detailIsError,
+    error: detailError,
+    isFetching: detailIsFetching,
+    refetch: refetchDetail,
+  } = useQuery({
     queryKey: ["/api/admin/conversations", viewingConversation?.id],
     queryFn: async () => {
       if (!viewingConversation?.id) return null;
       const res = await apiFetch(`/api/admin/conversations/${viewingConversation.id}`, { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load conversation");
+      }
+      return json;
     },
     enabled: !!viewingConversation?.id
   });
@@ -1465,12 +1530,25 @@ function ConversationsSection({
     setPage(1);
   };
 
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar las conversaciones</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold tracking-tight">CONVERSATION TRACKER</h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => refetch()} data-testid="button-refresh-conversations" className="transition-all duration-200 hover:bg-muted">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} data-testid="button-refresh-conversations" className="transition-all duration-200 hover:bg-muted">
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
@@ -1903,7 +1981,22 @@ function ConversationsSection({
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : conversationDetail && (
+            ) : detailIsError ? (
+              <div className="max-w-2xl mx-auto rounded-lg border p-4 bg-destructive/10 text-destructive">
+                <p className="font-medium">No se pudo cargar la conversación</p>
+                <p className="text-sm mt-1">{String((detailError as any)?.message || detailError || "")}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => refetchDetail()}
+                  disabled={detailIsFetching}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Reintentar
+                </Button>
+              </div>
+            ) : conversationDetail ? (
               <div className="max-w-4xl mx-auto space-y-4">
                 {(conversationDetail.messages || []).map((msg: any, idx: number) => (
                   <div
@@ -1932,7 +2025,7 @@ function ConversationsSection({
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="border-t bg-card p-4">
@@ -2589,6 +2682,8 @@ function AIModelsSection() {
   );
 }
 
+const FINANCE_FILTER_KEYS = ["status", "userId", "dateFrom", "dateTo"] as const;
+
 function PaymentsSection({
   focus,
   onOpenUser,
@@ -2596,19 +2691,30 @@ function PaymentsSection({
   focus?: { userId?: string; token?: number };
   onOpenUser?: (userId: string) => void;
 }) {
-  const [page, setPage] = useState(1);
+  const [location, setLocation] = useLocation();
   const limit = 20;
-  const [filters, setFilters] = useState({
-    status: "",
-    userId: focus?.userId || "",
-    dateFrom: "",
-    dateTo: ""
-  });
+  const initial = parseAdminSectionQuery(location, "payments", FINANCE_FILTER_KEYS);
+  const [page, setPage] = useState(initial.page);
+  const [filters, setFilters] = useState(() => ({
+    ...initial.filters,
+    userId: focus?.userId || initial.filters.userId,
+  }));
 
   const updateFilters = (next: Partial<typeof filters>) => {
     setFilters(prev => ({ ...prev, ...next }));
     setPage(1);
   };
+
+  useAdminSectionUrlSync({
+    section: "payments",
+    location,
+    setLocation,
+    page,
+    setPage,
+    filters,
+    setFilters,
+    filterKeys: FINANCE_FILTER_KEYS,
+  });
 
   useEffect(() => {
     if (focus?.token && focus.userId) {
@@ -2621,7 +2727,7 @@ function PaymentsSection({
     setPage(1);
   };
 
-  const { data: paymentsData, isLoading, refetch } = useQuery({
+  const { data: paymentsData, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["/api/admin/finance/payments", page, limit, filters.status, filters.userId, filters.dateFrom, filters.dateTo],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
@@ -2630,7 +2736,11 @@ function PaymentsSection({
       if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
       if (filters.dateTo) params.set("dateTo", filters.dateTo);
       const res = await apiFetch(`/api/admin/finance/payments?${params}`, { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load payments");
+      }
+      return json;
     }
   });
 
@@ -2641,7 +2751,11 @@ function PaymentsSection({
     queryKey: ["/api/admin/finance/payments/stats"],
     queryFn: async () => {
       const res = await apiFetch("/api/admin/finance/payments/stats", { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load payment stats");
+      }
+      return json;
     }
   });
 
@@ -2649,12 +2763,12 @@ function PaymentsSection({
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
-  if (policiesIsError) {
+  if (isError) {
     return (
       <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
-        <p className="font-medium">No se pudo cargar Security Center</p>
-        <p className="text-sm mt-1">{String((policiesError as any)?.message || policiesError || "")}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetchPolicies()}>
+        <p className="font-medium">No se pudieron cargar los pagos</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()} disabled={isFetching}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Reintentar
         </Button>
@@ -2667,7 +2781,7 @@ function PaymentsSection({
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Payments</h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => refetch()} title="Refresh">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} title="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
           <DropdownMenu>
@@ -2685,7 +2799,8 @@ function PaymentsSection({
                   if (filters.userId) params.set("userId", filters.userId);
                   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
                   if (filters.dateTo) params.set("dateTo", filters.dateTo);
-                  window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                  const win = window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                  if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
                 }}
               >
                 Export CSV
@@ -2697,7 +2812,8 @@ function PaymentsSection({
                   if (filters.userId) params.set("userId", filters.userId);
                   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
                   if (filters.dateTo) params.set("dateTo", filters.dateTo);
-                  window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                  const win = window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                  if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
                 }}
               >
                 Export JSON
@@ -2814,18 +2930,29 @@ function InvoicesSection({
   onOpenUser?: (userId: string) => void;
 }) {
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
   const limit = 20;
-  const [filters, setFilters] = useState({
-    status: "",
-    userId: focus?.userId || "",
-    dateFrom: "",
-    dateTo: ""
-  });
+  const [location, setLocation] = useLocation();
+  const initial = parseAdminSectionQuery(location, "invoices", FINANCE_FILTER_KEYS);
+  const [page, setPage] = useState(initial.page);
+  const [filters, setFilters] = useState(() => ({
+    ...initial.filters,
+    userId: focus?.userId || initial.filters.userId,
+  }));
   const updateFilters = (next: Partial<typeof filters>) => {
     setFilters(prev => ({ ...prev, ...next }));
     setPage(1);
   };
+
+  useAdminSectionUrlSync({
+    section: "invoices",
+    location,
+    setLocation,
+    page,
+    setPage,
+    filters,
+    setFilters,
+    filterKeys: FINANCE_FILTER_KEYS,
+  });
 
   useEffect(() => {
     if (focus?.token && focus.userId) {
@@ -2841,7 +2968,7 @@ function InvoicesSection({
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
   const [markPaidInvoice, setMarkPaidInvoice] = useState<any>(null);
 
-  const { data: invoicesData, isLoading, refetch } = useQuery({
+  const { data: invoicesData, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["/api/admin/finance/invoices", page, limit, filters.status, filters.userId, filters.dateFrom, filters.dateTo],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
@@ -2850,7 +2977,11 @@ function InvoicesSection({
       if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
       if (filters.dateTo) params.set("dateTo", filters.dateTo);
       const res = await apiFetch(`/api/admin/finance/invoices?${params}`, { credentials: "include" });
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load invoices");
+      }
+      return json;
     }
   });
   
@@ -2929,12 +3060,25 @@ function InvoicesSection({
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar las facturas</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Invoices ({pagination.total})</h2>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => refetch()} title="Refresh">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} title="Refresh" disabled={isFetching}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           <DropdownMenu>
@@ -2952,7 +3096,8 @@ function InvoicesSection({
                   if (filters.userId) params.set("userId", filters.userId);
                   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
                   if (filters.dateTo) params.set("dateTo", filters.dateTo);
-                  window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                  const win = window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                  if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
                 }}
               >
                 Export CSV
@@ -2964,7 +3109,8 @@ function InvoicesSection({
                   if (filters.userId) params.set("userId", filters.userId);
                   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
                   if (filters.dateTo) params.set("dateTo", filters.dateTo);
-                  window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                  const win = window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                  if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
                 }}
               >
                 Export JSON
@@ -3092,7 +3238,8 @@ function InvoicesSection({
                     <DropdownMenuItem
                       onClick={() => {
                         const params = new URLSearchParams({ format: "csv", limit: "1", invoiceId: invoice.id });
-                        window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                        const win = window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                        if (!win) toast.error("Pop-up bloqueado. Permite pop-ups para exportar.");
                       }}
                     >
                       <Download className="h-4 w-4 mr-2" />
@@ -4810,13 +4957,54 @@ function SecuritySection({
 
 function ReportsSection() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("templates");
+  const [location, setLocation] = useLocation();
+
+  const initialTab = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab === "templates" || tab === "generate" || tab === "history" || tab === "scheduled") {
+      return tab;
+    }
+    return "templates";
+  })();
+
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [reportFormat, setReportFormat] = useState<string>("json");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [historyPage, setHistoryPage] = useState(1);
   const [deletingReport, setDeletingReport] = useState<any>(null);
+  const [deletingSchedule, setDeletingSchedule] = useState<any>(null);
+  const [scheduleActiveOverride, setScheduleActiveOverride] = useState<Record<string, boolean>>({});
+  const [showCreateSchedule, setShowCreateSchedule] = useState(false);
+  const [scheduleName, setScheduleName] = useState("");
+  const [scheduleReportType, setScheduleReportType] = useState("user_report");
+  const [scheduleCadence, setScheduleCadence] = useState("daily");
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [scheduleDayOfWeek, setScheduleDayOfWeek] = useState("1");
+  const [scheduleFormat, setScheduleFormat] = useState("json");
+  const [scheduleLimit, setScheduleLimit] = useState("500");
+  const [scheduleRecipients, setScheduleRecipients] = useState("");
+  const [scheduleIsActive, setScheduleIsActive] = useState(true);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (!tab) return;
+    if (tab === activeTab) return;
+    if (tab === "templates" || tab === "generate" || tab === "history" || tab === "scheduled") {
+      setActiveTab(tab);
+    }
+  }, [location, activeTab]);
+
+  const setTabAndUrl = (tab: string) => {
+    setActiveTab(tab);
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", tab);
+    if (!params.get("section")) params.set("section", "reports");
+    setLocation(`/admin?${params.toString()}`);
+  };
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ["/api/admin/reports/templates"],
@@ -4835,6 +5023,19 @@ function ReportsSection() {
     refetchInterval: 5000
   });
 
+  const { data: scheduledReports = [], isLoading: scheduledLoading, refetch: refetchScheduled } = useQuery({
+    queryKey: ["/api/admin/reports/scheduled"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/admin/reports/scheduled", { credentials: "include" });
+      const json = await res.json().catch(() => ([]));
+      if (!res.ok) {
+        throw new Error((json as any)?.error || (json as any)?.message || "Failed to load scheduled reports");
+      }
+      return json;
+    },
+    refetchInterval: activeTab === "scheduled" ? 15000 : false
+  });
+
   const generateReportMutation = useMutation({
     mutationFn: async (data: { templateId: string; format: string; parameters?: any }) => {
       const res = await apiFetch("/api/admin/reports/generate", {
@@ -4851,7 +5052,7 @@ function ReportsSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
-      setActiveTab("history");
+      setTabAndUrl("history");
       toast.success("Report queued");
     },
     onError: (e: any) => {
@@ -4877,6 +5078,193 @@ function ReportsSection() {
       toast.error(e?.message || "Failed to delete report");
     }
   });
+
+  const createScheduleMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await apiFetch("/api/admin/reports/scheduled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include"
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Failed to create schedule");
+      }
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      setShowCreateSchedule(false);
+      setScheduleName("");
+      setScheduleReportType("user_report");
+      setScheduleCadence("daily");
+      setScheduleTime("09:00");
+      setScheduleDayOfWeek("1");
+      setScheduleFormat("json");
+      setScheduleLimit("500");
+      setScheduleRecipients("");
+      setScheduleIsActive(true);
+      toast.success("Schedule created");
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || "Failed to create schedule");
+    }
+  });
+
+  const updateScheduleMutation = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: any }) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+        credentials: "include"
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Failed to update schedule");
+      }
+      return json;
+    },
+    onSuccess: (_data: any, variables: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      if (variables?.id) {
+        setScheduleActiveOverride(prev => {
+          if (!(variables.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[variables.id];
+          return next;
+        });
+      }
+      toast.success("Schedule updated");
+    },
+    onError: (e: any, variables: any) => {
+      if (variables?.id) {
+        setScheduleActiveOverride(prev => {
+          if (!(variables.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[variables.id];
+          return next;
+        });
+      }
+      toast.error(e?.message || "Failed to update schedule");
+    }
+  });
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}`, { method: "DELETE", credentials: "include" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Failed to delete schedule");
+      }
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      setDeletingSchedule(null);
+      toast.success("Schedule deleted");
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || "Failed to delete schedule");
+    }
+  });
+
+  const runScheduleNowMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}/run-now`, { method: "POST", credentials: "include" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Failed to run schedule");
+      }
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
+      setTabAndUrl("history");
+      toast.success("Report queued");
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || "Failed to run schedule");
+    }
+  });
+
+  const parseRecipients = (raw: string): string[] => {
+    return String(raw || "")
+      .split(/[,\n]+/g)
+      .map(s => s.trim())
+      .filter(Boolean);
+  };
+
+  const buildScheduleExpression = (): string | null => {
+    const parts = String(scheduleTime || "").split(":");
+    if (parts.length !== 2) return null;
+    const hour = Number.parseInt(parts[0], 10);
+    const minute = Number.parseInt(parts[1], 10);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    if (hour < 0 || hour > 23) return null;
+    if (minute < 0 || minute > 59) return null;
+
+    if (scheduleCadence === "weekly") {
+      const dow = Number.parseInt(String(scheduleDayOfWeek || ""), 10);
+      if (!Number.isFinite(dow) || dow < 0 || dow > 6) return null;
+      return `${minute} ${hour} * * ${dow}`;
+    }
+
+    return `${minute} ${hour} * * *`;
+  };
+
+  const describeSchedule = (expr: string): string => {
+    const clean = String(expr || "").trim().replace(/\s+/g, " ");
+    const parts = clean.split(" ");
+    if (parts.length !== 5) return clean;
+
+    const [minStr, hourStr, dom, mon, dowStr] = parts;
+    if (dom !== "*" || mon !== "*") return clean;
+
+    const minute = Number.parseInt(minStr, 10);
+    const hour = Number.parseInt(hourStr, 10);
+    if (!Number.isFinite(minute) || !Number.isFinite(hour)) return clean;
+
+    const time = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    if (dowStr === "*") return `Daily @ ${time}`;
+
+    const dow = Number.parseInt(dowStr, 10);
+    const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const name = Number.isFinite(dow) && dow >= 0 && dow <= 6 ? names[dow] : dowStr;
+    return `Weekly (${name}) @ ${time}`;
+  };
+
+  const handleCreateSchedule = () => {
+    const name = scheduleName.trim();
+    if (!name) {
+      toast.error("Name is required");
+      return;
+    }
+
+    const schedule = buildScheduleExpression();
+    if (!schedule) {
+      toast.error("Invalid schedule");
+      return;
+    }
+
+    const recipients = parseRecipients(scheduleRecipients);
+    const limitNum = Number.parseInt(String(scheduleLimit || ""), 10);
+
+    const parameters: any = {};
+    if (Number.isFinite(limitNum) && limitNum > 0) parameters.limit = limitNum;
+
+    createScheduleMutation.mutate({
+      name,
+      type: scheduleReportType,
+      schedule,
+      recipients,
+      isActive: scheduleIsActive,
+      parameters,
+      format: scheduleFormat
+    });
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -4910,7 +5298,7 @@ function ReportsSection() {
 
   const handleGenerateFromTemplate = (templateId: string) => {
     setSelectedTemplate(templateId);
-    setActiveTab("generate");
+    setTabAndUrl("generate");
   };
 
   const handleSubmitGenerate = () => {
@@ -4926,7 +5314,7 @@ function ReportsSection() {
     window.open(`/api/admin/reports/download/${reportId}`, "_blank");
   };
 
-  if (templatesLoading) {
+  if (templatesLoading && (activeTab === "templates" || activeTab === "generate")) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
@@ -4939,10 +5327,11 @@ function ReportsSection() {
         <h2 className="text-lg font-medium">Reports Center</h2>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={setTabAndUrl}>
         <TabsList>
           <TabsTrigger value="templates" data-testid="tab-templates">Templates</TabsTrigger>
           <TabsTrigger value="generate" data-testid="tab-generate">Generate Report</TabsTrigger>
+          <TabsTrigger value="scheduled" data-testid="tab-scheduled">Scheduled</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
         </TabsList>
 
@@ -5059,6 +5448,284 @@ function ReportsSection() {
               </Button>
             </CardFooter>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="scheduled" className="mt-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Scheduled Reports</CardTitle>
+                <CardDescription>Recurring schedules that auto-generate reports</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchScheduled()}
+                  data-testid="button-refresh-scheduled"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button size="sm" onClick={() => setShowCreateSchedule(true)} data-testid="button-create-schedule">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New schedule
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {scheduledLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : scheduledReports.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  No schedules yet. Create your first scheduled report.
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="border-b bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Name</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Type</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Schedule</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Format</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Next run</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Last run</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Active</th>
+                        <th className="px-4 py-3 text-right text-sm font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduledReports.map((sched: any) => {
+                        const isActive = (scheduleActiveOverride[sched.id] ?? (sched.isActive === "true"));
+                        const schedFormat = String((sched as any)?.parameters?.format || "json").toUpperCase();
+                        const recipients = Array.isArray((sched as any)?.recipients) ? (sched as any).recipients : [];
+
+                        return (
+                          <tr key={sched.id} className="border-b last:border-0" data-testid={`row-schedule-${sched.id}`}>
+                            <td className="px-4 py-3 text-sm font-medium">{sched.name}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <Badge variant={getTypeBadgeVariant(sched.type)} className="text-xs">
+                                {String(sched.type || "").replace(/_/g, " ")}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <div className="text-sm">{describeSchedule(sched.schedule)}</div>
+                              <div className="text-xs text-muted-foreground font-mono">{sched.schedule}</div>
+                              {recipients.length > 0 && (
+                                <div className="text-xs text-muted-foreground truncate" title={recipients.join(", ")}>
+                                  To: {recipients.join(", ")}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm uppercase">{schedFormat}</td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground">
+                              {sched.nextRunAt ? format(new Date(sched.nextRunAt), "MMM dd, yyyy HH:mm") : "-"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground">
+                              {sched.lastRunAt ? format(new Date(sched.lastRunAt), "MMM dd, yyyy HH:mm") : "-"}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <Switch
+                                checked={!!isActive}
+                                onCheckedChange={(checked) => {
+                                  setScheduleActiveOverride(prev => ({ ...prev, [sched.id]: checked }));
+                                  updateScheduleMutation.mutate({ id: sched.id, patch: { isActive: checked } });
+                                }}
+                                disabled={updateScheduleMutation.isPending}
+                                data-testid={`switch-schedule-active-${sched.id}`}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  onClick={() => runScheduleNowMutation.mutate(sched.id)}
+                                  disabled={runScheduleNowMutation.isPending}
+                                  data-testid={`button-run-schedule-${sched.id}`}
+                                  title="Run now"
+                                >
+                                  <Play className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2 text-destructive hover:text-destructive"
+                                  onClick={() => setDeletingSchedule(sched)}
+                                  data-testid={`button-delete-schedule-${sched.id}`}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Dialog open={showCreateSchedule} onOpenChange={setShowCreateSchedule}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Create schedule</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Name</Label>
+                  <Input
+                    value={scheduleName}
+                    onChange={(e) => setScheduleName(e.target.value)}
+                    placeholder="e.g. Weekly security report"
+                    data-testid="input-schedule-name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Report type</Label>
+                  <Select value={scheduleReportType} onValueChange={setScheduleReportType}>
+                    <SelectTrigger data-testid="select-schedule-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user_report">Users</SelectItem>
+                      <SelectItem value="ai_models_report">AI Models</SelectItem>
+                      <SelectItem value="security_report">Security</SelectItem>
+                      <SelectItem value="financial_report">Financial</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Cadence</Label>
+                    <Select value={scheduleCadence} onValueChange={setScheduleCadence}>
+                      <SelectTrigger data-testid="select-schedule-cadence">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Time</Label>
+                    <Input
+                      type="time"
+                      value={scheduleTime}
+                      onChange={(e) => setScheduleTime(e.target.value)}
+                      data-testid="input-schedule-time"
+                    />
+                  </div>
+                </div>
+
+                {scheduleCadence === "weekly" && (
+                  <div className="space-y-2">
+                    <Label>Day of week</Label>
+                    <Select value={scheduleDayOfWeek} onValueChange={setScheduleDayOfWeek}>
+                      <SelectTrigger data-testid="select-schedule-dow">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">Sunday</SelectItem>
+                        <SelectItem value="1">Monday</SelectItem>
+                        <SelectItem value="2">Tuesday</SelectItem>
+                        <SelectItem value="3">Wednesday</SelectItem>
+                        <SelectItem value="4">Thursday</SelectItem>
+                        <SelectItem value="5">Friday</SelectItem>
+                        <SelectItem value="6">Saturday</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Format</Label>
+                    <Select value={scheduleFormat} onValueChange={setScheduleFormat}>
+                      <SelectTrigger data-testid="select-schedule-format">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="json">JSON</SelectItem>
+                        <SelectItem value="csv">CSV</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Limit (optional)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={scheduleLimit}
+                      onChange={(e) => setScheduleLimit(e.target.value)}
+                      data-testid="input-schedule-limit"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Recipients (optional)</Label>
+                  <Textarea
+                    value={scheduleRecipients}
+                    onChange={(e) => setScheduleRecipients(e.target.value)}
+                    placeholder="email1@example.com, email2@example.com"
+                    data-testid="textarea-schedule-recipients"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Preview: {(() => {
+                      const cron = buildScheduleExpression();
+                      if (!cron) return "Invalid schedule";
+                      return `${describeSchedule(cron)} (${cron})`;
+                    })()}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">Active</p>
+                    <p className="text-xs text-muted-foreground">Turn this schedule on or off</p>
+                  </div>
+                  <Switch checked={scheduleIsActive} onCheckedChange={setScheduleIsActive} data-testid="switch-schedule-active" />
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowCreateSchedule(false)}
+                    disabled={createScheduleMutation.isPending}
+                    data-testid="button-cancel-create-schedule"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleCreateSchedule}
+                    disabled={createScheduleMutation.isPending || !scheduleName.trim()}
+                    data-testid="button-submit-create-schedule"
+                  >
+                    {createScheduleMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      "Create"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="history" className="mt-6">
@@ -5205,6 +5872,41 @@ function ReportsSection() {
                 </>
               ) : (
                 "Delete report"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+
+      <AlertDialog open={!!deletingSchedule} onOpenChange={(open) => (!open ? setDeletingSchedule(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete schedule</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete{" "}
+              <span className="font-medium text-foreground">{deletingSchedule?.name || deletingSchedule?.id}</span>?
+              This will stop future scheduled generations.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteScheduleMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteScheduleMutation.isPending}
+              data-testid="button-confirm-delete-schedule"
+              onClick={(e) => {
+                e.preventDefault();
+                if (deletingSchedule?.id) deleteScheduleMutation.mutate(deletingSchedule.id);
+              }}
+            >
+              {deleteScheduleMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete schedule"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

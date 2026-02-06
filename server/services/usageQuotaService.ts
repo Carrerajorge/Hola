@@ -53,7 +53,7 @@ export class UsageQuotaService {
 
     // SECURITY: Check admin status using env variable and database role
     const role = String(user.role || "").toLowerCase().trim();
-    const isAdminRole = role === "admin" || role === "superadmin";
+    const isAdminRole = role === "admin" || role === "superadmin" || role === "team_admin";
     const isAdmin =
       (ADMIN_EMAIL && String(user.email || "").toLowerCase().trim() === ADMIN_EMAIL) ||
       isAdminRole;
@@ -139,7 +139,9 @@ export class UsageQuotaService {
       };
     }
 
-    const isAdmin = (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || user.role === "admin";
+    const role = String(user.role || "").toLowerCase().trim();
+    const isAdminRole = role === "admin" || role === "superadmin" || role === "team_admin";
+    const isAdmin = (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || isAdminRole;
     const plan = isAdmin ? "admin" : (user.plan || "free");
     const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
@@ -195,7 +197,9 @@ export class UsageQuotaService {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (!user) return false;
 
-    if (user.role === "admin" || user.plan === "pro" || (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
+    const role = String(user.role || "").toLowerCase().trim();
+    const isAdminRole = role === "admin" || role === "superadmin" || role === "team_admin";
+    if (isAdminRole || user.plan === "pro" || (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
       return true;
     }
 

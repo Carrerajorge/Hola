@@ -35,6 +35,7 @@ export function WhatsAppConnectDialog({
     autoReplyEnabled: boolean;
     controllersOnly: boolean;
     allowAgenticTools: boolean;
+    mentionOnly: boolean;
     controllers: Array<{ jid: string; masked: string }>;
     pairingActive: boolean;
     pairingExpiresAt: number | null;
@@ -55,7 +56,9 @@ export function WhatsAppConnectDialog({
     setSecurity(res.settings);
   };
 
-  const updateSecurity = async (patch: Partial<Pick<SecuritySettings, 'autoReplyEnabled' | 'controllersOnly' | 'allowAgenticTools'>>) => {
+  const updateSecurity = async (
+    patch: Partial<Pick<SecuritySettings, 'autoReplyEnabled' | 'controllersOnly' | 'allowAgenticTools' | 'mentionOnly'>>
+  ) => {
     setSecurityBusy(true);
     setError(null);
     try {
@@ -243,6 +246,20 @@ export function WhatsAppConnectDialog({
                 checked={!!security?.autoReplyEnabled}
                 disabled={securityBusy}
                 onCheckedChange={(checked) => updateSecurity({ autoReplyEnabled: checked, controllersOnly: true })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm">
+                Responder solo cuando escriban <span className="font-mono">ILIA ...</span>
+                <div className="text-xs text-muted-foreground">
+                  Más seguro: evita respuestas automáticas si alguien le escribe al número sin mencionarlo.
+                </div>
+              </div>
+              <Switch
+                checked={!!security?.mentionOnly}
+                disabled={securityBusy}
+                onCheckedChange={(checked) => updateSecurity({ mentionOnly: checked })}
               />
             </div>
 

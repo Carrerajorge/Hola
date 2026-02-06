@@ -68,20 +68,15 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen gradient-animated flex flex-col relative overflow-hidden">
-      {/* Floating Orbs */}
-      <div className="floating-orb floating-orb-1" />
-      <div className="floating-orb floating-orb-2" />
-      <div className="floating-orb floating-orb-3" />
-
+    <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-white/10 backdrop-blur-sm">
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
         <div className="flex items-center gap-2">
           {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full text-zinc-200 hover:text-white hover:bg-white/10 md:hidden"
+            className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 md:hidden"
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
             aria-expanded={mobileMenuOpen}
@@ -91,25 +86,24 @@ export default function LandingPage() {
           </Button>
 
 
-          <IliaGPTLogo size={32} />
-          <span className="font-semibold text-white">ILIAGPT</span>
-          <ChevronDown className="h-4 w-4 text-zinc-400" />
+          <IliaGPTLogo size={32} className="shadow-sm" />
+          <span className="font-semibold tracking-wide text-luxe text-luxe-sm" data-text="ILIAGPT">ILIAGPT</span>
+          <ChevronDown className="h-4 w-4 text-zinc-500" />
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-purple-400 hover:text-purple-300 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Descargar</span>
+          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
+          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="text-amber-700 hover:text-amber-600 transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
           {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
-            className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-              border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -117,13 +111,13 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-black/20 text-zinc-900 hover:bg-black/5 hover:border-amber-400/60 transition-all duration-300"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
             Suscríbete gratis
           </Button>
-          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-400 hover:text-white hover:bg-white/10">
+          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-600 hover:text-zinc-900 hover:bg-black/5">
             <HelpCircle className="h-5 w-5" />
           </Button>
         </div>
@@ -148,7 +142,7 @@ export default function LandingPage() {
         {/* Drawer */}
         <div
           className={
-            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl " +
+            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white/90 backdrop-blur-xl shadow-2xl " +
             "transition-transform duration-200 ease-out " +
             (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
           }
@@ -171,8 +165,8 @@ export default function LandingPage() {
                 className={
                   "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
                   (item.label === "Imágenes"
-                    ? "text-purple-300 hover:text-purple-200 hover:bg-white/10"
-                    : "text-zinc-200 hover:text-white hover:bg-white/10")
+                    ? "text-amber-700 hover:text-amber-600 hover:bg-black/5"
+                    : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
                 }
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -193,10 +187,9 @@ export default function LandingPage() {
           {/* Hero Title */}
           <div className="text-center fade-in-up">
             <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-white">¿Con qué puedo </span>
-              <span className="text-gradient-premium">ayudarte?</span>
+              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
             </h1>
-            <p className="text-lg text-zinc-400 max-w-xl mx-auto">
+            <p className="text-lg text-zinc-600 max-w-xl mx-auto">
               El asistente de IA más inteligente para crear, investigar y aprender
             </p>
           </div>
@@ -204,19 +197,19 @@ export default function LandingPage() {
           {/* Search Input */}
           <div className="space-y-6 fade-in-up fade-in-up-delay-1">
             <div className="relative">
-              <div className="glass-premium rounded-2xl p-1">
+              <div className="glass-luxe rounded-2xl p-1">
                 <Input
                   placeholder="Pregunta lo que quieras..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-16 px-6 text-lg bg-transparent border-0 text-white placeholder:text-zinc-500 
+                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400 
                     focus-visible:ring-0 focus-visible:ring-offset-0"
                   data-testid="input-landing-search"
                 />
               </div>
               {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-purple-500/20 via-pink-500/20 to-blue-500/20 blur-xl opacity-50" />
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-amber-200/60 via-yellow-100/50 to-amber-200/60 blur-xl opacity-70" />
             </div>
 
             {/* Feature Buttons */}
@@ -225,8 +218,8 @@ export default function LandingPage() {
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-white/20 bg-white/5 text-white
-                    hover:bg-white/10 hover:border-white/40 transition-all duration-300
+                  className={`rounded-full gap-2 text-sm border-black/10 bg-white/70 text-zinc-900
+                    hover:bg-white hover:border-amber-300/60 transition-all duration-300
                     hover:scale-105 hover:shadow-lg fade-in-up`}
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
@@ -241,11 +234,11 @@ export default function LandingPage() {
 
           {/* Promo Card with Premium Design */}
           {showPromo && (
-            <div className="glass-premium rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
+            <div className="glass-luxe rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full"
+                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full"
                 onClick={() => setShowPromo(false)}
                 data-testid="button-close-promo"
               >
@@ -258,14 +251,12 @@ export default function LandingPage() {
                     <Sparkles className="h-5 w-5 text-amber-400" />
                     <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Nuevo</span>
                   </div>
-                  <h3 className="text-xl font-bold text-white mb-2">Crea tu primera imagen</h3>
-                  <p className="text-sm text-zinc-400 mb-5 leading-relaxed">
+                  <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
+                  <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
                     ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
                   </p>
                   <Button
-                    className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-                      border-0 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 
-                      transition-all duration-300 btn-premium"
+                    className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >
@@ -288,12 +279,12 @@ export default function LandingPage() {
                       onClick={() => setLocation("/login")}
                     >
                       <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
-                        flex items-center justify-center border border-white/10
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-white/30
+                        flex items-center justify-center border border-black/10
+                        transition-all duration-300 group-hover:scale-105 group-hover:border-amber-400/60
                         group-hover:shadow-lg`}>
                         <span className="text-2xl">{style.emoji}</span>
                       </div>
-                      <span className="text-xs text-zinc-400 group-hover:text-white transition-colors">{style.label}</span>
+                      <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
                     </div>
                   ))}
                 </div>
@@ -320,11 +311,11 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-white/10 backdrop-blur-sm">
+      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white/70 backdrop-blur-md">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <Link href="/terms" className="text-zinc-400 hover:text-white underline transition-colors">Términos</Link>
+        <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
-        <Link href="/privacy-policy" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</Link>.
+        <Link href="/privacy-policy" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Política de privacidad</Link>.
       </footer>
     </div>
   );

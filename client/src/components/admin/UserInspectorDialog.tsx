@@ -126,11 +126,12 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
   });
 
   const clearChatsMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { reason: string }) => {
       if (!userId) throw new Error("Missing userId");
       const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/chats/delete-all`, {
         method: "POST",
-        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: input.reason }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -499,7 +500,16 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
                       e.preventDefault();
                       if (confirmAction === "block") blockMutation.mutate();
                       else if (confirmAction === "unblock") unblockMutation.mutate();
-                      else if (confirmAction === "clear-chats") clearChatsMutation.mutate();
+                      else if (confirmAction === "clear-chats") {
+                        const reason = prompt("Motivo (requerido):", "Soporte / solicitud del usuario");
+                        if (!reason) return;
+                        const trimmed = reason.trim();
+                        if (trimmed.length < 3) {
+                          toast.error("Motivo demasiado corto");
+                          return;
+                        }
+                        clearChatsMutation.mutate({ reason: trimmed });
+                      }
                     }}
                   >
                     {(confirmAction === "block" && blockMutation.isPending) ||

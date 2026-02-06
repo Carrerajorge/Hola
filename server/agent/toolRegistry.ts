@@ -40,6 +40,7 @@ export interface ToolContext {
   userId: string;
   chatId: string;
   runId: string;
+  channel?: string;
   correlationId?: string;
   stepIndex?: number;
   userPlan?: "free" | "pro" | "admin";
@@ -157,6 +158,27 @@ export class ToolRegistry {
           retryable: false,
         },
       };
+    }
+
+    // WhatsApp channel is a high-risk ingress: keep tool surface minimal by default.
+    if (context.channel === "whatsapp_web") {
+      const allowed = new Set(["search"]);
+      if (!allowed.has(name)) {
+        addLog("warn", `Tool blocked for WhatsApp channel: ${name}`);
+        return {
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
+          error: {
+            code: "ACCESS_DENIED",
+            message: `Tool \"${name}\" is not available from WhatsApp channel`,
+            retryable: false,
+          },
+        };
+      }
     }
     
     if (!tool) {

@@ -621,11 +621,18 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/privacy", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-
       const { id } = req.params;
-      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      const authUserId = getUserId(req);
+
+      if (authUserId) {
+        if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      } else {
+        // Anonymous user access: require cryptographic token.
+        const token = req.headers['x-anonymous-token'] as string;
+        if (!id.startsWith("anon_") || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
 
       const settings = await storage.getUserSettings(id);
       const logs = await storage.getConsentLogs(id, 10);
@@ -648,11 +655,17 @@ export function createUserRouter() {
 
   router.put("/api/users/:id/privacy", validateBody(updatePrivacySettingsSchema), async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-
       const { id } = req.params;
-      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      const authUserId = getUserId(req);
+      if (authUserId) {
+        if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      } else {
+        // Anonymous user access: require cryptographic token.
+        const token = req.headers['x-anonymous-token'] as string;
+        if (!id.startsWith("anon_") || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
 
       const { trainingOptIn, remoteBrowserDataAccess, analyticsTracking } = req.body;
       const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
@@ -895,11 +908,17 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/delete-all", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-
       const { id } = req.params;
-      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      const authUserId = getUserId(req);
+      if (authUserId) {
+        if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      } else {
+        // Anonymous user access: require cryptographic token.
+        const token = req.headers['x-anonymous-token'] as string;
+        if (!id.startsWith("anon_") || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
 
       const count = await storage.softDeleteAllChats(id);
 
@@ -909,6 +928,14 @@ export function createUserRouter() {
           await storage.revokeSharedLink(link.id);
         }
       }
+
+      await auditLog(req, {
+        action: "user.chats_delete_all",
+        resource: "chats",
+        details: { targetUserId: id, count },
+        category: "data",
+        severity: "warning",
+      });
 
       res.json({ count });
     } catch (error: any) {
@@ -1153,6 +1180,19 @@ export function createUserRouter() {
         })),
         preferences: user.preferences || {}
       };
+
+      await auditLog(req, {
+        action: "user.export_data",
+        resource: "users",
+        resourceId: userId,
+        details: {
+          format: exportData.format,
+          totalChats: exportData.statistics.totalChats,
+          totalMessages: exportData.statistics.totalMessages,
+        },
+        category: "data",
+        severity: "info",
+      });
 
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Content-Disposition", `attachment; filename="iliagpt-export-${userId.slice(0,8)}-${Date.now()}.json"`);

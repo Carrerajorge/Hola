@@ -67,8 +67,6 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/chats/",
         "/api/chats",
         "/api/image/",
-        "/api/user/",
-        "/api/users/",
         "/api/memory/",
         "/api/sandbox/",
         "/api/agent/",

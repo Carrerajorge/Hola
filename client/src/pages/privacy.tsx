@@ -573,7 +573,7 @@ export default function PrivacyPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>¿Borrar todo el historial?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Esta acción eliminará todas tus conversaciones. Tendrás un período de recuperación antes de que se eliminen permanentemente.
+                  Esta acción eliminará todas tus conversaciones. Tendrás un período de recuperación de 30 días antes de que se eliminen permanentemente.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

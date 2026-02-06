@@ -81,6 +81,33 @@ function buildExtractedTextFromChunks(chunks: IngestedChunk[], maxChars = 40_000
   return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
 }
 
+function shouldPersistAssistantOutputAsConversationDocument(args: {
+  userMessageText: string;
+  brief: any;
+  answerText: string;
+}): boolean {
+  const { userMessageText, brief, answerText } = args;
+  const answer = (answerText || "").trim();
+  if (answer.length < 2500) return false;
+
+  const wantsDoc = /\b(documento|informe|reporte|plan|propuesta|contrato|carta|cv|curr[ií]culum|presentaci[oó]n|diapositivas|manual|gu[ií]a)\b/i.test(userMessageText || "");
+  const fmt = String(brief?.deliverable?.format || "").toLowerCase();
+  const wantsArtifact = ["docx", "pdf", "pptx", "xlsx"].includes(fmt);
+
+  const headingCount = (answer.match(/^#{1,6}\s+/gm) || []).length;
+  const bulletCount = (answer.match(/^\s*[-*]\s+/gm) || []).length;
+  const numberedCount = (answer.match(/^\s*\d+\.\s+/gm) || []).length;
+  const looksStructured = headingCount >= 2 || bulletCount >= 10 || numberedCount >= 10;
+
+  return wantsArtifact || (wantsDoc && (looksStructured || answer.length > 6000));
+}
+
+function buildAssistantOutputExtractedText(answerText: string, maxChars = 120_000): string {
+  const t = (answerText || "").trim();
+  if (!t) return "";
+  return t.length > maxChars ? t.slice(0, maxChars) : t;
+}
+
 interface CategorizedError {
   category: ErrorCategory;
   userMessage: string;
@@ -858,6 +885,38 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
           });
         }
 
+        // Persist assistant "document-like" outputs so the user can request "mejora el documento anterior"
+        // without re-attaching or pasting the whole content.
+        if (isValidConversationId(contextChatId) && shouldPersistAssistantOutputAsConversationDocument({
+          userMessageText,
+          brief,
+          answerText: finalAnswer,
+        })) {
+          const extractedText = buildAssistantOutputExtractedText(finalAnswer);
+          const fileName = `assistant_output_${Date.now()}.md`;
+          if (extractedText) {
+            queueMicrotask(() => {
+              storage.createConversationDocument({
+                chatId: contextChatId,
+                messageId: null,
+                fileName,
+                storagePath: null,
+                mimeType: "text/markdown",
+                fileSize: extractedText.length,
+                extractedText,
+                metadata: {
+                  source: "assistant_output",
+                  requestId,
+                  deliverableFormat: brief?.deliverable?.format,
+                  primaryIntent: brief?.primary_intent,
+                },
+              }).catch((err: any) => {
+                console.warn(`[Chat API] Failed to persist assistant output to conversation_documents:`, err?.message || err);
+              });
+            });
+          }
+        }
+
         const responseWithMetadata = gptSessionContract ? {
           content: finalAnswer,
           role: "assistant",
@@ -961,6 +1020,38 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         usageQuotaService.recordTokenUsage(userId, response.usage.totalTokens).catch(err => {
           console.error(`[Chat API] Failed to record token usage for user ${userId}:`, err);
         });
+      }
+
+      // Persist assistant "document-like" outputs for follow-up edits ("mejora lo anterior") without pasting.
+      const legacyAnswerText = String((response as any)?.content || "");
+      if (isValidConversationId(contextChatId) && shouldPersistAssistantOutputAsConversationDocument({
+        userMessageText,
+        brief,
+        answerText: legacyAnswerText,
+      })) {
+        const extractedText = buildAssistantOutputExtractedText(legacyAnswerText);
+        const fileName = `assistant_output_${Date.now()}.md`;
+        if (extractedText) {
+          queueMicrotask(() => {
+            storage.createConversationDocument({
+              chatId: contextChatId,
+              messageId: null,
+              fileName,
+              storagePath: null,
+              mimeType: "text/markdown",
+              fileSize: extractedText.length,
+              extractedText,
+              metadata: {
+                source: "assistant_output",
+                requestId,
+                deliverableFormat: brief?.deliverable?.format,
+                primaryIntent: brief?.primary_intent,
+              },
+            }).catch((err: any) => {
+              console.warn(`[Chat API] Failed to persist assistant output to conversation_documents:`, err?.message || err);
+            });
+          });
+        }
       }
 
       if (userId) {
@@ -1342,7 +1433,74 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               ].join("\n");
               console.log(`[Stream] DocTool edit context: injected extractedText chars=${base.length}`);
             } else {
-              console.log(`[Stream] DocTool edit context: no conversation_documents with extractedText found for chatId=${existingChatId}`);
+              console.log(`[Stream] DocTool edit context: no conversation_documents with extractedText found for chatId=${existingChatId}, trying artifacts link fallback...`);
+              const storedFilename = (() => {
+                for (let mi = messages.length - 1; mi >= 0; mi--) {
+                  const msg = messages[mi];
+                  if (!msg || msg.role !== "assistant") continue;
+                  const content = String(msg.content || "");
+                  const m = content.match(/\/api\/artifacts\/([a-zA-Z0-9._-]+)/);
+                  if (m && m[1]) return m[1];
+                }
+                return null;
+              })();
+
+              if (storedFilename) {
+                try {
+                  const fs = await import("fs");
+                  const path = await import("path");
+                  const artifactPath = path.default.join(process.cwd(), "artifacts", storedFilename);
+                  if (fs.default.existsSync(artifactPath)) {
+                    const buffer = await fs.promises.readFile(artifactPath);
+
+                    const lower = storedFilename.toLowerCase();
+                    const mimeType = lower.endsWith(".docx")
+                      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      : lower.endsWith(".xlsx")
+                        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        : lower.endsWith(".pptx")
+                          ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                          : lower.endsWith(".pdf")
+                            ? "application/pdf"
+                            : "application/octet-stream";
+
+                    const docModel = await normalizeDocument(buffer, storedFilename);
+                    const { chunks } = ingestSemanticDocumentToChunks({ model: docModel, mimeType });
+                    const extractedText = buildExtractedTextFromChunks(chunks, 60_000);
+
+                    if (extractedText) {
+                      messageForProduction = [
+                        userMessageText,
+                        ``,
+                        `DOCUMENTO_BASE (extraído desde artifacts/${storedFilename}):`,
+                        extractedText,
+                      ].join("\n");
+
+                      queueMicrotask(() => {
+                        storage.createConversationDocument({
+                          chatId: existingChatId,
+                          messageId: null,
+                          fileName: storedFilename,
+                          storagePath: null,
+                          mimeType,
+                          fileSize: buffer.length,
+                          extractedText,
+                          metadata: {
+                            source: "artifact_fallback",
+                            storedFilename,
+                          },
+                        }).catch(() => { });
+                      });
+
+                      console.log(`[Stream] DocTool edit context: extracted from artifact file chars=${extractedText.length}`);
+                    }
+                  } else {
+                    console.log(`[Stream] DocTool edit context: artifact file not found on disk: ${artifactPath}`);
+                  }
+                } catch (e2: any) {
+                  console.warn(`[Stream] DocTool edit context: artifact fallback failed:`, e2?.message || e2);
+                }
+              }
             }
           } catch (e: any) {
             console.warn(`[Stream] DocTool edit context: failed to load conversation_documents for chatId=${existingChatId}:`, e?.message || e);
@@ -1484,6 +1642,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   chatId: effectiveChatId,
                   intentResult,
                   locale: intentResult.language_detected || 'es',
+                  forceProduction: true,
                 },
                 res
               );
@@ -1653,6 +1812,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 chatId: effectiveChatId,
                 intentResult,
                 locale: intentResult.language_detected || 'es',
+                forceProduction: true,
               },
               res
             );
@@ -2379,6 +2539,39 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const finalAnswer = (v.needs_clarification && v.clarification_question)
         ? v.clarification_question
         : v.final_answer;
+
+      // Persist assistant "document-like" outputs for follow-up edits ("mejora lo anterior") without pasting.
+      const persistentChatId = (chatId || conversationId || "").trim();
+      const canPersistAssistantOutput = !!persistentChatId && !persistentChatId.startsWith("pending-");
+      if (canPersistAssistantOutput && shouldPersistAssistantOutputAsConversationDocument({
+        userMessageText,
+        brief,
+        answerText: finalAnswer,
+      })) {
+        const extractedText = buildAssistantOutputExtractedText(finalAnswer);
+        const fileName = `assistant_output_${Date.now()}.md`;
+        if (extractedText) {
+          queueMicrotask(() => {
+            storage.createConversationDocument({
+              chatId: persistentChatId,
+              messageId: assistantMessageId || null,
+              fileName,
+              storagePath: null,
+              mimeType: "text/markdown",
+              fileSize: extractedText.length,
+              extractedText,
+              metadata: {
+                source: "assistant_output",
+                requestId,
+                deliverableFormat: brief?.deliverable?.format,
+                primaryIntent: brief?.primary_intent,
+              },
+            }).catch((err: any) => {
+              console.warn(`[Stream] Failed to persist assistant output to conversation_documents:`, err?.message || err);
+            });
+          });
+        }
+      }
 
       emitTraceEvent(effectiveRunId, v.verdict === 'pass' ? 'verification_passed' : 'verification_failed', {
         confidence: v.confidence,

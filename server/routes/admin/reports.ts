@@ -737,21 +737,46 @@ reportsRouter.post("/generate-pdf/:id", async (req, res) => {
 
         const reportsDir = path.join(process.cwd(), "generated_reports");
         const files = await fs.readdir(reportsDir).catch(() => []);
-        const jsonFile = files.find((f: string) => f.includes(report.type) && f.endsWith('.json'));
+
+        const candidate = typeof report.filePath === "string" ? report.filePath.trim() : "";
+        let jsonFile = "";
+
+        if (candidate && !candidate.startsWith("/") && candidate.endsWith(".json")) {
+            jsonFile = path.basename(candidate);
+        }
+
+        if (!jsonFile) {
+            // Preferred: `${id}_${type}.json`
+            jsonFile = files.find((f: string) => f.startsWith(`${report.id}_`) && f.endsWith(".json")) || "";
+        }
+
+        if (!jsonFile) {
+            // Legacy fallback (may pick the wrong report if multiple exist)
+            jsonFile = files.find((f: string) => f.includes(report.type) && f.endsWith(".json")) || "";
+        }
 
         let data: any[] = [];
         if (jsonFile) {
-            const content = await fs.readFile(path.join(reportsDir, jsonFile), "utf-8");
+            const content = await fs.readFile(path.join(reportsDir, path.basename(jsonFile)), "utf-8");
             data = JSON.parse(content);
         }
 
         // Generate HTML for PDF
+        const escapeHtml = (value: any): string => {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        };
+
         const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>${report.name}</title>
+    <title>${escapeHtml(report.name)}</title>
     <style>
         body { font-family: Arial, sans-serif; padding: 40px; }
         h1 { color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
@@ -763,17 +788,17 @@ reportsRouter.post("/generate-pdf/:id", async (req, res) => {
     </style>
 </head>
 <body>
-    <h1>${report.name}</h1>
+    <h1>${escapeHtml(report.name)}</h1>
     <p>Generado: ${new Date().toLocaleDateString('es')}</p>
     <p>Total de registros: ${data.length}</p>
     
     <table>
         <thead>
-            <tr>${data.length > 0 ? Object.keys(data[0]).map(k => `<th>${k}</th>`).join('') : ''}</tr>
+            <tr>${data.length > 0 ? Object.keys(data[0]).map(k => `<th>${escapeHtml(k)}</th>`).join('') : ''}</tr>
         </thead>
         <tbody>
             ${data.slice(0, 100).map(row => 
-                `<tr>${Object.values(row).map(v => `<td>${v ?? ''}</td>`).join('')}</tr>`
+                `<tr>${Object.values(row).map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`
             ).join('')}
         </tbody>
     </table>
@@ -803,3 +828,109 @@ reportsRouter.delete("/generated/:id", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
+// ============================================
+// Scheduled Reports Runner (DB polling)
+// ============================================
+
+let scheduledReportsRunnerStarted = false;
+let scheduledReportsRunnerInFlight = false;
+
+function isScheduledReportsRunnerEnabled(): boolean {
+    const raw = String(process.env.SCHEDULED_REPORTS_DISABLED || "").trim().toLowerCase();
+    return raw !== "true" && raw !== "1";
+}
+
+async function runDueScheduledReports(): Promise<void> {
+    if (scheduledReportsRunnerInFlight) return;
+    scheduledReportsRunnerInFlight = true;
+
+    try {
+        const now = new Date();
+
+        const due = await dbRead
+            .select()
+            .from(scheduledReports)
+            .where(and(
+                eq(scheduledReports.isActive, "true"),
+                sql`${scheduledReports.nextRunAt} is not null`,
+                lte(scheduledReports.nextRunAt, now)
+            ))
+            .orderBy(asc(scheduledReports.nextRunAt))
+            .limit(10);
+
+        for (const sched of due) {
+            const next = computeNextRunAt(String(sched.schedule), now);
+
+            // Claim the schedule by moving next_run_at forward (prevents duplicate runs across replicas).
+            const [claimed] = await db
+                .update(scheduledReports)
+                .set({
+                    lastRunAt: now,
+                    nextRunAt: next || null,
+                    updatedAt: now,
+                    // If schedule becomes invalid, disable it.
+                    isActive: next ? "true" : "false",
+                })
+                .where(and(
+                    eq(scheduledReports.id, sched.id),
+                    eq(scheduledReports.isActive, "true"),
+                    sql`${scheduledReports.nextRunAt} is not null`,
+                    lte(scheduledReports.nextRunAt, now)
+                ))
+                .returning();
+
+            if (!claimed) continue;
+
+            if (!next) {
+                console.warn(`[ScheduledReports] Disabled invalid schedule id=${sched.id} schedule=${sched.schedule}`);
+                continue;
+            }
+
+            try {
+                const params: any = { ...(sched.parameters || {}), scheduledReportId: sched.id };
+                const format = String((sched as any).parameters?.format || "json");
+
+                await queueGeneratedReport({
+                    templateId: null,
+                    name: sched.name,
+                    type: sched.type,
+                    parameters: params,
+                    format,
+                    generatedBy: sched.createdBy || null,
+                });
+            } catch (err) {
+                console.error(`[ScheduledReports] Failed to queue scheduled report id=${sched.id}:`, err);
+            }
+        }
+    } catch (error) {
+        console.error('[ScheduledReports] Runner tick failed:', error);
+    } finally {
+        scheduledReportsRunnerInFlight = false;
+    }
+}
+
+function startScheduledReportsRunner(): void {
+    if (scheduledReportsRunnerStarted) return;
+    scheduledReportsRunnerStarted = true;
+
+    const pollMsRaw = parseInt(String(process.env.SCHEDULED_REPORTS_POLL_MS || "60000"), 10);
+    const pollMs = Number.isFinite(pollMsRaw) ? Math.max(pollMsRaw, 5000) : 60000;
+
+    // Kick once on startup.
+    runDueScheduledReports().catch(() => undefined);
+
+    const timer = setInterval(() => {
+        runDueScheduledReports().catch(() => undefined);
+    }, pollMs);
+
+    // Do not keep the process alive solely for scheduling.
+    (timer as any).unref?.();
+
+    console.log(`[ScheduledReports] Runner started (pollMs=${pollMs})`);
+}
+
+if (isScheduledReportsRunnerEnabled()) {
+    startScheduledReportsRunner();
+}
