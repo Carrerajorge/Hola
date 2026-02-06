@@ -90,6 +90,7 @@ export default function WorkspaceSettingsPage() {
   const [billingHelpOpen, setBillingHelpOpen] = useState(false);
   const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
   const [planSelectKey, setPlanSelectKey] = useState(0);
+  const [billingTab, setBillingTab] = useState<"plan" | "invoices">("plan");
   const [creditsOffset, setCreditsOffset] = useState(0);
   const [creditsUsage, setCreditsUsage] = useState<{
     cycleStart: string;
@@ -101,6 +102,29 @@ export default function WorkspaceSettingsPage() {
     percentUsed: number | null;
   } | null>(null);
   const [creditsLoading, setCreditsLoading] = useState(false);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoicesError, setInvoicesError] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<
+    {
+      id: string;
+      number: string | null;
+      status: string | null;
+      currency: string | null;
+      amountDue: number;
+      amountPaid: number;
+      amountRemaining: number;
+      subtotal: number | null;
+      total: number | null;
+      createdAt: string | null;
+      periodStart: string | null;
+      periodEnd: string | null;
+      hostedInvoiceUrl: string | null;
+      invoicePdf: string | null;
+    }[]
+  >([]);
+  const [invoicesCursor, setInvoicesCursor] = useState<string | null>(null);
+  const [invoicesHasMore, setInvoicesHasMore] = useState(false);
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
 
   const [billingStatus, setBillingStatus] = useState<{
     subscriptionStatus: string | null;
@@ -226,6 +250,51 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
+  const loadInvoices = async (opts?: { reset?: boolean }) => {
+    if (!canManageBilling) return;
+    if (invoicesLoading) return;
+
+    const reset = opts?.reset === true;
+    setInvoicesError(null);
+    setInvoicesLoading(true);
+    try {
+      const cursor = reset ? null : invoicesCursor;
+      const url = cursor
+        ? `/api/billing/invoices?limit=10&startingAfter=${encodeURIComponent(cursor)}`
+        : `/api/billing/invoices?limit=10`;
+      const res = await apiFetch(url);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudieron cargar las facturas");
+      }
+
+      const nextInvoices = Array.isArray(data?.invoices) ? data.invoices : [];
+
+      setInvoices((prev) => (reset ? nextInvoices : [...prev, ...nextInvoices]));
+      setInvoicesHasMore(!!data?.hasMore);
+      setInvoicesCursor(data?.nextCursor || null);
+      setInvoicesLoaded(true);
+    } catch (e: any) {
+      const msg = e?.message || "No se pudieron cargar las facturas.";
+      setInvoicesError(msg);
+      toast({
+        title: "Error",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setInvoicesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection !== "billing") return;
+    if (billingTab !== "invoices") return;
+    if (!canManageBilling) return;
+    if (invoicesLoaded) return;
+    void loadInvoices({ reset: true });
+  }, [activeSection, billingTab, canManageBilling, invoicesLoaded]);
+
   const formatCycleShort = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
@@ -252,6 +321,41 @@ export default function WorkspaceSettingsPage() {
       default:
         return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "Gratis";
     }
+  };
+
+  const formatMoney = (amountCents: number | null | undefined, currency: string | null | undefined) => {
+    if (typeof amountCents !== "number") return "—";
+    const cur = String(currency || "usd").toUpperCase();
+    try {
+      return new Intl.NumberFormat("es-ES", { style: "currency", currency: cur }).format(amountCents / 100);
+    } catch {
+      return `${(amountCents / 100).toFixed(2)} ${cur}`;
+    }
+  };
+
+  const invoiceStatusInfo = (statusRaw: string | null | undefined) => {
+    const status = String(statusRaw || "").toLowerCase().trim();
+    switch (status) {
+      case "paid":
+        return { label: "Pagada", className: "bg-green-100 text-green-700 hover:bg-green-100" };
+      case "open":
+        return { label: "Pendiente", className: "bg-amber-100 text-amber-800 hover:bg-amber-100" };
+      case "draft":
+        return { label: "Borrador", className: "bg-slate-100 text-slate-700 hover:bg-slate-100" };
+      case "void":
+        return { label: "Anulada", className: "bg-slate-100 text-slate-700 hover:bg-slate-100" };
+      case "uncollectible":
+        return { label: "Incobrable", className: "bg-red-100 text-red-700 hover:bg-red-100" };
+      default:
+        return { label: statusRaw ? String(statusRaw) : "—", className: "bg-slate-100 text-slate-700 hover:bg-slate-100" };
+    }
+  };
+
+  const formatInvoiceDate = (iso: string | null | undefined) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
   };
 
   const handleLogoUpload = async (file: File) => {
@@ -810,7 +914,11 @@ export default function WorkspaceSettingsPage() {
               </div>
             )}
 
-            <Tabs defaultValue="plan" className="w-full">
+            <Tabs
+              value={billingTab}
+              onValueChange={(value) => setBillingTab(value as "plan" | "invoices")}
+              className="w-full"
+            >
               <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
                 <TabsTrigger 
                   value="plan" 
@@ -1033,23 +1141,153 @@ export default function WorkspaceSettingsPage() {
 	                </div>
               </TabsContent>
 
-              <TabsContent value="invoices" className="mt-6">
-                <div className="border rounded-lg p-6">
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No hay facturas disponibles
-                  </p>
-	                  <div className="flex justify-center">
-	                    <Button
-	                      variant="outline"
-	                      size="sm"
-	                      onClick={() => void openStripePortal()}
-	                      data-testid="button-open-billing-portal"
-	                    >
-	                      {canManageBilling ? "Administrar en portal" : "Contactar administrador"}
-	                    </Button>
-	                  </div>
-	                </div>
-	              </TabsContent>
+              <TabsContent value="invoices" className="mt-6 space-y-4">
+                {!canManageBilling ? (
+                  <div className="border rounded-lg p-6">
+                    <p className="text-sm text-muted-foreground text-center py-8">
+                      Solo el administrador puede ver y descargar facturas.
+                    </p>
+                    <div className="flex justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void openStripePortal()}
+                        data-testid="button-open-billing-portal"
+                      >
+                        Contactar administrador
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="space-y-1">
+                        <h3 className="font-semibold">Facturas</h3>
+                        <p className="text-sm text-muted-foreground">Historial de facturación del espacio de trabajo.</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void loadInvoices({ reset: true })}
+                          disabled={invoicesLoading}
+                          data-testid="button-refresh-invoices"
+                        >
+                          {invoicesLoading ? "Cargando..." : "Actualizar"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void openStripePortal()}
+                          data-testid="button-open-billing-portal"
+                        >
+                          Ver en portal
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg overflow-hidden">
+                      {invoicesLoading && invoices.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-10">Cargando facturas...</p>
+                      ) : invoicesError ? (
+                        <div className="p-6 space-y-3">
+                          <p className="text-sm text-muted-foreground">{invoicesError}</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void loadInvoices({ reset: true })}
+                            disabled={invoicesLoading}
+                            data-testid="button-retry-invoices"
+                          >
+                            Reintentar
+                          </Button>
+                        </div>
+                      ) : invoices.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-10">No hay facturas disponibles.</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/50">
+                              <tr className="text-left text-muted-foreground">
+                                <th className="px-4 py-3 font-medium">Fecha</th>
+                                <th className="px-4 py-3 font-medium">Estado</th>
+                                <th className="px-4 py-3 font-medium">Total</th>
+                                <th className="px-4 py-3 font-medium">Periodo</th>
+                                <th className="px-4 py-3 font-medium text-right">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {invoices.map((inv) => {
+                                const status = invoiceStatusInfo(inv.status);
+                                const period =
+                                  inv.periodStart && inv.periodEnd
+                                    ? `${formatCycleShort(inv.periodStart)} - ${formatCycleShort(inv.periodEnd)}`
+                                    : "—";
+                                const total = typeof inv.total === "number" ? inv.total : inv.amountDue;
+                                return (
+                                  <tr key={inv.id} className="border-t">
+                                    <td className="px-4 py-3">
+                                      <div className="space-y-0.5">
+                                        <div className="font-medium">{formatInvoiceDate(inv.createdAt)}</div>
+                                        <div className="text-xs text-muted-foreground">{inv.number ? `#${inv.number}` : inv.id}</div>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <Badge className={status.className}>{status.label}</Badge>
+                                    </td>
+                                    <td className="px-4 py-3 tabular-nums">{formatMoney(total, inv.currency)}</td>
+                                    <td className="px-4 py-3 text-muted-foreground">{period}</td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex items-center justify-end gap-2">
+                                        {inv.hostedInvoiceUrl ? (
+                                          <Button variant="outline" size="sm" asChild data-testid={`button-invoice-view-${inv.id}`}>
+                                            <a href={inv.hostedInvoiceUrl} target="_blank" rel="noreferrer">
+                                              Ver
+                                            </a>
+                                          </Button>
+                                        ) : (
+                                          <Button variant="outline" size="sm" disabled>
+                                            Ver
+                                          </Button>
+                                        )}
+                                        {inv.invoicePdf ? (
+                                          <Button variant="outline" size="sm" asChild data-testid={`button-invoice-pdf-${inv.id}`}>
+                                            <a href={inv.invoicePdf} target="_blank" rel="noreferrer">
+                                              PDF
+                                            </a>
+                                          </Button>
+                                        ) : (
+                                          <Button variant="outline" size="sm" disabled>
+                                            PDF
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {invoicesHasMore && (
+                      <div className="flex justify-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void loadInvoices()}
+                          disabled={invoicesLoading || !invoicesCursor}
+                          data-testid="button-load-more-invoices"
+                        >
+                          {invoicesLoading ? "Cargando..." : "Cargar más"}
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </TabsContent>
             </Tabs>
           </div>
         );
