@@ -253,6 +253,7 @@ export async function executeUnifiedChat(
     onChunk?: (chunk: string) => void;
     disableImageGeneration?: boolean;
     systemPrompt?: string;
+    channel?: string;
   } = {}
 ): Promise<void> {
   const { requestSpec, runId, isAgenticMode } = context;
@@ -353,6 +354,7 @@ export async function executeUnifiedChat(
         userId: request.userId,
         chatId: request.chatId,
         requestSpec,
+        channel: options.channel,
         maxIterations: 10
       });
 

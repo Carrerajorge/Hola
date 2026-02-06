@@ -1,6 +1,5 @@
-import fs from 'fs';
-import path from 'path';
 import { EventEmitter } from 'events';
+import { getWhatsAppWebUserDir } from './whatsappWebSettings';
 
 // NOTE: This integration uses an *unofficial* WhatsApp Web protocol library (Baileys).
 // It enables QR-based linking for a phone-controlled WhatsApp account.
@@ -20,7 +19,6 @@ export type WhatsAppWebStatus =
   | { state: 'disconnected' }
   | { state: 'connecting' }
   | { state: 'qr'; qr: string }
-  | { state: 'pairing_code'; phone: string; code: string }
   | { state: 'connected'; me?: { id?: string; name?: string } };
 
 export interface WhatsAppWebEvents {
@@ -28,14 +26,66 @@ export interface WhatsAppWebEvents {
   inbound_message: (userId: string, msg: { from: string; text: string; messageId?: string; timestamp?: number }) => void;
 }
 
+function unwrapMessageContent(message: any): any {
+  let m = message;
+  // Common wrapper layers used by WhatsApp/Baileys.
+  // Keep this conservative and non-recursive to avoid unexpected shapes.
+  for (let i = 0; i < 5; i++) {
+    if (!m) return m;
+    if (m.ephemeralMessage?.message) { m = m.ephemeralMessage.message; continue; }
+    if (m.viewOnceMessage?.message) { m = m.viewOnceMessage.message; continue; }
+    if (m.viewOnceMessageV2?.message) { m = m.viewOnceMessageV2.message; continue; }
+    if (m.viewOnceMessageV2Extension?.message) { m = m.viewOnceMessageV2Extension.message; continue; }
+    if (m.documentWithCaptionMessage?.message) { m = m.documentWithCaptionMessage.message; continue; }
+    break;
+  }
+  return m;
+}
+
+function extractText(message: any): string {
+  const m = unwrapMessageContent(message) || {};
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.listResponseMessage?.title ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    ''
+  );
+}
+
 export class WhatsAppWebManager extends EventEmitter {
   private sockets = new Map<string, { sock: WASocket; auth: AuthenticationState; status: WhatsAppWebStatus }>();
+  private manualDisconnect = new Set<string>();
+  private reconnectAttempts = new Map<string, number>();
+  private reconnectTimers = new Map<string, NodeJS.Timeout>();
+
+  private clearReconnect(userId: string): void {
+    const t = this.reconnectTimers.get(userId);
+    if (t) clearTimeout(t);
+    this.reconnectTimers.delete(userId);
+    this.reconnectAttempts.delete(userId);
+  }
+
+  private scheduleReconnect(userId: string): void {
+    if (this.reconnectTimers.has(userId)) return;
+    const attempts = (this.reconnectAttempts.get(userId) ?? 0) + 1;
+    this.reconnectAttempts.set(userId, attempts);
+    const delayMs = Math.min(60_000, 1000 * Math.pow(2, attempts - 1));
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(userId);
+      void this.start(userId).catch(() => null);
+    }, delayMs);
+    this.reconnectTimers.set(userId, timer);
+  }
 
   private sessionDirForUser(userId: string): string {
-    const base = path.join(process.cwd(), 'data', 'whatsapp-web');
-    const dir = path.join(base, userId);
-    fs.mkdirSync(dir, { recursive: true });
-    return dir;
+    // Use a safe, per-user directory (hash-based) and prevent path traversal.
+    // This directory also stores settings.json.
+    return getWhatsAppWebUserDir(userId);
   }
 
   getStatus(userId: string): WhatsAppWebStatus {
@@ -43,14 +93,14 @@ export class WhatsAppWebManager extends EventEmitter {
   }
 
   async start(userId: string): Promise<WhatsAppWebStatus> {
-    return this.startWithOptions(userId);
-  }
+    this.manualDisconnect.delete(userId);
+    // If a reconnect is scheduled and the user explicitly starts, prefer the explicit start.
+    const scheduled = this.reconnectTimers.get(userId);
+    if (scheduled) {
+      clearTimeout(scheduled);
+      this.reconnectTimers.delete(userId);
+    }
 
-  /**
-   * Start a WhatsApp Web session. If `phone` is provided, we will attempt to generate
-   * a pairing code (link by phone number) instead of requiring QR scanning.
-   */
-  async startWithOptions(userId: string, opts?: { phone?: string }): Promise<WhatsAppWebStatus> {
     const existing = this.sockets.get(userId);
     if (existing) return existing.status;
 
@@ -73,36 +123,6 @@ export class WhatsAppWebManager extends EventEmitter {
     this.sockets.set(userId, record);
     this.emit('status', userId, record.status);
 
-    // Optional: pairing code flow (link by phone number)
-    if (opts?.phone) {
-      const phone = String(opts.phone).trim();
-      const digitsOnly = phone.replace(/[^0-9]/g, '');
-      if (digitsOnly.length < 8) {
-        record.status = { state: 'disconnected' };
-        this.emit('status', userId, record.status);
-        this.sockets.delete(userId);
-        throw new Error('Invalid phone number');
-      }
-
-      // Baileys supports requesting a pairing code for linking.
-      // We keep the socket alive so the user can complete linking in WhatsApp.
-      (async () => {
-        try {
-          const anySock = sock as any;
-          if (typeof anySock.requestPairingCode !== 'function') {
-            throw new Error('Pairing code not supported by WhatsApp Web provider');
-          }
-          const code = await anySock.requestPairingCode(digitsOnly);
-          record.status = { state: 'pairing_code', phone: digitsOnly, code: String(code) };
-          this.emit('status', userId, record.status);
-        } catch (e: any) {
-          record.status = { state: 'disconnected' };
-          this.emit('status', userId, record.status);
-          this.sockets.delete(userId);
-        }
-      })().catch(() => null);
-    }
-
     sock.ev.on('creds.update', async () => {
       try {
         await saveCreds();
@@ -120,48 +140,46 @@ export class WhatsAppWebManager extends EventEmitter {
       }
 
       if (connection === 'open') {
+        this.clearReconnect(userId);
         record.status = { state: 'connected', me: { id: sock.user?.id, name: sock.user?.name } };
         this.emit('status', userId, record.status);
       }
 
       if (connection === 'close') {
         const reason = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const shouldReconnect = !this.manualDisconnect.has(userId) && reason !== DisconnectReason.loggedOut;
 
         record.status = { state: 'disconnected' };
         this.emit('status', userId, record.status);
 
         this.sockets.delete(userId);
+        this.manualDisconnect.delete(userId);
 
         if (shouldReconnect) {
-          // Best-effort reconnect.
-          void this.startWithOptions(userId).catch(() => null);
+          // Best-effort reconnect with backoff to reduce flapping.
+          this.scheduleReconnect(userId);
         }
       }
     });
 
     sock.ev.on('messages.upsert', (m) => {
       try {
-        const msg = m.messages?.[0];
-        if (!msg) return;
-        if (msg.key.fromMe) return;
-        const from = msg.key.remoteJid || 'unknown';
+        const msgs = m.messages || [];
+        for (const msg of msgs) {
+          if (!msg) continue;
+          if (msg.key?.fromMe) continue;
 
-        // Extract a simple text message.
-        const text =
-          (msg.message as any)?.conversation ||
-          (msg.message as any)?.extendedTextMessage?.text ||
-          (msg.message as any)?.imageMessage?.caption ||
-          '';
+          const from = msg.key?.remoteJid || 'unknown';
+          const text = extractText((msg as any).message);
+          if (!text) continue;
 
-        if (!text) return;
-
-        this.emit('inbound_message', userId, {
-          from,
-          text,
-          messageId: msg.key.id || undefined,
-          timestamp: (msg.messageTimestamp as any) ? Number(msg.messageTimestamp) * 1000 : undefined,
-        });
+          this.emit('inbound_message', userId, {
+            from,
+            text,
+            messageId: msg.key?.id || undefined,
+            timestamp: (msg as any).messageTimestamp ? Number((msg as any).messageTimestamp) * 1000 : undefined,
+          });
+        }
       } catch {
         // ignore
       }
@@ -173,6 +191,13 @@ export class WhatsAppWebManager extends EventEmitter {
   async disconnect(userId: string): Promise<void> {
     const rec = this.sockets.get(userId);
     if (!rec) return;
+
+    this.manualDisconnect.add(userId);
+    this.clearReconnect(userId);
+    // Detach listeners first to avoid triggering reconnect on our own shutdown.
+    try { rec.sock.ev.removeAllListeners('connection.update'); } catch { /* ignore */ }
+    try { rec.sock.ev.removeAllListeners('messages.upsert'); } catch { /* ignore */ }
+    try { rec.sock.ev.removeAllListeners('creds.update'); } catch { /* ignore */ }
 
     try {
       await rec.sock.logout();

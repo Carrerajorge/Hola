@@ -53,3 +53,6 @@ artifacts/node_modules_backup/
 artifacts/Test_*.txt
 artifacts/*.log
 artifacts/*.tmp
+
+# Runtime connector data (may include credentials/session state)
+data/whatsapp-web/

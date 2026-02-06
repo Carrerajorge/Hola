@@ -2,22 +2,17 @@ import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/apiClient';
-
-type Status =
-  | { state: 'disconnected' }
-  | { state: 'connecting' }
-  | { state: 'qr'; qr: string }
-  | { state: 'pairing_code'; phone: string; code: string }
-  | { state: 'connected'; me?: { id?: string; name?: string } };
+import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-web-events';
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
   });
-  const json = await res.json();
+  const json = await res.json().catch(() => ({}));
   if (!res.ok || json?.success === false) {
     throw new Error(json?.error || `Request failed (${res.status})`);
   }
@@ -31,49 +26,99 @@ export function WhatsAppConnectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [status, setStatus] = useState<Status>({ state: 'disconnected' });
+  const [status, setStatus] = useState<WhatsAppWebStatus>({ state: 'disconnected' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [countryCode, setCountryCode] = useState('+51');
-  const [phoneNumber, setPhoneNumber] = useState('');
+
+  type SecuritySettings = {
+    autoReplyEnabled: boolean;
+    controllersOnly: boolean;
+    allowAgenticTools: boolean;
+    mentionOnly: boolean;
+    controllers: Array<{ jid: string; masked: string }>;
+    pairingActive: boolean;
+    pairingExpiresAt: number | null;
+    updatedAt: number;
+  };
+
+  const [security, setSecurity] = useState<SecuritySettings | null>(null);
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [pairingCode, setPairingCode] = useState<{ code: string; expiresAt: number } | null>(null);
 
   const refreshStatus = async () => {
-    const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/status`);
+    const res = await api<{ success: true; status: WhatsAppWebStatus }>(`/api/integrations/whatsapp/web/status`);
     setStatus(res.status);
+  };
+
+  const refreshSecurity = async () => {
+    const res = await api<{ success: true; settings: SecuritySettings }>(`/api/integrations/whatsapp/web/security/settings`);
+    setSecurity(res.settings);
+  };
+
+  const updateSecurity = async (
+    patch: Partial<Pick<SecuritySettings, 'autoReplyEnabled' | 'controllersOnly' | 'allowAgenticTools' | 'mentionOnly'>>
+  ) => {
+    setSecurityBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ success: true; settings: SecuritySettings }>(`/api/integrations/whatsapp/web/security/settings`, {
+        method: 'POST',
+        body: JSON.stringify(patch),
+      });
+      setSecurity(res.settings);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudieron guardar los ajustes');
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const generatePairingCode = async () => {
+    setSecurityBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ success: true; code: string; expiresAt: number }>(`/api/integrations/whatsapp/web/security/pairing-code`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setPairingCode({ code: res.code, expiresAt: res.expiresAt });
+      // Also refresh settings so UI shows pairingActive/expiresAt.
+      void refreshSecurity().catch(() => null);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo generar el código');
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const revokeController = async (jid: string) => {
+    setSecurityBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ success: true; settings: SecuritySettings }>(`/api/integrations/whatsapp/web/security/controllers/remove`, {
+        method: 'POST',
+        body: JSON.stringify({ jid }),
+      });
+      setSecurity(res.settings);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo revocar el contacto');
+    } finally {
+      setSecurityBusy(false);
+    }
   };
 
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/connect/start`, {
+      const res = await api<{ success: true; status: WhatsAppWebStatus }>(`/api/integrations/whatsapp/web/connect/start`, {
         method: 'POST',
         body: JSON.stringify({}),
       });
       setStatus(res.status);
     } catch (e: any) {
       setError(e?.message || 'No se pudo iniciar la conexión');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const generatePairingCode = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const cc = countryCode.trim().replace(/\s+/g, '');
-      const num = phoneNumber.trim().replace(/\s+/g, '');
-      const phone = `${cc}${num}`;
-
-      const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/connect/pairing-code`, {
-        method: 'POST',
-        body: JSON.stringify({ phone }),
-      });
-      setStatus(res.status);
-    } catch (e: any) {
-      setError(e?.message || 'No se pudo generar el código');
     } finally {
       setBusy(false);
     }
@@ -97,11 +142,16 @@ export function WhatsAppConnectDialog({
 
   useEffect(() => {
     if (!open) return;
-    void refreshStatus();
-    const t = setInterval(() => {
-      void refreshStatus().catch(() => null);
-    }, 1200);
-    return () => clearInterval(t);
+    const unsub = whatsappWebEventStream.subscribe({
+      onStatus: (s) => {
+        setStatus(s);
+        setError(null);
+      },
+      onError: (msg) => setError(msg),
+    });
+    void refreshStatus().catch(() => null);
+    void refreshSecurity().catch(() => null);
+    return unsub;
   }, [open]);
 
   useEffect(() => {
@@ -162,46 +212,7 @@ export function WhatsAppConnectDialog({
             </div>
           )}
 
-          {status.state === 'pairing_code' && (
-            <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
-              <div className="text-sm">
-                Número: <span className="font-medium">{status.phone}</span>
-              </div>
-              <div className="text-sm">
-                Código: <span className="font-mono font-semibold">{status.code}</span>
-              </div>
-              <ol className="text-sm text-muted-foreground list-decimal pl-5 space-y-1">
-                <li>Abra WhatsApp en su teléfono</li>
-                <li>Dispositivos vinculados → Vincular un dispositivo</li>
-                <li>Elija “Vincular con número / código”</li>
-                <li>Ingrese el código mostrado</li>
-              </ol>
-            </div>
-          )}
-
           {error && <div className="text-sm text-red-600">{error}</div>}
-
-          {status.state !== 'connected' && status.state !== 'qr' && status.state !== 'pairing_code' ? (
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">
-                Vincular por número (alternativa al QR)
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={countryCode}
-                  onChange={(e) => setCountryCode(e.target.value)}
-                  placeholder="+51"
-                  className="h-9 w-20 rounded-md border bg-background px-2 text-sm"
-                />
-                <input
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  placeholder="918714054"
-                  className="h-9 flex-1 rounded-md border bg-background px-2 text-sm"
-                />
-              </div>
-            </div>
-          ) : null}
 
           <div className="flex gap-2">
             {status.state === 'connected' ? (
@@ -209,18 +220,111 @@ export function WhatsAppConnectDialog({
                 Desconectar
               </Button>
             ) : (
-              <>
-                <Button onClick={start} disabled={busy}>
-                  Generar QR
-                </Button>
-                <Button variant="secondary" onClick={generatePairingCode} disabled={busy}>
-                  Generar código
-                </Button>
-              </>
+              <Button onClick={start} disabled={busy}>
+                Generar QR
+              </Button>
             )}
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cerrar
             </Button>
+          </div>
+
+          <div className="rounded-lg border p-3 space-y-3">
+            <div>
+              <div className="text-sm font-medium">Seguridad</div>
+              <div className="text-xs text-muted-foreground">
+                Por defecto ILIA no responde automáticamente. Para habilitar control desde WhatsApp, empareje un contacto.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm">
+                Auto-reply (solo emparejados)
+                <div className="text-xs text-muted-foreground">Recomendado para evitar abuso por terceros.</div>
+              </div>
+              <Switch
+                checked={!!security?.autoReplyEnabled}
+                disabled={securityBusy}
+                onCheckedChange={(checked) => updateSecurity({ autoReplyEnabled: checked, controllersOnly: true })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm">
+                Responder solo cuando escriban <span className="font-mono">ILIA ...</span>
+                <div className="text-xs text-muted-foreground">
+                  Más seguro: evita respuestas automáticas si alguien le escribe al número sin mencionarlo.
+                </div>
+              </div>
+              <Switch
+                checked={!!security?.mentionOnly}
+                disabled={securityBusy}
+                onCheckedChange={(checked) => updateSecurity({ mentionOnly: checked })}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm">
+                Herramientas / Agent (`!agent`)
+                <div className="text-xs text-muted-foreground">
+                  Riesgoso. Solo para su número emparejado. Deje apagado si no lo necesita.
+                </div>
+              </div>
+              <Switch
+                checked={!!security?.allowAgenticTools}
+                disabled={securityBusy || !security?.autoReplyEnabled}
+                onCheckedChange={(checked) => updateSecurity({ allowAgenticTools: checked })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm">
+                  Emparejar controlador
+                  <div className="text-xs text-muted-foreground">
+                    Genere un código y envíe desde WhatsApp: <span className="font-mono">PAIR ABCD1234EF56</span>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" onClick={generatePairingCode} disabled={securityBusy}>
+                  Generar código
+                </Button>
+              </div>
+
+              {(pairingCode || security?.pairingActive) ? (
+                <div className="rounded-md bg-muted/30 border px-3 py-2">
+                  <div className="text-xs text-muted-foreground">Código</div>
+                  <div className="font-mono text-lg tracking-widest">
+                    {pairingCode?.code || '******'}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Expira: {new Date((pairingCode?.expiresAt || security?.pairingExpiresAt || Date.now())).toLocaleString()}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm">Controladores emparejados</div>
+              {security?.controllers?.length ? (
+                <div className="space-y-1">
+                  {security.controllers.map((c) => (
+                    <div key={c.jid} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="font-mono">{c.masked}</span>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={securityBusy}
+                        onClick={() => revokeController(c.jid)}
+                      >
+                        Revocar
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">Ninguno.</div>
+              )}
+            </div>
           </div>
 
           <div className="text-xs text-muted-foreground">

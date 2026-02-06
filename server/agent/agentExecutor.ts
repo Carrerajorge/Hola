@@ -17,6 +17,10 @@ export interface AgentExecutorOptions {
   userId: string;
   chatId: string;
   requestSpec: RequestSpec;
+  /**
+   * Optional source channel (e.g. "whatsapp_web") to apply tighter tool policies.
+   */
+  channel?: string;
 }
 
 interface FunctionDeclaration {
@@ -194,29 +198,38 @@ async function executeToolCall(
   let artifact: { type: string; url: string; name: string } | undefined;
 
   try {
-    switch (toolName) {
-      case "web_search": {
-        const searchResult = await toolRegistry.execute("search", {
-          query: args.query,
-          maxResults: args.maxResults || 5
-        }, context);
-        result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
-        break;
-      }
+    const blockedByChannel =
+      context.channel === "whatsapp_web" &&
+      ["fetch_url", "create_presentation", "create_document", "create_spreadsheet"].includes(toolName);
 
-      case "fetch_url": {
-        try {
-          const { fetchUrl } = await import("../services/webSearch");
-          const fetchResult = await fetchUrl(args.url, {
-            extractText: args.extractText ?? true,
-            maxLength: 50000
-          });
-          result = fetchResult;
-        } catch (err: any) {
-          result = { error: err.message };
+    if (blockedByChannel) {
+      result = {
+        error: `Tool "${toolName}" is disabled for WhatsApp. Use the web panel for file generation or URL fetch.`,
+      };
+    } else {
+      switch (toolName) {
+        case "web_search": {
+          const searchResult = await toolRegistry.execute("search", {
+            query: args.query,
+            maxResults: args.maxResults || 5
+          }, context);
+          result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
+          break;
         }
-        break;
-      }
+
+        case "fetch_url": {
+          try {
+            const { fetchUrl } = await import("../services/webSearch");
+            const fetchResult = await fetchUrl(args.url, {
+              extractText: args.extractText ?? true,
+              maxLength: 50000
+            });
+            result = fetchResult;
+          } catch (err: any) {
+            result = { error: err.message };
+          }
+          break;
+        }
 
       case "create_presentation": {
         const slideSpec = {
@@ -448,6 +461,7 @@ async function executeToolCall(
         const toolResult = await toolRegistry.execute(toolName, args, context);
         result = toolResult.success ? toolResult.output : { error: toolResult.error?.message };
       }
+      }
     }
 
     const durationMs = Date.now() - startTime;
@@ -495,10 +509,16 @@ export async function executeAgentLoop(
   res: Response,
   options: AgentExecutorOptions
 ): Promise<void> {
-  const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
+  const { runId, userId, chatId, requestSpec, maxIterations = 10, channel } = options;
 
-  const tools = getToolsForIntent(requestSpec.intent);
-  const toolContext: ToolContext = { userId, chatId, runId };
+  let tools = getToolsForIntent(requestSpec.intent);
+  if (channel === "whatsapp_web") {
+    // WhatsApp channel: keep the tool surface extremely small (no file writes, no URL fetch).
+    const allow = new Set(["web_search", "analyze_data", "generate_chart"]);
+    tools = tools.filter(t => allow.has(t.name));
+  }
+
+  const toolContext: ToolContext = { userId, chatId, runId, channel };
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
   let iteration = 0;
