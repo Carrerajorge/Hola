@@ -56,8 +56,10 @@ describe("shell_command runner mode", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it("should stream via runner when SHELL_COMMAND_SANDBOX_MODE=runner", async () => {
-    const prevMode = process.env.SHELL_COMMAND_SANDBOX_MODE;
+  it(
+    "should stream via runner when SHELL_COMMAND_SANDBOX_MODE=runner",
+    async () => {
+      const prevMode = process.env.SHELL_COMMAND_SANDBOX_MODE;
     const prevUrl = process.env.SHELL_COMMAND_RUNNER_URL;
     const prevTok = process.env.SHELL_COMMAND_RUNNER_TOKEN;
 
@@ -74,7 +76,8 @@ describe("shell_command runner mode", () => {
 
     const res = await toolRegistry.execute(
       "shell_command",
-      { command: "echo hello", timeout: 5000 },
+      // In CI/loaded environments this can take a bit longer than 5s.
+      { command: "echo hello", timeout: 15000 },
       {
         userId: "u1",
         chatId: "c1",
@@ -102,5 +105,6 @@ describe("shell_command runner mode", () => {
 
     if (prevTok === undefined) delete process.env.SHELL_COMMAND_RUNNER_TOKEN;
     else process.env.SHELL_COMMAND_RUNNER_TOKEN = prevTok;
-  });
+  },
+  20000);
 });

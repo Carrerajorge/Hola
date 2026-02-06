@@ -95,6 +95,8 @@ describe("Document Generation E2E", () => {
     let generator: MockDocumentGenerator;
 
     beforeEach(() => {
+        // Ensure other suites' fake timers don't leak into these E2E-style async tests.
+        vi.useRealTimers();
         generator = new MockDocumentGenerator();
     });
 
