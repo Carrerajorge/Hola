@@ -146,7 +146,7 @@ class PollingManager {
         'task_start', 'plan_created', 'plan_step', 'step_started',
         'tool_call', 'tool_output', 'tool_chunk', 'observation',
         'verification', 'step_completed', 'step_failed', 'step_retried',
-        'replan', 'thinking', 'shell_output', 'artifact_created',
+        'replan', 'thinking', 'shell_output', 'shell_chunk', 'shell_exit', 'artifact_created',
         'error', 'done', 'cancelled', 'heartbeat'
       ];
       

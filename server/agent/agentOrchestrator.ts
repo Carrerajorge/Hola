@@ -959,7 +959,8 @@ Respond with ONLY valid JSON in this exact format:
         stepIndex,
         onStream: (evt) => {
           try {
-            // Stream chunks to the UI in near real-time (best-effort)
+            // Stream chunks to the UI in near real-time.
+            // Legacy event (kept for backward compatibility): shell_output with truncated snippet.
             void this.emitTraceEvent("shell_output", {
               stepIndex,
               stepId: `step-${stepIndex}`,
@@ -968,12 +969,33 @@ Respond with ONLY valid JSON in this exact format:
               output_snippet: evt.chunk.substring(0, 2000),
               is_final_chunk: false,
             });
+
+            // New event (preferred): shell_chunk with ordering metadata.
+            // Consumers can reconstruct full output without relying on truncation.
+            (this as any).__shellSeqByStep = (this as any).__shellSeqByStep || new Map();
+            const m: Map<number, number> = (this as any).__shellSeqByStep;
+            const next = (m.get(stepIndex) || 0) + 1;
+            m.set(stepIndex, next);
+
+            const chunk = typeof evt.chunk === 'string' ? evt.chunk : String(evt.chunk);
+            const maxChunk = 64 * 1024;
+
+            void this.emitTraceEvent("shell_chunk", {
+              stepIndex,
+              stepId: `step-${stepIndex}`,
+              tool_name: step.toolName,
+              stream: evt.stream,
+              chunk_sequence: next,
+              chunk: chunk.length > maxChunk ? chunk.slice(0, maxChunk) : chunk,
+              is_truncated: chunk.length > maxChunk,
+            });
           } catch {
             // ignore streaming errors
           }
         },
         onExit: (evt) => {
           try {
+            // Legacy final marker
             void this.emitTraceEvent("shell_output", {
               stepIndex,
               stepId: `step-${stepIndex}`,
@@ -982,6 +1004,19 @@ Respond with ONLY valid JSON in this exact format:
               command: typeof step.input?.command === "string" ? step.input.command : "",
               exit_code: evt.exitCode,
               signal: evt.signal,
+              is_final_chunk: true,
+            });
+
+            // New final marker
+            void this.emitTraceEvent("shell_exit", {
+              stepIndex,
+              stepId: `step-${stepIndex}`,
+              tool_name: step.toolName,
+              command: typeof step.input?.command === "string" ? step.input.command : "",
+              exit_code: evt.exitCode,
+              signal: evt.signal,
+              wasKilled: evt.wasKilled,
+              durationMs: evt.durationMs,
               is_final_chunk: true,
             });
           } catch {

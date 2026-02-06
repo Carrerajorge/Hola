@@ -162,7 +162,7 @@ function StepTimeline({ steps, runId }: { steps: TraceStep[]; runId: string }) {
 
 function StepDetails({ step }: { step: TraceStep }) {
   const shellEvents = step.events.filter(e => 
-    e.event_type === 'shell_output' || e.event_type === 'tool_call'
+    e.event_type === 'shell_output' || e.event_type === 'shell_chunk' || e.event_type === 'shell_exit' || e.event_type === 'tool_call'
   );
   
   const hasArtifacts = step.artifacts.length > 0;
@@ -279,6 +279,8 @@ function ArtifactsPanel({ step }: { step: TraceStep }) {
 function ShellPanel({ step }: { step: TraceStep }) {
   const shellEvents = step.events.filter(e => 
     e.event_type === 'shell_output' || 
+    e.event_type === 'shell_chunk' ||
+    e.event_type === 'shell_exit' ||
     e.event_type === 'tool_call' ||
     e.event_type === 'tool_output'
   );
@@ -291,6 +293,8 @@ function ShellPanel({ step }: { step: TraceStep }) {
     );
   }
 
+  const fullShell = step.shellOutput;
+
   return (
     <ScrollArea className="h-[200px] rounded border bg-black p-3" data-testid={`shell-panel-${step.index}`}>
       <div className="font-mono text-xs text-green-400 space-y-1">
@@ -299,11 +303,20 @@ function ShellPanel({ step }: { step: TraceStep }) {
             {event.command && (
               <div className="text-blue-400">$ {event.command}</div>
             )}
-            {event.output_snippet && (
-              <pre className="whitespace-pre-wrap text-gray-300">{event.output_snippet}</pre>
-            )}
           </div>
         ))}
+
+        {fullShell ? (
+          <pre className="whitespace-pre-wrap text-gray-300">{fullShell}</pre>
+        ) : (
+          shellEvents.map((event, i) => (
+            <div key={`legacy-${i}`}>
+              {event.output_snippet && (
+                <pre className="whitespace-pre-wrap text-gray-300">{event.output_snippet}</pre>
+              )}
+            </div>
+          ))
+        )}
       </div>
     </ScrollArea>
   );
