@@ -135,7 +135,7 @@ import(pathToFileURL(join(__dirname, "worker.mjs")).href).catch(err => {
 "use strict";
 const { pathToFileURL } = require("url");
 const { join } = require("path");
-import(pathToFileURL(join(__dirname, "sandboxRunner/index.mjs")).href).catch(err => {
+import(pathToFileURL(join(__dirname, "agent/sandboxRunner/index.mjs")).href).catch(err => {
   console.error("Failed to start sandbox runner:", err);
   process.exit(1);
 });
