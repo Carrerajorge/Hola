@@ -166,7 +166,7 @@ export const MinimalComposer = memo(function MinimalComposer({
               disabled={disabled}
               className={cn(
                 "min-h-[40px] max-h-[200px] resize-none",
-                "border-0 bg-transparent focus-visible:ring-0",
+                "border-0 bg-transparent outline-none focus-visible:outline-none focus-visible:ring-0",
                 "py-2 px-1",
                 "text-base placeholder:text-muted-foreground/60"
               )}

@@ -221,6 +221,7 @@ export function createUserRouter() {
           featureFlags: {
             memoryEnabled: false,
             recordingHistoryEnabled: false,
+            chatHistoryEnabled: true,
             webSearchAuto: true,
             codeInterpreterEnabled: true,
             canvasEnabled: true,
@@ -523,8 +524,9 @@ export function createUserRouter() {
 
       const settings = await storage.getUserSettings(id);
       const logs = await storage.getConsentLogs(id, 10);
+      const defaultPrivacySettings = { trainingOptIn: false, remoteBrowserDataAccess: false, analyticsTracking: true };
       res.json({
-        privacySettings: settings?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false },
+        privacySettings: { ...defaultPrivacySettings, ...(settings?.privacySettings || {}) },
         consentHistory: logs
       });
     } catch (error: any) {
@@ -533,7 +535,13 @@ export function createUserRouter() {
     }
   });
 
-  router.put("/api/users/:id/privacy", async (req, res) => {
+  const updatePrivacySettingsSchema = z.object({
+    trainingOptIn: z.boolean().optional(),
+    remoteBrowserDataAccess: z.boolean().optional(),
+    analyticsTracking: z.boolean().optional(),
+  });
+
+  router.put("/api/users/:id/privacy", validateBody(updatePrivacySettingsSchema), async (req, res) => {
     try {
       const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
@@ -541,7 +549,7 @@ export function createUserRouter() {
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
-      const { trainingOptIn, remoteBrowserDataAccess } = req.body;
+      const { trainingOptIn, remoteBrowserDataAccess, analyticsTracking } = req.body;
       const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
       const userAgent = req.headers['user-agent'] || undefined;
 
@@ -551,10 +559,30 @@ export function createUserRouter() {
       if (remoteBrowserDataAccess !== undefined) {
         await storage.logConsent(id, 'remote_browser_access', String(remoteBrowserDataAccess), ipAddress, userAgent);
       }
+      if (analyticsTracking !== undefined) {
+        await storage.logConsent(id, 'analytics_tracking', String(analyticsTracking), ipAddress, userAgent);
+      }
 
-      const settings = await storage.upsertUserSettings(id, {
-        privacySettings: { trainingOptIn: trainingOptIn ?? false, remoteBrowserDataAccess: remoteBrowserDataAccess ?? false }
-      });
+      const privacyUpdates: Partial<{
+        trainingOptIn: boolean;
+        remoteBrowserDataAccess: boolean;
+        analyticsTracking: boolean;
+      }> = {};
+      if (trainingOptIn !== undefined) privacyUpdates.trainingOptIn = trainingOptIn;
+      if (remoteBrowserDataAccess !== undefined) privacyUpdates.remoteBrowserDataAccess = remoteBrowserDataAccess;
+      if (analyticsTracking !== undefined) privacyUpdates.analyticsTracking = analyticsTracking;
+
+      if (Object.keys(privacyUpdates).length === 0) {
+        return res.status(400).json({ error: "No privacy settings provided" });
+      }
+
+      // Build a full settings object to satisfy typing and prevent accidental resets.
+      const currentSettings = await storage.getUserSettings(id);
+      const defaultPrivacySettings = { trainingOptIn: false, remoteBrowserDataAccess: false, analyticsTracking: true };
+      const currentPrivacy = { ...defaultPrivacySettings, ...(currentSettings?.privacySettings || {}) };
+      const nextPrivacy = { ...currentPrivacy, ...privacyUpdates };
+
+      const settings = await storage.upsertUserSettings(id, { privacySettings: nextPrivacy });
 
       res.json(settings);
     } catch (error: any) {

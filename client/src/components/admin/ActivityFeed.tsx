@@ -180,7 +180,7 @@ export function ActivityFeed({ limit = 20 }: { limit?: number }) {
                   <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                     {log.userId && (
                       <span className="truncate max-w-[150px]">
-                        {log.details?.email || log.userId}
+                        {log.details?.actorEmail || log.details?.email || log.userId}
                       </span>
                     )}
                     {log.ipAddress && log.ipAddress !== "unknown" && (

@@ -2,6 +2,9 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { dbRead } from "../../db";
+import { payments, users } from "@shared/schema";
+import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const reportsRouter = Router();
 
@@ -220,14 +223,58 @@ reportsRouter.post("/generate", async (req, res) => {
 
                 switch (reportType) {
                     case "user_report":
-                        const users = await storage.getAllUsers();
-                        data = users.map(u => ({
+                        // Safety: exporting every user doesn't scale. Support basic filtering + hard limits.
+                        const params = (parameters || {}) as Record<string, any>;
+                        const limitParam = parseInt(String(params.limit ?? ""), 10);
+                        const limitNum = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 5000, 1), 50000);
+
+                        const userConditions: SQL[] = [];
+                        if (params.plan) userConditions.push(eq(users.plan, String(params.plan)));
+                        if (params.status) userConditions.push(eq(users.status, String(params.status)));
+                        if (params.role) userConditions.push(eq(users.role, String(params.role)));
+                        if (params.createdFrom) userConditions.push(gte(users.createdAt, new Date(String(params.createdFrom))));
+
+                        if (params.search) {
+                            const q = `%${String(params.search)}%`;
+                            userConditions.push(or(
+                                ilike(users.email, q),
+                                ilike(users.username, q),
+                                ilike(users.fullName, q)
+                            ));
+                        }
+
+                        const whereClause = userConditions.length > 0 ? and(...userConditions) : undefined;
+                        const userQuery = whereClause
+                            ? dbRead.select({
+                                email: users.email,
+                                fullName: users.fullName,
+                                username: users.username,
+                                plan: users.plan,
+                                role: users.role,
+                                status: users.status,
+                                createdAt: users.createdAt,
+                            }).from(users).where(whereClause)
+                            : dbRead.select({
+                                email: users.email,
+                                fullName: users.fullName,
+                                username: users.username,
+                                plan: users.plan,
+                                role: users.role,
+                                status: users.status,
+                                createdAt: users.createdAt,
+                            }).from(users);
+
+                        const userRows = await userQuery
+                            .orderBy(desc(users.createdAt), desc(users.id))
+                            .limit(limitNum);
+
+                        data = userRows.map(u => ({
                             email: u.email,
                             fullName: u.fullName || u.username,
                             plan: u.plan,
                             role: u.role,
                             status: u.status,
-                            createdAt: u.createdAt
+                            createdAt: u.createdAt,
                         }));
                         break;
 
@@ -254,8 +301,37 @@ reportsRouter.post("/generate", async (req, res) => {
                         break;
 
                     case "financial_report":
-                        const payments = await storage.getPayments();
-                        data = payments.map(p => ({
+                        // Safety: exporting every payment doesn't scale. Support basic filtering + hard limits.
+                        const paymentParams = (parameters || {}) as Record<string, any>;
+                        const paymentLimitParam = parseInt(String(paymentParams.limit ?? ""), 10);
+                        const paymentLimitNum = Math.min(Math.max(Number.isFinite(paymentLimitParam) ? paymentLimitParam : 5000, 1), 50000);
+
+                        const paymentConditions: SQL[] = [];
+                        if (paymentParams.status) paymentConditions.push(eq(payments.status, String(paymentParams.status)));
+                        if (paymentParams.userId) paymentConditions.push(eq(payments.userId, String(paymentParams.userId)));
+                        if (paymentParams.createdFrom) paymentConditions.push(gte(payments.createdAt, new Date(String(paymentParams.createdFrom))));
+                        if (paymentParams.createdTo) paymentConditions.push(lte(payments.createdAt, new Date(String(paymentParams.createdTo))));
+
+                        const paymentWhereClause = paymentConditions.length > 0 ? and(...paymentConditions) : undefined;
+                        const paymentQuery = paymentWhereClause
+                            ? dbRead.select({
+                                createdAt: payments.createdAt,
+                                amount: payments.amount,
+                                status: payments.status,
+                                method: payments.method,
+                            }).from(payments).where(paymentWhereClause)
+                            : dbRead.select({
+                                createdAt: payments.createdAt,
+                                amount: payments.amount,
+                                status: payments.status,
+                                method: payments.method,
+                            }).from(payments);
+
+                        const paymentRows = await paymentQuery
+                            .orderBy(desc(payments.createdAt), desc(payments.id))
+                            .limit(paymentLimitNum);
+
+                        data = paymentRows.map(p => ({
                             createdAt: p.createdAt,
                             amount: p.amount,
                             status: p.status,

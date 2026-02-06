@@ -32,9 +32,9 @@ function getNodemailer() {
 export interface SubscriptionInfo {
   plan: "free" | "go" | "plus" | "pro" | "business";
   status: "active" | "cancelled" | "past_due" | "trialing" | "inactive";
-  currentPeriodEnd?: Date;
-  stripeCustomerId?: string;
-  stripeSubscriptionId?: string;
+  currentPeriodEnd?: Date | null;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
 }
 
 export interface PurchaseNotification {
@@ -65,7 +65,7 @@ export interface PurchaseNotification {
 // CONSTANTS
 // ============================================
 
-const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim();
 
 const PLAN_HIERARCHY: Record<string, number> = {
   free: 0,
@@ -187,11 +187,11 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionI
     }
     
     return {
-      plan: (user.plan as SubscriptionInfo["plan"]) || "free",
-      status: (user.status as SubscriptionInfo["status"]) || "inactive",
-      currentPeriodEnd: user.subscriptionPeriodEnd ? new Date(user.subscriptionPeriodEnd) : undefined,
-      stripeCustomerId: user.stripeCustomerId || undefined,
-      stripeSubscriptionId: user.stripeSubscriptionId || undefined,
+      plan: ((user.subscriptionPlan || user.plan) as SubscriptionInfo["plan"]) || "free",
+      status: (user.subscriptionStatus as SubscriptionInfo["status"]) || "inactive",
+      currentPeriodEnd: user.subscriptionPeriodEnd ? new Date(user.subscriptionPeriodEnd) : null,
+      stripeCustomerId: user.stripeCustomerId ?? null,
+      stripeSubscriptionId: user.stripeSubscriptionId ?? null,
     };
   } catch (error) {
     console.error("Error getting user subscription:", error);
@@ -204,16 +204,27 @@ export async function updateUserSubscription(
   subscription: Partial<SubscriptionInfo>
 ): Promise<boolean> {
   try {
-    await db.update(users)
-      .set({
-        plan: subscription.plan,
-        status: subscription.status,
-        subscriptionPeriodEnd: subscription.currentPeriodEnd,
-        stripeCustomerId: subscription.stripeCustomerId,
-        stripeSubscriptionId: subscription.stripeSubscriptionId,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
+    const patch: Record<string, any> = { updatedAt: new Date() };
+
+    if (subscription.plan !== undefined) {
+      // Keep legacy `plan` in sync for feature gates; store canonical subscription plan as well.
+      patch.plan = subscription.plan;
+      patch.subscriptionPlan = subscription.plan;
+    }
+    if (subscription.status !== undefined) {
+      patch.subscriptionStatus = subscription.status;
+    }
+    if (subscription.currentPeriodEnd !== undefined) {
+      patch.subscriptionPeriodEnd = subscription.currentPeriodEnd;
+    }
+    if (subscription.stripeCustomerId !== undefined) {
+      patch.stripeCustomerId = subscription.stripeCustomerId;
+    }
+    if (subscription.stripeSubscriptionId !== undefined) {
+      patch.stripeSubscriptionId = subscription.stripeSubscriptionId;
+    }
+
+    await db.update(users).set(patch).where(eq(users.id, userId));
     
     return true;
   } catch (error) {
@@ -428,6 +439,11 @@ async function sendPurchaseEmail(notification: PurchaseNotification): Promise<bo
 </html>
 `;
     
+    if (!ADMIN_EMAIL) {
+      console.log("[Stripe] ADMIN_EMAIL not configured, skipping purchase notification email");
+      return true;
+    }
+
     await transporter.sendMail({
       from: process.env.SMTP_FROM || "IliaGPT <noreply@iliagpt.com>",
       to: ADMIN_EMAIL,
@@ -605,7 +621,10 @@ export async function handleSubscriptionDeleted(subscription: any, eventId?: str
   await updateUserSubscription(userId, {
     plan: "free",
     status: "cancelled",
-    stripeSubscriptionId: undefined,
+    stripeSubscriptionId: null,
+    currentPeriodEnd: (subscription as any).current_period_end
+      ? new Date(((subscription as any).current_period_end ?? 0) * 1000)
+      : null,
   });
   
   if (eventId) {

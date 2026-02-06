@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { dbRead } from "../../db";
+import { auditLogs, securityPolicies, users } from "@shared/schema";
+import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const securityRouter = Router();
 
@@ -140,29 +143,92 @@ securityRouter.patch("/policies/:id/toggle", async (req, res) => {
 
 securityRouter.get("/audit-logs", async (req, res) => {
     try {
-        const { action, resource, date_from, date_to, severity, status, page = "1", limit = "50" } = req.query;
-        const pageNum = parseInt(page as string);
-        const limitNum = Math.min(parseInt(limit as string), 100);
+        const {
+            action,
+            resource,
+            userId,
+            role,
+            exclude_admin,
+            category,
+            severity,
+            date_from,
+            date_to,
+            page = "1",
+            limit = "50",
+        } = req.query as Record<string, string | undefined>;
 
-        let logs = await storage.getAuditLogs(500);
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+        const offset = (pageNum - 1) * limitNum;
+
+        const conditions: SQL[] = [];
 
         if (action) {
-            logs = logs.filter(l => l.action?.includes(action as string));
+            conditions.push(ilike(auditLogs.action, `%${action}%`));
         }
         if (resource) {
-            logs = logs.filter(l => l.resource === resource);
+            conditions.push(ilike(auditLogs.resource, `%${resource}%`));
+        }
+        if (userId) {
+            conditions.push(eq(auditLogs.userId, userId));
         }
         if (date_from) {
-            const fromDate = new Date(date_from as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= fromDate);
+            conditions.push(gte(auditLogs.createdAt, new Date(date_from)));
         }
         if (date_to) {
-            const toDate = new Date(date_to as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
+            conditions.push(lte(auditLogs.createdAt, new Date(date_to)));
+        }
+        if (severity) {
+            conditions.push(sql`coalesce(${auditLogs.details} ->> 'severity', 'info') = ${severity}`);
+        }
+        if (category) {
+            conditions.push(sql`coalesce(${auditLogs.details} ->> 'category', 'system') = ${category}`);
+        }
+        if (role) {
+            conditions.push(eq(users.role, role));
+        }
+        if (exclude_admin === "true") {
+            conditions.push(sql`coalesce(${users.role}, 'anonymous') != 'admin'`);
         }
 
-        const total = logs.length;
-        const paginatedLogs = logs.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+        const baseQuery = dbRead
+            .select({
+                log: auditLogs,
+                userEmail: users.email,
+                userRole: users.role,
+                userFullName: users.fullName,
+            })
+            .from(auditLogs)
+            .leftJoin(users, eq(auditLogs.userId, users.id));
+
+        const countQuery = dbRead
+            .select({ count: sql<number>`count(*)` })
+            .from(auditLogs)
+            .leftJoin(users, eq(auditLogs.userId, users.id));
+
+        const [rows, totalResult] = await Promise.all([
+            (whereClause ? baseQuery.where(whereClause) : baseQuery)
+                .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+                .limit(limitNum)
+                .offset(offset),
+            whereClause ? countQuery.where(whereClause) : countQuery,
+        ]);
+
+        const paginatedLogs = rows.map((row) => {
+            const log = row.log as any;
+            const details = { ...(log.details || {}) } as Record<string, any>;
+            if (row.userEmail && !details.actorEmail) details.actorEmail = row.userEmail;
+            if (row.userRole && !details.actorRole) details.actorRole = row.userRole;
+            return {
+                ...log,
+                details,
+                user: row.userEmail ? { id: log.userId, email: row.userEmail, role: row.userRole, fullName: row.userFullName } : null,
+            };
+        });
+
+        const total = Number(totalResult[0]?.count || 0);
 
         res.json({
             logs: paginatedLogs,
@@ -171,8 +237,8 @@ securityRouter.get("/audit-logs", async (req, res) => {
                 page: pageNum,
                 limit: limitNum,
                 total,
-                totalPages: Math.ceil(total / limitNum)
-            }
+                totalPages: Math.ceil(total / limitNum),
+            },
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -181,41 +247,68 @@ securityRouter.get("/audit-logs", async (req, res) => {
 
 securityRouter.get("/stats", async (req, res) => {
     try {
-        const [policies, auditLogs] = await Promise.all([
-            storage.getSecurityPolicies(),
-            storage.getAuditLogs(1000)
-        ]);
-
         const now = new Date();
         const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-        const activePolicies = policies.filter(p => p.isEnabled === "true").length;
-        const logsToday = auditLogs.filter(l => l.createdAt && new Date(l.createdAt) >= startOfToday).length;
+        const [
+            policyCounts,
+            policyTypeRows,
+            logsTodayResult,
+            criticalAlertsResult,
+            severityCountsResult
+        ] = await Promise.all([
+            dbRead.select({
+                total: sql<number>`count(*)`,
+                active: sql<number>`count(*) filter (where ${securityPolicies.isEnabled} = 'true')`,
+            }).from(securityPolicies),
+            dbRead.select({
+                policyType: securityPolicies.policyType,
+                count: sql<number>`count(*)`,
+            }).from(securityPolicies).groupBy(securityPolicies.policyType),
+            dbRead.select({ count: sql<number>`count(*)` })
+                .from(auditLogs)
+                .where(gte(auditLogs.createdAt, startOfToday)),
+            dbRead.select({ count: sql<number>`count(*)` })
+                .from(auditLogs)
+                .where(and(
+                    gte(auditLogs.createdAt, twentyFourHoursAgo),
+                    or(
+                        ilike(auditLogs.action, "%login_failed%"),
+                        ilike(auditLogs.action, "%blocked%"),
+                        ilike(auditLogs.action, "%rate_limit%"),
+                        ilike(auditLogs.action, "%unauthorized%"),
+                        ilike(auditLogs.action, "%permission_denied%"),
+                        ilike(auditLogs.action, "%security_alert%")
+                    )
+                )),
+            dbRead.select({
+                info: sql<number>`count(*) filter (where coalesce(${auditLogs.details} ->> 'severity', 'info') = 'info')`,
+                warning: sql<number>`count(*) filter (where coalesce(${auditLogs.details} ->> 'severity', 'info') = 'warning')`,
+                error: sql<number>`count(*) filter (where coalesce(${auditLogs.details} ->> 'severity', 'info') = 'error')`,
+                critical: sql<number>`count(*) filter (where coalesce(${auditLogs.details} ->> 'severity', 'info') = 'critical')`,
+            })
+                .from(auditLogs)
+                .where(gte(auditLogs.createdAt, twentyFourHoursAgo)),
+        ]);
 
-        const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-        const criticalAlerts = auditLogs.filter(l =>
-            l.createdAt &&
-            new Date(l.createdAt) >= twentyFourHoursAgo &&
-            criticalActions.some(a => l.action?.includes(a))
-        ).length;
-
-        const severityCounts = {
-            info: auditLogs.filter(l => !criticalActions.some(a => l.action?.includes(a)) && !l.action?.includes("warning")).length,
-            warning: auditLogs.filter(l => l.action?.includes("warning")).length,
-            critical: auditLogs.filter(l => criticalActions.some(a => l.action?.includes(a))).length
-        };
+        const policyTypeBreakdown = (policyTypeRows || []).reduce((acc: Record<string, number>, row: any) => {
+            acc[String(row.policyType)] = Number(row.count || 0);
+            return acc;
+        }, {});
 
         res.json({
-            totalPolicies: policies.length,
-            activePolicies,
-            criticalAlerts24h: criticalAlerts,
-            auditEventsToday: logsToday,
-            severityCounts,
-            policyTypeBreakdown: policies.reduce((acc: Record<string, number>, p) => {
-                acc[p.policyType] = (acc[p.policyType] || 0) + 1;
-                return acc;
-            }, {})
+            totalPolicies: Number(policyCounts[0]?.total || 0),
+            activePolicies: Number(policyCounts[0]?.active || 0),
+            criticalAlerts24h: Number(criticalAlertsResult[0]?.count || 0),
+            auditEventsToday: Number(logsTodayResult[0]?.count || 0),
+            severityCounts: {
+                info: Number(severityCountsResult[0]?.info || 0),
+                warning: Number(severityCountsResult[0]?.warning || 0),
+                error: Number(severityCountsResult[0]?.error || 0),
+                critical: Number(severityCountsResult[0]?.critical || 0),
+            },
+            policyTypeBreakdown
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -280,46 +373,73 @@ securityRouter.get("/config", async (req, res) => {
 // GET /api/admin/security/threats - Get recent threat analysis
 securityRouter.get("/threats", async (req, res) => {
     try {
-        const auditLogs = await storage.getAuditLogs(1000);
         const now = new Date();
         const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-        const recentLogs = auditLogs.filter(l => 
-            l.createdAt && new Date(l.createdAt) >= last24h
-        );
+        const [summaryRows, suspiciousIpsRows, recentThreats] = await Promise.all([
+            dbRead.select({
+                loginFailures: sql<number>`count(*) filter (where ${auditLogs.action} ILIKE '%login_failed%')`,
+                blockedRequests: sql<number>`count(*) filter (where ${auditLogs.action} ILIKE '%blocked%' OR ${auditLogs.action} ILIKE '%rate_limit%')`,
+                unauthorizedAccess: sql<number>`count(*) filter (where ${auditLogs.action} ILIKE '%unauthorized%' OR ${auditLogs.action} ILIKE '%403%')`,
+            })
+                .from(auditLogs)
+                .where(gte(auditLogs.createdAt, last24h)),
+            dbRead.select({
+                ip: auditLogs.ipAddress,
+                failedAttempts: sql<number>`count(*)`,
+            })
+                .from(auditLogs)
+                .where(and(
+                    gte(auditLogs.createdAt, last24h),
+                    ilike(auditLogs.action, "%login_failed%")
+                ))
+                .groupBy(auditLogs.ipAddress)
+                .having(sql`count(*) >= 5`)
+                .orderBy(desc(sql`count(*)`))
+                .limit(50),
+            dbRead.select({
+                action: auditLogs.action,
+                ip: auditLogs.ipAddress,
+                timestamp: auditLogs.createdAt,
+                details: auditLogs.details,
+            })
+                .from(auditLogs)
+                .where(and(
+                    gte(auditLogs.createdAt, last24h),
+                    or(
+                        ilike(auditLogs.action, "%login_failed%"),
+                        ilike(auditLogs.action, "%blocked%"),
+                        ilike(auditLogs.action, "%rate_limit%"),
+                        ilike(auditLogs.action, "%unauthorized%"),
+                        ilike(auditLogs.action, "%403%")
+                    )
+                ))
+                .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+                .limit(20),
+        ]);
 
-        // Analyze threats
-        const loginFailures = recentLogs.filter(l => l.action?.includes("login_failed"));
-        const blockedRequests = recentLogs.filter(l => l.action?.includes("blocked") || l.action?.includes("rate_limit"));
-        const unauthorizedAccess = recentLogs.filter(l => l.action?.includes("unauthorized") || l.action?.includes("403"));
-
-        // Group by IP
-        const ipCounts: Record<string, number> = {};
-        loginFailures.forEach(l => {
-            const ip = l.ipAddress || "unknown";
-            ipCounts[ip] = (ipCounts[ip] || 0) + 1;
-        });
-
-        const suspiciousIps = Object.entries(ipCounts)
-            .filter(([_, count]) => count >= 5)
-            .map(([ip, count]) => ({ ip, failedAttempts: count }));
+        const summaryRow = summaryRows[0] || ({} as any);
 
         res.json({
             summary: {
-                loginFailures: loginFailures.length,
-                blockedRequests: blockedRequests.length,
-                unauthorizedAccess: unauthorizedAccess.length,
-                totalThreats: loginFailures.length + blockedRequests.length + unauthorizedAccess.length
+                loginFailures: Number(summaryRow.loginFailures || 0),
+                blockedRequests: Number(summaryRow.blockedRequests || 0),
+                unauthorizedAccess: Number(summaryRow.unauthorizedAccess || 0),
+                totalThreats:
+                    Number(summaryRow.loginFailures || 0) +
+                    Number(summaryRow.blockedRequests || 0) +
+                    Number(summaryRow.unauthorizedAccess || 0)
             },
-            suspiciousIps,
-            recentThreats: [...loginFailures, ...blockedRequests, ...unauthorizedAccess]
-                .slice(0, 20)
-                .map(l => ({
-                    action: l.action,
-                    ip: l.ipAddress,
-                    timestamp: l.createdAt,
-                    details: l.details
-                })),
+            suspiciousIps: (suspiciousIpsRows || []).map((r: any) => ({
+                ip: r.ip || "unknown",
+                failedAttempts: Number(r.failedAttempts || 0)
+            })),
+            recentThreats: (recentThreats || []).map((l: any) => ({
+                action: l.action,
+                ip: l.ip,
+                timestamp: l.timestamp,
+                details: l.details
+            })),
             period: "24h"
         });
     } catch (error: any) {
@@ -388,22 +508,29 @@ securityRouter.delete("/ip/unblock/:ip", async (req, res) => {
 // GET /api/admin/security/audit-logs/export - Export audit logs as CSV
 securityRouter.get("/audit-logs/export", async (req, res) => {
     try {
-        const { format = "csv", date_from, date_to, action } = req.query;
-        
-        let logs = await storage.getAuditLogs(10000);
-        
-        // Apply filters
+        const { format = "csv", date_from, date_to, action, limit = "10000" } = req.query as Record<string, string | undefined>;
+        const limitNum = Math.min(Math.max(parseInt(limit || "10000", 10) || 10000, 1), 50000);
+
+        const conditions: SQL[] = [];
         if (action) {
-            logs = logs.filter(l => l.action?.includes(action as string));
+            conditions.push(ilike(auditLogs.action, `%${action}%`));
         }
         if (date_from) {
-            const fromDate = new Date(date_from as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= fromDate);
+            conditions.push(gte(auditLogs.createdAt, new Date(date_from)));
         }
         if (date_to) {
-            const toDate = new Date(date_to as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
+            conditions.push(lte(auditLogs.createdAt, new Date(date_to)));
         }
+
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+        const exportQuery = whereClause
+            ? dbRead.select().from(auditLogs).where(whereClause)
+            : dbRead.select().from(auditLogs);
+
+        const logs = await exportQuery
+            .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+            .limit(limitNum);
         
         // Log the export action
         await auditLog(req, {
@@ -412,7 +539,7 @@ securityRouter.get("/audit-logs/export", async (req, res) => {
             details: { 
                 format, 
                 recordCount: logs.length,
-                exportedBy: (req as any).user?.email 
+                exportedBy: (req as any).user?.claims?.email || (req as any).user?.email 
             },
             category: "security",
             severity: "warning"

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { storage } from "../../storage";
 import { llmGateway } from "../../lib/llmGateway";
+import { dbRead } from "../../db";
+import { payments, users } from "@shared/schema";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 export const analyticsRouter = Router();
 
@@ -100,21 +103,27 @@ analyticsRouter.get("/charts", async (req, res) => {
         const endDate = new Date();
 
         // Fetch data for all charts in parallel
-        const [userGrowthData, payments, providerMetrics] = await Promise.all([
+        const [userGrowthData, revenueRows, providerMetrics] = await Promise.all([
             storage.getUserGrowthData(granularity as '1h' | '24h' | '7d' | '30d' | '90d' | '1y'),
-            storage.getPayments(),
+            dbRead.select({
+                day: sql`date_trunc('day', ${payments.createdAt})`,
+                amount: sql<string>`coalesce(sum(nullif(${payments.amount}, '')::numeric), 0)::text`,
+            })
+                .from(payments)
+                .where(and(
+                    gte(payments.createdAt, startDate),
+                    eq(payments.status, "completed")
+                ))
+                .groupBy(sql`date_trunc('day', ${payments.createdAt})`)
+                .orderBy(sql`date_trunc('day', ${payments.createdAt})`),
             storage.getProviderMetrics(undefined, startDate, endDate)
         ]);
 
-        // Revenue trend
-        const revenueByDate = payments
-            .filter(p => new Date(p.createdAt!) >= startDate)
-            .reduce((acc: Record<string, number>, p) => {
-                const dateKey = new Date(p.createdAt!).toISOString().split("T")[0];
-                acc[dateKey] = (acc[dateKey] || 0) + parseFloat(p.amount || "0");
-                return acc;
-            }, {});
-        const revenueTrend = Object.entries(revenueByDate).map(([date, amount]) => ({ date, amount }));
+        // Revenue trend (DB-aggregated; avoids loading all payments into memory)
+        const revenueTrend = (revenueRows || []).map((r: any) => ({
+            date: new Date(r.day).toISOString().split("T")[0],
+            amount: parseFloat(r.amount || "0"),
+        }));
 
         // Model usage grouped by date
         const modelUsageMap = new Map<string, Record<string, number>>();
@@ -205,15 +214,21 @@ analyticsRouter.get("/charts/:chartType", async (req, res) => {
                 break;
 
             case "revenue":
-                const payments = await storage.getPayments();
-                const revenueByDate = payments
-                    .filter(p => new Date(p.createdAt!) >= startDate)
-                    .reduce((acc: Record<string, number>, p) => {
-                        const dateKey = new Date(p.createdAt!).toISOString().split("T")[0];
-                        acc[dateKey] = (acc[dateKey] || 0) + parseFloat(p.amount || "0");
-                        return acc;
-                    }, {});
-                data = Object.entries(revenueByDate).map(([date, amount]) => ({ date, amount }));
+                const revenueRows = await dbRead.select({
+                    day: sql`date_trunc('day', ${payments.createdAt})`,
+                    amount: sql<string>`coalesce(sum(nullif(${payments.amount}, '')::numeric), 0)::text`,
+                })
+                    .from(payments)
+                    .where(and(
+                        gte(payments.createdAt, startDate),
+                        eq(payments.status, "completed")
+                    ))
+                    .groupBy(sql`date_trunc('day', ${payments.createdAt})`)
+                    .orderBy(sql`date_trunc('day', ${payments.createdAt})`);
+                data = (revenueRows || []).map((r: any) => ({
+                    date: new Date(r.day).toISOString().split("T")[0],
+                    amount: parseFloat(r.amount || "0"),
+                }));
                 break;
 
             case "modelUsage":
@@ -333,16 +348,25 @@ analyticsRouter.get("/costs", async (req, res) => {
 
 analyticsRouter.get("/funnel", async (req, res) => {
     try {
-        const allUsers = await storage.getAllUsers();
-
         const eventStats = await storage.getAnalyticsEventStats();
 
-        const visitors = eventStats["page_view"] || allUsers.length * 3;
-        const signups = allUsers.length;
-        const activeUsers = allUsers.filter(u => u.status === "active").length;
-        const trialUsers = allUsers.filter(u => u.plan === "free" && u.status === "active").length;
-        const proUsers = allUsers.filter(u => u.plan === "pro").length;
-        const enterpriseUsers = allUsers.filter(u => u.plan === "enterprise").length;
+        const [row] = await dbRead
+            .select({
+                signups: sql<number>`count(*)`,
+                activeUsers: sql<number>`count(*) filter (where ${users.status} = 'active')`,
+                trialUsers: sql<number>`count(*) filter (where ${users.plan} = 'free' and ${users.status} = 'active')`,
+                proUsers: sql<number>`count(*) filter (where ${users.plan} = 'pro')`,
+                enterpriseUsers: sql<number>`count(*) filter (where ${users.plan} = 'enterprise')`,
+            })
+            .from(users);
+
+        const signups = Number(row?.signups || 0);
+        const activeUsers = Number(row?.activeUsers || 0);
+        const trialUsers = Number(row?.trialUsers || 0);
+        const proUsers = Number(row?.proUsers || 0);
+        const enterpriseUsers = Number(row?.enterpriseUsers || 0);
+
+        const visitors = eventStats["page_view"] || signups * 3;
 
         const funnel = [
             { stage: "visitors", count: visitors, percentage: 100 },

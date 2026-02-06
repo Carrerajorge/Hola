@@ -95,16 +95,20 @@ export class UserRepository {
 
   async getUserStats(): Promise<UserStats> {
     logRepositoryAction({ action: "getUserStats" });
-    
-    const allUsers = await db.select().from(users);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    const total = allUsers.length;
-    const active = allUsers.filter(u => u.status === "active").length;
-    const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
-    
-    return { total, active, newThisMonth };
+
+    const [row] = await db.select({
+      total: sql<number>`count(*)`,
+      active: sql<number>`count(*) filter (where ${users.status} = 'active')`,
+      newThisMonth: sql<number>`count(*) filter (where ${users.createdAt} >= ${monthStart})`,
+    }).from(users);
+
+    return {
+      total: Number(row?.total || 0),
+      active: Number(row?.active || 0),
+      newThisMonth: Number(row?.newThisMonth || 0),
+    };
   }
 
   async getUserOrThrow(id: string): Promise<User> {

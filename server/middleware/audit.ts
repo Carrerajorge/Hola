@@ -6,6 +6,45 @@ import { getSecureUserId } from "../lib/anonUserHelper";
 import { Logger } from "../lib/logger";
 import { redactSensitiveData } from "./redactionHelper";
 
+function getActorEmail(req: Request): string | undefined {
+    const session = req.session as any;
+    const user = (req as any).user;
+    return (
+        user?.claims?.email ||
+        user?.email ||
+        session?.passport?.user?.claims?.email ||
+        session?.passport?.user?.email ||
+        (user as any)?.profile?.emails?.[0]?.value ||
+        undefined
+    );
+}
+
+function getActorRole(req: Request): string | undefined {
+    const session = req.session as any;
+    const user = (req as any).user;
+    return (
+        user?.role ||
+        user?.claims?.role ||
+        session?.passport?.user?.role ||
+        session?.passport?.user?.claims?.role ||
+        undefined
+    );
+}
+
+function getCategoryFromPath(path: string): string {
+    if (path.startsWith("/api/admin")) return "admin";
+    if (path.startsWith("/api/auth")) return "auth";
+    if (path.startsWith("/api/security")) return "security";
+    if (path.startsWith("/api/user")) return "user";
+    return "system";
+}
+
+function getSeverityFromStatus(statusCode: number): string {
+    if (statusCode >= 500) return "error";
+    if (statusCode >= 400) return "warning";
+    return "info";
+}
+
 export const auditMiddleware = (action: string, resourceExtractor: (req: Request) => string) => {
     return async (req: Request, res: Response, next: NextFunction) => {
         // Capture the original end function to log after response is sent (optional, but standard for audit)
@@ -18,6 +57,12 @@ export const auditMiddleware = (action: string, resourceExtractor: (req: Request
                     const resource = resourceExtractor(req);
                     const ipAddress = req.ip || req.socket.remoteAddress;
                     const userAgent = req.get("user-agent");
+                    const actorEmail = getActorEmail(req);
+                    const actorRole = getActorRole(req);
+                    const sessionId = (req as any).sessionID || null;
+                    const requestId = res.locals.requestId || res.locals.traceId || req.get("x-request-id") || null;
+                    const traceId = res.locals.traceId || req.get("x-trace-id") || null;
+                    const category = getCategoryFromPath(req.originalUrl || req.path);
 
                     await db.insert(auditLogs).values({
                         userId: userId || null, // Allow anonymous or system actions if needed, or null if not logged in
@@ -27,6 +72,13 @@ export const auditMiddleware = (action: string, resourceExtractor: (req: Request
                             method: req.method,
                             url: req.originalUrl,
                             body: req.method !== "GET" ? redactSensitiveData(req.body) : undefined,
+                            actorEmail,
+                            actorRole,
+                            sessionId,
+                            requestId,
+                            traceId,
+                            category,
+                            severity: "info",
                         },
                         ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
                         userAgent,
@@ -80,6 +132,13 @@ export const globalAuditMiddleware = async (req: Request, res: Response, next: N
             const userId = getSecureUserId(req);
             const ipAddress = req.ip || req.socket.remoteAddress;
             const userAgent = req.get("user-agent");
+            const actorEmail = getActorEmail(req);
+            const actorRole = getActorRole(req);
+            const sessionId = (req as any).sessionID || null;
+            const requestId = res.locals.requestId || res.locals.traceId || req.get("x-request-id") || null;
+            const traceId = res.locals.traceId || req.get("x-trace-id") || null;
+            const category = getCategoryFromPath(req.originalUrl || req.path);
+            const severity = getSeverityFromStatus(res.statusCode);
 
             // We use a safe substring of URL as resource identifier
             const resource = req.baseUrl + req.path;
@@ -92,6 +151,13 @@ export const globalAuditMiddleware = async (req: Request, res: Response, next: N
                     method: req.method,
                     url: req.originalUrl,
                     statusCode: res.statusCode,
+                    actorEmail,
+                    actorRole,
+                    sessionId,
+                    requestId,
+                    traceId,
+                    category,
+                    severity,
                 },
                 ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
                 userAgent,

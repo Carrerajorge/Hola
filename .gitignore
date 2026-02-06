@@ -12,6 +12,7 @@ vite.config.ts.*
 # Replit / sandbox / estado (may contain environment dumps)
 sandbox_workspace/
 attached_assets/
+.local/
 **/.state/
 sandbox_workspace/.state/
 **/session*.json
@@ -55,3 +56,9 @@ artifacts/*.log
 artifacts/*.tmp
 artifacts/*.zip
 artifacts/*.ics
+
+# Generated runtime artifacts (never commit)
+artifacts/
+generated_reports/
+uploads/
+Downloads/

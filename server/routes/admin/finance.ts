@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { storage } from "../../storage";
+import { dbRead } from "../../db";
+import { invoices, payments } from "@shared/schema";
 import { sendPaymentEmail } from "../../services/genericEmailService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { and, desc, eq, gte, ilike, lte, sql, type SQL } from "drizzle-orm";
 
 export const financeRouter = Router();
 
@@ -21,33 +24,31 @@ financeRouter.get("/payments", async (req, res) => {
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        let payments = await storage.getPayments();
+        const conditions: SQL[] = [];
+        if (status) conditions.push(eq(payments.status, status));
+        if (userId) conditions.push(eq(payments.userId, userId));
+        if (dateFrom) conditions.push(gte(payments.createdAt, new Date(dateFrom)));
+        if (dateTo) conditions.push(lte(payments.createdAt, new Date(dateTo)));
 
-        // Apply filters
-        if (status) {
-            payments = payments.filter(p => p.status === status);
-        }
-        if (userId) {
-            payments = payments.filter(p => p.userId === userId);
-        }
-        if (dateFrom) {
-            const fromDate = new Date(dateFrom);
-            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) >= fromDate);
-        }
-        if (dateTo) {
-            const toDate = new Date(dateTo);
-            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) <= toDate);
-        }
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-        // Sort by date descending
-        payments.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-        });
+        const paymentsQuery = whereClause
+            ? dbRead.select().from(payments).where(whereClause)
+            : dbRead.select().from(payments);
 
-        const total = payments.length;
-        const paginatedPayments = payments.slice(offset, offset + limitNum);
+        const countQuery = whereClause
+            ? dbRead.select({ count: sql<number>`count(*)` }).from(payments).where(whereClause)
+            : dbRead.select({ count: sql<number>`count(*)` }).from(payments);
+
+        const [paginatedPayments, totalResult] = await Promise.all([
+            paymentsQuery
+                .orderBy(desc(payments.createdAt), desc(payments.id))
+                .limit(limitNum)
+                .offset(offset),
+            countQuery
+        ]);
+
+        const total = Number(totalResult[0]?.count || 0);
 
         res.json({
             payments: paginatedPayments,
@@ -75,19 +76,41 @@ financeRouter.get("/payments/stats", async (req, res) => {
 // GET /api/admin/finance/payments/export - Export payments to CSV/Excel
 financeRouter.get("/payments/export", async (req, res) => {
     try {
-        const { format = "csv" } = req.query;
-        const payments = await storage.getPayments();
+        const { format = "csv", limit = "10000", status, userId, dateFrom, dateTo, paymentId } = req.query as Record<string, string | undefined>;
+        const limitNum = Math.min(Math.max(parseInt(limit || "10000", 10) || 10000, 1), 50000);
 
-        await storage.createAuditLog({
-            action: "payments_export",
+        const conditions: SQL[] = [];
+        if (paymentId) conditions.push(eq(payments.id, paymentId));
+        if (status) conditions.push(eq(payments.status, status));
+        if (userId) conditions.push(eq(payments.userId, userId));
+        if (dateFrom) conditions.push(gte(payments.createdAt, new Date(dateFrom)));
+        if (dateTo) conditions.push(lte(payments.createdAt, new Date(dateTo)));
+
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+        const exportQuery = whereClause
+            ? dbRead.select().from(payments).where(whereClause)
+            : dbRead.select().from(payments);
+
+        const exportRows = await exportQuery
+            .orderBy(desc(payments.createdAt), desc(payments.id))
+            .limit(limitNum);
+
+        await auditLog(req, {
+            action: AuditActions.ADMIN_EXPORT_DATA,
             resource: "payments",
-            details: { format, count: payments.length }
+            details: {
+                format,
+                recordCount: exportRows.length,
+                filters: { paymentId, status, userId, dateFrom, dateTo },
+            },
+            category: "admin",
+            severity: "warning",
         });
 
         if (format === "csv") {
             const headers = ["id", "userId", "amount", "currency", "status", "method", "createdAt"];
             const csvRows = [headers.join(",")];
-            payments.forEach(p => {
+            exportRows.forEach(p => {
                 csvRows.push([
                     p.id,
                     p.userId || "",
@@ -104,7 +127,7 @@ financeRouter.get("/payments/export", async (req, res) => {
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.json`);
-            res.json(payments);
+            res.json(exportRows);
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -138,28 +161,41 @@ financeRouter.get("/invoices", async (req, res) => {
         const {
             page = "1",
             limit = "20",
-            status
+            status,
+            userId,
+            dateFrom,
+            dateTo
         } = req.query as Record<string, string>;
 
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        let invoices = await storage.getInvoices();
+        const conditions: SQL[] = [];
+        if (status) conditions.push(eq(invoices.status, status));
+        if (userId) conditions.push(eq(invoices.userId, userId));
+        if (dateFrom) conditions.push(gte(invoices.createdAt, new Date(dateFrom)));
+        if (dateTo) conditions.push(lte(invoices.createdAt, new Date(dateTo)));
 
-        if (status) {
-            invoices = invoices.filter(i => i.status === status);
-        }
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-        // Sort by date descending
-        invoices.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-        });
+        const invoicesQuery = whereClause
+            ? dbRead.select().from(invoices).where(whereClause)
+            : dbRead.select().from(invoices);
 
-        const total = invoices.length;
-        const paginatedInvoices = invoices.slice(offset, offset + limitNum);
+        const countQuery = whereClause
+            ? dbRead.select({ count: sql<number>`count(*)` }).from(invoices).where(whereClause)
+            : dbRead.select({ count: sql<number>`count(*)` }).from(invoices);
+
+        const [paginatedInvoices, totalResult] = await Promise.all([
+            invoicesQuery
+                .orderBy(desc(invoices.createdAt), desc(invoices.id))
+                .limit(limitNum)
+                .offset(offset),
+            countQuery
+        ]);
+
+        const total = Number(totalResult[0]?.count || 0);
 
         res.json({
             invoices: paginatedInvoices,
@@ -199,7 +235,12 @@ financeRouter.patch("/invoices/:id", async (req, res) => {
 // POST /api/admin/finance/invoices/:id/mark-paid - Mark invoice as paid
 financeRouter.post("/invoices/:id/mark-paid", async (req, res) => {
     try {
-        const previousInvoice = await storage.getInvoices().then(invoices => invoices.find(i => i.id === req.params.id));
+        const [previousInvoice] = await dbRead
+            .select()
+            .from(invoices)
+            .where(eq(invoices.id, req.params.id))
+            .limit(1);
+
         const invoice = await storage.updateInvoice(req.params.id, {
             status: "paid",
             paidAt: new Date()
@@ -230,8 +271,12 @@ financeRouter.post("/invoices/:id/mark-paid", async (req, res) => {
 // POST /api/admin/finance/invoices/:id/resend - Resend invoice notification
 financeRouter.post("/invoices/:id/resend", async (req, res) => {
     try {
-        const invoices = await storage.getInvoices();
-        const invoice = invoices.find(i => i.id === req.params.id);
+        const [invoice] = await dbRead
+            .select()
+            .from(invoices)
+            .where(eq(invoices.id, req.params.id))
+            .limit(1);
+
         if (!invoice) {
             return res.status(404).json({ error: "Invoice not found" });
         }
@@ -282,19 +327,41 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
 // GET /api/admin/finance/invoices/export - Export invoices
 financeRouter.get("/invoices/export", async (req, res) => {
     try {
-        const { format = "csv" } = req.query;
-        const invoices = await storage.getInvoices();
+        const { format = "csv", limit = "10000", status, userId, dateFrom, dateTo, invoiceId } = req.query as Record<string, string | undefined>;
+        const limitNum = Math.min(Math.max(parseInt(limit || "10000", 10) || 10000, 1), 50000);
 
-        await storage.createAuditLog({
-            action: "invoices_export",
+        const conditions: SQL[] = [];
+        if (invoiceId) conditions.push(eq(invoices.id, invoiceId));
+        if (status) conditions.push(eq(invoices.status, status));
+        if (userId) conditions.push(eq(invoices.userId, userId));
+        if (dateFrom) conditions.push(gte(invoices.createdAt, new Date(dateFrom)));
+        if (dateTo) conditions.push(lte(invoices.createdAt, new Date(dateTo)));
+
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+        const exportQuery = whereClause
+            ? dbRead.select().from(invoices).where(whereClause)
+            : dbRead.select().from(invoices);
+
+        const exportRows = await exportQuery
+            .orderBy(desc(invoices.createdAt), desc(invoices.id))
+            .limit(limitNum);
+
+        await auditLog(req, {
+            action: AuditActions.ADMIN_EXPORT_DATA,
             resource: "invoices",
-            details: { format, count: invoices.length }
+            details: {
+                format,
+                recordCount: exportRows.length,
+                filters: { invoiceId, status, userId, dateFrom, dateTo },
+            },
+            category: "admin",
+            severity: "warning",
         });
 
         if (format === "csv") {
             const headers = ["id", "userId", "amount", "currency", "status", "dueDate", "createdAt", "paidAt"];
             const csvRows = [headers.join(",")];
-            invoices.forEach(i => {
+            exportRows.forEach(i => {
                 csvRows.push([
                     i.id,
                     i.userId || "",
@@ -312,7 +379,7 @@ financeRouter.get("/invoices/export", async (req, res) => {
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=invoices_${Date.now()}.json`);
-            res.json(invoices);
+            res.json(exportRows);
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });

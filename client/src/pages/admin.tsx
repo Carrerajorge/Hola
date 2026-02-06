@@ -79,6 +79,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import { isAdminUser } from "@/lib/admin";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
@@ -105,7 +106,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
 ];
 
-function DashboardSection() {
+function DashboardSection({ onNavigate }: { onNavigate?: (section: AdminSection) => void }) {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/dashboard"],
     queryFn: async () => {
@@ -131,7 +132,11 @@ function DashboardSection() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-users">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("users")}
+          data-testid="card-users"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-blue-500/10">
               <Users className="h-4 w-4 text-blue-500" />
@@ -145,7 +150,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-ai-models">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("ai-models")}
+          data-testid="card-ai-models"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-purple-500/10">
               <Bot className="h-4 w-4 text-purple-500" />
@@ -165,7 +174,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-payments">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("payments")}
+          data-testid="card-payments"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-green-500/10">
               <CreditCard className="h-4 w-4 text-green-500" />
@@ -179,7 +192,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-invoices">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("invoices")}
+          data-testid="card-invoices"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-orange-500/10">
               <FileText className="h-4 w-4 text-orange-500" />
@@ -193,7 +210,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-analytics">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("analytics")}
+          data-testid="card-analytics"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-cyan-500/10">
               <BarChart3 className="h-4 w-4 text-cyan-500" />
@@ -206,7 +227,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-database">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("database")}
+          data-testid="card-database"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-slate-500/10">
               <Database className="h-4 w-4 text-slate-500" />
@@ -222,7 +247,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-security">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("security")}
+          data-testid="card-security"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className={cn("p-2 rounded-md", d.security?.status === "healthy" ? "bg-green-500/10" : "bg-yellow-500/10")}>
               <Shield className={cn("h-4 w-4", d.security?.status === "healthy" ? "text-green-500" : "text-yellow-500")} />
@@ -238,7 +267,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-reports">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("reports")}
+          data-testid="card-reports"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-indigo-500/10">
               <FileBarChart className="h-4 w-4 text-indigo-500" />
@@ -251,7 +284,11 @@ function DashboardSection() {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-settings">
+        <div
+          className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer"
+          onClick={() => onNavigate?.("settings")}
+          data-testid="card-settings"
+        >
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 rounded-md bg-gray-500/10">
               <Settings className="h-4 w-4 text-gray-500" />
@@ -329,6 +366,8 @@ function DashboardSection() {
 function UsersSection() {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [viewingUser, setViewingUser] = useState<any>(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -339,15 +378,50 @@ function UsersSection() {
   const itemsPerPage = 20;
   const [newUser, setNewUser] = useState({ email: "", password: "", plan: "free", role: "user" });
 
-  const { data: users = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/users"],
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setDebouncedSearch("");
+      setCurrentPage(1);
+      return;
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(trimmed);
+      setCurrentPage(1);
+    }, 300);
+  };
+
+  const { data: usersData, isLoading, refetch } = useQuery({
+    queryKey: [
+      "/api/admin/users",
+      currentPage,
+      itemsPerPage,
+      debouncedSearch,
+      filters.plan,
+      filters.status,
+      filters.role,
+      sortConfig.key,
+      sortConfig.direction,
+    ],
     queryFn: async () => {
-      const res = await fetch("/api/admin/users", { credentials: "include" });
-      const data = await res.json();
-      // Handle both array response and paginated response
-      if (Array.isArray(data)) return data;
-      if (data?.users && Array.isArray(data.users)) return data.users;
-      return [];
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        limit: String(itemsPerPage),
+        sortBy: sortConfig.key,
+        sortOrder: sortConfig.direction,
+      });
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      if (filters.plan) params.set("plan", filters.plan);
+      if (filters.status) params.set("status", filters.status);
+      if (filters.role) params.set("role", filters.role);
+
+      const res = await fetch(`/api/admin/users?${params}`, { credentials: "include" });
+      return res.json();
     }
   });
 
@@ -401,31 +475,20 @@ function UsersSection() {
     window.open(`/api/admin/users/export?format=${format}`, "_blank");
   };
 
-  const filteredAndSortedUsers = users
-    .filter((u: any) => {
-      const matchesSearch = u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesPlan = !filters.plan || u.plan === filters.plan;
-      const matchesStatus = !filters.status || u.status === filters.status;
-      const matchesRole = !filters.role || u.role === filters.role;
-      return matchesSearch && matchesPlan && matchesStatus && matchesRole;
-    })
-    .sort((a: any, b: any) => {
-      const aVal = a[sortConfig.key] || "";
-      const bVal = b[sortConfig.key] || "";
-      if (sortConfig.direction === "asc") return aVal > bVal ? 1 : -1;
-      return aVal < bVal ? 1 : -1;
-    });
+  const users = Array.isArray(usersData) ? usersData : usersData?.users || [];
+  const pagination = Array.isArray(usersData)
+    ? { page: 1, limit: users.length, total: users.length, totalPages: 1 }
+    : usersData?.pagination || { page: currentPage, limit: itemsPerPage, total: users.length, totalPages: 1 };
 
-  const totalPages = Math.ceil(filteredAndSortedUsers.length / itemsPerPage);
-  const paginatedUsers = filteredAndSortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalUsers = Number(pagination.total || users.length);
+  const totalPages = Number(pagination.totalPages || 1);
 
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc"
     }));
+    setCurrentPage(1);
   };
 
   if (isLoading) {
@@ -433,10 +496,18 @@ function UsersSection() {
   }
 
   return (
-    <div className="space-y-4">
+      <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Users ({filteredAndSortedUsers.length})</h2>
+        <h2 className="text-lg font-medium">Users ({totalUsers})</h2>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => refetch()}
+            title="Refresh"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1" data-testid="button-export-users">
@@ -507,7 +578,13 @@ function UsersSection() {
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search users..." className="pl-9 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="input-search-users" />
+          <Input
+            placeholder="Search users..."
+            className="pl-9 h-9"
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            data-testid="input-search-users"
+          />
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} className="gap-1">
           <Filter className="h-4 w-4" />
@@ -517,7 +594,13 @@ function UsersSection() {
 
       {showFilters && (
         <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/30">
-          <Select value={filters.plan} onValueChange={(v) => setFilters({ ...filters, plan: v })}>
+          <Select
+            value={filters.plan}
+            onValueChange={(v) => {
+              setFilters({ ...filters, plan: v });
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Plan" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="">All Plans</SelectItem>
@@ -526,7 +609,13 @@ function UsersSection() {
               <SelectItem value="enterprise">Enterprise</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+          <Select
+            value={filters.status}
+            onValueChange={(v) => {
+              setFilters({ ...filters, status: v });
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-[140px] h-8"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="">All Status</SelectItem>
@@ -536,7 +625,13 @@ function UsersSection() {
               <SelectItem value="pending_verification">Pending</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={filters.role} onValueChange={(v) => setFilters({ ...filters, role: v })}>
+          <Select
+            value={filters.role}
+            onValueChange={(v) => {
+              setFilters({ ...filters, role: v });
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Role" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="">All Roles</SelectItem>
@@ -547,7 +642,16 @@ function UsersSection() {
               <SelectItem value="api_only">API Only</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="ghost" size="sm" onClick={() => setFilters({ plan: "", status: "", role: "" })}>Clear</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setFilters({ plan: "", status: "", role: "" });
+              setCurrentPage(1);
+            }}
+          >
+            Clear
+          </Button>
         </div>
       )}
 
@@ -576,9 +680,9 @@ function UsersSection() {
               </tr>
             </thead>
             <tbody>
-              {paginatedUsers.length === 0 ? (
+              {users.length === 0 ? (
                 <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No users found</td></tr>
-              ) : paginatedUsers.map((user: any) => (
+              ) : users.map((user: any) => (
                 <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="p-3">
                     <div className="flex items-center gap-2">
@@ -1925,17 +2029,40 @@ function AIModelsSection() {
 }
 
 function PaymentsSection() {
-  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const limit = 20;
+  const [filters, setFilters] = useState({
+    status: "",
+    userId: "",
+    dateFrom: "",
+    dateTo: ""
+  });
 
-  const { data: paymentsData, isLoading } = useQuery({
-    queryKey: ["/api/admin/finance/payments"],
+  const updateFilters = (next: Partial<typeof filters>) => {
+    setFilters(prev => ({ ...prev, ...next }));
+    setPage(1);
+  };
+
+  const clearFilters = () => {
+    setFilters({ status: "", userId: "", dateFrom: "", dateTo: "" });
+    setPage(1);
+  };
+
+  const { data: paymentsData, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/finance/payments", page, limit, filters.status, filters.userId, filters.dateFrom, filters.dateTo],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments", { credentials: "include" });
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (filters.status) params.set("status", filters.status);
+      if (filters.userId) params.set("userId", filters.userId);
+      if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+      if (filters.dateTo) params.set("dateTo", filters.dateTo);
+      const res = await fetch(`/api/admin/finance/payments?${params}`, { credentials: "include" });
       return res.json();
     }
   });
-  
-  const payments = paymentsData?.payments || paymentsData || [];
+
+  const payments = paymentsData?.payments || [];
+  const pagination = paymentsData?.pagination || { page, limit, total: payments.length, totalPages: 1 };
 
   const { data: stats } = useQuery({
     queryKey: ["/api/admin/finance/payments/stats"],
@@ -1951,7 +2078,48 @@ function PaymentsSection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Payments</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">Payments</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} title="Refresh">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                onClick={() => {
+                  const params = new URLSearchParams({ format: "csv", limit: "50000" });
+                  if (filters.status) params.set("status", filters.status);
+                  if (filters.userId) params.set("userId", filters.userId);
+                  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+                  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+                  window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                }}
+              >
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  const params = new URLSearchParams({ format: "json", limit: "50000" });
+                  if (filters.status) params.set("status", filters.status);
+                  if (filters.userId) params.set("userId", filters.userId);
+                  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+                  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+                  window.open(`/api/admin/finance/payments/export?${params}`, "_blank");
+                }}
+              >
+                Export JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
@@ -1966,6 +2134,38 @@ function PaymentsSection() {
           <p className="text-xl font-semibold">{stats?.count || 0}</p>
         </div>
       </div>
+
+      <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-muted/30 p-3">
+        <Select value={filters.status} onValueChange={(v) => updateFilters({ status: v })}>
+          <SelectTrigger className="w-[150px] h-8"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All Status</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="failed">Failed</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="User ID..."
+          className="h-8 w-[220px]"
+          value={filters.userId}
+          onChange={(e) => updateFilters({ userId: e.target.value })}
+        />
+        <Input
+          type="date"
+          className="h-8 w-[150px]"
+          value={filters.dateFrom}
+          onChange={(e) => updateFilters({ dateFrom: e.target.value })}
+        />
+        <Input
+          type="date"
+          className="h-8 w-[150px]"
+          value={filters.dateTo}
+          onChange={(e) => updateFilters({ dateTo: e.target.value })}
+        />
+        <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>
+      </div>
+
       <div className="rounded-lg border">
         <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>ID</span>
@@ -1992,24 +2192,62 @@ function PaymentsSection() {
           ))
         )}
       </div>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= pagination.totalPages} onClick={() => setPage(p => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function InvoicesSection() {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const limit = 20;
+  const [filters, setFilters] = useState({
+    status: "",
+    userId: "",
+    dateFrom: "",
+    dateTo: ""
+  });
+  const updateFilters = (next: Partial<typeof filters>) => {
+    setFilters(prev => ({ ...prev, ...next }));
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setFilters({ status: "", userId: "", dateFrom: "", dateTo: "" });
+    setPage(1);
+  };
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
 
-  const { data: invoicesData, isLoading } = useQuery({
-    queryKey: ["/api/admin/finance/invoices"],
+  const { data: invoicesData, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/finance/invoices", page, limit, filters.status, filters.userId, filters.dateFrom, filters.dateTo],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/invoices", { credentials: "include" });
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (filters.status) params.set("status", filters.status);
+      if (filters.userId) params.set("userId", filters.userId);
+      if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+      if (filters.dateTo) params.set("dateTo", filters.dateTo);
+      const res = await fetch(`/api/admin/finance/invoices?${params}`, { credentials: "include" });
       return res.json();
     }
   });
   
-  const invoices = invoicesData?.invoices || invoicesData || [];
+  const invoices = invoicesData?.invoices || [];
+  const pagination = invoicesData?.pagination || { page, limit, total: invoices.length, totalPages: 1 };
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (invoice: any) => {
@@ -2024,6 +2262,7 @@ function InvoicesSection() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/invoices"] });
       setShowAddModal(false);
+      setNewInvoice({ invoiceNumber: "", amount: "", userId: "" });
     }
   });
 
@@ -2034,46 +2273,125 @@ function InvoicesSection() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Invoices ({invoices.length})</h2>
-        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogTrigger asChild>
-            <Button size="sm" data-testid="button-create-invoice">
-              <Plus className="h-4 w-4 mr-2" />
-              Crear factura
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Crear factura</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Número de factura</Label>
-                <Input 
-                  placeholder="INV-2024-001" 
-                  value={newInvoice.invoiceNumber}
-                  onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Importe</Label>
-                <Input 
-                  placeholder="99.00" 
-                  value={newInvoice.amount}
-                  onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
-                />
-              </div>
-              <Button 
-                className="w-full" 
-                onClick={() => createInvoiceMutation.mutate(newInvoice)}
-                disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+        <h2 className="text-lg font-medium">Invoices ({pagination.total})</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} title="Refresh">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                onClick={() => {
+                  const params = new URLSearchParams({ format: "csv", limit: "50000" });
+                  if (filters.status) params.set("status", filters.status);
+                  if (filters.userId) params.set("userId", filters.userId);
+                  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+                  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+                  window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                }}
               >
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  const params = new URLSearchParams({ format: "json", limit: "50000" });
+                  if (filters.status) params.set("status", filters.status);
+                  if (filters.userId) params.set("userId", filters.userId);
+                  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+                  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+                  window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                }}
+              >
+                Export JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+            <DialogTrigger asChild>
+              <Button size="sm" data-testid="button-create-invoice">
+                <Plus className="h-4 w-4 mr-2" />
                 Crear factura
               </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Crear factura</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Número de factura</Label>
+                  <Input 
+                    placeholder="INV-2024-001" 
+                    value={newInvoice.invoiceNumber}
+                    onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Importe</Label>
+                  <Input 
+                    placeholder="99.00" 
+                    value={newInvoice.amount}
+                    onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>User ID (opcional)</Label>
+                  <Input
+                    placeholder="user_id..."
+                    value={newInvoice.userId}
+                    onChange={(e) => setNewInvoice({ ...newInvoice, userId: e.target.value })}
+                  />
+                </div>
+                <Button 
+                  className="w-full" 
+                  onClick={() => createInvoiceMutation.mutate(newInvoice)}
+                  disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+                >
+                  Crear factura
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
+
+      <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-muted/30 p-3">
+        <Select value={filters.status} onValueChange={(v) => updateFilters({ status: v })}>
+          <SelectTrigger className="w-[150px] h-8"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All Status</SelectItem>
+            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="failed">Failed</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="User ID..."
+          className="h-8 w-[220px]"
+          value={filters.userId}
+          onChange={(e) => updateFilters({ userId: e.target.value })}
+        />
+        <Input
+          type="date"
+          className="h-8 w-[150px]"
+          value={filters.dateFrom}
+          onChange={(e) => updateFilters({ dateFrom: e.target.value })}
+        />
+        <Input
+          type="date"
+          className="h-8 w-[150px]"
+          value={filters.dateTo}
+          onChange={(e) => updateFilters({ dateTo: e.target.value })}
+        />
+        <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>
+      </div>
+
       <div className="rounded-lg border">
         <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>Factura</span>
@@ -2097,7 +2415,17 @@ function InvoicesSection() {
                 <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
                   {invoice.status === "paid" ? "Pagada" : "Pendiente"}
                 </Badge>
-                <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => {
+                    const params = new URLSearchParams({ format: "csv", limit: "1", invoiceId: invoice.id });
+                    window.open(`/api/admin/finance/invoices/export?${params}`, "_blank");
+                  }}
+                  title="Download CSV"
+                  data-testid={`button-download-invoice-${invoice.id}`}
+                >
                   <Download className="h-3 w-3" />
                 </Button>
               </div>
@@ -2105,6 +2433,22 @@ function InvoicesSection() {
           ))
         )}
       </div>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= pagination.totalPages} onClick={() => setPage(p => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4966,13 +5310,15 @@ export default function AdminPage() {
     }
   });
 
+  const isAdmin = isAdminUser(currentUser as any);
+
   // Redirect non-admin users
   useEffect(() => {
-    if (!isLoadingUser && currentUser && currentUser.role !== "admin") {
+    if (!isLoadingUser && currentUser && !isAdmin) {
       console.warn("[Admin] Access denied - user is not admin:", currentUser.email);
       setLocation("/");
     }
-  }, [currentUser, isLoadingUser, setLocation]);
+  }, [currentUser, isLoadingUser, isAdmin, setLocation]);
 
   // Show loading while checking auth
   if (isLoadingUser) {
@@ -4984,7 +5330,7 @@ export default function AdminPage() {
   }
 
   // Block access if not admin
-  if (!currentUser || currentUser.role !== "admin") {
+  if (!currentUser || !isAdmin) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
         <Shield className="h-16 w-16 text-red-500" />
@@ -4998,7 +5344,7 @@ export default function AdminPage() {
   const renderSection = () => {
     switch (activeSection) {
       case "dashboard":
-        return <DashboardSection />;
+        return <DashboardSection onNavigate={setActiveSection} />;
       case "users":
         return <UsersSection />;
       case "conversations":

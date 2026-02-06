@@ -17,6 +17,12 @@ import { createChunkStore } from "../lib/pareChunkStore";
 import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
+import { buildCanonicalBrief, type BriefAttachmentSummary } from "../pipeline/requestUnderstanding/requestUnderstandingAgent";
+import { ingestSemanticDocumentToChunks } from "../pipeline/ingestion2026/documentIngestion2026";
+import type { IngestedChunk } from "../pipeline/ingestion2026/ingestionTypes";
+import { extractImageSemantics } from "../pipeline/ingestion2026/imageIngestion2026";
+import { hybridRetrieveInMemory } from "../pipeline/retrieval/hybridRetrieval";
+import { verifyAnswer } from "../pipeline/verifier/verifier";
 import { agentEventBus } from "../agent/eventBus";
 import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
 import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
@@ -191,6 +197,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
+      const requestId = `chat_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
       const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
@@ -286,64 +293,345 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
 
-      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
-
-      if (hasDocumentAttachments) {
-        console.log(`[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
-        return res.status(400).json({
-          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-          code: "USE_ANALYZE_ENDPOINT"
-        });
-      }
-
-      let attachmentContext = "";
-      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
-
-      if (hasAttachments) {
-        console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
-        try {
-          const extractedContents: { extracted: Awaited<ReturnType<typeof extractAttachmentContent>>; attachment: Attachment }[] = [];
-          for (const attachment of attachments as Attachment[]) {
-            const extracted = await extractAttachmentContent(attachment);
-            extractedContents.push({ extracted, attachment });
-          }
-
-          const successfulExtractions = extractedContents.filter(e => e.extracted !== null).map(e => e.extracted!);
-          if (successfulExtractions.length > 0) {
-            attachmentContext = formatAttachmentsAsContext(successfulExtractions);
-            console.log(`[Chat API] Extracted content from ${successfulExtractions.length} attachment(s), context length: ${attachmentContext.length}`);
-          }
-
-          if (conversationId) {
-            for (const { extracted, attachment } of extractedContents) {
-              if (extracted) {
-                try {
-                  await storage.createConversationDocument({
-                    chatId: conversationId,
-                    fileName: extracted.fileName,
-                    storagePath: attachment.storagePath || null,
-                    mimeType: extracted.mimeType || "application/octet-stream",
-                    extractedText: extracted.content,
-                    metadata: { fileId: attachment.fileId }
-                  });
-                  console.log(`[Chat API] Persisted document: ${extracted.fileName} to conversation ${conversationId}`);
-                } catch (persistError) {
-                  console.error(`[Chat API] Error persisting document ${extracted.fileName}:`, persistError);
-                }
-              }
-            }
-          }
-        } catch (attachmentError) {
-          console.error("[Chat API] Error extracting attachment content:", attachmentError);
-        }
-      }
-
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      // Resolve storagePaths for attachments (some clients only send fileId).
+      const resolvedAttachments: any[] = [];
+      if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments) {
+          const resolved = { ...att };
+          if (!resolved.storagePath && resolved.fileId) {
+            const fileRecord = await storage.getFile(resolved.fileId);
+            if (fileRecord && fileRecord.storagePath) {
+              resolved.storagePath = fileRecord.storagePath;
+            }
+          }
+          resolvedAttachments.push(resolved);
+        }
+      }
+
+      const hasAttachments = resolvedAttachments.length > 0;
+      const hasLastImageContext = !!lastImageBase64 && !!lastImageId;
+      const inlineImages: string[] = Array.isArray(images) ? images.filter((x: any) => typeof x === "string") : [];
+
+      // ===== ingestion2026 → canonical brief (gating) → hybrid RAG → verifier (when attachments/images exist) =====
+      const userMessageText = ([...formattedMessages].reverse().find(m => m.role === "user")?.content || "").toString();
+
+      const shouldUseEncargoPipeline = hasAttachments || hasLastImageContext || inlineImages.length > 0;
+      const allChunks: IngestedChunk[] = [];
+      const briefAttachments: BriefAttachmentSummary[] = [];
+      const failedFiles: Array<{ filename: string; error: string }> = [];
+
+      if (shouldUseEncargoPipeline) {
+        const objectStorageService = new ObjectStorageService();
+
+        // Ingest resolved attachments (documents + images)
+        if (hasAttachments) {
+          for (const att of resolvedAttachments) {
+            const filename = att.name || 'attachment';
+            const mimeType = (att.mimeType || att.type || 'application/octet-stream').toLowerCase();
+            const isImage = mimeType.startsWith("image/") || String(att.type || "").toLowerCase() === "image";
+
+            try {
+              let buffer: Buffer;
+              if (att.storagePath) {
+                buffer = await objectStorageService.getObjectEntityBuffer(att.storagePath);
+              } else if (att.content) {
+                buffer = Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64');
+              } else {
+                throw new Error('No storagePath or content provided for attachment');
+              }
+
+              if (isImage) {
+                const imageId = att.fileId || `img_${filename}_${Date.now()}`;
+                const base64 = buffer.toString("base64");
+                const { extraction, chunk } = await extractImageSemantics({
+                  imageId,
+                  base64,
+                  requestId,
+                  userId: userId || conversationId || "anonymous",
+                });
+                allChunks.push(chunk);
+                briefAttachments.push({
+                  id: imageId,
+                  kind: "image",
+                  label: filename,
+                  mimeType,
+                  summary: [extraction.summary, extraction.detected_text ? `TEXT: ${extraction.detected_text.slice(0, 300)}` : ""].filter(Boolean).join("\n"),
+                  citationHint: `img:${imageId}`,
+                });
+                continue;
+              }
+
+              const docModel = await normalizeDocument(buffer, filename, att.storagePath);
+              const { chunks, summary } = ingestSemanticDocumentToChunks({ model: docModel, mimeType });
+              allChunks.push(...chunks);
+
+              const docSummaryLines = [
+                `${summary.filename} (${summary.documentType || 'document'}, mime=${summary.mimeType})`,
+                summary.pageCount ? `Pages: ${summary.pageCount}` : '',
+                summary.sheetCount ? `Sheets: ${summary.sheetCount}` : '',
+                `Sections: ${summary.sectionCount}, Tables: ${summary.tableCount}`,
+                summary.headingPreview.length ? `Headings: ${summary.headingPreview.join(" | ")}` : '',
+                summary.notes && summary.notes.length ? `Warnings: ${summary.notes.slice(0, 3).join(" | ")}` : '',
+              ].filter(Boolean).join("\n");
+
+              briefAttachments.push({
+                id: att.fileId || summary.docId || filename,
+                kind: "document",
+                label: filename,
+                mimeType,
+                summary: docSummaryLines,
+                citationHint: `doc:${filename}`,
+              });
+            } catch (err: any) {
+              const msg = err?.message || String(err);
+              failedFiles.push({ filename, error: msg });
+              console.error(`[Chat API] ingestion2026 failed for ${filename}:`, msg);
+              // Ensure the brief step knows a file existed but could not be ingested (prevents "silent" missing context).
+              briefAttachments.push({
+                id: att.fileId || filename,
+                kind: isImage ? "image" : "document",
+                label: filename,
+                mimeType,
+                summary: `FAILED_TO_INGEST: ${msg}`,
+              });
+            }
+          }
+        }
+
+        // Ingest last image context (edit / follow-up tasks)
+        if (hasLastImageContext) {
+          try {
+            const { extraction, chunk } = await extractImageSemantics({
+              imageId: String(lastImageId),
+              base64: String(lastImageBase64),
+              requestId,
+              userId: userId || conversationId || "anonymous",
+            });
+            allChunks.push(chunk);
+            briefAttachments.push({
+              id: String(lastImageId),
+              kind: "image",
+              label: `lastImage:${lastImageId}`,
+              mimeType: "image/*",
+              summary: [extraction.summary, extraction.detected_text ? `TEXT: ${extraction.detected_text.slice(0, 300)}` : ""].filter(Boolean).join("\n"),
+              citationHint: `img:${lastImageId}`,
+            });
+          } catch (imgErr: any) {
+            console.warn(`[Chat API] Image context extraction failed (${lastImageId}):`, imgErr?.message || imgErr);
+          }
+        }
+
+        // Ingest inline image data URLs (cap to avoid runaway costs)
+        const parseDataUrlBase64 = (dataUrl: string): string | null => {
+          const s = (dataUrl || "").trim();
+          if (!s) return null;
+          if (s.startsWith("data:")) {
+            const idx = s.indexOf("base64,");
+            if (idx === -1) return null;
+            return s.slice(idx + "base64,".length).trim() || null;
+          }
+          // If the client sent raw base64, accept it.
+          if (/^[A-Za-z0-9+/=\n\r]+$/.test(s) && s.length > 100) return s.replace(/\s+/g, "");
+          return null;
+        };
+
+        for (let i = 0; i < Math.min(3, inlineImages.length); i++) {
+          const base64 = parseDataUrlBase64(inlineImages[i]);
+          if (!base64) continue;
+          const imageId = `inline_${Date.now()}_${i}`;
+          try {
+            const { extraction, chunk } = await extractImageSemantics({
+              imageId,
+              base64,
+              requestId,
+              userId: userId || conversationId || "anonymous",
+            });
+            allChunks.push(chunk);
+            briefAttachments.push({
+              id: imageId,
+              kind: "image",
+              label: `inlineImage:${i + 1}`,
+              mimeType: "image/*",
+              summary: [extraction.summary, extraction.detected_text ? `TEXT: ${extraction.detected_text.slice(0, 300)}` : ""].filter(Boolean).join("\n"),
+              citationHint: `img:${imageId}`,
+            });
+          } catch (imgErr: any) {
+            console.warn(`[Chat API] Inline image extraction failed (#${i + 1}):`, imgErr?.message || imgErr);
+          }
+        }
+      }
+
+      // ===== 1) Canonical brief (gating, always) =====
+      const briefRes = await buildCanonicalBrief({
+        userMessage: userMessageText,
+        conversationContext: formattedMessages,
+        attachments: briefAttachments,
+        requestId,
+        userId: userId || conversationId || "anonymous",
+      });
+
+      const brief = briefRes.brief;
+
+      if (brief.blocker.is_blocked && brief.blocker.clarification_question) {
+        const question = brief.blocker.clarification_question.trim();
+        return res.json({
+          content: question,
+          role: "assistant",
+          metadata: { brief, blocked: true }
+        });
+      }
+
+      // If we ingested context, run the encargo pipeline end-to-end (RAG + citations + verifier).
+      if (shouldUseEncargoPipeline) {
+        const retrieval = await hybridRetrieveInMemory({
+          query: userMessageText,
+          chunks: allChunks,
+          topK: Math.min(12, allChunks.length || 12),
+          enableGraphExpansion: allChunks.filter(c => c.kind === 'document').length > 20,
+        });
+
+        const retrieved = retrieval.selected;
+        const allowedCitations = retrieved.map(r => `[${r.chunk.sourceId}]`).join("\n");
+
+        // Build retrieval context within a token budget
+        const MAX_CTX_TOKENS = 3500;
+        let usedTokens = 0;
+        const ctxParts: string[] = [];
+
+        for (const r of retrieved) {
+          const tag = `[${r.chunk.sourceId}]`;
+          const body = (r.chunk.content || "").slice(0, 3000);
+          const part = `${tag}\n${body}`.trim();
+          const partTokens = Math.ceil(part.length / 4);
+          if (usedTokens + partTokens > MAX_CTX_TOKENS) break;
+          ctxParts.push(part);
+          usedTokens += partTokens;
+        }
+
+        const retrievalContext = ctxParts.join("\n\n---\n\n").trim();
+
+        const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(
+          userMessageText,
+          false
+        );
+
+        const briefSummaryForPrompt = JSON.stringify({
+          primary_intent: brief.primary_intent,
+          subtasks: brief.subtasks,
+          deliverable: brief.deliverable,
+          audience_tone: brief.audience_tone,
+          restrictions: brief.restrictions,
+          inputs: {
+            provided: brief.inputs.provided.slice(0, 10),
+            assumed: brief.inputs.assumed.slice(0, 10),
+          },
+          success_criteria: brief.success_criteria.slice(0, 10),
+        });
+
+        const citationsRules = [
+          `CITAS OBLIGATORIAS:`,
+          `- Cuando afirmes hechos concretos (fechas, numeros, definiciones, quotes), agrega al final de la frase una o mas citas EXACTAS de la lista permitida.`,
+          `- Formato de cita: [doc:...], [img:...], [web:...] exactamente como aparecen abajo.`,
+          `- Si la respuesta no se puede sustentar con las fuentes recuperadas, pide UNA sola aclaracion y DETENTE.`,
+          ``,
+          `CITAS PERMITIDAS (copiar/pegar tal cual):\n${allowedCitations || "(ninguna)"}`,
+        ].join("\n");
+
+        const systemContent = [
+          answerFirstPrompt.fullPrompt,
+          ``,
+          `BRIEF_CANONICO (para ejecucion, no lo repitas literal):\n${briefSummaryForPrompt}`,
+          ``,
+          citationsRules,
+          retrievalContext ? `\n\nFUENTES RECUPERADAS (usa solo esto como base factual y citalo):\n${retrievalContext}` : `\n\nFUENTES RECUPERADAS: (ninguna)`,
+        ].join("\n");
+
+        const systemMessage = {
+          role: "system" as const,
+          content: systemContent
+        };
+
+        const draft = await llmGateway.chat(
+          [systemMessage, ...formattedMessages],
+          {
+            userId: userId || conversationId || "anonymous",
+            requestId,
+            model: effectiveModel,
+            maxTokens: 2000,
+            temperature: 0.4,
+            disableImageGeneration: true,
+            skipCache: true,
+          }
+        );
+
+        const draftAnswer = (draft.content || "").trim() || "No pude generar una respuesta.";
+
+        const verification = await verifyAnswer({
+          userMessage: userMessageText,
+          brief,
+          draftAnswer,
+          retrieved,
+          requestId,
+          userId: userId || conversationId || "anonymous",
+        });
+
+        const v = verification.result;
+        const finalAnswer = (v.needs_clarification && v.clarification_question)
+          ? v.clarification_question
+          : v.final_answer;
+
+        // Token Usage Accounting (best-effort; structured subcalls are logged via llmGateway API logs).
+        if (userId && draft.usage?.totalTokens) {
+          usageQuotaService.recordTokenUsage(userId, draft.usage.totalTokens).catch(err => {
+            console.error(`[Chat API] Failed to record token usage for user ${userId}:`, err);
+          });
+        }
+
+        const responseWithMetadata = gptSessionContract ? {
+          content: finalAnswer,
+          role: "assistant",
+          metadata: {
+            verified: v.verdict === 'pass',
+            verificationAttempts: verification.attempts,
+            brief: { ...brief, _raw_attempts: briefRes.attempts },
+            retrieval: retrieval.stats,
+            verification: {
+              verdict: v.verdict,
+              confidence: v.confidence,
+              issues: v.issues?.slice(0, 20),
+            },
+            failedFiles: failedFiles.length > 0 ? failedFiles : undefined,
+          },
+          usage: draft.usage,
+          gpt_id: gptSessionContract.gptId,
+          config_version: gptSessionContract.configVersion,
+          tool_permissions: gptSessionContract.toolPermissions,
+          session_id: serverSessionId || gptSessionContract.sessionId
+        } : {
+          content: finalAnswer,
+          role: "assistant",
+          metadata: {
+            verified: v.verdict === 'pass',
+            verificationAttempts: verification.attempts,
+            brief: { ...brief, _raw_attempts: briefRes.attempts },
+            retrieval: retrieval.stats,
+            verification: {
+              verdict: v.verdict,
+              confidence: v.confidence,
+              issues: v.issues?.slice(0, 20),
+            },
+            failedFiles: failedFiles.length > 0 ? failedFiles : undefined,
+          },
+          usage: draft.usage,
+        };
+
+        return res.json(responseWithMetadata);
+      }
 
       // Build gptSession info - prefer contract-based session over legacy gptConfig
       const gptSession = gptSessionContract ? {
@@ -364,9 +652,9 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         figmaMode,
         provider,
         model: effectiveModel,
-        attachmentContext,
-        forceDirectResponse: hasAttachments && attachmentContext.length > 0,
-        hasRawAttachments: hasAttachments,
+        attachmentContext: "",
+        forceDirectResponse: false,
+        hasRawAttachments: false,
         lastImageBase64,
         lastImageId,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
@@ -577,7 +865,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto, lastImageBase64, lastImageId } = req.body;
 
       // DEBUG: Log all incoming request parameters for docTool verification
       console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}, forceWebSearch: ${forceWebSearch}`);
@@ -774,16 +1062,12 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
+      // NOTE: Document attachments are supported in /chat/stream via the ingestion2026 + brief/RAG/verifier pipeline.
+      // /analyze remains available for dedicated document-only workflows.
       const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
         attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
-
       if (hasDocumentAttachments) {
-        console.log(`[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
-        return res.status(400).json({
-          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
-          code: "USE_ANALYZE_ENDPOINT"
-        });
+        console.log(`[Stream API] 📎 Document attachments detected - ingestion2026 enabled`);
       }
 
       const user = (req as AuthenticatedRequest).user;
@@ -1068,119 +1352,25 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }, 15000);
 
-      // Process attachments using DocumentBatchProcessor for atomic batch handling
-      let attachmentContext = "";
-      let batchResult: BatchProcessingResult | null = null;
-      const hasAttachments = resolvedAttachments.length > 0;
-      const attachmentsCount = hasAttachments ? resolvedAttachments.length : 0;
-
-      // GUARD: Detect if user requests "analyze all" - requires full coverage
-      const userMessage = messages[messages.length - 1]?.content || "";
-      const requiresFullCoverage = /\b(todos|all|completo|complete|cada|every)\b/i.test(userMessage);
-
-      if (hasAttachments) {
-        console.log(`[Stream] Processing ${attachmentsCount} attachment(s) as atomic batch:`,
-          resolvedAttachments.map((a: any) => ({
-            name: a.name,
-            type: a.type,
-            storagePath: a.storagePath,
-            fileId: a.fileId
-          }))
-        );
-
-        try {
-          const batchProcessor = new DocumentBatchProcessor();
-
-          // Convert resolved attachments to BatchAttachment format
-          // storagePaths were already resolved earlier
-          const batchAttachments: BatchAttachment[] = resolvedAttachments
-            .filter((att: any) => att.storagePath || att.content)
-            .map((att: any) => ({
-              name: att.name || 'document',
-              mimeType: att.mimeType || att.type || 'application/octet-stream',
-              storagePath: att.storagePath || '',
-              content: att.content
-            }));
-
-          batchResult = await batchProcessor.processBatch(batchAttachments);
-
-          // Log observability metrics per file
-          console.log(`[Stream] Batch processing complete:`, {
-            attachmentsCount: batchResult.attachmentsCount,
-            processedFiles: batchResult.processedFiles,
-            failedFiles: batchResult.failedFiles.length,
-            totalChunks: batchResult.chunks.length,
-            totalTokens: batchResult.totalTokens
-          });
-
-          // Log per-file stats
-          for (const stat of batchResult.stats) {
-            console.log(`[Stream] File stats: ${stat.filename}`, {
-              bytesRead: stat.bytesRead,
-              pagesProcessed: stat.pagesProcessed,
-              tokensExtracted: stat.tokensExtracted,
-              parseTimeMs: stat.parseTimeMs,
-              chunkCount: stat.chunkCount,
-              status: stat.status
-            });
-          }
-
-          // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
-          if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
-            const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
-            const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
-            console.error(`[Stream] ${errorMsg}`);
-
-            res.write(`event: error\ndata: ${JSON.stringify({
-              type: 'coverage_failure',
-              message: 'No se pudieron procesar todos los archivos solicitados',
-              details: {
-                requested: batchResult.attachmentsCount,
-                processed: batchResult.processedFiles,
-                failedFiles: batchResult.failedFiles
-              },
-              requestId,
-              timestamp: Date.now()
-            })}\n\n`);
-
-            clearInterval(heartbeatInterval);
-            return res.end();
-          }
-
-          // Use unified context from batch processor
-          if (batchResult.unifiedContext) {
-            attachmentContext = batchResult.unifiedContext;
-            console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
-          }
-
-        } catch (batchError: any) {
-          console.error("[Stream] Batch processing error:", batchError);
-
-          res.write(`event: error\ndata: ${JSON.stringify({
-            type: 'batch_processing_error',
-            message: 'Error al procesar los archivos adjuntos',
-            details: batchError.message,
-            requestId,
-            timestamp: Date.now()
-          })}\n\n`);
-
-          clearInterval(heartbeatInterval);
-          return res.end();
-        }
-      }
-
+      // ===== ingestion2026 → canonical brief (gating) → hybrid RAG → verifier (gating) → stream answer =====
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
 
-      // GUARD: Block image generation when attachments are present
-      if (hasAttachments && attachmentsCount > 0) {
-        console.log(`[Stream] GUARD: Image generation BLOCKED - ${attachmentsCount} attachments present`);
-        // Ensure route decision does not include image generation tools
+      const hasAttachments = resolvedAttachments.length > 0;
+      const hasLastImageContext = !!lastImageBase64 && !!lastImageId;
+      const attachmentsCount = (hasAttachments ? resolvedAttachments.length : 0) + (hasLastImageContext ? 1 : 0);
+
+      // GUARD: Detect if user requests "analyze all" - requires full coverage
+      const userMessage = messages[messages.length - 1]?.content || "";
+      const requiresFullCoverage = /\b(todos|all|completo|complete|cada|every)\b/i.test(userMessage);
+
+      // GUARD: Block image generation tools when attachments or image context are present
+      if (attachmentsCount > 0) {
+        console.log(`[Stream] GUARD: Image generation BLOCKED - attachmentsCount=${attachmentsCount}`);
         if (routeDecision) {
           routeDecision.tools = routeDecision.tools.filter(t => !['generate_image', 'image_gen', 'dall_e'].includes(t));
-          // Force agent mode for document analysis when attachments present
           if (routeDecision.route === 'chat') {
             routeDecision.route = 'agent';
             routeDecision.intent = 'analysis';
@@ -1188,56 +1378,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-
-      // Default question classification for token limits
+      // Default question classification for token limits (Answer-First enforcer has its own classifier)
       const questionClassification = {
         type: 'general',
         maxTokens: 1000
       } as Partial<QuestionClassification>;
-
-
-
-      // Build Answer-First system prompt based on question type
-      const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(
-        userMessageText,
-        hasAttachments,
-        attachmentContext
-      );
-
-      let systemContent = answerFirstPrompt.fullPrompt;
-
-      if (hasAttachments && attachmentContext && batchResult) {
-        // Build citation format instructions based on document types
-        const citationFormats = batchResult.stats
-          .filter(s => s.status === 'success')
-          .map(s => {
-            const ext = s.filename.split('.').pop()?.toLowerCase();
-            switch (ext) {
-              case 'pdf': return `- ${s.filename}: [doc:${s.filename} p#]`;
-              case 'xlsx': case 'xls': return `- ${s.filename}: [doc:${s.filename} sheet:NombreHoja cell:A1]`;
-              case 'docx': case 'doc': return `- ${s.filename}: [doc:${s.filename} p#]`;
-              case 'pptx': case 'ppt': return `- ${s.filename}: [doc:${s.filename} slide:#]`;
-              case 'csv': return `- ${s.filename}: [doc:${s.filename} row:#]`;
-              default: return `- ${s.filename}: [doc:${s.filename}]`;
-            }
-          })
-          .join('\n');
-
-        // Add document context to Answer-First prompt
-        systemContent += `\n\nDOCUMENTOS PROCESADOS (${batchResult.processedFiles}/${batchResult.attachmentsCount}):
-${batchResult.stats.map(s => `- ${s.filename}: ${s.status === 'success' ? `${s.tokensExtracted} tokens` : `ERROR: ${s.error}`}`).join('\n')}
-
-FORMATO DE CITAS REQUERIDO:
-${citationFormats}
-
-CONTENIDO DE LOS DOCUMENTOS:
-${attachmentContext}`;
-      }
-
-      const systemMessage = {
-        role: "system" as const,
-        content: systemContent
-      };
 
       // If we have a run, create an assistant message placeholder at the start
       let assistantMessageId: string | null = null;
@@ -1245,7 +1390,7 @@ ${attachmentContext}`;
         const assistantMessage = await storage.createChatMessage({
           chatId,
           role: 'assistant',
-          content: '', // Will be updated during streaming
+          content: '',
           status: 'pending',
           runId: claimedRun.id,
           userMessageId: claimedRun.userMessageId,
@@ -1279,7 +1424,7 @@ ${attachmentContext}`;
           intent: unifiedContext?.requestSpec.intent,
           intentConfidence: unifiedContext?.requestSpec.intentConfidence,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
-          attachmentsCount: attachmentsCount,
+          attachmentsCount,
           isAgenticMode: unifiedContext?.isAgenticMode
         }
       }).catch(() => { });
@@ -1293,97 +1438,437 @@ ${attachmentContext}`;
         }).catch(() => { });
       }
 
-      if (unifiedContext?.isAgenticMode) {
-        emitTraceEvent(effectiveRunId, 'agent_delegated', {
-          agent: {
-            name: unifiedContext.requestSpec.primaryAgent,
-            role: 'primary',
-            status: 'active'
-          }
-        }).catch(() => { });
-      }
-
       emitTraceEvent(effectiveRunId, 'thinking', {
-        content: `Analyzing request: ${unifiedContext?.requestSpec.intent || 'chat'}`,
+        content: `Building canonical brief + retrieval context`,
         phase: 'planning'
       }).catch(() => { });
 
       // Apply dynamic token limit based on question type (Answer-First)
       const effectiveMaxTokens = questionClassification.type === 'summary' ||
         questionClassification.type === 'analysis'
-        ? 2000 // Allow longer responses for summaries/analysis
-        : questionClassification.maxTokens * 4; // Apply stricter limit for factual questions
+        ? 2000
+        : questionClassification.maxTokens * 4;
 
-      console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
+      const objectStorageService = new ObjectStorageService();
+      const allChunks: IngestedChunk[] = [];
+      const briefAttachments: BriefAttachmentSummary[] = [];
+      const failedFiles: Array<{ filename: string; error: string }> = [];
 
-      const streamGenerator = llmGateway.streamChat(
+      // Ingest web sources as retrievable context
+      if (detectedWebSources.length > 0) {
+        for (const ws of detectedWebSources.slice(0, 10)) {
+          const url = ws.url || ws.canonicalUrl || ws.link;
+          if (!url) continue;
+          const sourceId = `web:${url}`;
+          const snippet = ws.snippet || "";
+          const title = ws.title || ws.siteName || ws.domain || "web";
+          const content = `Type: web\nTitle: ${title}\nURL: ${url}\nSnippet: ${snippet}`.trim();
+          allChunks.push({
+            id: `webchunk_${Buffer.from(url).toString("base64").slice(0, 18)}`,
+            kind: "web",
+            sourceId,
+            location: {},
+            headingPath: [],
+            content,
+            rawContent: snippet,
+            metadata: { title },
+          });
+          briefAttachments.push({
+            id: url,
+            kind: "web",
+            label: title,
+            summary: `${title}\n${snippet}`.trim(),
+            citationHint: sourceId,
+          });
+        }
+      }
+
+      // Ingest resolved attachments (documents + images)
+      if (hasAttachments) {
+        console.log(`[Stream] ingestion2026: processing ${resolvedAttachments.length} attachment(s)`);
+
+        for (const att of resolvedAttachments) {
+          const filename = att.name || 'attachment';
+          const mimeType = (att.mimeType || att.type || 'application/octet-stream').toLowerCase();
+          const isImage = mimeType.startsWith("image/") || String(att.type || "").toLowerCase() === "image";
+
+          try {
+            let buffer: Buffer;
+            if (att.storagePath) {
+              buffer = await objectStorageService.getObjectEntityBuffer(att.storagePath);
+            } else if (att.content) {
+              buffer = Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64');
+            } else {
+              throw new Error('No storagePath or content provided for attachment');
+            }
+
+            if (isImage) {
+              const imageId = att.fileId || `img_${filename}_${Date.now()}`;
+              const base64 = buffer.toString("base64");
+              const { extraction, chunk } = await extractImageSemantics({
+                imageId,
+                base64,
+                requestId,
+                userId: userId || conversationId || "anonymous",
+              });
+              allChunks.push(chunk);
+              briefAttachments.push({
+                id: imageId,
+                kind: "image",
+                label: filename,
+                mimeType,
+                summary: [extraction.summary, extraction.detected_text ? `TEXT: ${extraction.detected_text.slice(0, 300)}` : ""].filter(Boolean).join("\n"),
+                citationHint: `img:${imageId}`,
+              });
+              continue;
+            }
+
+            const docModel = await normalizeDocument(buffer, filename, att.storagePath);
+            const { chunks, summary } = ingestSemanticDocumentToChunks({ model: docModel, mimeType });
+            allChunks.push(...chunks);
+
+            const docSummaryLines = [
+              `${summary.filename} (${summary.documentType || 'document'}, mime=${summary.mimeType})`,
+              summary.pageCount ? `Pages: ${summary.pageCount}` : '',
+              summary.sheetCount ? `Sheets: ${summary.sheetCount}` : '',
+              `Sections: ${summary.sectionCount}, Tables: ${summary.tableCount}`,
+              summary.headingPreview.length ? `Headings: ${summary.headingPreview.join(" | ")}` : '',
+              summary.notes && summary.notes.length ? `Warnings: ${summary.notes.slice(0, 3).join(" | ")}` : '',
+            ].filter(Boolean).join("\n");
+
+            briefAttachments.push({
+              id: att.fileId || summary.docId || filename,
+              kind: "document",
+              label: filename,
+              mimeType,
+              summary: docSummaryLines,
+              citationHint: `doc:${filename}`,
+            });
+          } catch (err: any) {
+            const msg = err?.message || String(err);
+            failedFiles.push({ filename, error: msg });
+            console.error(`[Stream] ingestion2026 failed for ${filename}:`, msg);
+            // Ensure the brief step knows a file existed but could not be ingested (prevents "silent" missing context).
+            briefAttachments.push({
+              id: att.fileId || filename,
+              kind: isImage ? "image" : "document",
+              label: filename,
+              mimeType,
+              summary: `FAILED_TO_INGEST: ${msg}`,
+            });
+          }
+        }
+      }
+
+      // Ingest last image context (edit / follow-up tasks)
+      if (hasLastImageContext) {
+        try {
+          const { extraction, chunk } = await extractImageSemantics({
+            imageId: String(lastImageId),
+            base64: String(lastImageBase64),
+            requestId,
+            userId: userId || conversationId || "anonymous",
+          });
+          allChunks.push(chunk);
+          briefAttachments.push({
+            id: String(lastImageId),
+            kind: "image",
+            label: `lastImage:${lastImageId}`,
+            mimeType: "image/*",
+            summary: [extraction.summary, extraction.detected_text ? `TEXT: ${extraction.detected_text.slice(0, 300)}` : ""].filter(Boolean).join("\n"),
+            citationHint: `img:${lastImageId}`,
+          });
+        } catch (imgErr: any) {
+          console.warn(`[Stream] Image context extraction failed (${lastImageId}):`, imgErr?.message || imgErr);
+        }
+      }
+
+      // COVERAGE CHECK: if user asked for "all", require zero ingestion failures when attachments exist.
+      if (requiresFullCoverage && hasAttachments && failedFiles.length > 0) {
+        res.write(`event: error\ndata: ${JSON.stringify({
+          type: 'coverage_failure',
+          message: 'No se pudieron procesar todos los archivos solicitados',
+          details: {
+            requested: resolvedAttachments.length,
+            processed: resolvedAttachments.length - failedFiles.length,
+            failedFiles
+          },
+          requestId,
+          timestamp: Date.now()
+        })}\n\n`);
+        clearInterval(heartbeatInterval);
+        return res.end();
+      }
+
+      // ===== 1) Canonical brief (gating) =====
+      const briefRes = await buildCanonicalBrief({
+        userMessage: userMessageText,
+        conversationContext: formattedMessages,
+        attachments: briefAttachments,
+        requestId,
+        userId: userId || conversationId || "anonymous",
+      });
+
+      const brief = briefRes.brief;
+
+      emitTraceEvent(effectiveRunId, 'plan_created', {
+        plan: {
+          objective: brief.primary_intent,
+          steps: brief.subtasks.map((t, idx) => ({
+            index: idx + 1,
+            toolName: 'subtask',
+            description: `${t.title}: ${t.description}`
+          })),
+        },
+        metadata: {
+          brief,
+          attempts: briefRes.attempts,
+          attachments: briefAttachments.map(a => ({ id: a.id, kind: a.kind, label: a.label })),
+        }
+      }).catch(() => { });
+
+      // Optional: expose brief for debugging (frontend currently ignores this event)
+      writeSse(res, 'brief', {
+        requestId,
+        runId: effectiveRunId,
+        brief,
+        timestamp: Date.now(),
+      });
+
+      if (brief.blocker.is_blocked && brief.blocker.clarification_question) {
+        const question = brief.blocker.clarification_question.trim();
+        let fullContent = "";
+        let lastAckSequence = -1;
+
+        if (!isConnectionClosed) {
+          fullContent = question;
+          lastAckSequence = 0;
+          writeSse(res, 'chunk', {
+            content: question,
+            sequenceId: 0,
+            requestId,
+            runId: effectiveRunId,
+            timestamp: Date.now(),
+          });
+        }
+
+        if (claimedRun && assistantMessageId) {
+          const metadata = { webSources: detectedWebSources, brief, blocked: true };
+          await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata as any);
+          await storage.updateChatRunStatus(claimedRun.id, 'done');
+        }
+
+        if (!isConnectionClosed) {
+          writeSse(res, 'done', {
+            requestId,
+            runId: effectiveRunId,
+            assistantMessageId,
+            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            timestamp: Date.now()
+          });
+
+          writeSse(res, 'complete', {
+            requestId,
+            runId: effectiveRunId,
+            assistantMessageId,
+            totalSequences: lastAckSequence + 1,
+            contentLength: fullContent.length,
+            intent: unifiedContext?.requestSpec.intent,
+            deliverableType: unifiedContext?.requestSpec.deliverableType,
+            durationMs: unifiedContext ? Date.now() - unifiedContext.startTime : 0,
+            timestamp: Date.now(),
+            ...sessionMetadata
+          });
+        }
+
+        emitTraceEvent(effectiveRunId, 'done', {
+          summary: question.slice(0, 200),
+          phase: 'completed',
+          metadata: { blocked: true }
+        }).catch(() => { });
+
+        // End early: we asked the single clarifying question.
+        return;
+      }
+
+      // ===== 2) Hybrid RAG (keyword + embeddings) + GraphRAG-lite =====
+      emitTraceEvent(effectiveRunId, 'tool_call_started', {
+        tool_name: 'hybrid_retrieval',
+        tool_input: { chunks: allChunks.length, graph: true },
+      }).catch(() => { });
+
+      const retrieval = await hybridRetrieveInMemory({
+        query: userMessageText,
+        chunks: allChunks,
+        topK: Math.min(12, allChunks.length),
+        enableGraphExpansion: allChunks.filter(c => c.kind === 'document').length > 20,
+      });
+
+      emitTraceEvent(effectiveRunId, 'tool_call_succeeded', {
+        tool_name: 'hybrid_retrieval',
+        metadata: retrieval.stats,
+      }).catch(() => { });
+
+      const retrieved = retrieval.selected;
+      const allowedCitations = retrieved.map(r => `[${r.chunk.sourceId}]`).join("\n");
+
+      // Build retrieval context within a token budget
+      const MAX_CTX_TOKENS = 3500;
+      let usedTokens = 0;
+      const ctxParts: string[] = [];
+
+      for (const r of retrieved) {
+        const tag = `[${r.chunk.sourceId}]`;
+        const body = (r.chunk.content || "").slice(0, 3000);
+        const part = `${tag}\n${body}`.trim();
+        const partTokens = Math.ceil(part.length / 4);
+        if (usedTokens + partTokens > MAX_CTX_TOKENS) break;
+        ctxParts.push(part);
+        usedTokens += partTokens;
+      }
+
+      const retrievalContext = ctxParts.join("\n\n---\n\n").trim();
+
+      // ===== 3) Answer generation (batch) =====
+      const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(
+        userMessageText,
+        false
+      );
+
+      const briefSummaryForPrompt = JSON.stringify({
+        primary_intent: brief.primary_intent,
+        subtasks: brief.subtasks,
+        deliverable: brief.deliverable,
+        audience_tone: brief.audience_tone,
+        restrictions: brief.restrictions,
+        inputs: {
+          provided: brief.inputs.provided.slice(0, 10),
+          assumed: brief.inputs.assumed.slice(0, 10),
+        },
+        success_criteria: brief.success_criteria.slice(0, 10),
+      });
+
+      const citationsRules = [
+        `CITAS OBLIGATORIAS:`,
+        `- Cuando afirmes hechos concretos (fechas, numeros, definiciones, quotes), agrega al final de la frase una o mas citas EXACTAS de la lista permitida.`,
+        `- Formato de cita: [doc:...], [img:...], [web:...] exactamente como aparecen abajo.`,
+        `- Si la respuesta no se puede sustentar con las fuentes recuperadas, pide UNA sola aclaracion y DETENTE.`,
+        ``,
+        `CITAS PERMITIDAS (copiar/pegar tal cual):\n${allowedCitations || "(ninguna)"}`,
+      ].join("\n");
+
+      let systemContent = [
+        answerFirstPrompt.fullPrompt,
+        ``,
+        `BRIEF_CANONICO (para ejecucion, no lo repitas literal):\n${briefSummaryForPrompt}`,
+        ``,
+        citationsRules,
+        retrievalContext ? `\n\nFUENTES RECUPERADAS (usa solo esto como base factual y citalo):\n${retrievalContext}` : `\n\nFUENTES RECUPERADAS: (ninguna)`,
+      ].join("\n");
+
+      const systemMessage = {
+        role: "system" as const,
+        content: systemContent
+      };
+
+      console.log(`[Stream] Brief+RAG: chunks=${allChunks.length}, retrieved=${retrieved.length}, ctxTokens~=${usedTokens}`);
+
+      const draft = await llmGateway.chat(
         [systemMessage, ...formattedMessages],
         {
           userId: userId || conversationId || "anonymous",
           requestId,
-          disableImageGeneration: hasAttachments,
+          model: effectiveModel,
           maxTokens: effectiveMaxTokens,
+          temperature: 0.4,
+          disableImageGeneration: attachmentsCount > 0,
+          skipCache: true,
         }
       );
 
+      const draftAnswer = (draft.content || "").trim() || "No pude generar una respuesta.";
+
+      // ===== 4) Verifier/QA (gating) =====
+      emitTraceEvent(effectiveRunId, 'verification', {
+        content: 'Running verifier checks (coherence, citations, contradictions)',
+        phase: 'verifying'
+      }).catch(() => { });
+
+      const verification = await verifyAnswer({
+        userMessage: userMessageText,
+        brief,
+        draftAnswer,
+        retrieved,
+        requestId,
+        userId: userId || conversationId || "anonymous",
+      });
+
+      const v = verification.result;
+      const finalAnswer = (v.needs_clarification && v.clarification_question)
+        ? v.clarification_question
+        : v.final_answer;
+
+      emitTraceEvent(effectiveRunId, v.verdict === 'pass' ? 'verification_passed' : 'verification_failed', {
+        confidence: v.confidence,
+        metadata: {
+          verdict: v.verdict,
+          issues: v.issues?.slice(0, 10),
+          missing_citations: v.missing_citations?.slice(0, 10),
+          citations_used: v.citations_used?.slice(0, 20),
+        }
+      }).catch(() => { });
+
+      if (retrieved.length > 0) {
+        emitTraceEvent(effectiveRunId, 'citations_added', {
+          citations: retrieved.slice(0, 10).map(r => ({ source: r.chunk.sourceId, text: (r.chunk.rawContent || r.chunk.content).slice(0, 120) })),
+        }).catch(() => { });
+      }
+
+      // ===== 5) Stream final answer (post-verified) =====
       let fullContent = "";
       let lastAckSequence = -1;
+      const OUT_CHUNK_SIZE = 900;
 
-      for await (const chunk of streamGenerator) {
-        if (isConnectionClosed) break;
+      if (!isConnectionClosed) {
+        for (let i = 0, seq = 0; i < finalAnswer.length; i += OUT_CHUNK_SIZE, seq++) {
+          const piece = finalAnswer.slice(i, i + OUT_CHUNK_SIZE);
+          if (!piece) continue;
+          fullContent += piece;
+          lastAckSequence = seq;
 
-        fullContent += chunk.content;
-        lastAckSequence = chunk.sequenceId;
+          if (claimedRun && seq > (claimedRun.lastSeq || 0)) {
+            await storage.updateChatRunLastSeq(claimedRun.id, seq);
+          }
 
-        // Update run's lastSeq for deduplication on reconnect
-        if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
-          await storage.updateChatRunLastSeq(claimedRun.id, chunk.sequenceId);
-        }
-
-        if (chunk.done) {
-          console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
-          writeSse(res, 'done', {
-            sequenceId: chunk.sequenceId,
-            requestId: chunk.requestId,
-            runId: effectiveRunId,
-            intent: unifiedContext?.requestSpec.intent,
-            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
-            timestamp: Date.now(),
-            ...sessionMetadata
-          });
-        } else {
           writeSse(res, 'chunk', {
-            content: chunk.content,
-            sequenceId: chunk.sequenceId,
-            requestId: chunk.requestId,
+            content: piece,
+            sequenceId: seq,
+            requestId,
             runId: effectiveRunId,
             timestamp: Date.now(),
           });
         }
       }
 
-      // Update assistant message with full content, webSources and mark run as done
+      // Update assistant message with full content and mark run as done
       if (claimedRun && assistantMessageId) {
-        const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
-        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
+        const metadata = {
+          webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          brief: { ...brief, _raw_attempts: briefRes.attempts },
+          retrieval: retrieval.stats,
+          verification: {
+            verdict: v.verdict,
+            confidence: v.confidence,
+            issues: v.issues?.slice(0, 20),
+          },
+        };
+        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata as any);
         await storage.updateChatRunStatus(claimedRun.id, 'done');
       }
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
 
       if (!isConnectionClosed) {
-        if (unifiedContext?.isAgenticMode) {
-          emitTraceEvent(effectiveRunId, 'agent_completed', {
-            agent: {
-              name: unifiedContext.requestSpec.primaryAgent,
-              role: 'primary',
-              status: 'completed'
-            },
-            durationMs
-          }).catch(() => { });
-        }
-
-        // Send done event with webSources for frontend NewsCards
         writeSse(res, 'done', {
           requestId,
           runId: effectiveRunId,
@@ -1396,7 +1881,7 @@ ${attachmentContext}`;
           requestId,
           runId: effectiveRunId,
           assistantMessageId,
-          totalSequences: lastAckSequence + 1,
+          totalSequences: Math.max(0, lastAckSequence + 1),
           contentLength: fullContent.length,
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
@@ -1409,7 +1894,7 @@ ${attachmentContext}`;
           summary: fullContent.slice(0, 200),
           durationMs,
           phase: 'completed',
-          metadata: { contentLength: fullContent.length, sequences: lastAckSequence + 1 }
+          metadata: { contentLength: fullContent.length, sequences: Math.max(0, lastAckSequence + 1) }
         }).catch(() => { });
       }
 

@@ -78,11 +78,22 @@ class AuthStorage implements IAuthStorage {
   async upsertUser(userData: UpsertUser): Promise<User> {
     const startTime = Date.now();
     const logContext = { id: userData.id, email: userData.email };
+    const configuredAdminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+    const shouldPromoteToAdmin = Boolean(
+      configuredAdminEmail &&
+        userData.email &&
+        userData.email.toLowerCase() === configuredAdminEmail
+    );
     
     try {
       const existingById = await this.getUser(userData.id);
       
       if (existingById) {
+        // Never demote admins; only promote if email matches configured admin email.
+        const nextRole = (existingById.role === "admin" || shouldPromoteToAdmin)
+          ? "admin"
+          : (existingById.role || "user");
+
         const [updatedUser] = await db
           .update(users)
           .set({
@@ -94,6 +105,7 @@ class AuthStorage implements IAuthStorage {
             profileImageUrl: userData.profileImageUrl ?? existingById.profileImageUrl,
             authProvider: userData.authProvider ?? existingById.authProvider,
             emailVerified: userData.emailVerified ?? existingById.emailVerified,
+            role: nextRole,
             updatedAt: new Date(),
           })
           .where(eq(users.id, userData.id))
@@ -114,6 +126,10 @@ class AuthStorage implements IAuthStorage {
       if (userData.email) {
         const existingByEmail = await this.getUserByEmail(userData.email);
         if (existingByEmail) {
+          const nextRole = (existingByEmail.role === "admin" || shouldPromoteToAdmin)
+            ? "admin"
+            : (existingByEmail.role || "user");
+
           const [updatedUser] = await db
             .update(users)
             .set({
@@ -125,6 +141,7 @@ class AuthStorage implements IAuthStorage {
               profileImageUrl: userData.profileImageUrl ?? existingByEmail.profileImageUrl,
               authProvider: userData.authProvider ?? existingByEmail.authProvider,
               emailVerified: userData.emailVerified ?? existingByEmail.emailVerified,
+              role: nextRole,
               updatedAt: new Date(),
             })
             .where(eq(users.email, userData.email))
@@ -144,6 +161,7 @@ class AuthStorage implements IAuthStorage {
         }
       }
       
+      const newRole = shouldPromoteToAdmin ? "admin" : (userData.role || "user");
       const [newUser] = await db
         .insert(users)
         .values({
@@ -156,7 +174,7 @@ class AuthStorage implements IAuthStorage {
           profileImageUrl: userData.profileImageUrl,
           authProvider: userData.authProvider ?? "email",
           emailVerified: userData.emailVerified ?? "false",
-          role: "user",
+          role: newRole,
           plan: "free",
           createdAt: new Date(),
           updatedAt: new Date(),

@@ -465,7 +465,7 @@ describe("Subscription Service Tests - 100+ Rigorous Tests", () => {
     });
     
     it("78. should validate correct admin email", () => {
-      const adminEmail = "carrerajorge874@gmail.com";
+      const adminEmail = "admin@example.com";
       expect(validateEmail(adminEmail)).toBe(true);
     });
     

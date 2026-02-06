@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { storage } from "../../storage";
-import { db } from "../../db";
+import { db, dbRead } from "../../db";
 import { users } from "@shared/schema";
 import { hashPassword } from "../../utils/password";
 import { validateBody } from "../../middleware/validateRequest";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { createUserBodySchema } from "../../schemas/apiSchemas";
-import { sql, ilike, or, desc, asc } from "drizzle-orm";
+import { sql, ilike, or, desc, asc, and, eq, type SQL } from "drizzle-orm";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const usersRouter = Router();
@@ -29,49 +29,53 @@ usersRouter.get("/", async (req, res) => {
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        // Build query with search
-        let allUsers = await storage.getAllUsers();
-        
-        // Apply search filter
+        const conditions: SQL[] = [];
+
         if (search) {
-            const searchLower = search.toLowerCase();
-            allUsers = allUsers.filter(u => 
-                u.email?.toLowerCase().includes(searchLower) ||
-                u.firstName?.toLowerCase().includes(searchLower) ||
-                u.lastName?.toLowerCase().includes(searchLower) ||
-                u.fullName?.toLowerCase().includes(searchLower)
-            );
+            const q = `%${search}%`;
+            conditions.push(or(
+                ilike(users.email, q),
+                ilike(users.username, q),
+                ilike(users.firstName, q),
+                ilike(users.lastName, q),
+                ilike(users.fullName, q)
+            ));
         }
 
-        // Apply status filter
-        if (status) {
-            allUsers = allUsers.filter(u => u.status === status);
-        }
+        if (status) conditions.push(eq(users.status, status));
+        if (role) conditions.push(eq(users.role, role));
+        if (plan) conditions.push(eq(users.plan, plan));
 
-        // Apply role filter
-        if (role) {
-            allUsers = allUsers.filter(u => u.role === role);
-        }
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-        // Apply plan filter
-        if (plan) {
-            allUsers = allUsers.filter(u => u.plan === plan);
-        }
+        const sortColumnMap: Record<string, any> = {
+            createdAt: users.createdAt,
+            email: users.email,
+            queryCount: users.queryCount,
+            tokensConsumed: users.tokensConsumed,
+            lastLoginAt: users.lastLoginAt
+        };
 
-        // Sort
-        const validSortFields = ["createdAt", "email", "queryCount", "tokensConsumed", "lastLoginAt"];
-        const sortField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
-        allUsers.sort((a, b) => {
-            const aVal = (a as any)[sortField] ?? 0;
-            const bVal = (b as any)[sortField] ?? 0;
-            if (sortOrder === "asc") {
-                return aVal > bVal ? 1 : -1;
-            }
-            return aVal < bVal ? 1 : -1;
-        });
+        const sortColumn = sortColumnMap[sortBy] || users.createdAt;
+        const orderClause = sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
 
-        const total = allUsers.length;
-        const paginatedUsers = allUsers.slice(offset, offset + limitNum);
+        const usersQuery = whereClause
+            ? dbRead.select().from(users).where(whereClause)
+            : dbRead.select().from(users);
+
+        const countQuery = whereClause
+            ? dbRead.select({ count: sql<number>`count(*)` }).from(users).where(whereClause)
+            : dbRead.select({ count: sql<number>`count(*)` }).from(users);
+
+        const [paginatedUsers, totalResult] = await Promise.all([
+            usersQuery
+                .orderBy(orderClause, desc(users.id))
+                .limit(limitNum)
+                .offset(offset),
+            countQuery
+        ]);
+
+        const total = Number(totalResult[0]?.count || 0);
 
         res.json({
             users: paginatedUsers,
@@ -100,8 +104,7 @@ usersRouter.get("/stats", async (req, res) => {
 
 usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (req, res) => {
     const { email, password, plan, role } = req.body;
-    const existingUsers = await storage.getAllUsers();
-    const existingUser = existingUsers.find(u => u.email === email);
+    const existingUser = await storage.getUserByEmail(email);
     if (existingUser) {
         return res.status(409).json({ message: "A user with this email already exists" });
     }
@@ -119,7 +122,7 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
         action: AuditActions.USER_CREATED,
         resource: "users",
         resourceId: user.id,
-        details: { email, plan, role, createdBy: (req as any).user?.email },
+        details: { email, plan, role, createdBy: (req as any).user?.claims?.email || (req as any).user?.email },
         category: "admin",
         severity: "info"
     });
@@ -148,7 +151,7 @@ usersRouter.patch("/:id", async (req, res) => {
                     plan: previousUser.plan,
                     status: previousUser.status
                 } : null,
-                updatedBy: (req as any).user?.email
+                updatedBy: (req as any).user?.claims?.email || (req as any).user?.email
             },
             category: "admin",
             severity: "info"
@@ -176,7 +179,7 @@ usersRouter.delete("/:id", async (req, res) => {
                     role: userToDelete.role,
                     plan: userToDelete.plan
                 } : null,
-                deletedBy: (req as any).user?.email
+                deletedBy: (req as any).user?.claims?.email || (req as any).user?.email
             },
             category: "admin",
             severity: "warning"
@@ -445,13 +448,34 @@ usersRouter.post("/:id/reset", async (req, res) => {
 // Export endpoints
 usersRouter.get("/export", async (req, res) => {
     try {
-        const { format = "json" } = req.query;
-        const allUsers = await storage.getAllUsers();
+        const { format = "json", limit = "5000" } = req.query as Record<string, string>;
+        const limitNum = Math.min(Math.max(parseInt(limit, 10) || 5000, 1), 50000);
+
+        // Safety: exporting "all users" doesn't scale; export the most recent N users.
+        const exportedUsers = await dbRead
+            .select({
+                id: users.id,
+                email: users.email,
+                username: users.username,
+                firstName: users.firstName,
+                lastName: users.lastName,
+                fullName: users.fullName,
+                plan: users.plan,
+                role: users.role,
+                status: users.status,
+                queryCount: users.queryCount,
+                tokensConsumed: users.tokensConsumed,
+                createdAt: users.createdAt,
+                lastLoginAt: users.lastLoginAt,
+            })
+            .from(users)
+            .orderBy(desc(users.createdAt), desc(users.id))
+            .limit(limitNum);
 
         if (format === "csv") {
             const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
             const csvRows = [headers.join(",")];
-            allUsers.forEach(u => {
+            exportedUsers.forEach(u => {
                 csvRows.push([
                     u.id,
                     u.email || "",
@@ -471,7 +495,7 @@ usersRouter.get("/export", async (req, res) => {
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
-            res.json(allUsers);
+            res.json(exportedUsers);
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });

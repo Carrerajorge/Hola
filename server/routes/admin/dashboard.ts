@@ -2,7 +2,9 @@ import { Router } from "express";
 import { storage } from "../../storage";
 import { llmGateway } from "../../lib/llmGateway";
 import { getRealtimeMetrics, getExtendedDashboardStats } from "../../services/realtimeMetrics";
-import { auditLog } from "../../services/auditLogger";
+import { dbRead } from "../../db";
+import { auditLogs, chats, invoices, platformSettings, reports, users } from "@shared/schema";
+import { and, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 
 export const dashboardRouter = Router();
 
@@ -32,31 +34,54 @@ dashboardRouter.get("/", async (req, res) => {
             userStats,
             paymentStats,
             aiModels,
-            invoices,
-            auditLogs,
-            reports,
-            settings,
-            allUsers,
+            invoiceStats,
+            queryStats,
+            recentAuditLogs,
+            reportStats,
+            settingsStats,
+            securityAlerts24h,
             healthStatus
         ] = await Promise.all([
             storage.getUserStats(),
             storage.getPaymentStats(),
             storage.getAiModels(),
-            storage.getInvoices(),
+            dbRead.select({
+                total: sql<number>`count(*)`,
+                pending: sql<number>`count(*) filter (where ${invoices.status} = 'pending')`,
+                paid: sql<number>`count(*) filter (where ${invoices.status} = 'paid')`,
+            }).from(invoices),
+            dbRead.select({
+                totalQueries: sql<number>`coalesce(sum(${users.queryCount}), 0)`,
+            }).from(users),
             storage.getAuditLogs(10),
-            storage.getReports(),
-            storage.getSettings(),
-            storage.getAllUsers(),
+            dbRead.select({ total: sql<number>`count(*)` }).from(reports),
+            dbRead.select({
+                total: sql<number>`count(*)`,
+                categories: sql<number>`count(distinct ${platformSettings.category})`,
+            }).from(platformSettings),
+            dbRead.select({ count: sql<number>`count(*)` })
+                .from(auditLogs)
+                .where(and(
+                    gte(auditLogs.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+                    or(
+                        ilike(auditLogs.action, "%login_failed%"),
+                        ilike(auditLogs.action, "%blocked%"),
+                        ilike(auditLogs.action, "%rate_limit%"),
+                        ilike(auditLogs.action, "%unauthorized%")
+                    )
+                )),
             llmGateway.healthCheck().catch(() => ({ xai: { available: false }, gemini: { available: false } }))
         ]);
 
-        const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
-        const pendingInvoices = invoices.filter(i => i.status === "pending").length;
-        const paidInvoices = invoices.filter(i => i.status === "paid").length;
+        const totalQueries = Number(queryStats[0]?.totalQueries || 0);
+        const pendingInvoices = Number(invoiceStats[0]?.pending || 0);
+        const paidInvoices = Number(invoiceStats[0]?.paid || 0);
+        const totalInvoices = Number(invoiceStats[0]?.total || 0);
         const activeModels = aiModels.filter(m => m.status === "active").length;
-        const securityAlerts = auditLogs.filter(l =>
-            l.action?.includes("login_failed") || l.action?.includes("blocked")
-        ).length;
+        const securityAlerts = Number(securityAlerts24h[0]?.count || 0);
+        const totalReports = Number(reportStats[0]?.total || 0);
+        const totalSettings = Number(settingsStats[0]?.total || 0);
+        const settingsCategories = Number(settingsStats[0]?.categories || 0);
 
         res.json({
             users: {
@@ -75,7 +100,7 @@ dashboardRouter.get("/", async (req, res) => {
                 count: paymentStats.count
             },
             invoices: {
-                total: invoices.length,
+                total: totalInvoices,
                 pending: pendingInvoices,
                 paid: paidInvoices
             },
@@ -92,19 +117,19 @@ dashboardRouter.get("/", async (req, res) => {
                 status: securityAlerts > 5 ? "warning" : "healthy"
             },
             reports: {
-                total: reports.length,
+                total: totalReports,
                 scheduled: 0 // scheduledReports not linked in storage.getReports()
             },
             settings: {
-                total: settings.length,
-                categories: [...new Set(settings.map(s => s.category))].length
+                total: totalSettings,
+                categories: settingsCategories
             },
             systemHealth: {
                 xai: (healthStatus as any)?.xai?.available ?? false,
                 gemini: (healthStatus as any)?.gemini?.available ?? false,
                 uptime: 99.9
             },
-            recentActivity: auditLogs.slice(0, 5)
+            recentActivity: recentAuditLogs.slice(0, 5)
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -114,22 +139,24 @@ dashboardRouter.get("/", async (req, res) => {
 // GET /api/admin/dashboard/new-users - Recent user registrations
 dashboardRouter.get("/new-users", async (req, res) => {
     try {
-        const { hours = "24" } = req.query;
+        const { hours = "24", limit = "200" } = req.query as Record<string, string>;
         const hoursNum = parseInt(hours as string, 10) || 24;
         const since = new Date(Date.now() - hoursNum * 60 * 60 * 1000);
+        const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 200, 1), 1000);
 
-        const allUsers = await storage.getAllUsers();
-        const newUsers = allUsers
-            .filter(u => u.createdAt && new Date(u.createdAt) >= since)
-            .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
-            .map(u => ({
-                id: u.id,
-                email: u.email,
-                fullName: u.fullName,
-                authProvider: u.authProvider,
-                createdAt: u.createdAt,
-                status: u.status
-            }));
+        const newUsers = await dbRead
+            .select({
+                id: users.id,
+                email: users.email,
+                fullName: users.fullName,
+                authProvider: users.authProvider,
+                createdAt: users.createdAt,
+                status: users.status,
+            })
+            .from(users)
+            .where(gte(users.createdAt, since))
+            .orderBy(desc(users.createdAt))
+            .limit(limitNum);
 
         res.json({
             newUsers,
@@ -145,19 +172,24 @@ dashboardRouter.get("/new-users", async (req, res) => {
 // GET /api/admin/dashboard/active-sessions - Currently active users
 dashboardRouter.get("/active-sessions", async (req, res) => {
     try {
-        const allUsers = await storage.getAllUsers();
+        const { minutes = "15", limit = "200" } = req.query as Record<string, string>;
         const now = Date.now();
-        const fifteenMinutesAgo = now - 15 * 60 * 1000;
+        const minutesNum = Math.min(Math.max(parseInt(minutes as string, 10) || 15, 1), 1440);
+        const limitNum = Math.min(Math.max(parseInt(limit as string, 10) || 200, 1), 1000);
+        const since = new Date(now - minutesNum * 60 * 1000);
 
-        const activeSessions = allUsers
-            .filter(u => u.lastLoginAt && new Date(u.lastLoginAt).getTime() >= fifteenMinutesAgo)
-            .map(u => ({
-                id: u.id,
-                email: u.email,
-                fullName: u.fullName,
-                lastLoginAt: u.lastLoginAt,
-                plan: u.plan
-            }));
+        const activeSessions = await dbRead
+            .select({
+                id: users.id,
+                email: users.email,
+                fullName: users.fullName,
+                lastLoginAt: users.lastLoginAt,
+                plan: users.plan,
+            })
+            .from(users)
+            .where(gte(users.lastLoginAt, since))
+            .orderBy(desc(users.lastLoginAt))
+            .limit(limitNum);
 
         res.json({
             activeSessions,
@@ -183,8 +215,27 @@ dashboardRouter.get("/user-activity", async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
 
-        const conversations = await storage.getConversationsByUserId(userId as string);
-        const auditLogs = await storage.getAuditLogsByResourceId(userId as string);
+        const [conversationStats, recentConversations, recentAuditLogs] = await Promise.all([
+            dbRead.select({ count: sql<number>`count(*)` }).from(chats).where(eq(chats.userId, userId as string)),
+            dbRead.select({
+                id: chats.id,
+                title: chats.title,
+                createdAt: chats.createdAt,
+                updatedAt: chats.updatedAt,
+                lastMessageAt: chats.lastMessageAt,
+                messageCount: chats.messageCount,
+                tokensUsed: chats.tokensUsed,
+            })
+                .from(chats)
+                .where(eq(chats.userId, userId as string))
+                .orderBy(desc(chats.updatedAt))
+                .limit(10),
+            dbRead.select()
+                .from(auditLogs)
+                .where(or(eq(auditLogs.userId, userId as string), eq(auditLogs.resourceId, userId as string)))
+                .orderBy(desc(auditLogs.createdAt))
+                .limit(20),
+        ]);
 
         res.json({
             user: {
@@ -199,8 +250,9 @@ dashboardRouter.get("/user-activity", async (req, res) => {
                 tokensConsumed: user.tokensConsumed
             },
             activity: {
-                conversationCount: conversations.length,
-                recentAuditLogs: auditLogs.slice(0, 10)
+                conversationCount: Number(conversationStats[0]?.count || 0),
+                recentConversations,
+                recentAuditLogs: recentAuditLogs.slice(0, 10)
             }
         });
     } catch (error: any) {

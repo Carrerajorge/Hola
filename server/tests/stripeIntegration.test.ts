@@ -622,7 +622,7 @@ describe("Stripe Integration Tests - 100+ Comprehensive Tests", () => {
     });
     
     it("91. should validate admin email", () => {
-      expect(validateEmail("carrerajorge874@gmail.com")).toBe(true);
+      expect(validateEmail("admin@example.com")).toBe(true);
     });
     
     it("92. should handle international email domains", () => {
@@ -779,7 +779,7 @@ describe("Stripe Integration Tests - 100+ Comprehensive Tests", () => {
     
     it("110. should handle complete payment notification flow", () => {
       const customer = createMockCustomer({ 
-        email: "carrerajorge874@gmail.com",
+        email: "admin@example.com",
         metadata: { userId: "admin_user" }
       });
       
@@ -792,7 +792,7 @@ describe("Stripe Integration Tests - 100+ Comprehensive Tests", () => {
       
       const event = createMockWebhookEvent("customer.subscription.created", subscription);
       
-      expect(customer.email).toBe("carrerajorge874@gmail.com");
+      expect(customer.email).toBe("admin@example.com");
       expect(isSubscriptionActive(subscription)).toBe(true);
       expect(getPlanFromAmount(subscription.items.data[0].price.unit_amount)).toBe("pro");
       expect(event.type).toBe("customer.subscription.created");

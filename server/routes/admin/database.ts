@@ -10,16 +10,18 @@ export const databaseRouter = Router();
 databaseRouter.get("/info", async (req, res) => {
     try {
         const userStats = await storage.getUserStats();
-        const models = await storage.getAiModels();
-        const payments = await storage.getPayments();
-        const invoices = await storage.getInvoices();
+        const [modelsCount, paymentsCount, invoicesCount] = await Promise.all([
+            db.execute(sql`SELECT COUNT(*)::int as count FROM ai_models`).then(r => Number((r.rows as any[])?.[0]?.count || 0)),
+            db.execute(sql`SELECT COUNT(*)::int as count FROM payments`).then(r => Number((r.rows as any[])?.[0]?.count || 0)),
+            db.execute(sql`SELECT COUNT(*)::int as count FROM invoices`).then(r => Number((r.rows as any[])?.[0]?.count || 0)),
+        ]);
 
         res.json({
             tables: {
                 users: { count: userStats.total },
-                ai_models: { count: models.length },
-                payments: { count: payments.length },
-                invoices: { count: invoices.length }
+                ai_models: { count: modelsCount },
+                payments: { count: paymentsCount },
+                invoices: { count: invoicesCount }
             },
             status: "healthy",
             lastBackup: new Date().toISOString()

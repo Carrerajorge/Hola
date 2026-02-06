@@ -129,9 +129,9 @@ conversationsRouter.get("/stats/summary", async (req, res) => {
             }).from(chats)
         ]);
 
-        const allUsers = await storage.getAllUsers();
         const totalMessages = allConversations.reduce((sum, c) => sum + (c.messageCount || 0), 0);
-        const avgMessagesPerUser = allUsers.length > 0 ? Math.round(totalMessages / allUsers.length) : 0;
+        const userStats = await storage.getUserStats();
+        const avgMessagesPerUser = userStats.total > 0 ? Math.round(totalMessages / userStats.total) : 0;
         const totalConvCount = Number(totalConversations[0]?.count || 0);
         const avgMessagesPerConversation = totalConvCount > 0 ? Math.round(totalMessages / totalConvCount) : 0;
 

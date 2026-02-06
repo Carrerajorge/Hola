@@ -30,7 +30,7 @@ describe('Stress Test - Large Excel File Processing', () => {
     
     expect(parseTime).toBeLessThan(30000); // Should parse in under 30 seconds
     expect(workbook.worksheets.length).toBeGreaterThanOrEqual(2);
-  });
+  }, 30000);
 
   it('should correctly count rows in SalesData sheet', async () => {
     const workbook = new ExcelJS.Workbook();

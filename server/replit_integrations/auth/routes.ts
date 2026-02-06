@@ -109,8 +109,7 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       // Find user in database by email
-      const allUsers = await storage.getAllUsers();
-      const dbUser = allUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      const dbUser = await storage.getUserByEmail(email);
 
       if (!dbUser) {
         return res.status(401).json({ message: "Usuario no encontrado" });

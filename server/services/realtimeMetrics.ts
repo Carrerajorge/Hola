@@ -4,8 +4,10 @@
  */
 
 import { storage } from "../storage";
-import { db } from "../db";
+import { dbRead } from "../db";
 import { llmGateway } from "../lib/llmGateway";
+import { invoices } from "@shared/schema";
+import { sql } from "drizzle-orm";
 
 export interface RealtimeMetrics {
   timestamp: number;
@@ -73,12 +75,16 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
       : 0;
     
     // Format recent activity
-    const recentActivity = recentLogs.slice(0, 5).map(log => ({
-      action: log.action,
-      user: log.userId || "system",
-      time: log.createdAt.toISOString(),
-      resource: log.resource || undefined
-    }));
+    const recentActivity = recentLogs.slice(0, 5).map(log => {
+      const details = (log as any).details || {};
+      const actorEmail = details.actorEmail || details.email;
+      return {
+        action: log.action,
+        user: actorEmail || log.userId || "system",
+        time: log.createdAt.toISOString(),
+        resource: log.resource || undefined
+      };
+    });
     
     cachedMetrics = {
       timestamp: now,
@@ -129,14 +135,19 @@ export async function getExtendedDashboardStats() {
     userStats,
     paymentStats,
     allModels,
-    invoices,
+    invoiceStats,
     recentLogs,
     settings
   ] = await Promise.all([
     storage.getUserStats(),
     storage.getPaymentStats(),
     storage.getAiModels(),
-    storage.getInvoices(),
+    dbRead.select({
+      total: sql<number>`count(*)`,
+      pending: sql<number>`count(*) filter (where ${invoices.status} = 'pending')`,
+      paid: sql<number>`count(*) filter (where ${invoices.status} = 'paid')`,
+      overdue: sql<number>`count(*) filter (where ${invoices.status} = 'overdue')`,
+    }).from(invoices),
     storage.getAuditLogs(50),
     storage.getSettings()
   ]);
@@ -192,10 +203,10 @@ export async function getExtendedDashboardStats() {
       byProvider: modelsByProvider
     },
     invoices: {
-      total: invoices.length,
-      pending: invoices.filter(i => i.status === "pending").length,
-      paid: invoices.filter(i => i.status === "paid").length,
-      overdue: invoices.filter(i => i.status === "overdue").length
+      total: Number(invoiceStats[0]?.total || 0),
+      pending: Number(invoiceStats[0]?.pending || 0),
+      paid: Number(invoiceStats[0]?.paid || 0),
+      overdue: Number(invoiceStats[0]?.overdue || 0)
     },
     activity: {
       total: recentLogs.length,

@@ -5,16 +5,18 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, CreditCard, Calendar, CheckCircle, Download, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { isAdminUser } from "@/lib/admin";
 
 export default function BillingPage() {
   const [, setLocation] = useLocation();
   const { user, isLoading } = useAuth();
+  const isAdmin = isAdminUser(user as any);
 
   useEffect(() => {
-    if (!isLoading && user?.role !== "admin") {
+    if (!isLoading && user && !isAdmin) {
       setLocation("/");
     }
-  }, [user, isLoading, setLocation]);
+  }, [user, isAdmin, isLoading, setLocation]);
 
   if (isLoading) {
     return (
@@ -24,7 +26,7 @@ export default function BillingPage() {
     );
   }
 
-  if (user?.role !== "admin") {
+  if (!user || !isAdmin) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">

@@ -153,6 +153,7 @@ export const userProfileSchema = z.object({
 export const featureFlagsSchema = z.object({
     memoryEnabled: z.boolean().default(false),
     recordingHistoryEnabled: z.boolean().default(false),
+    chatHistoryEnabled: z.boolean().default(true),
     webSearchAuto: z.boolean().default(true),
     codeInterpreterEnabled: z.boolean().default(true),
     canvasEnabled: z.boolean().default(true),
@@ -164,6 +165,7 @@ export const featureFlagsSchema = z.object({
 export const privacySettingsSchema = z.object({
     trainingOptIn: z.boolean().default(false),
     remoteBrowserDataAccess: z.boolean().default(false),
+    analyticsTracking: z.boolean().default(true),
 });
 
 export const userSettings = pgTable("user_settings", {

@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
 import { db } from "../db";
-import { users } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { apiLogs, users } from "@shared/schema";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { withRetry } from "../lib/retryUtility";
+import { z } from "zod";
+import { sendEmail } from "../services/genericEmailService";
 
 const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
   price_go_monthly: { name: "Go", amount: 500, interval: "month" },
@@ -11,6 +13,25 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
   price_pro_monthly: { name: "Pro", amount: 20000, interval: "month" },
   price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
+
+function getEffectiveUserId(req: any): string | undefined {
+  return (
+    req?.user?.claims?.sub ||
+    req?.user?.id ||
+    req?.session?.authUserId ||
+    req?.session?.passport?.user?.claims?.sub ||
+    req?.session?.passport?.user?.id
+  );
+}
+
+function addMonths(base: Date, deltaMonths: number): Date {
+  const d = new Date(base);
+  const day = d.getDate();
+  d.setMonth(d.getMonth() + deltaMonths);
+  // Preserve end-of-month behavior where possible
+  if (d.getDate() !== day) d.setDate(0);
+  return d;
+}
 
 export function createStripeRouter() {
   const router = Router();
@@ -479,8 +500,7 @@ export function createStripeRouter() {
 
   router.get("/api/billing/status", async (req, res) => {
     try {
-      const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      const userId = getEffectiveUserId(req);
 
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
@@ -510,10 +530,215 @@ export function createStripeRouter() {
     }
   });
 
+  router.get("/api/billing/credits/usage", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const offsetMonths = z
+        .preprocess((v) => (v === undefined ? 0 : Number(v)), z.number().int().min(-24).max(24))
+        .parse((req.query as any)?.offset);
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const now = new Date();
+      const anchorEnd = dbUser.subscriptionPeriodEnd ? new Date(dbUser.subscriptionPeriodEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      const cycleEnd = addMonths(anchorEnd, offsetMonths);
+      const cycleStart = addMonths(cycleEnd, -1);
+
+      const [usageRow] = await db
+        .select({
+          tokensIn: sql<number>`COALESCE(SUM(${apiLogs.tokensIn}), 0)`,
+          tokensOut: sql<number>`COALESCE(SUM(${apiLogs.tokensOut}), 0)`,
+          totalRequests: sql<number>`COUNT(*)`,
+        })
+        .from(apiLogs)
+        .where(and(eq(apiLogs.userId, userId), gte(apiLogs.createdAt, cycleStart), lt(apiLogs.createdAt, cycleEnd)));
+
+      const tokensIn = usageRow?.tokensIn ?? 0;
+      const tokensOut = usageRow?.tokensOut ?? 0;
+      const totalTokens = tokensIn + tokensOut;
+      const totalRequests = usageRow?.totalRequests ?? 0;
+
+      const effectivePlanRaw =
+        (dbUser.subscriptionStatus === "active" && dbUser.subscriptionPlan ? dbUser.subscriptionPlan : dbUser.plan) || "free";
+      const effectivePlan = String(effectivePlanRaw || "free").toLowerCase().trim();
+
+      const DEFAULT_MONTHLY_LIMITS: Record<string, number | null> = {
+        free: 100_000,
+        go: 1_000_000,
+        plus: 5_000_000,
+        pro: null,
+        business: null,
+        enterprise: null,
+        admin: null,
+      };
+
+      const configuredLimit = typeof dbUser.monthlyTokenLimit === "number" ? dbUser.monthlyTokenLimit : null;
+      const limitTokens = configuredLimit && configuredLimit > 0 ? configuredLimit : (DEFAULT_MONTHLY_LIMITS[effectivePlan] ?? null);
+
+      const percentUsed = limitTokens ? Math.min(100, (totalTokens / limitTokens) * 100) : null;
+
+      res.json({
+        cycleStart: cycleStart.toISOString(),
+        cycleEnd: cycleEnd.toISOString(),
+        plan: effectivePlan,
+        totalTokens,
+        totalRequests,
+        limitTokens,
+        percentUsed,
+      });
+    } catch (error: any) {
+      console.error("Billing credit usage error:", error);
+      res.status(500).json({ error: "Failed to get credit usage" });
+    }
+  });
+
+  router.get("/api/billing/credits/alerts", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const prefs = (dbUser as any).preferences || {};
+      const saved = prefs?.billing?.creditAlerts || {};
+
+      const adminEmail = (process.env.ADMIN_EMAIL || "").trim();
+
+      res.json({
+        enabled: saved.enabled === true,
+        thresholdPercent: typeof saved.thresholdPercent === "number" ? saved.thresholdPercent : 80,
+        recipientEmail: adminEmail,
+      });
+    } catch (error: any) {
+      console.error("Billing credit alerts get error:", error);
+      res.status(500).json({ error: "Failed to get credit alerts" });
+    }
+  });
+
+  router.put("/api/billing/credits/alerts", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const body = z
+        .object({
+          enabled: z.boolean(),
+          thresholdPercent: z.number().int().min(1).max(100).default(80),
+        })
+        .parse(req.body);
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const role = String((dbUser as any).role || "").toLowerCase();
+      if (!["admin", "superadmin", "team_admin"].includes(role)) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      const prefs = ((dbUser as any).preferences || {}) as any;
+      const nextPrefs = {
+        ...prefs,
+        billing: {
+          ...(prefs.billing || {}),
+          creditAlerts: {
+            enabled: body.enabled,
+            thresholdPercent: body.thresholdPercent,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      };
+
+      await db.update(users).set({ preferences: nextPrefs, updatedAt: new Date() }).where(eq(users.id, userId));
+
+      const recipientEmail = (process.env.ADMIN_EMAIL || "").trim();
+
+      res.json({
+        enabled: body.enabled,
+        thresholdPercent: body.thresholdPercent,
+        recipientEmail,
+      });
+    } catch (error: any) {
+      console.error("Billing credit alerts update error:", error);
+      res.status(500).json({ error: "Failed to update credit alerts" });
+    }
+  });
+
+  router.post("/api/billing/credits/alerts/test", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const role = String((dbUser as any).role || "").toLowerCase();
+      if (!["admin", "superadmin", "team_admin"].includes(role)) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      const prefs = (dbUser as any).preferences || {};
+      const saved = prefs?.billing?.creditAlerts || {};
+
+      const recipientEmail = (process.env.ADMIN_EMAIL || "").trim();
+      if (!recipientEmail) {
+        return res.status(500).json({ error: "ADMIN_EMAIL is not configured" });
+      }
+      const thresholdPercent = typeof saved.thresholdPercent === "number" ? saved.thresholdPercent : 80;
+
+      const now = new Date();
+      const result = await sendEmail({
+        to: recipientEmail,
+        subject: "Prueba: Alertas de uso de creditos (IliaGPT)",
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            <h2>Prueba de alerta de uso de creditos</h2>
+            <p>Este es un correo de prueba para verificar que el panel de facturacion puede notificar al administrador.</p>
+            <ul>
+              <li><strong>Usuario:</strong> ${dbUser.email || dbUser.id}</li>
+              <li><strong>Umbral:</strong> ${thresholdPercent}%</li>
+              <li><strong>Fecha:</strong> ${now.toISOString()}</li>
+            </ul>
+            <p>Si recibiste este correo, la configuracion esta lista.</p>
+          </div>
+        `,
+        text: `Prueba de alerta de uso de creditos\nUsuario: ${dbUser.email || dbUser.id}\nUmbral: ${thresholdPercent}%\nFecha: ${now.toISOString()}`,
+      });
+
+      if (!result.success) {
+        return res.status(500).json({ error: result.error || "Failed to send test email" });
+      }
+
+      res.json({ success: true, recipientEmail, messageId: result.messageId });
+    } catch (error: any) {
+      console.error("Billing credit alerts test error:", error);
+      res.status(500).json({ error: "Failed to send test email" });
+    }
+  });
+
   router.post("/api/stripe/portal", async (req, res) => {
     try {
-      const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      const userId = getEffectiveUserId(req);
 
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });

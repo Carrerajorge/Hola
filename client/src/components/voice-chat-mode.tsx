@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Mic, MicOff, Volume2, VolumeX, Loader2, Video, VideoOff, Upload, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 
 interface VoiceChatModeProps {
   open: boolean;
@@ -23,6 +24,19 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   const [response, setResponse] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const { settings } = useSettingsContext();
+
+  const speechLocale = useMemo(() => {
+    const code = settings.spokenLanguage;
+    if (!code || code === "auto") return navigator.language || "es-ES";
+    if (code === "es") return "es-ES";
+    if (code === "en") return "en-US";
+    if (code === "fr") return "fr-FR";
+    if (code === "de") return "de-DE";
+    if (code === "pt") return "pt-PT";
+    return navigator.language || "es-ES";
+  }, [settings.spokenLanguage]);
 
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -107,7 +121,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
-    recognition.lang = 'es-ES';
+    recognition.lang = speechLocale;
 
     recognition.onstart = () => {
       setIsListening(true);
@@ -154,7 +168,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [transcript]);
+  }, [transcript, speechLocale]);
 
   const stopListening = () => {
     if (recognitionRef.current) {
@@ -310,15 +324,17 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-ES';
-    utterance.rate = 1;
-    utterance.pitch = 1;
+    utterance.lang = speechLocale;
+    utterance.rate = settings.voiceSpeed ?? 1;
+    utterance.volume = settings.voiceVolume ?? 1;
+    utterance.pitch = settings.voice === "ember" ? 1.2 : settings.voice === "breeze" ? 0.9 : 1;
 
-    // Try to get a Spanish voice
+    // Try to get a voice matching the configured locale.
     const voices = window.speechSynthesis.getVoices();
-    const spanishVoice = voices.find(v => v.lang.startsWith('es'));
-    if (spanishVoice) {
-      utterance.voice = spanishVoice;
+    const languagePrefix = speechLocale.split("-")[0].toLowerCase();
+    const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(languagePrefix));
+    if (matchingVoice) {
+      utterance.voice = matchingVoice;
     }
 
     utterance.onstart = () => setIsSpeaking(true);
