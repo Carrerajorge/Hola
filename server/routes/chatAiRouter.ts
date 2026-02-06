@@ -35,6 +35,7 @@ import type { Response } from "express";
 import type { AuthenticatedRequest } from "../types/express";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
+import { conversationStateService } from "../services/conversationStateService";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -1239,19 +1240,70 @@ ${attachmentContext}`;
         content: systemContent
       };
 
-      // If we have a run, create an assistant message placeholder at the start
+      // Ensure chat exists so we can persist messages (critical for memory)
+      const effectiveChatIdForPersistence = chatId || conversationId || `chat_${Date.now()}`;
+      try {
+        const existingChat = await storage.getChat(effectiveChatIdForPersistence);
+        if (!existingChat) {
+          await storage.createChat({
+            id: effectiveChatIdForPersistence,
+            title: "New Chat",
+            userId: userId || undefined,
+          });
+        }
+      } catch (e) {
+        // Best-effort: if chat creation fails, streaming can still proceed, but memory will degrade.
+        console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
+      }
+
+      // Persist the latest user message (best-effort). Without this, server-side memory is empty.
+      let persistedUserMessageId: string | null = null;
+      try {
+        if (userMessageText && effectiveChatIdForPersistence) {
+          const userMsg = await storage.createChatMessage({
+            chatId: effectiveChatIdForPersistence,
+            role: 'user',
+            content: userMessageText,
+            status: 'done',
+            requestId,
+          });
+          persistedUserMessageId = userMsg.id;
+
+          // Also persist into Conversation State (separate store used by /api/memory/chats/:id/state)
+          // Best-effort + idempotent (per-request) to avoid UI retry loops duplicating messages.
+          await conversationStateService.appendMessage(
+            effectiveChatIdForPersistence,
+            'user',
+            userMessageText,
+            {
+              chatMessageId: userMsg.id,
+              requestId: `${requestId}:state:user`,
+            }
+          );
+        }
+      } catch (e) {
+        console.warn('[Stream] Failed to persist user message (best-effort):', e);
+      }
+
+      // Create an assistant message placeholder at the start (so we can stream-update and persist)
       let assistantMessageId: string | null = null;
-      if (claimedRun && chatId) {
+      try {
         const assistantMessage = await storage.createChatMessage({
-          chatId,
+          chatId: effectiveChatIdForPersistence,
           role: 'assistant',
           content: '', // Will be updated during streaming
           status: 'pending',
-          runId: claimedRun.id,
-          userMessageId: claimedRun.userMessageId,
+          runId: claimedRun?.id,
+          userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,
+          requestId: claimedRun ? undefined : requestId,
         });
         assistantMessageId = assistantMessage.id;
-        await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
+
+        if (claimedRun) {
+          await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
+        }
+      } catch (e) {
+        console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
       }
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
@@ -1362,10 +1414,31 @@ ${attachmentContext}`;
         }
       }
 
-      // Update assistant message with full content, webSources and mark run as done
-      if (claimedRun && assistantMessageId) {
-        const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
-        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
+      // Update assistant message with full content + webSources
+      if (assistantMessageId) {
+        try {
+          const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
+          await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
+
+          // Also persist assistant into Conversation State so /api/memory/chats/:id/state reflects reality.
+          // Best-effort + idempotent.
+          await conversationStateService.appendMessage(
+            effectiveChatIdForPersistence,
+            'assistant',
+            fullContent,
+            {
+              chatMessageId: assistantMessageId,
+              requestId: `${requestId}:state:assistant`,
+              metadata: metadata || undefined,
+            }
+          );
+        } catch (e) {
+          console.warn('[Stream] Failed to finalize assistant message (best-effort):', e);
+        }
+      }
+
+      // Mark run as done if we claimed one
+      if (claimedRun) {
         await storage.updateChatRunStatus(claimedRun.id, 'done');
       }
 
