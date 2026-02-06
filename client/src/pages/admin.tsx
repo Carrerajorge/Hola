@@ -87,6 +87,7 @@ import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
+import AgenticEngineDashboard from "@/components/admin/AgenticEngineDashboard";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -5053,7 +5054,7 @@ export default function AdminPage() {
       case "settings":
         return <SettingsSection />;
       case "agentic":
-        return <AgenticEngineSection />;
+        return <AgenticEngineDashboard />;
       case "excel":
         return <ExcelManagerSection />;
       default:

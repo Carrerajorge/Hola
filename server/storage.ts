@@ -359,7 +359,7 @@ export interface IStorage {
   seedDefaultSettings(): Promise<void>;
   // Agent Gap Logs
   createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog>;
-  getAgentGapLogs(status?: string): Promise<AgentGapLog[]>;
+  getAgentGapLogs(status?: string, userId?: string): Promise<AgentGapLog[]>;
   updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined>;
   // Library Folder CRUD
   getLibraryFolders(userId: string): Promise<LibraryFolder[]>;
@@ -2367,12 +2367,9 @@ export class MemStorage implements IStorage {
   }
 
   async seedDefaultSettings(): Promise<void> {
-    const existing = await this.getSettingsConfig();
-    if (existing.length > 0) return;
-
     const defaultSettings: InsertSettingsConfig[] = [
-      { category: "general", key: "app_name", value: "Sira GPT", defaultValue: "Sira GPT", valueType: "string", description: "Application name" },
-      { category: "general", key: "app_description", value: "AI-powered chat assistant", defaultValue: "AI-powered chat assistant", valueType: "string", description: "Application description" },
+      { category: "general", key: "app_name", value: "ILIAGPT", defaultValue: "ILIAGPT", valueType: "string", description: "Application name" },
+      { category: "general", key: "app_description", value: "AI Platform", defaultValue: "AI Platform", valueType: "string", description: "Application description" },
       { category: "general", key: "support_email", value: "", defaultValue: "", valueType: "string", description: "Support email address" },
       { category: "general", key: "timezone_default", value: "UTC", defaultValue: "UTC", valueType: "string", description: "Default timezone" },
       { category: "general", key: "date_format", value: "YYYY-MM-DD", defaultValue: "YYYY-MM-DD", valueType: "string", description: "Date format" },
@@ -2383,7 +2380,7 @@ export class MemStorage implements IStorage {
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },
-      { category: "ai_models", key: "default_model", value: "grok-3-fast", defaultValue: "grok-3-fast", valueType: "string", description: "Default AI model" },
+      { category: "ai_models", key: "default_model", value: "grok-4-1-fast-non-reasoning", defaultValue: "grok-4-1-fast-non-reasoning", valueType: "string", description: "Default AI model" },
       { category: "ai_models", key: "max_tokens_per_request", value: 4096, defaultValue: 4096, valueType: "number", description: "Max tokens per request" },
       { category: "ai_models", key: "enable_streaming", value: true, defaultValue: true, valueType: "boolean", description: "Enable streaming responses" },
       { category: "security", key: "max_login_attempts", value: 5, defaultValue: 5, valueType: "number", description: "Max login attempts before lockout" },
@@ -2399,8 +2396,9 @@ export class MemStorage implements IStorage {
   }
 
   // Agent Gap Logs CRUD
-  private generateGapSignature(prompt: string, intent: string | null): string {
-    const normalized = (prompt.toLowerCase().trim() + '|' + (intent || 'unknown')).substring(0, 200);
+  private generateGapSignature(userId: string | null | undefined, prompt: string, intent: string | null): string {
+    // Include userId so frequency aggregation doesn't merge across different accounts.
+    const normalized = ((userId || 'unknown') + '|' + prompt.toLowerCase().trim() + '|' + (intent || 'unknown')).substring(0, 240);
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
       const char = normalized.charCodeAt(i);
@@ -2411,14 +2409,15 @@ export class MemStorage implements IStorage {
   }
 
   async createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog> {
-    const signature = this.generateGapSignature(log.userPrompt, log.detectedIntent || null);
+    const signature = this.generateGapSignature(log.userId || null, log.userPrompt, log.detectedIntent || null);
 
     const existing = await db.select()
       .from(agentGapLogs)
       .where(
         and(
           eq(agentGapLogs.gapSignature, signature),
-          eq(agentGapLogs.status, 'pending')
+          eq(agentGapLogs.status, 'pending'),
+          log.userId ? eq(agentGapLogs.userId, log.userId) : isNull(agentGapLogs.userId)
         )
       )
       .limit(1);
@@ -2440,10 +2439,20 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getAgentGapLogs(status?: string): Promise<AgentGapLog[]> {
+  async getAgentGapLogs(status?: string, userId?: string): Promise<AgentGapLog[]> {
+    if (status && userId) {
+      return dbRead.select().from(agentGapLogs)
+        .where(and(eq(agentGapLogs.status, status), eq(agentGapLogs.userId, userId)))
+        .orderBy(desc(agentGapLogs.createdAt));
+    }
     if (status) {
       return dbRead.select().from(agentGapLogs)
         .where(eq(agentGapLogs.status, status))
+        .orderBy(desc(agentGapLogs.createdAt));
+    }
+    if (userId) {
+      return dbRead.select().from(agentGapLogs)
+        .where(eq(agentGapLogs.userId, userId))
         .orderBy(desc(agentGapLogs.createdAt));
     }
     return dbRead.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));
