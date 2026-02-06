@@ -1,8 +1,9 @@
 import { db } from "./db";
 import { users, aiModels } from "@shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 
-const ADMIN_EMAIL = "Carrerajorge874@gmail.com";
+const ADMIN_EMAIL_RAW = (process.env.ADMIN_EMAIL || "").trim();
+const ADMIN_EMAIL = ADMIN_EMAIL_RAW.toLowerCase();
 const GEMINI_MODELS_TO_ENABLE = [
   "gemini-2.5-flash",
   "gemini-2.5-pro",
@@ -40,17 +41,27 @@ export async function seedProductionData(): Promise<SeedResult> {
     return result;
   }
 
+  if (!ADMIN_EMAIL_RAW) {
+    const errMsg = "ADMIN_EMAIL is not configured (required for production seeding)";
+    result.errors.push(errMsg);
+    console.error(`[seed] ${errMsg}`);
+    return result;
+  }
+
   console.log(`[seed] Starting production seed...`);
 
   try {
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "202212.";
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+    if (!ADMIN_PASSWORD && process.env.NODE_ENV === "production") {
+      throw new Error("ADMIN_PASSWORD is not configured (required in production)");
+    }
     const bcrypt = await import("bcrypt");
-    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD || "admin", 12);
 
     const existingUser = await db
       .select({ id: users.id, email: users.email, role: users.role })
       .from(users)
-      .where(eq(users.email, ADMIN_EMAIL))
+      .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
       .limit(1);
 
     if (existingUser.length > 0) {
@@ -61,7 +72,7 @@ export async function seedProductionData(): Promise<SeedResult> {
           role: "admin",
           password: hashedPassword
         })
-        .where(eq(users.email, ADMIN_EMAIL));
+        .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`);
 
       result.userUpdated = true;
       console.log(`[seed] User ${ADMIN_EMAIL} updated to admin with configured password`);
@@ -159,10 +170,25 @@ export async function getSeedStatus(): Promise<{
     geminiModelsMissing: number;
   };
 }> {
+  if (!ADMIN_EMAIL_RAW) {
+    return {
+      adminUser: null,
+      enabledModels: [],
+      geminiModelsStatus: GEMINI_MODELS_TO_ENABLE.map((modelId) => ({ modelId, isEnabled: false, exists: false })),
+      summary: {
+        userExists: false,
+        userIsAdmin: false,
+        geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
+        geminiModelsEnabled: 0,
+        geminiModelsMissing: GEMINI_MODELS_TO_ENABLE.length,
+      },
+    };
+  }
+
   const adminUser = await db
     .select({ email: users.email, role: users.role })
     .from(users)
-    .where(eq(users.email, ADMIN_EMAIL))
+    .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
     .limit(1);
 
   const enabledModels = await db

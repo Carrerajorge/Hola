@@ -47,8 +47,37 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
           description: "Preparando el sistema de pagos, intenta de nuevo en unos segundos.",
         });
         
-        // Trigger product creation
-        await apiFetch("/api/stripe/create-products", { method: "POST" });
+        // Trigger product creation (admin-only, opt-in on server)
+        const seedRes = await apiFetch("/api/stripe/create-products", { method: "POST" });
+        const seedData = await seedRes.json().catch(() => null);
+        if (!seedRes.ok) {
+          if (seedRes.status === 404) {
+            toast({
+              title: "Inicialización deshabilitada",
+              description:
+                "El servidor tiene deshabilitada la inicialización de productos. Habilita ALLOW_STRIPE_PRODUCT_SEEDING=true para usar esta función.",
+              variant: "destructive",
+            });
+          } else if (seedRes.status === 403) {
+            toast({
+              title: "Acceso restringido",
+              description: "Solo administradores pueden inicializar productos de Stripe.",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Error",
+              description: seedData?.error || "No se pudo inicializar productos de Stripe.",
+              variant: "destructive",
+            });
+          }
+          return;
+        }
+
+        toast({
+          title: "Productos listos",
+          description: "Stripe fue inicializado. Intenta suscribirte de nuevo.",
+        });
         return;
       }
       

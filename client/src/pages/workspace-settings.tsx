@@ -35,9 +35,16 @@ import { Badge } from "@/components/ui/badge";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/lib/apiClient";
+import { isAdminUser, isBillingManagerUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
+import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
+import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { CreditAlertsDialog } from "@/components/credit-alerts-dialog";
+import { BillingHelpDialog } from "@/components/billing-help-dialog";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -57,11 +64,43 @@ export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
+  const { user } = useAuth();
+  const isAdmin = isAdminUser(user as any);
+  const canManageBilling = isBillingManagerUser(user as any);
+  const canManageWorkspace = canManageBilling;
+  const { toast } = useToast();
+  const userDisplayName = user?.fullName || user?.username || "Tu cuenta";
+  const userEmail = user?.email || "";
+  const userInitials =
+    userDisplayName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0] || "")
+      .join("")
+      .toUpperCase() || "U";
   const [workspaceName, setWorkspaceName] = useState("");
   const [orgId, setOrgId] = useState<string>("");
   const [workspaceId, setWorkspaceId] = useState<string>("");
   const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [billingHelpOpen, setBillingHelpOpen] = useState(false);
+  const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
+  const [planSelectKey, setPlanSelectKey] = useState(0);
+  const [creditsOffset, setCreditsOffset] = useState(0);
+  const [creditsUsage, setCreditsUsage] = useState<{
+    cycleStart: string;
+    cycleEnd: string;
+    plan: string;
+    totalTokens: number;
+    totalRequests: number;
+    limitTokens: number | null;
+    percentUsed: number | null;
+  } | null>(null);
+  const [creditsLoading, setCreditsLoading] = useState(false);
 
   const [billingStatus, setBillingStatus] = useState<{
     subscriptionStatus: string | null;
@@ -113,6 +152,7 @@ export default function WorkspaceSettingsPage() {
         setWorkspaceId(data.workspaceId || "");
         setWorkspaceName(data.name || "");
         setLogoFileUuid(data.logoFileUuid || null);
+        setMemberCount(typeof data.memberCount === "number" ? data.memberCount : null);
       } catch {
         // ignore
       }
@@ -123,11 +163,96 @@ export default function WorkspaceSettingsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (activeSection !== "billing") return;
+
+    let cancelled = false;
+    setCreditsLoading(true);
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/billing/credits/usage?offset=${creditsOffset}`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || "No se pudo cargar el uso de créditos");
+        }
+        if (!cancelled) setCreditsUsage(data);
+      } catch (e: any) {
+        if (!cancelled) {
+          toast({
+            title: "Error",
+            description: e?.message || "No se pudo cargar el uso de créditos.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (!cancelled) setCreditsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, creditsOffset, toast]);
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
   };
 
   const { uploadFile, isUploading } = useCloudLibrary();
+
+  const openStripePortal = async () => {
+    if (!canManageBilling) {
+      toast({
+        title: "Contactar administrador",
+        description: "Solo el administrador puede gestionar la facturación. Envía una solicitud desde aquí.",
+      });
+      setBillingHelpAction("billing_portal");
+      setBillingHelpOpen(true);
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/stripe/portal", { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo abrir el portal de facturación");
+      }
+      if (data?.url) window.location.href = data.url;
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo abrir el portal de facturación.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const formatCycleShort = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("es-ES", { month: "short", day: "numeric" });
+  };
+
+  const planLabel = (planRaw: string | null | undefined) => {
+    const plan = String(planRaw || "free").toLowerCase().trim();
+    switch (plan) {
+      case "free":
+        return "Gratis";
+      case "go":
+        return "Go";
+      case "plus":
+        return "Plus";
+      case "pro":
+        return "Pro";
+      case "business":
+        return "Business";
+      case "enterprise":
+        return "Enterprise";
+      case "admin":
+        return "Admin";
+      default:
+        return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "Gratis";
+    }
+  };
 
   const handleLogoUpload = async (file: File) => {
     // Client-side validations
@@ -189,70 +314,120 @@ export default function WorkspaceSettingsPage() {
 
   const renderContent = () => {
     switch (activeSection) {
-      case "general":
-        return (
-          <div className="space-y-8">
-            <div>
-              <h1 className="text-2xl font-semibold">General</h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                Personaliza el aspecto, el nombre, las instrucciones y más de tu espacio de trabajo.
-              </p>
-            </div>
+	      case "general":
+	        return (
+	          <div className="space-y-8">
+	            <div>
+	              <h1 className="text-2xl font-semibold">General</h1>
+	              <p className="text-sm text-muted-foreground mt-1">
+	                Personaliza el aspecto, el nombre, las instrucciones y más de tu espacio de trabajo.
+	              </p>
+	            </div>
 
-            <div className="space-y-6">
-              <h2 className="text-lg font-medium">Aspecto</h2>
-              
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm">Nombre de espacio de trabajo</span>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={workspaceName}
-                      onChange={(e) => setWorkspaceName(e.target.value)}
-                      className="w-72"
-                      data-testid="input-workspace-name"
-                      placeholder="Espacio de trabajo"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isSavingWorkspace || !workspaceName.trim()}
-                      onClick={handleSaveName}
-                      data-testid="button-save-workspace-name"
-                    >
-                      Guardar
-                    </Button>
-                  </div>
-                </div>
+	            {!canManageWorkspace && (
+	              <div className="rounded-lg border bg-muted/30 p-4 flex items-start justify-between gap-4">
+	                <div className="space-y-1">
+	                  <p className="text-sm font-medium">Solo administrador</p>
+	                  <p className="text-sm text-muted-foreground">
+	                    Para cambiar el nombre o el logotipo del espacio de trabajo, contacta al administrador.
+	                  </p>
+	                </div>
+	                <Button
+	                  variant="outline"
+	                  onClick={() => {
+	                    setBillingHelpAction("workspace_settings");
+	                    setBillingHelpOpen(true);
+	                  }}
+	                  data-testid="button-workspace-contact-admin"
+	                >
+	                  Contactar administrador
+	                </Button>
+	              </div>
+	            )}
+
+	            <div className="space-y-6">
+	              <h2 className="text-lg font-medium">Aspecto</h2>
+	              
+	              <div className="space-y-4">
+	                <div className="flex items-center justify-between gap-3">
+	                  <span className="text-sm">Nombre de espacio de trabajo</span>
+	                  <div className="flex items-center gap-2">
+	                    <Input
+	                      value={workspaceName}
+	                      onChange={(e) => setWorkspaceName(e.target.value)}
+	                      disabled={!canManageWorkspace}
+	                      className="w-72"
+	                      data-testid="input-workspace-name"
+	                      placeholder="Espacio de trabajo"
+	                    />
+	                    {canManageWorkspace ? (
+	                      <Button
+	                        variant="outline"
+	                        size="sm"
+	                        disabled={isSavingWorkspace || !workspaceName.trim()}
+	                        onClick={handleSaveName}
+	                        data-testid="button-save-workspace-name"
+	                      >
+	                        Guardar
+	                      </Button>
+	                    ) : (
+	                      <Button
+	                        variant="outline"
+	                        size="sm"
+	                        onClick={() => {
+	                          setBillingHelpAction("workspace_name");
+	                          setBillingHelpOpen(true);
+	                        }}
+	                        data-testid="button-contact-admin-workspace-name"
+	                      >
+	                        Contactar administrador
+	                      </Button>
+	                    )}
+	                  </div>
+	                </div>
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-1">
                     <span className="text-sm">Logotipo</span>
                     <Info className="h-3 w-3 text-muted-foreground" />
                   </div>
-                  <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
-                    <Upload className="h-7 w-7 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">PNG/JPG/WebP, máx. 2MB</p>
-                    <div className="mt-2">
-                      <label className="text-sm text-primary hover:underline cursor-pointer" data-testid="button-browse-files">
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/png,image/jpeg,image/webp"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) handleLogoUpload(f);
-                            e.target.value = '';
-                          }}
-                        />
-                        {isUploading ? "Subiendo..." : "Explorar archivos"}
-                      </label>
-                    </div>
-                    {logoFileUuid && (
-                      <p className="mt-2 text-xs text-muted-foreground">Logo actualizado</p>
-                    )}
-                  </div>
-                </div>
+	                  <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
+	                    <Upload className="h-7 w-7 text-muted-foreground mb-2" />
+	                    <p className="text-sm text-muted-foreground">PNG/JPG/WebP, máx. 2MB</p>
+	                    <div className="mt-2">
+	                      {canManageWorkspace ? (
+	                        <label className="text-sm text-primary hover:underline cursor-pointer" data-testid="button-browse-files">
+	                          <input
+	                            type="file"
+	                            className="hidden"
+	                            accept="image/png,image/jpeg,image/webp"
+	                            onChange={(e) => {
+	                              const f = e.target.files?.[0];
+	                              if (f) handleLogoUpload(f);
+	                              e.target.value = '';
+	                            }}
+	                          />
+	                          {isUploading ? "Subiendo..." : "Explorar archivos"}
+	                        </label>
+	                      ) : (
+	                        <Button
+	                          variant="outline"
+	                          size="sm"
+	                          onClick={() => {
+	                            setBillingHelpAction("workspace_logo");
+	                            setBillingHelpOpen(true);
+	                          }}
+	                          data-testid="button-contact-admin-workspace-logo"
+	                        >
+	                          Contactar administrador
+	                        </Button>
+	                      )}
+	                    </div>
+	                    {logoFileUuid && (
+	                      <p className="mt-2 text-xs text-muted-foreground">Logo actualizado</p>
+	                    )}
+	                  </div>
+	                </div>
               </div>
             </div>
 
@@ -358,16 +533,16 @@ export default function WorkspaceSettingsPage() {
                     <span>Tipo de cuenta</span>
                     <span>Fecha agregada</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">JC</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <span className="text-sm font-medium block">Jorge Carrera (Tú)</span>
-                        <span className="text-xs text-muted-foreground">carrerajorge874@gmail.com</span>
-                      </div>
-                    </div>
+	                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
+	                    <div className="flex items-center gap-3">
+	                      <Avatar className="h-9 w-9">
+	                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">{userInitials}</AvatarFallback>
+	                      </Avatar>
+	                      <div>
+	                        <span className="text-sm font-medium block">{userDisplayName} (Tú)</span>
+	                        <span className="text-xs text-muted-foreground">{userEmail}</span>
+	                      </div>
+	                    </div>
                     <div className="flex items-center gap-1">
                       <span className="text-sm">Propietario</span>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -577,15 +752,63 @@ export default function WorkspaceSettingsPage() {
           </div>
         );
 
-      case "billing":
-        return (
-          <div className="space-y-6">
+	      case "billing":
+	        const cycleStartLabel = creditsUsage?.cycleStart ? formatCycleShort(creditsUsage.cycleStart) : "—";
+	        const cycleEndLabel = creditsUsage?.cycleEnd ? formatCycleShort(creditsUsage.cycleEnd) : "—";
+	        const cycleLine = `${creditsOffset === 0 ? "Ciclo actual" : "Ciclo"}: ${cycleStartLabel} - ${cycleEndLabel}`;
+	        const creditsUsed = creditsUsage?.totalTokens ?? 0;
+	        const creditsLimit = creditsUsage?.limitTokens ?? null;
+        const creditsPercent =
+          typeof creditsUsage?.percentUsed === "number"
+            ? Math.round(creditsUsage.percentUsed)
+            : creditsLimit && creditsLimit > 0
+              ? Math.round((creditsUsed / creditsLimit) * 100)
+              : null;
+	        const cycleEndMs = creditsUsage?.cycleEnd ? new Date(creditsUsage.cycleEnd).getTime() : null;
+	        const daysToCycleEnd =
+	          creditsOffset === 0 && cycleEndMs ? Math.max(0, Math.ceil((cycleEndMs - Date.now()) / (24 * 60 * 60 * 1000))) : null;
+	        const effectivePlanRaw = creditsUsage?.plan || (user as any)?.subscriptionPlan || user?.plan || "free";
+	        const effectivePlanKey = String(effectivePlanRaw || "free").toLowerCase().trim();
+	        const PLAN_PRICES_USD: Record<string, number | null> = {
+	          free: 0,
+	          go: 5,
+	          plus: 10,
+	          pro: 200,
+	          business: 25,
+	          enterprise: null,
+	          admin: null,
+	        };
+	        const priceUsd = PLAN_PRICES_USD[effectivePlanKey] ?? null;
+	        return (
+	          <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold">Facturación</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Ciclo actual: Nov 28 - Dec 28
+                {creditsLoading ? "Cargando ciclo..." : cycleLine}
               </p>
             </div>
+
+            {!canManageBilling && (
+              <div className="rounded-lg border bg-muted/30 p-4 flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Solo administrador</p>
+                  <p className="text-sm text-muted-foreground">
+                    Este espacio de trabajo está conectado al panel de administración. Para cambiar el plan, administrar facturación o configurar alertas,
+                    contacta al administrador.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setBillingHelpAction("workspace_billing");
+                    setBillingHelpOpen(true);
+                  }}
+                  data-testid="button-billing-contact-admin"
+                >
+                  Contactar administrador
+                </Button>
+              </div>
+            )}
 
             <Tabs defaultValue="plan" className="w-full">
               <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
@@ -610,87 +833,204 @@ export default function WorkspaceSettingsPage() {
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-lg">Plan Business</span>
+                        <span className="font-semibold text-lg">Plan {planLabel(creditsUsage?.plan || (user as any)?.subscriptionPlan || user?.plan)}</span>
                         <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Mensualmente</Badge>
                       </div>
-                      <p className="text-sm text-muted-foreground">Se desactiva el 28 de diciembre de 2025</p>
-                    </div>
-                    <Select>
-                      <SelectTrigger className="w-auto gap-2" data-testid="select-manage-plan">
-                        <SelectValue placeholder="Administrar plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="change">Cambiar plan</SelectItem>
-                        <SelectItem value="cancel">Cancelar plan</SelectItem>
-                        <SelectItem value="reactivate">Reactivar plan</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <p className="text-sm text-muted-foreground">
+                        {billingStatus?.willDeactivate
+                          ? `Se desactivará${deactivationDateLabel ? ` el ${deactivationDateLabel}` : ""}`
+                          : billingStatus?.subscriptionStatus === "active"
+                            ? `Activo${deactivationDateLabel ? ` · Renueva el ${deactivationDateLabel}` : ""}`
+                            : "Sin suscripción activa"}
+                      </p>
+	                  </div>
+	                    {canManageBilling ? (
+	                      <Select
+	                        key={planSelectKey}
+	                        onValueChange={(value) => {
+	                          // Re-mount to restore placeholder state
+	                          setPlanSelectKey((k) => k + 1);
+	                          if (value === "change") {
+	                            setUpgradeOpen(true);
+	                            return;
+	                          }
+	                          if (value === "cancel" || value === "reactivate") {
+	                            void openStripePortal();
+	                          }
+	                        }}
+	                      >
+	                        <SelectTrigger className="w-auto gap-2" data-testid="select-manage-plan">
+	                          <SelectValue placeholder="Administrar plan" />
+	                        </SelectTrigger>
+	                        <SelectContent>
+	                          <SelectItem value="change">Cambiar plan</SelectItem>
+	                          <SelectItem value="cancel">Cancelar plan</SelectItem>
+	                          <SelectItem value="reactivate">Reactivar plan</SelectItem>
+	                        </SelectContent>
+	                      </Select>
+	                    ) : (
+	                      <Button
+	                        variant="outline"
+	                        onClick={() => {
+	                          setBillingHelpAction("manage_plan");
+	                          setBillingHelpOpen(true);
+	                        }}
+	                        data-testid="button-contact-admin-manage-plan"
+	                      >
+	                        Contactar administrador
+	                      </Button>
+	                    )}
+	                  </div>
                   
-                  <div className="pt-2">
-                    <div className="flex items-baseline">
-                      <span className="text-4xl font-bold">$30</span>
-                      <span className="text-muted-foreground ml-1">/participante</span>
-                    </div>
-                  </div>
-                  
-                  <p className="text-sm text-muted-foreground">1/2 participantes en uso</p>
-                </div>
+	                  <div className="pt-2">
+	                    <div className="flex items-baseline">
+	                      {priceUsd === null ? (
+	                        <>
+	                          <span className="text-4xl font-bold">—</span>
+	                          <span className="text-muted-foreground ml-2">Precio personalizado</span>
+	                        </>
+	                      ) : (
+	                        <>
+	                          <span className="text-4xl font-bold">${priceUsd}</span>
+	                          <span className="text-muted-foreground ml-1">/participante</span>
+	                        </>
+	                      )}
+	                    </div>
+	                  </div>
+	                  
+	                  <p className="text-sm text-muted-foreground">
+	                    {typeof memberCount === "number"
+	                      ? `${memberCount} participante${memberCount === 1 ? "" : "s"} en uso`
+	                      : "Participantes en uso: —"}
+	                  </p>
+	                </div>
 
                 <div className="border rounded-lg p-6 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-semibold">Uso de créditos</h3>
-                      <p className="text-sm text-muted-foreground">Próximo ciclo en 9 días</p>
+                      <p className="text-sm text-muted-foreground">
+                        {creditsLoading
+                          ? "Cargando..."
+                          : creditsOffset === 0
+                            ? (daysToCycleEnd !== null ? `Próximo ciclo en ${daysToCycleEnd} día${daysToCycleEnd === 1 ? "" : "s"}` : "Próximo ciclo pronto")
+                            : "Ciclo anterior"}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-menu">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-prev">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-menu">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+	                        </DropdownMenuTrigger>
+	                        <DropdownMenuContent align="end">
+	                          {canManageBilling ? (
+	                            <>
+	                              <DropdownMenuItem onSelect={() => setAlertsOpen(true)}>Configurar alertas</DropdownMenuItem>
+	                              <DropdownMenuItem onSelect={() => setUpgradeOpen(true)}>Cambiar plan</DropdownMenuItem>
+	                              <DropdownMenuItem onSelect={() => void openStripePortal()}>Administrar facturación</DropdownMenuItem>
+	                            </>
+	                          ) : (
+	                            <DropdownMenuItem
+	                              onSelect={() => {
+	                                setBillingHelpAction("billing_menu");
+	                                setBillingHelpOpen(true);
+	                              }}
+	                            >
+	                              Contactar administrador
+	                            </DropdownMenuItem>
+	                          )}
+	                          {isAdmin && <DropdownMenuItem onSelect={() => setLocation("/admin")}>Abrir panel admin</DropdownMenuItem>}
+	                        </DropdownMenuContent>
+	                      </DropdownMenu>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        data-testid="button-credits-prev"
+                        disabled={creditsLoading || creditsOffset <= -24}
+                        onClick={() => setCreditsOffset((o) => Math.max(-24, o - 1))}
+                      >
                         <ChevronLeft className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-next">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        data-testid="button-credits-next"
+                        disabled={creditsLoading || creditsOffset >= 0}
+                        onClick={() => setCreditsOffset((o) => Math.min(0, o + 1))}
+                      >
                         <ChevronRight className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
                   
                   <p className="text-sm">
-                    <span className="font-semibold">0</span>
-                    <span className="text-muted-foreground"> / 0 créditos usados (100%)</span>
+                    <span className="font-semibold">{creditsUsed.toLocaleString()}</span>
+                    {creditsLimit ? (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        / {creditsLimit.toLocaleString()} créditos usados{creditsPercent !== null ? ` (${creditsPercent}%)` : ""}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground"> créditos usados</span>
+                    )}
                   </p>
                 </div>
 
-                <div className="border rounded-lg p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                      <h3 className="font-semibold">Agregar más créditos</h3>
+	                <div className="border rounded-lg p-6">
+	                  <div className="flex items-center justify-between">
+	                    <div className="space-y-1">
+	                      <h3 className="font-semibold">Agregar más créditos</h3>
                       <p className="text-sm text-muted-foreground max-w-md">
                         Permite que tu equipo siga teniendo acceso incluso después de alcanzar los límites de su plan. Los créditos son válidos durante 12 meses.
-                      </p>
-                    </div>
-                    <Button variant="outline" data-testid="button-add-credits">
-                      Agregar créditos
-                    </Button>
-                  </div>
-                </div>
+	                      </p>
+	                    </div>
+	                    <Button
+	                      variant="outline"
+	                      data-testid="button-add-credits"
+	                      onClick={() => {
+	                        if (canManageBilling) {
+	                          setUpgradeOpen(true);
+	                          return;
+	                        }
+	                        setBillingHelpAction("add_credits");
+	                        setBillingHelpOpen(true);
+	                      }}
+	                    >
+	                      {canManageBilling ? "Agregar créditos" : "Contactar administrador"}
+	                    </Button>
+	                  </div>
+	                </div>
 
                 <Separator />
 
-                <div className="border rounded-lg p-6">
-                  <div className="flex items-center justify-between">
+	                <div className="border rounded-lg p-6">
+	                  <div className="flex items-center justify-between">
                     <div className="space-y-1">
                       <h3 className="font-semibold">Alertas de uso de créditos</h3>
                       <p className="text-sm text-muted-foreground">
                         Enviar alertas a los propietarios cuando estén por agotarse los créditos
-                      </p>
-                    </div>
-                    <Button variant="outline" data-testid="button-manage-alerts">
-                      Administrar
-                    </Button>
-                  </div>
-                </div>
+	                      </p>
+	                    </div>
+	                    <Button
+	                      variant="outline"
+	                      data-testid="button-manage-alerts"
+	                      onClick={() => {
+	                        if (canManageBilling) {
+	                          setAlertsOpen(true);
+	                          return;
+	                        }
+	                        setBillingHelpAction("credit_alerts");
+	                        setBillingHelpOpen(true);
+	                      }}
+	                    >
+	                      {canManageBilling ? "Administrar" : "Contactar administrador"}
+	                    </Button>
+	                  </div>
+	                </div>
               </TabsContent>
 
               <TabsContent value="invoices" className="mt-6">
@@ -698,8 +1038,18 @@ export default function WorkspaceSettingsPage() {
                   <p className="text-sm text-muted-foreground text-center py-8">
                     No hay facturas disponibles
                   </p>
-                </div>
-              </TabsContent>
+	                  <div className="flex justify-center">
+	                    <Button
+	                      variant="outline"
+	                      size="sm"
+	                      onClick={() => void openStripePortal()}
+	                      data-testid="button-open-billing-portal"
+	                    >
+	                      {canManageBilling ? "Administrar en portal" : "Contactar administrador"}
+	                    </Button>
+	                  </div>
+	                </div>
+	              </TabsContent>
             </Tabs>
           </div>
         );
@@ -1144,6 +1494,9 @@ export default function WorkspaceSettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <UpgradePlanDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
+      <CreditAlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
+      <BillingHelpDialog open={billingHelpOpen} onOpenChange={setBillingHelpOpen} action={billingHelpAction} />
       {showDeactivationBanner && (
         <div className="flex justify-end px-6 py-3">
           <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
@@ -1154,23 +1507,15 @@ export default function WorkspaceSettingsPage() {
                 Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación{deactivationDateLabel ? ` el ${deactivationDateLabel}.` : "."}
               </span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-2 flex-shrink-0"
-              data-testid="button-reactivate"
-              onClick={async () => {
-                try {
-                  const res = await apiFetch("/api/stripe/portal", { method: "POST" });
-                  const data = await res.json();
-                  if (data?.url) window.location.href = data.url;
-                } catch {
-                  // ignore
-                }
-              }}
-            >
-              Reactivar
-            </Button>
+	              <Button
+	                variant="outline"
+	                size="sm"
+	                className="ml-2 flex-shrink-0"
+	                data-testid="button-reactivate"
+	                onClick={() => void openStripePortal()}
+	              >
+	                {canManageBilling ? "Reactivar" : "Contactar administrador"}
+	              </Button>
           </div>
         </div>
       )}

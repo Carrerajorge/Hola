@@ -10,9 +10,35 @@ import { usageQuotaService } from "../services/usageQuotaService";
 import { AuthenticatedRequest, getUserId } from "../types/express";
 import { validateBody } from "../middleware/validateRequest";
 import { z } from "zod";
+import { requireAdmin } from "./admin/utils";
+import { auditLog, AuditActions } from "../services/auditLogger";
 
 export function createUserRouter() {
   const router = Router();
+
+  const updateNotificationPreferenceSchema = z.object({
+    eventTypeId: z.string().min(1),
+    enabled: z.boolean().optional(),
+    channels: z.enum(["push", "email", "push_email", "none"]).optional(),
+  });
+
+  async function hasElevatedRole(userId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    const role = String(row?.role || "").toLowerCase().trim();
+    return ["admin", "superadmin", "team_admin"].includes(role);
+  }
+
+  function requireCatalogSeedingEnabled(_req: any, res: any, next: any) {
+    const flag = String(process.env.ALLOW_CATALOG_SEEDING || "").trim().toLowerCase();
+    if (flag === "true" || flag === "1") return next();
+    // Hide seed endpoints unless explicitly enabled.
+    return res.status(404).json({ error: "Not found" });
+  }
 
   router.get("/api/user/usage", async (req, res) => {
     try {
@@ -110,6 +136,31 @@ export function createUserRouter() {
   router.get("/api/users/:id/notification-preferences", async (req, res) => {
     try {
       const { id } = req.params;
+      const authUserId = getUserId(req);
+
+      if (authUserId) {
+        if (authUserId !== id) {
+          const elevated = await hasElevatedRole(authUserId);
+          if (!elevated) {
+            await auditLog(req, {
+              action: AuditActions.SECURITY_ALERT,
+              resource: "notification_preferences",
+              resourceId: id,
+              details: { reason: "forbidden", actorUserId: authUserId, targetUserId: id, path: req.originalUrl || req.path },
+              category: "security",
+              severity: "warning",
+            });
+            return res.status(403).json({ error: "Forbidden" });
+          }
+        }
+      } else {
+        // Allow anonymous users to access their own preferences if token validates.
+        const token = req.headers["x-anonymous-token"] as string;
+        if (!id.startsWith("anon_") || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
       const eventTypes = await storage.getNotificationEventTypes();
       const preferences = await storage.getNotificationPreferences(id);
 
@@ -130,13 +181,38 @@ export function createUserRouter() {
     }
   });
 
-  router.put("/api/users/:id/notification-preferences", async (req, res) => {
+  router.put("/api/users/:id/notification-preferences", validateBody(updateNotificationPreferenceSchema), async (req, res) => {
     try {
       const { id } = req.params;
       const { eventTypeId, enabled, channels } = req.body;
 
-      if (!eventTypeId) {
-        return res.status(400).json({ error: "eventTypeId is required" });
+      const authUserId = getUserId(req);
+
+      if (authUserId) {
+        if (authUserId !== id) {
+          const elevated = await hasElevatedRole(authUserId);
+          if (!elevated) {
+            await auditLog(req, {
+              action: AuditActions.SECURITY_ALERT,
+              resource: "notification_preferences",
+              resourceId: id,
+              details: { reason: "forbidden", actorUserId: authUserId, targetUserId: id, path: req.originalUrl || req.path },
+              category: "security",
+              severity: "warning",
+            });
+            return res.status(403).json({ error: "Forbidden" });
+          }
+        }
+      } else {
+        const token = req.headers["x-anonymous-token"] as string;
+        if (!id.startsWith("anon_") || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+
+      const eventTypes = await storage.getNotificationEventTypes();
+      if (!eventTypes.some((t) => t.id === eventTypeId)) {
+        return res.status(400).json({ error: "Unknown eventTypeId" });
       }
 
       const preference = await storage.upsertNotificationPreference({
@@ -153,7 +229,7 @@ export function createUserRouter() {
     }
   });
 
-  router.post("/api/notification-event-types/seed", async (req, res) => {
+  router.post("/api/notification-event-types/seed", requireCatalogSeedingEnabled, requireAdmin, async (req, res) => {
     try {
       const eventTypesToSeed = [
         { id: 'ai_response_ready', name: 'Respuestas de IA', description: 'Notificaciones cuando una respuesta larga está lista', category: 'ai_updates', severity: 'normal', defaultChannels: 'push', sortOrder: 1 },
@@ -171,6 +247,14 @@ export function createUserRouter() {
       if (toInsert.length > 0) {
         await db.insert(notificationEventTypes).values(toInsert);
       }
+
+      await auditLog(req, {
+        action: "system.notification_event_types_seeded",
+        resource: "notification_event_types",
+        details: { inserted: toInsert.length, totalAfter: existing.length + toInsert.length },
+        category: "config",
+        severity: "warning",
+      });
 
       const allEventTypes = await storage.getNotificationEventTypes();
       res.json({
@@ -240,9 +324,11 @@ export function createUserRouter() {
   });
 
   const updateUserSettingsSchema = z.object({
-    responsePreferences: responsePreferencesSchema.optional(),
-    userProfile: userProfileSchema.optional(),
-    featureFlags: featureFlagsSchema.optional(),
+    // Use patch semantics: only provided keys should be updated.
+    // Important: avoid Zod defaults overwriting existing settings when a client omits a field.
+    responsePreferences: responsePreferencesSchema.partial().optional(),
+    userProfile: userProfileSchema.partial().optional(),
+    featureFlags: featureFlagsSchema.partial().optional(),
   });
 
   router.put("/api/users/:id/settings", validateBody(updateUserSettingsSchema), async (req, res) => {
@@ -303,7 +389,7 @@ export function createUserRouter() {
     }
   });
 
-  router.post("/api/integrations/seed", async (req, res) => {
+  router.post("/api/integrations/seed", requireCatalogSeedingEnabled, requireAdmin, async (req, res) => {
     try {
       const providersToSeed = [
         {
@@ -368,10 +454,12 @@ export function createUserRouter() {
         }
       ];
 
+      let insertedProviders = 0;
       for (const provider of providersToSeed) {
         const existing = await storage.getIntegrationProvider(provider.id);
         if (!existing) {
           await db.insert(integrationProviders).values(provider);
+          insertedProviders++;
         }
       }
 
@@ -391,15 +479,24 @@ export function createUserRouter() {
         { id: "google_drive:get_file", providerId: "google_drive", name: "Obtener archivo", description: "Obtiene contenido de un archivo", requiredScopes: ["https://www.googleapis.com/auth/drive.readonly"], dataAccessLevel: "read", confirmationRequired: "false" }
       ];
 
+      let insertedTools = 0;
       for (const tool of toolsToSeed) {
         const existing = await db.select().from(integrationTools).where(eq(integrationTools.id, tool.id));
         if (existing.length === 0) {
           await db.insert(integrationTools).values({ ...tool, isActive: "true" });
+          insertedTools++;
         }
       }
 
       const providers = await storage.getIntegrationProviders();
       const tools = await storage.getIntegrationTools();
+      await auditLog(req, {
+        action: "system.integration_catalog_seeded",
+        resource: "integration_catalog",
+        details: { insertedProviders, insertedTools, providersTotal: providers.length, toolsTotal: tools.length },
+        category: "config",
+        severity: "warning",
+      });
       res.json({ message: "Catalog seeded", providers: providers.length, tools: tools.length });
     } catch (error: any) {
       console.error("Error seeding catalog:", error);

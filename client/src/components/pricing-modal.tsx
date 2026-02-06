@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Check, Zap, Rocket, Star, Crown, Clock } from "lucide-react";
+import { apiFetch } from "@/lib/apiClient";
 
 interface QuotaInfo {
   remaining: number;
@@ -159,7 +160,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
 
   useEffect(() => {
     if (open) {
-      fetch("/api/stripe/price-ids")
+      apiFetch("/api/stripe/price-ids")
         .then(res => res.json())
         .then(data => {
           if (data.priceMapping) {
@@ -181,7 +182,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
     setLoadingPlan(planId);
     
     try {
-      const response = await fetch("/api/checkout", {
+      const response = await apiFetch("/api/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

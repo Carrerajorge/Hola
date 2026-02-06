@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../db";
 import { workspaces, users, libraryFiles } from "@shared/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { validateBody } from "../middleware/validateRequest";
 import { getUserId } from "../types/express";
 import { isValidWorkspaceName, normalizeWorkspaceName } from "../services/workspaceValidation";
@@ -34,11 +34,18 @@ export function createWorkspaceRouter() {
 
       const ws = await ensureWorkspace(orgId);
 
+      const [{ count: memberCountRaw } = { count: 0 }] = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(users)
+        .where(and(eq(users.orgId, orgId), isNull(users.deletedAt)));
+      const memberCount = typeof memberCountRaw === "number" ? memberCountRaw : Number(memberCountRaw || 0);
+
       res.json({
         orgId,
         workspaceId: ws.id,
         name: ws.name,
         logoFileUuid: ws.logoFileUuid || null,
+        memberCount,
       });
     } catch (e: any) {
       console.error("[Workspace] GET /me error:", e);
@@ -65,8 +72,12 @@ export function createWorkspaceRouter() {
 
         const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
         const orgId = (u as any)?.orgId || DEFAULT_ORG_ID;
-        const role = (u as any)?.role || "guest";
-        if (!['admin', 'superadmin', 'team_admin'].includes(role)) {
+        const role = String((u as any)?.role || "guest").toLowerCase().trim();
+        const userEmail = String((u as any)?.email || "").toLowerCase().trim();
+        const adminEmail = String(process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+        const canManage = ['admin', 'superadmin', 'team_admin'].includes(role) || (adminEmail && userEmail === adminEmail);
+
+        if (!canManage) {
           return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
         }
 
