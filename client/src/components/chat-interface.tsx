@@ -1867,8 +1867,8 @@ export function ChatInterface({
           setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
         }
       },
-      buildFinalMessage: (content, data) => ({
-        id: (Date.now() + 1).toString(),
+      buildFinalMessage: (content, data, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
         role: "assistant",
         content,
         timestamp: new Date(),
@@ -1876,8 +1876,8 @@ export function ChatInterface({
         webSources: data?.webSources,
         artifact: data?.artifact,
       }),
-      buildErrorMessage: (error) => ({
-        id: (Date.now() + 1).toString(),
+      buildErrorMessage: (error, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
         role: "assistant",
         content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
         timestamp: new Date(),
@@ -2496,8 +2496,8 @@ export function ChatInterface({
           conversationId: effectiveChatIdForStream,
           model: selectedModel || "grok-3",
         },
-        buildFinalMessage: (content) => ({
-          id: `emergency-${Date.now()}`,
+        buildFinalMessage: (content, _lastEvent, messageId) => ({
+          id: messageId || `emergency-${Date.now()}`,
           role: "assistant",
           content: content || "No response received",
           timestamp: new Date(),
@@ -2606,15 +2606,15 @@ export function ChatInterface({
           forceWebSearch: isWebSearch,
           webSearchAuto: isWebSearch,
         },
-        buildFinalMessage: (fullContent) => ({
-          id: `assistant-${Date.now()}`,
+        buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
+          id: messageId || `assistant-${Date.now()}`,
           role: "assistant",
           content: fullContent || "No se recibió respuesta del servidor.",
           timestamp: new Date(),
           userMessageId: userMsgId,
         }),
-        buildErrorMessage: () => ({
-          id: `error-${Date.now()}`,
+        buildErrorMessage: (_error, messageId) => ({
+          id: messageId || `error-${Date.now()}`,
           role: "assistant",
           content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
           timestamp: new Date(),
@@ -3657,27 +3657,29 @@ export function ChatInterface({
       }
     }
 
-    // Send user message and get run info for SSE streaming
+    // Send user message — fire-and-forget (don't block stream start)
     try {
-      console.log("[handleSubmit] ABOUT TO CALL onSendMessage");
-      
-      // Add timeout to detect stuck promises
-      const messageResultPromise = onSendMessage(userMsg);
-      const timeoutPromise = new Promise<undefined>((_, reject) => 
-        setTimeout(() => reject(new Error("onSendMessage timeout after 10s")), 10000)
-      );
-      
-      let messageResult;
-      try {
-        messageResult = await Promise.race([messageResultPromise, timeoutPromise]);
-      } catch (timeoutError: any) {
-        console.error("[handleSubmit] onSendMessage failed or timed out:", timeoutError);
-        // Fallback: call stream directly without waiting for run
-        messageResult = undefined;
-      }
-      
-      console.log("[handleSubmit] messageResult:", messageResult);
-      const runInfo = messageResult?.run;
+      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+
+      // Fire-and-forget: persist user message in background.
+      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
+      onSendMessage(userMsg);
+
+      // Start image detection early (runs in parallel with intent checks below).
+      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+      const isImageTool = selectedTool === "image";
+      const imageDetectPromise: Promise<boolean> = (
+        !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles
+      )
+        ? fetch("/api/image/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userInput })
+          })
+            .then(r => r.json())
+            .then(d => !!d.isImageRequest)
+            .catch(() => false)
+        : Promise.resolve(!!isImageTool);
 
       // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
       const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -3840,26 +3842,9 @@ export function ChatInterface({
       try {
         abortControllerRef.current = new AbortController();
 
-        // Check if this is an image generation request (manual tool selection or auto-detect)
-        const isImageTool = selectedTool === "image";
-        let shouldGenerateImage = isImageTool;
-
-        // CRITICAL FIX: When files are attached, NEVER auto-detect image generation
-        // Files indicate document analysis intent, not image generation
-        // Auto-detect image requests ONLY if no tool is selected AND no files attached
-        if (!isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles) {
-          try {
-            const detectRes = await fetch("/api/image/detect", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message: userInput })
-            });
-            const detectData = await detectRes.json();
-            shouldGenerateImage = detectData.isImageRequest;
-          } catch (e) {
-            console.error("Image detection error:", e);
-          }
-        }
+        // Await the image detection that was started in parallel above.
+        // By now it has had time to run during intent checks (~0ms extra wait).
+        let shouldGenerateImage = await imageDetectPromise;
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
@@ -4061,8 +4046,10 @@ IMPORTANTE:
           const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
-          // Use SSE streaming if we have run info, otherwise fall back to legacy fetch
-          if (runInfo && chatId) {
+          // Always use SSE streaming — generate an effective chatId if needed.
+          // Previously gated on `runInfo && chatId` which required awaiting onSendMessage.
+          const effectiveStreamChatId = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+          if (effectiveStreamChatId) {
             // SSE streaming mode - real-time streaming from server
             setAiState("responding");
 
@@ -4186,9 +4173,8 @@ IMPORTANTE:
               credentials: "include",
               body: JSON.stringify({
                 messages: finalChatHistory,
-                conversationId: chatId,
-                runId: runInfo.id,
-                chatId: chatId,
+                conversationId: effectiveStreamChatId,
+                chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null
@@ -4906,6 +4892,7 @@ IMPORTANTE:
                     pendingGeneratedImage={pendingGeneratedImage}
                     latestGeneratedImageRef={latestGeneratedImageRef}
                     streamingContent={streamingContent}
+                    streamingMsgId={streamChat.nextMessageIdRef.current}
                     aiState={aiState}
                     regeneratingMsgIndex={regeneratingMsgIndex}
                     handleCopyMessage={handleCopyMessage}

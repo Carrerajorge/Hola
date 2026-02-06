@@ -13,10 +13,11 @@ import { detectClientIntent } from "@/lib/clientIntentDetector";
 import { messageLogger } from "@/lib/logger";
 import { AgentArtifact } from "@/components/agent-steps-display";
 
-// Stable ID for the synthetic streaming message — never changes, so React
-// keeps the same DOM node and simply updates its content, avoiding
-// unmount/remount flicker.
-const STREAMING_MSG_ID = "__streaming__";
+// Fallback ID for the synthetic streaming message. When a pre-generated
+// messageId is provided via `streamingMsgId` prop, we use that instead
+// so the streaming message and the finalized message share the SAME key,
+// preventing Virtuoso from unmounting/remounting the DOM node.
+const STREAMING_MSG_ID_FALLBACK = "__streaming__";
 
 export interface ChatMessageListProps {
     messages: Message[];
@@ -60,6 +61,9 @@ export interface ChatMessageListProps {
     onRunComplete?: (artifacts: Array<{ id: string; type: string; name: string; url: string }>) => void;
     uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
     aiProcessSteps?: { step: string; status: "pending" | "active" | "done" }[];
+    /** Pre-generated message ID for zero-flicker streaming→final transition.
+     *  When provided, the streaming message uses this ID so it matches the finalized message key. */
+    streamingMsgId?: string | null;
 }
 
 export function ChatMessageList({
@@ -103,9 +107,14 @@ export function ChatMessageList({
     activeRunId,
     onRunComplete,
     uiPhase = 'idle',
-    aiProcessSteps = []
+    aiProcessSteps = [],
+    streamingMsgId
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+    // Effective streaming message ID: use pre-generated ID if available (for zero-flicker),
+    // otherwise fall back to the fixed "__streaming__" constant.
+    const effectiveStreamingId = streamingMsgId || STREAMING_MSG_ID_FALLBACK;
 
     // Track the previous streaming content length for transition detection.
     // When streaming goes from non-empty to empty, we know a finalize just
@@ -160,7 +169,7 @@ export function ChatMessageList({
     const mergedMessages = useMemo(() => {
         if (streamingContent && variant === "default") {
             const streamingMsg: Message = {
-                id: STREAMING_MSG_ID,
+                id: effectiveStreamingId,
                 role: "assistant",
                 content: streamingContent,
                 timestamp: new Date(),
@@ -168,7 +177,7 @@ export function ChatMessageList({
             return [...messages, streamingMsg];
         }
         return messages;
-    }, [messages, streamingContent, variant]);
+    }, [messages, streamingContent, variant, effectiveStreamingId]);
 
     const isLastMessageAssistant = mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === "assistant";
     const showSuggestedReplies = variant === "default" && aiState === "idle" && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
@@ -234,8 +243,10 @@ export function ChatMessageList({
 
     // Render a single item — streaming messages get a specialized renderer
     const renderItem = useCallback((index: number, msg: Message) => {
-        // Synthetic streaming message — render with markdown + cursor
-        if (msg.id === STREAMING_MSG_ID) {
+        // Synthetic streaming message — render with markdown + cursor.
+        // We check BOTH the ID match AND that streaming is active, because after
+        // finalize the same ID may be used for the real MessageItem.
+        if (msg.id === effectiveStreamingId && !!streamingContent) {
             return (
                 <div className="pb-4 px-2">
                     <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
@@ -308,7 +319,8 @@ export function ChatMessageList({
         handleDownloadImage, setLightboxImage, handleReopenDocument,
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
-        onSuperAgentCancel, onSuperAgentRetry, onQuestionClick
+        onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
+        effectiveStreamingId, streamingContent
     ]);
 
     return (
