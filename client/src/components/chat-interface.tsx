@@ -437,6 +437,10 @@ export function ChatInterface({
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  useEffect(() => {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -2153,6 +2157,10 @@ export function ChatInterface({
 
     const checkStatus = async () => {
       try {
+        // Stop polling if the user removed this file from the composer.
+        const stillTracked = uploadedFilesRef.current.some((f: any) => f.id === fileId || f.id === trackingId);
+        if (!stillTracked) return;
+
         const contentRes = await fetch(`/api/files/${fileId}/content`);
 
         if (!contentRes.ok && contentRes.status !== 202) {
@@ -2416,12 +2424,13 @@ export function ChatInterface({
     const startTime = Date.now();
 
     const checkStatus = async (): Promise<void> => {
+      // Stop polling if the user removed this file from the composer.
+      const stillTracked = uploadedFilesRef.current.some((f: any) => f.id === fileId || f.id === trackingId);
+      if (!stillTracked) return;
+
       if (Date.now() - startTime > maxTime) {
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        // Never mark as ready with empty content; fall back to the slower, reliable poll.
+        pollFileStatus(fileId, trackingId);
         return;
       }
 
@@ -2454,11 +2463,7 @@ export function ChatInterface({
         setTimeout(checkStatus, pollInterval);
       } catch (error) {
         console.error("Polling error:", error);
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        pollFileStatus(fileId, trackingId);
       }
     };
 
@@ -2673,16 +2678,29 @@ export function ChatInterface({
       console.log("[handleSubmit] All uploads complete");
     }
 
-    // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
-    if (filesStillLoading) {
-      console.log("[handleSubmit] files still loading after wait, returning");
+    // Give React state a tick to flush any upload status updates before reading `uploadedFiles`.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Read the latest uploadedFiles (avoid stale closures after awaiting uploads).
+    const latestUploadedFiles = uploadedFilesRef.current;
+
+    const attachableUploadedFiles = latestUploadedFiles.filter((f: any) => {
+      const status = String(f.status || "");
+      if (status !== "ready" && status !== "processing") return false;
+      // Ensure we have a reference we can persist/use server-side.
+      return Boolean(f.storagePath || f.spreadsheetData?.uploadId);
+    });
+
+    // Don't submit while files are still uploading (processing is allowed; server can read via storagePath).
+    const filesStillUploading = latestUploadedFiles.some((f: any) => f.status === "uploading");
+    if (filesStillUploading) {
+      console.log("[handleSubmit] files still uploading after wait, returning");
       return;
     }
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFiles.length > 0;
+    const hasFiles = attachableUploadedFiles.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
@@ -2820,10 +2838,29 @@ export function ChatInterface({
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const attachments = uploadedFiles.map((f: any) => ({
+        const messageAttachments = attachableUploadedFiles.map((f: any) => ({
+          type: (String(f.type || "").startsWith("image/") ? "image" : "document") as "image" | "document",
+          name: f.name,
+          documentType: (() => {
+            if (String(f.type || "").startsWith("image/")) return undefined;
+            if (String(f.type || "").includes("pdf") || String(f.name || "").toLowerCase().endsWith(".pdf")) return "pdf";
+            if (String(f.type || "").includes("sheet") || String(f.type || "").includes("excel") || String(f.type || "").includes("csv") || String(f.name || "").match(/\.(xlsx|xls|csv)$/i)) return "excel";
+            if (String(f.type || "").includes("presentation") || String(f.type || "").includes("powerpoint") || String(f.name || "").match(/\.(pptx|ppt)$/i)) return "ppt";
+            return "word";
+          })() as "word" | "excel" | "ppt" | "pdf",
+          mimeType: f.type,
+          imageUrl: String(f.type || "").startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
+          storagePath: f.storagePath,
+          fileId: f.id,
+          spreadsheetData: f.spreadsheetData,
+        }));
+
+        const runAttachments = attachableUploadedFiles.map((f: any) => ({
           id: f.id,
           name: f.name,
           type: f.type,
+          mimeType: f.type,
+          storagePath: f.storagePath,
           spreadsheetData: f.spreadsheetData
         }));
 
@@ -2837,6 +2874,8 @@ export function ChatInterface({
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
+          requestId: generateRequestId(),
+          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
         };
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
@@ -2844,7 +2883,16 @@ export function ChatInterface({
 
         // Clear input IMMEDIATELY after capturing the value to prevent duplicates
         setInput("");
-        setUploadedFiles([]);
+        // Keep errored/unfinished uploads in the composer; only clear attachable files we just sent.
+        setUploadedFiles((prev: any[]) =>
+          prev.filter((f: any) => {
+            const status = String(f.status || "");
+            if (status === "error") return true;
+            if (status === "uploading") return true;
+            if (status === "processing" && !f.storagePath && !f.spreadsheetData?.uploadId) return true;
+            return false;
+          })
+        );
 
         console.log("[Agent Mode] Starting run with input:", userMessageContent);
 
@@ -2854,7 +2902,7 @@ export function ChatInterface({
           chatId || "",
           userMessageContent,
           agentMessageId,
-          attachments
+          runAttachments
         );
 
         console.log("[Agent Mode] Run result:", result);
@@ -3263,7 +3311,9 @@ export function ChatInterface({
 
     // Check if this is a Super Agent research request with sources
     const superAgentCheck = shouldUseSuperAgent(input);
-    if (superAgentCheck.use) {
+    // Super Agent doesn't currently accept file context; if the user has uploaded anything,
+    // keep them on the regular flow so attachments are preserved and analyzed.
+    if (superAgentCheck.use && latestUploadedFiles.length === 0) {
       console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
 
       const userInput = input;
@@ -3611,17 +3661,25 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately
     const userInput = input;
-    const currentUploadedFiles = [...uploadedFiles];
+    const currentUploadedFiles = [...attachableUploadedFiles];
     const userMsgId = Date.now().toString();
 
     // Reset UI state immediately
     setInput("");
     if (chatId) clearDraft(chatId);
-    setUploadedFiles([]);
+    // Keep errored/unfinished uploads in the composer; only clear attachable files we just sent.
+    setUploadedFiles((prev: any[]) =>
+      prev.filter((f: any) => {
+        const status = String(f.status || "");
+        if (status === "error") return true;
+        if (status === "uploading") return true;
+        if (status === "processing" && !f.storagePath && !f.spreadsheetData?.uploadId) return true;
+        return false;
+      })
+    );
 
     // Process attachments for message construction
     const attachments = currentUploadedFiles
-      .filter((f: any) => f.status === "ready" || f.status === "processing")
       .map((f: any) => ({
         type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
         name: f.name,
@@ -3633,7 +3691,7 @@ export function ChatInterface({
           return "word"; // default to word for text/docs
         })() as "word" | "excel" | "ppt" | "pdf",
         mimeType: f.type,
-        imageUrl: f.dataUrl,
+        imageUrl: f.type.startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
         storagePath: f.storagePath,
         fileId: f.id,
         spreadsheetData: f.spreadsheetData,
@@ -5328,7 +5386,7 @@ IMPORTANTE:
                 selectedDocText={selectedDocText}
                 handleDocTextDeselect={handleDocTextDeselect}
                 onTextareaFocus={handleCloseModelSelector}
-                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading")}
               />
             </div>
           </Panel>
@@ -5749,7 +5807,7 @@ IMPORTANTE:
             isGoogleFormsActive={isGoogleFormsActive}
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
-            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading")}
           />
         </div>
       )}

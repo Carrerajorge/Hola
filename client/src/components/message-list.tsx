@@ -487,7 +487,7 @@ const AttachmentList = memo(function AttachmentList({
       )}
     >
       {attachments.map((att, i) =>
-        att.type === "document" && att.documentType ? (
+        att.type === "document" && att.documentType && typeof att.content === "string" && att.content.length > 0 ? (
           <div
             key={i}
             className={cn(

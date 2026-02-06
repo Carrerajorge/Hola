@@ -1036,7 +1036,7 @@ export function Composer({
                 handleMentionKeyDown(e);
                 if (showMentionPopover) return;
                 handleHistoryNavigation(e);
-                const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading");
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
                   e.preventDefault();
                   handleSubmitWithHistory();

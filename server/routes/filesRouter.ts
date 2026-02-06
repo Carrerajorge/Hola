@@ -474,6 +474,54 @@ export function createFilesRouter() {
 
   router.get("/objects/:objectPath(*)", async (req, res) => {
     try {
+      // Local fallback for development: serve from ./uploads when object storage isn't available.
+      // This makes `storagePath` values like `/objects/uploads/<uuid>` directly renderable (e.g., <img src=...>).
+      if (req.path.startsWith("/objects/uploads/")) {
+        const fsSync = await import("fs");
+        const pathMod = await import("path");
+
+        const objectId = req.path.replace("/objects/uploads/", "");
+        // Basic traversal guard (objectId should be a single path segment).
+        if (!objectId || objectId.includes("/") || objectId.includes("..")) {
+          return res.sendStatus(404);
+        }
+
+        const localFilePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+        if (fsSync.default.existsSync(localFilePath)) {
+          const detectMimeType = (header: Buffer): string | null => {
+            if (header.length >= 8 && header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47) return "image/png";
+            if (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) return "image/jpeg";
+            if (header.length >= 6 && header.subarray(0, 6).toString("ascii") === "GIF87a") return "image/gif";
+            if (header.length >= 6 && header.subarray(0, 6).toString("ascii") === "GIF89a") return "image/gif";
+            if (header.length >= 12 && header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+            if (header.length >= 2 && header.subarray(0, 2).toString("ascii") === "BM") return "image/bmp";
+            if (header.length >= 4 && (header.subarray(0, 4).toString("ascii") === "II*\u0000" || header.subarray(0, 4).toString("ascii") === "MM\u0000*")) return "image/tiff";
+            if (header.length >= 5 && header.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+            return null;
+          };
+
+          try {
+            const fd = await fsSync.promises.open(localFilePath, "r");
+            try {
+              const headerBuf = Buffer.alloc(16);
+              const { bytesRead } = await fd.read(headerBuf, 0, headerBuf.length, 0);
+              const mimeType = detectMimeType(headerBuf.subarray(0, bytesRead));
+              if (mimeType) {
+                res.setHeader("Content-Type", mimeType);
+              }
+              res.setHeader("Content-Disposition", "inline");
+            } finally {
+              await fd.close();
+            }
+          } catch {
+            // Best-effort MIME detection only.
+          }
+
+          fsSync.default.createReadStream(localFilePath).pipe(res);
+          return;
+        }
+      }
+
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
       objectStorageService.downloadObject(objectFile, res);
     } catch (error) {
