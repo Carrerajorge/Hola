@@ -577,6 +577,8 @@ export const TraceEventTypeSchema = z.enum([
     'replan',
     'thinking',
     'shell_output',
+    'shell_chunk',
+    'shell_exit',
     'artifact_created',
     'artifact_ready',
     'citations_added',
