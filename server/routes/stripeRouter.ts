@@ -981,6 +981,110 @@ export function createStripeRouter() {
     }
   });
 
+  router.get("/api/billing/invoices", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const actorRole = getActorRole(req);
+      if (actorRole && !isBillingManagerRole(actorRole) && !isAdminEmail(getActorEmail(req))) {
+        await auditLog(req, {
+          action: AuditActions.SECURITY_ALERT,
+          resource: "billing.invoices",
+          resourceId: userId,
+          details: { reason: "permission_denied", role: actorRole, actorEmail: getActorEmail(req) || null },
+          category: "security",
+          severity: "warning",
+        });
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      const parsedQuery = z
+        .object({
+          limit: z
+            .preprocess((v) => (v === undefined ? 10 : Number(v)), z.number().int().min(1).max(25))
+            .default(10),
+          startingAfter: z
+            .preprocess((v) => (Array.isArray(v) ? v[0] : v), z.string().trim().min(1).optional()),
+        })
+        .parse(req.query);
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const canManageBilling = canManageBillingForDbUser(dbUser);
+      if (!canManageBilling) {
+        await auditLog(req, {
+          action: AuditActions.SECURITY_ALERT,
+          resource: "billing.invoices",
+          resourceId: userId,
+          details: { reason: "permission_denied", role: normalizeRole((dbUser as any).role), actorEmail: getActorEmail(req) || null },
+          category: "security",
+          severity: "warning",
+        });
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      if (!dbUser.stripeCustomerId) {
+        return res.json({ invoices: [], hasMore: false, nextCursor: null });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const result = await stripe.invoices.list({
+        customer: dbUser.stripeCustomerId,
+        limit: parsedQuery.limit,
+        starting_after: parsedQuery.startingAfter,
+      });
+
+      const invoices = result.data.map((inv) => ({
+        id: inv.id,
+        number: inv.number || null,
+        status: inv.status || null,
+        currency: inv.currency || null,
+        amountDue: typeof inv.amount_due === "number" ? inv.amount_due : 0,
+        amountPaid: typeof inv.amount_paid === "number" ? inv.amount_paid : 0,
+        amountRemaining: typeof inv.amount_remaining === "number" ? inv.amount_remaining : 0,
+        subtotal: typeof inv.subtotal === "number" ? inv.subtotal : null,
+        total: typeof inv.total === "number" ? inv.total : null,
+        createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : null,
+        periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+        periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+        hostedInvoiceUrl: inv.hosted_invoice_url || null,
+        invoicePdf: inv.invoice_pdf || null,
+      }));
+
+      const nextCursor = result.has_more && result.data.length > 0 ? result.data[result.data.length - 1]!.id : null;
+
+      await auditLog(req, {
+        action: "billing.invoices_listed",
+        resource: "billing.invoices",
+        resourceId: userId,
+        details: {
+          customerId: dbUser.stripeCustomerId,
+          limit: parsedQuery.limit,
+          startingAfter: parsedQuery.startingAfter || null,
+          returned: invoices.length,
+          hasMore: result.has_more,
+        },
+        category: "user",
+        severity: "info",
+      });
+
+      res.json({
+        invoices,
+        hasMore: result.has_more,
+        nextCursor,
+      });
+    } catch (error: any) {
+      console.error("Billing invoices error:", error);
+      res.status(500).json({ error: "Failed to list invoices" });
+    }
+  });
+
   router.post("/api/stripe/portal", async (req, res) => {
     try {
       const userId = getEffectiveUserId(req);

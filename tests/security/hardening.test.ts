@@ -59,5 +59,24 @@ describe("security hardening", () => {
     expect(res.status).toBe(403);
     expect(res.body?.code).toBe("PERMISSION_DENIED");
   });
-});
 
+  it("requires authentication to list invoices (401)", async () => {
+    const app = makeApp();
+    const res = await request(app).get("/api/billing/invoices");
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects invoice listing for non-billing-manager users (403)", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as any).user = { claims: { sub: "user_123", role: "user", email: "user@example.com" } };
+      next();
+    });
+    app.use(createStripeRouter());
+
+    const res = await request(app).get("/api/billing/invoices");
+    expect(res.status).toBe(403);
+    expect(res.body?.code).toBe("PERMISSION_DENIED");
+  });
+});
