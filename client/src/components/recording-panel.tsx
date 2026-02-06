@@ -65,7 +65,7 @@ export function RecordingPanel({
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
-        className="flex items-center gap-3 px-2"
+        className="flex items-center gap-2.5 px-1.5"
         data-testid="recording-ui-compact"
       >
         <Tooltip>
@@ -102,7 +102,7 @@ export function RecordingPanel({
             )}
           />
 
-          <span className="text-lg font-medium tabular-nums min-w-[48px]" data-testid="recording-timer">
+          <span className="text-base font-medium tabular-nums min-w-[48px]" data-testid="recording-timer">
             {formatRecordingTime(recordingTime)}
           </span>
 

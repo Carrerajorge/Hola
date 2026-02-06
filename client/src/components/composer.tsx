@@ -561,7 +561,7 @@ export function Composer({
           aria-label="Open tools menu"
           title="Open tools menu"
           className={cn(
-            isDocumentMode ? "h-10 w-10 rounded-[16px]" : "h-9 w-9 sm:h-8 sm:w-8 rounded-[14px]",
+            isDocumentMode ? "h-10 w-10 rounded-full" : "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
             "flex-shrink-0",
             "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
             "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
@@ -851,27 +851,44 @@ export function Composer({
     )
     : "shrink-0 w-full px-4 pb-4 pt-2 bg-background";
 
-  const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
-    : cn(
-      // Professional Premium Container
-      "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-      // Glass Background & Blur
-      "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
-      // Premium Border (silver, ultra-thin)
-      "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
-      "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
-      // Shape & Spacing
-      "rounded-[22px] px-4 py-2.5",
-      // Elevated Shadow
-      "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
-      // Focus State (minimal silver)
-      "focus-within:shadow-[0_0_0_1px_rgba(199,199,199,0.30),0_8px_40px_rgba(0,0,0,0.08)] focus-within:border-[#bdbdbd]/80",
-      "dark:focus-within:shadow-[0_0_0_1px_rgba(255,255,255,0.10),0_8px_40px_rgba(0,0,0,0.35)] dark:focus-within:border-white/20",
-
-      selectedDocText && "border-primary/20",
-      isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
-    );
+  const inputContainerClass = cn(
+    isDocumentMode
+      ? cn(
+        "relative flex flex-col",
+        // Glass Background & Blur
+        "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
+        // Premium Border (silver, ultra-thin)
+        "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
+        "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
+        // Shape & Spacing
+        "rounded-[22px] px-4 py-2",
+        // Elevated Shadow
+        "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
+        // Focus State (minimal silver)
+        "focus-within:shadow-[0_0_0_1px_rgba(199,199,199,0.30),0_8px_40px_rgba(0,0,0,0.08)] focus-within:border-[#bdbdbd]/80",
+        "dark:focus-within:shadow-[0_0_0_1px_rgba(255,255,255,0.10),0_8px_40px_rgba(0,0,0,0.35)] dark:focus-within:border-white/20",
+        "transition-colors duration-200"
+      )
+      : cn(
+        // Professional Premium Container
+        "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
+        // Glass Background & Blur
+        "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
+        // Premium Border (silver, ultra-thin)
+        "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
+        "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
+        // Shape & Spacing
+        "rounded-[22px] px-4 py-2",
+        // Elevated Shadow
+        "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
+        // Focus State (minimal silver)
+        "focus-within:shadow-[0_0_0_1px_rgba(199,199,199,0.30),0_8px_40px_rgba(0,0,0,0.08)] focus-within:border-[#bdbdbd]/80",
+        "dark:focus-within:shadow-[0_0_0_1px_rgba(255,255,255,0.10),0_8px_40px_rgba(0,0,0,0.35)] dark:focus-within:border-white/20",
+      ),
+    // Keep these highlights in document mode too
+    selectedDocText && "border-primary/20",
+    isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
+  );
 
   return (
     <div
@@ -1056,7 +1073,7 @@ export function Composer({
             />
           </div>
 
-          <div className="flex items-center justify-between mt-1 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
+          <div className="flex items-center justify-between mt-0.5 pt-0.5 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
