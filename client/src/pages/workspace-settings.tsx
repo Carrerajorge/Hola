@@ -32,14 +32,51 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { apiFetch } from "@/lib/apiClient";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
+import { useAuth } from "@/hooks/use-auth";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
+
+type WorkspaceMember = {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string | null;
+  role: string | null;
+  createdAt: string | Date | null;
+};
+
+type WorkspaceInvitation = {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string | Date | null;
+  lastSentAt: string | Date | null;
+};
+
+type WorkspaceSeatBilling = {
+  seatPriceCents: number;
+  currency: string;
+  activeMembers: number;
+  pendingInvites: number;
+  billedSeats: number;
+  totalCents: number;
+};
 
 const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings className="h-4 w-4" /> },
@@ -53,9 +90,46 @@ const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[
   { id: "identity", label: "Identidad y acceso", icon: <ShieldCheck className="h-4 w-4" /> },
 ];
 
+function formatDateEsShort(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "—";
+  // Example: "28 ago 2025"
+  return new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+    .format(date)
+    .replace(/\./g, "");
+}
+
+function getMemberDisplayName(member: WorkspaceMember): string {
+  const full =
+    member.fullName ||
+    [member.firstName, member.lastName].filter(Boolean).join(" ").trim();
+  if (full) return full;
+  if (member.email) return member.email.split("@")[0] || member.email;
+  return "Usuario";
+}
+
+function getMemberInitials(member: WorkspaceMember): string {
+  const name = getMemberDisplayName(member).trim();
+  if (!name) return "US";
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  const single = parts[0].replace(/[^a-zA-Z0-9]/g, "");
+  return single.slice(0, 2).toUpperCase() || "US";
+}
+
+function isOwnerRole(role: string | null | undefined): boolean {
+  return ["admin", "superadmin", "team_admin"].includes((role || "").toLowerCase());
+}
+
 export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const [workspaceName, setWorkspaceName] = useState("");
   const [orgId, setOrgId] = useState<string>("");
@@ -63,11 +137,31 @@ export default function WorkspaceSettingsPage() {
   const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
 
+  const canManageMembers = useMemo(() => {
+    const role = ((user as any)?.role || "").toString().toLowerCase();
+    return ["admin", "superadmin", "team_admin"].includes(role);
+  }, [user]);
+
   const [billingStatus, setBillingStatus] = useState<{
     subscriptionStatus: string | null;
     subscriptionPeriodEnd: string | null;
     willDeactivate: boolean;
   } | null>(null);
+
+  const [seatBilling, setSeatBilling] = useState<WorkspaceSeatBilling | null>(null);
+
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [membersFilter, setMembersFilter] = useState("");
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+
+  const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
+  const [isLoadingInvitations, setIsLoadingInvitations] = useState(false);
+
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"team_member" | "team_admin">("team_member");
+  const [isInviting, setIsInviting] = useState(false);
+  const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
 
   const deactivationDateLabel = useMemo(() => {
     return formatPeriodEndEs(billingStatus?.subscriptionPeriodEnd ?? null);
@@ -122,6 +216,68 @@ export default function WorkspaceSettingsPage() {
       cancelled = true;
     };
   }, []);
+
+  const refreshSeatBilling = async () => {
+    try {
+      const res = await apiFetch("/api/workspace/billing");
+      if (!res.ok) return;
+      const data = await res.json();
+      setSeatBilling({
+        seatPriceCents: data.seatPriceCents ?? 3000,
+        currency: data.currency ?? "USD",
+        activeMembers: data.activeMembers ?? 0,
+        pendingInvites: data.pendingInvites ?? 0,
+        billedSeats: data.billedSeats ?? 0,
+        totalCents: data.totalCents ?? 0,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const refreshMembers = async () => {
+    setIsLoadingMembers(true);
+    try {
+      const res = await apiFetch("/api/workspace/members");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return;
+      setMembers((data?.members || []) as WorkspaceMember[]);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingMembers(false);
+    }
+  };
+
+  const refreshInvitations = async () => {
+    if (!canManageMembers) {
+      setInvitations([]);
+      return;
+    }
+    setIsLoadingInvitations(true);
+    try {
+      const res = await apiFetch("/api/workspace/invitations");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return;
+      setInvitations((data?.invitations || []) as WorkspaceInvitation[]);
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingInvitations(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === "members") {
+      refreshMembers();
+      refreshSeatBilling();
+      if (canManageMembers) refreshInvitations();
+    }
+    if (activeSection === "billing") {
+      refreshSeatBilling();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, canManageMembers]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -184,6 +340,57 @@ export default function WorkspaceSettingsPage() {
       setWorkspaceName(data.name || workspaceName);
     } finally {
       setIsSavingWorkspace(false);
+    }
+  };
+
+  const filteredMembers = useMemo(() => {
+    const q = membersFilter.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => {
+      const name = getMemberDisplayName(m).toLowerCase();
+      const email = (m.email || "").toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [members, membersFilter]);
+
+  const handleInviteMember = async () => {
+    const email = inviteEmail.trim();
+    if (!email) return;
+
+    setIsInviting(true);
+    setLastInviteLink(null);
+    try {
+      const res = await apiFetch("/api/workspace/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: inviteRole }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || "No se pudo enviar la invitación");
+        return;
+      }
+      setInviteEmail("");
+      setLastInviteLink(data?.inviteLink || null);
+      await refreshInvitations();
+      await refreshSeatBilling();
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    try {
+      const res = await apiFetch(`/api/workspace/invitations/${invitationId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || "No se pudo revocar la invitación");
+        return;
+      }
+      await refreshInvitations();
+      await refreshSeatBilling();
+    } catch {
+      // ignore
     }
   };
 
@@ -303,7 +510,10 @@ export default function WorkspaceSettingsPage() {
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold">Miembros</h1>
-              <p className="text-sm text-muted-foreground">Empresa · 1 miembro</p>
+              <p className="text-sm text-muted-foreground">
+                Empresa · {(seatBilling?.activeMembers ?? members.length)}{" "}
+                {(seatBilling?.activeMembers ?? members.length) === 1 ? "miembro" : "miembros"}
+              </p>
             </div>
 
             <Tabs defaultValue="users" className="w-full">
@@ -339,10 +549,21 @@ export default function WorkspaceSettingsPage() {
                       placeholder="Filtrar por nombre" 
                       className="pl-9 w-64"
                       data-testid="input-filter-members"
+                      value={membersFilter}
+                      onChange={(e) => setMembersFilter(e.target.value)}
                     />
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" className="gap-2" data-testid="button-invite-member">
+                    <Button
+                      variant="outline"
+                      className="gap-2"
+                      data-testid="button-invite-member"
+                      disabled={!canManageMembers}
+                      onClick={() => {
+                        setInviteDialogOpen(true);
+                        setLastInviteLink(null);
+                      }}
+                    >
                       <Plus className="h-4 w-4" />
                       Invitar a un miembro
                     </Button>
@@ -358,33 +579,181 @@ export default function WorkspaceSettingsPage() {
                     <span>Tipo de cuenta</span>
                     <span>Fecha agregada</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9">
-                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">JC</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <span className="text-sm font-medium block">Jorge Carrera (Tú)</span>
-                        <span className="text-xs text-muted-foreground">carrerajorge874@gmail.com</span>
-                      </div>
+                  {isLoadingMembers ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">Cargando miembros...</div>
+                  ) : filteredMembers.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground">No hay miembros.</div>
+                  ) : (
+                    <div className="divide-y">
+                      {filteredMembers.map((member) => {
+                        const isMe = !!(user as any)?.id && (user as any).id === member.id;
+                        return (
+                          <div key={member.id} className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Avatar className="h-9 w-9">
+                                <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">
+                                  {getMemberInitials(member)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <span className="text-sm font-medium block truncate">
+                                  {getMemberDisplayName(member)}
+                                  {isMe ? " (Tú)" : ""}
+                                </span>
+                                <span className="text-xs text-muted-foreground block truncate">
+                                  {member.email || "—"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm">{isOwnerRole(member.role) ? "Propietario" : "Miembro"}</span>
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <span className="text-sm">{formatDateEsShort(member.createdAt)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">Propietario</span>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <span className="text-sm">28 ago 2025</span>
-                  </div>
+                  )}
                 </div>
               </TabsContent>
 
               <TabsContent value="pending-invites" className="mt-6">
-                <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
+                {!canManageMembers ? (
+                  <p className="text-sm text-muted-foreground">No tienes permisos para ver invitaciones.</p>
+                ) : isLoadingInvitations ? (
+                  <p className="text-sm text-muted-foreground">Cargando invitaciones...</p>
+                ) : invitations.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
+                ) : (
+                  <div className="border rounded-lg">
+                    <div className="grid grid-cols-4 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+                      <span>Correo</span>
+                      <span>Rol</span>
+                      <span>Enviado</span>
+                      <span className="text-right">Acciones</span>
+                    </div>
+                    <div className="divide-y">
+                      {invitations.map((inv) => (
+                        <div key={inv.id} className="grid grid-cols-4 gap-4 px-4 py-3 items-center">
+                          <span className="text-sm font-medium truncate">{inv.email}</span>
+                          <span className="text-sm text-muted-foreground">
+                            {inv.role === "team_admin" ? "Administrador" : "Miembro"}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            {formatDateEsShort(inv.lastSentAt || inv.createdAt)}
+                          </span>
+                          <div className="flex items-center justify-end">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRevokeInvitation(inv.id)}
+                              data-testid={`button-revoke-invite-${inv.id}`}
+                            >
+                              Revocar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="pending-requests" className="mt-6">
                 <p className="text-sm text-muted-foreground">No hay solicitudes pendientes.</p>
               </TabsContent>
             </Tabs>
+
+            <Dialog
+              open={inviteDialogOpen}
+              onOpenChange={(open) => {
+                setInviteDialogOpen(open);
+                if (!open) {
+                  setInviteEmail("");
+                  setLastInviteLink(null);
+                  setInviteRole("team_member");
+                }
+              }}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Invitar a un miembro</DialogTitle>
+                  <DialogDescription>
+                    Agrega un miembro por correo. Se agregará facturación por cada miembro invitado. Puedes agregar los que desees.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Correo electrónico</span>
+                    <Input
+                      placeholder="correo@empresa.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      data-testid="input-invite-email"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium">Rol</span>
+                    <Select
+                      value={inviteRole}
+                      onValueChange={(v) => setInviteRole(v as "team_member" | "team_admin")}
+                    >
+                      <SelectTrigger data-testid="select-invite-role">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="team_member">Miembro</SelectItem>
+                        <SelectItem value="team_admin">Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    Precio: ${((seatBilling?.seatPriceCents ?? 3000) / 100).toFixed(0)} / participante.{" "}
+                    {seatBilling ? `${seatBilling.billedSeats} participantes facturados.` : ""}
+                  </div>
+
+                  {lastInviteLink && (
+                    <div className="rounded-lg border p-3 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Modo desarrollo: comparte este enlace con el invitado.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Input value={lastInviteLink} readOnly data-testid="input-invite-link" />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => copyToClipboard(lastInviteLink)}
+                          data-testid="button-copy-invite-link"
+                        >
+                          Copiar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setInviteDialogOpen(false)}
+                    data-testid="button-close-invite"
+                  >
+                    Cerrar
+                  </Button>
+                  <Button
+                    onClick={handleInviteMember}
+                    disabled={!canManageMembers || isInviting || !inviteEmail.trim()}
+                    data-testid="button-submit-invite"
+                  >
+                    {isInviting ? "Enviando..." : "Enviar invitación"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         );
 
@@ -629,12 +998,18 @@ export default function WorkspaceSettingsPage() {
                   
                   <div className="pt-2">
                     <div className="flex items-baseline">
-                      <span className="text-4xl font-bold">$30</span>
+                      <span className="text-4xl font-bold">
+                        ${((seatBilling?.seatPriceCents ?? 3000) / 100).toFixed(0)}
+                      </span>
                       <span className="text-muted-foreground ml-1">/participante</span>
                     </div>
                   </div>
                   
-                  <p className="text-sm text-muted-foreground">1/2 participantes en uso</p>
+                  <p className="text-sm text-muted-foreground">
+                    {seatBilling
+                      ? `${seatBilling.activeMembers}/${seatBilling.billedSeats} participantes en uso (${seatBilling.pendingInvites} pendientes)`
+                      : "Cargando participantes..."}
+                  </p>
                 </div>
 
                 <div className="border rounded-lg p-6 space-y-4">
@@ -1190,7 +1565,7 @@ export default function WorkspaceSettingsPage() {
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
               <IliaGPTLogo size={24} />
             </div>
-            <span className="text-sm font-medium truncate">Espacio de trabajo de Jor...</span>
+            <span className="text-sm font-medium truncate">{workspaceName || "Espacio de trabajo"}</span>
           </div>
 
           <nav className="space-y-1">
