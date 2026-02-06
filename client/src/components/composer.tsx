@@ -561,14 +561,14 @@ export function Composer({
           aria-label="Open tools menu"
           title="Open tools menu"
           className={cn(
-            "h-9 w-9 rounded-[14px] flex-shrink-0",
+            isDocumentMode ? "h-10 w-10 rounded-[16px]" : "h-9 w-9 sm:h-8 sm:w-8 rounded-[14px]",
+            "flex-shrink-0",
             "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
             "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
             "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
             "backdrop-blur-sm shadow-none",
             "transition-colors duration-150",
-            "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
-            isDocumentMode && "h-10 w-10 rounded-[16px]"
+            "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
           )}
         >
           <Plus className="h-4 w-4" />
@@ -862,7 +862,7 @@ export function Composer({
       "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
       "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
       // Shape & Spacing
-      "rounded-[24px] px-4 py-3",
+      "rounded-[22px] px-4 py-2.5",
       // Elevated Shadow
       "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
       // Focus State (minimal silver)
@@ -1022,7 +1022,7 @@ export function Composer({
               "rounded-[20px] border-[0.5px] border-solid bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
               "border-[#c7c7c7]/80 dark:border-white/20",
               "hover:border-[#bdbdbd]/85 dark:hover:border-white/25",
-              "px-4 py-2",
+              "px-4 py-1.5",
               "transition-colors duration-150",
               "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
             )}
@@ -1056,7 +1056,7 @@ export function Composer({
             />
           </div>
 
-          <div className="flex items-center justify-between mt-1.5 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
+          <div className="flex items-center justify-between mt-1 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}

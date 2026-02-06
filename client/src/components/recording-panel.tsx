@@ -74,11 +74,19 @@ export function RecordingPanel({
               variant="ghost"
               size="icon"
               onClick={onDiscard}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
+                "border-[0.5px] border-solid border-[#c7c7c7]/70 hover:border-red-400 dark:border-white/20 dark:hover:border-red-300/40",
+                "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
+                "text-zinc-700 hover:text-red-600 dark:text-white/70 dark:hover:text-red-300",
+                "backdrop-blur-sm shadow-none",
+                "transition-colors duration-150",
+                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+              )}
               aria-label="Discard recording"
               data-testid="button-discard-recording"
             >
-              <Trash2 className="h-5 w-5" aria-hidden="true" />
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Descartar grabación</TooltipContent>
@@ -123,14 +131,22 @@ export function RecordingPanel({
               variant="ghost"
               size="icon"
               onClick={isPaused ? onResume : onPause}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
+                "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
+                "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
+                "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
+                "backdrop-blur-sm shadow-none",
+                "transition-colors duration-150",
+                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+              )}
               aria-label={isPaused ? "Resume recording" : "Pause recording"}
               data-testid={isPaused ? "button-resume-recording" : "button-pause-recording"}
             >
               {isPaused ? (
-                <Play className="h-5 w-5" aria-hidden="true" />
+                <Play className="h-4 w-4" aria-hidden="true" />
               ) : (
-                <Pause className="h-5 w-5" aria-hidden="true" />
+                <Pause className="h-4 w-4" aria-hidden="true" />
               )}
             </Button>
           </TooltipTrigger>
@@ -143,11 +159,19 @@ export function RecordingPanel({
               size="icon"
               onClick={onSend}
               disabled={!canSend}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 bg-transparent hover:bg-muted text-foreground disabled:opacity-50 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
+                "border-[0.5px] border-solid backdrop-blur-sm shadow-none",
+                "transition-colors duration-150",
+                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
+                canSend
+                  ? "bg-white/35 hover:bg-white/55 border-[#c7c7c7]/70 text-zinc-700 hover:text-zinc-900 dark:bg-white/5 dark:hover:bg-white/8 dark:border-white/20 dark:text-white/70 dark:hover:text-white/90"
+                  : "opacity-50 cursor-not-allowed bg-white/20 border-[#c7c7c7]/40 text-zinc-400 dark:bg-white/5 dark:border-white/10 dark:text-white/30"
+              )}
               aria-label="Send message"
               data-testid="button-send-recording"
             >
-              <ArrowUp className="h-5 w-5" aria-hidden="true" />
+              <ArrowUp className="h-4 w-4" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Enviar mensaje</TooltipContent>
@@ -165,7 +189,7 @@ export function RecordingPanel({
             onClick={onToggleRecording}
             size="icon"
             className={cn(
-              "h-9 w-9 rounded-full",
+              "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
               "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
               "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
               "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
@@ -205,7 +229,7 @@ export function RecordingPanel({
             size="icon"
             disabled={isFilesLoading}
             className={cn(
-              "h-9 w-9 rounded-full",
+              "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
               "border-[0.5px] border-solid backdrop-blur-sm shadow-none",
               "transition-colors duration-150",
               "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
@@ -226,7 +250,7 @@ export function RecordingPanel({
               onClick={onOpenVoiceChat}
               size="icon"
               className={cn(
-                "h-9 w-9 rounded-full",
+                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
                 "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
                 "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
                 "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
