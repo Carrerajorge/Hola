@@ -1139,22 +1139,92 @@ const shellCommandTool: ToolDefinition = {
       };
     }
 
-    // Execute with bash -lc to preserve typical shell behavior, but without spawning a shell through exec().
     const { spawn } = await import("child_process");
 
     const timeoutMs = Math.min(Math.max(Number(input.timeout ?? 30000), 1000), 60000);
+
+    // Sandbox mode (v1): host (default) or docker.
+    // NOTE: docker mode requires that the runtime has access to the Docker daemon
+    // (typically via /var/run/docker.sock) and that the `docker` CLI is available.
+    const sandboxMode = (process.env.SHELL_COMMAND_SANDBOX_MODE || "host").toLowerCase();
+    const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
+
+    const runWithHost = () => {
+      return spawn("/usr/bin/bash", ["-lc", cmd], {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: workspaceDir },
+        shell: false,
+        windowsHide: true,
+      });
+    };
+
+    const runWithDocker = () => {
+      // Hardening defaults (v1): no network, drop caps, no new privileges.
+      // We mount the per-run workspace as /workspace.
+      const uid = typeof (process as any).getuid === "function" ? (process as any).getuid() : undefined;
+      const gid = typeof (process as any).getgid === "function" ? (process as any).getgid() : undefined;
+
+      const dockerArgs: string[] = [
+        "run",
+        "--rm",
+        "-i",
+        "--network",
+        "none",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--pids-limit",
+        "256",
+        "--cpus",
+        process.env.SHELL_COMMAND_DOCKER_CPUS || "1",
+        "--memory",
+        process.env.SHELL_COMMAND_DOCKER_MEMORY || "512m",
+        "-v",
+        `${workspaceDir}:/workspace`,
+        "-w",
+        "/workspace",
+      ];
+
+      if (uid !== undefined && gid !== undefined) {
+        dockerArgs.push("--user", `${uid}:${gid}`);
+      }
+
+      dockerArgs.push(dockerImage, "/bin/bash", "-lc", cmd);
+
+      return spawn("docker", dockerArgs, {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: workspaceDir },
+        shell: false,
+        windowsHide: true,
+      });
+    };
 
     return new Promise((resolve) => {
       let stdout = "";
       let stderr = "";
       let killed = false;
 
-      const child = spawn("/usr/bin/bash", ["-lc", cmd], {
-        cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
-        shell: false,
-        windowsHide: true,
-      });
+      let child = null as any;
+      try {
+        child = sandboxMode === "docker" ? runWithDocker() : runWithHost();
+      } catch (err: any) {
+        return resolve({
+          success: false,
+          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+          error: createError(
+            "COMMAND_ERROR",
+            sandboxMode === "docker"
+              ? `Docker sandbox unavailable: ${err?.message || String(err)}`
+              : `Command spawn failed: ${err?.message || String(err)}`,
+            true
+          ),
+          artifacts: [],
+          previews: [{ type: "text", content: err?.message || String(err), title: "Error Output" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      }
 
       const maxCapture = 1024 * 1024; // 1MB each stream
 
