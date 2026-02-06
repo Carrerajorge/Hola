@@ -37,6 +37,7 @@ import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
+import { type UserSkill } from "@/hooks/use-user-skills";
 import "@/components/ui/glass-effects.css";
 
 interface UploadedFile {
@@ -120,6 +121,9 @@ export interface ComposerProps {
   setIsGoogleFormsActive?: (value: boolean) => void;
   onTextareaFocus?: () => void;
   isFilesLoading?: boolean;
+  userSkills: UserSkill[];
+  activeSkillId: string | null;
+  setActiveSkillId: (value: string | null) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -187,9 +191,15 @@ export function Composer({
   setIsGoogleFormsActive,
   onTextareaFocus,
   isFilesLoading = false,
+  userSkills,
+  activeSkillId,
+  setActiveSkillId,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
+
+  const enabledUserSkills = userSkills.filter((s) => s.enabled);
+  const activeSkill = activeSkillId ? enabledUserSkills.find((s) => s.id === activeSkillId) || null : null;
 
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
 
@@ -1041,6 +1051,88 @@ export function Composer({
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
               {renderSelectedDocToolLogo()}
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  {activeSkill ? (
+                    <div
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100/80 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[13px] font-medium cursor-pointer"
+                      data-testid="active-skill-chip"
+                      aria-label="Skill activo"
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <Wand2 className="h-4 w-4" />
+                      <span className="max-w-[140px] truncate" data-testid="active-skill-label">{activeSkill.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setActiveSkillId(null); }}
+                        className="ml-0.5 hover:bg-amber-200/60 dark:hover:bg-amber-800/40 rounded p-0.5 transition-colors focus:outline-none"
+                        aria-label="Quitar skill"
+                        data-testid="button-clear-active-skill"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                    </div>
+                  ) : (
+                    <button
+                      className="flex items-center justify-center w-10 h-10 rounded-xl hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground"
+                      aria-label="Seleccionar skill"
+                      data-testid="button-skill-picker"
+                      type="button"
+                    >
+                      <Wand2 className="h-5 w-5" />
+                    </button>
+                  )}
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-1 bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" data-testid="skill-picker-popover">
+                  <div className="grid gap-0.5">
+                    <div className="px-2 py-1 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                      Skills
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveSkillId(null)}
+                      className={cn(
+                        "w-full flex items-center justify-between gap-2 px-2 py-2 text-sm rounded-lg",
+                        "hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors text-left",
+                        !activeSkill && "bg-zinc-100/70 dark:bg-zinc-700/70"
+                      )}
+                      data-testid="skill-picker-none"
+                    >
+                      <span className="truncate">Ninguno</span>
+                      {!activeSkill && <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                    </button>
+
+                    {enabledUserSkills.length === 0 ? (
+                      <div className="px-2 py-2 text-xs text-zinc-400 text-center">
+                        No hay skills personalizados activos.
+                      </div>
+                    ) : (
+                      enabledUserSkills.map((s) => {
+                        const isActive = activeSkillId === s.id;
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => setActiveSkillId(s.id)}
+                            className={cn(
+                              "w-full flex items-center justify-between gap-2 px-2 py-2 text-sm rounded-lg",
+                              "hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors text-left",
+                              isActive && "bg-zinc-100/70 dark:bg-zinc-700/70"
+                            )}
+                            data-testid={`skill-picker-${s.id}`}
+                          >
+                            <span className="truncate">{s.name}</span>
+                            {isActive && <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
               {showKnowledgeBase && (
                 <div className="flex items-center gap-2">

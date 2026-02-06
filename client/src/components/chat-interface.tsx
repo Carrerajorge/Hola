@@ -371,10 +371,108 @@ export function ChatInterface({
     return getProject(selectedProjectId) || projects.find((p: any) => p.id === selectedProjectId);
   }, [selectedProjectId, projects, getProject]);
 
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { settings } = useSettingsContext();
   const { toast } = useToast();
-  const { skills: userSkills, createSkill } = useUserSkills();
+  const { skills: userSkills, isLoading: isUserSkillsLoading, createSkill } = useUserSkills();
+
+  const [activeSkillId, setActiveSkillId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("sira-active-skill-id");
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (activeSkillId) localStorage.setItem("sira-active-skill-id", activeSkillId);
+      else localStorage.removeItem("sira-active-skill-id");
+    } catch {
+      // Ignore storage failures (private mode, quota, etc.)
+    }
+  }, [activeSkillId]);
+
+  // Multi-device sync: persist the active skill selection server-side for authenticated users.
+  // Policy:
+  // - If the server has an active skill, it wins and we adopt it locally.
+  // - If the server has none, we keep local and push it to the server (1-time "migration").
+  const didHydrateActiveSkillFromServer = useRef(false);
+  const serverActiveSkillIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    didHydrateActiveSkillFromServer.current = false;
+    serverActiveSkillIdRef.current = null;
+
+    if (!isAuthenticated) return;
+
+    let cancelled = false;
+    apiFetch("/api/skills/active", { method: "GET" })
+      .then(async (resp) => {
+        if (cancelled) return;
+        if (!resp.ok) return;
+        const data = await resp.json().catch(() => ({}));
+        const serverActiveSkillId = typeof data?.activeSkillId === "string" && data.activeSkillId.trim()
+          ? data.activeSkillId.trim()
+          : null;
+
+        serverActiveSkillIdRef.current = serverActiveSkillId;
+        didHydrateActiveSkillFromServer.current = true;
+
+        if (serverActiveSkillId) {
+          setActiveSkillId(serverActiveSkillId);
+        }
+      })
+      .catch((e) => {
+        console.warn("[Skills] Failed to hydrate active skill:", e?.message || e);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!didHydrateActiveSkillFromServer.current) return;
+
+    if (activeSkillId === serverActiveSkillIdRef.current) return;
+
+    const nextActiveSkillId = activeSkillId;
+    apiFetch("/api/skills/active", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeSkillId: nextActiveSkillId }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        serverActiveSkillIdRef.current = nextActiveSkillId;
+      })
+      .catch((e) => {
+        console.warn("[Skills] Failed to persist active skill:", e?.message || e);
+      });
+  }, [activeSkillId, isAuthenticated]);
+
+  // If the active skill was deleted/disabled, clear it once skills are loaded.
+  useEffect(() => {
+    if (!activeSkillId) return;
+    if (isUserSkillsLoading) return;
+    const stillValid = userSkills.some((s) => s.enabled && s.id === activeSkillId);
+    if (!stillValid) setActiveSkillId(null);
+  }, [activeSkillId, isUserSkillsLoading, userSkills]);
+
+  const resolveSkillContextForMessage = useCallback((text: string) => {
+    const cleaned = (text || "").replace(/^🌐\s*/, "");
+    const invocation = parseSkillInvocation(cleaned);
+    const invokedSkill = invocation ? findEnabledSkillByName(invocation.name, userSkills) : null;
+    const selectedSkill = activeSkillId ? userSkills.find((s) => s.enabled && s.id === activeSkillId) || null : null;
+    const skill = invokedSkill || selectedSkill;
+
+    return {
+      skillId: skill?.id,
+      skill: skill ? { name: skill.name, instructions: skill.instructions } : undefined,
+    };
+  }, [activeSkillId, userSkills]);
   
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
@@ -1864,9 +1962,7 @@ export function ChatInterface({
 	      }));
 
 	      const lastUserForSkill = [...contextUpToUser].reverse().find(m => m.role === "user")?.content || "";
-	      const skillInvocation = parseSkillInvocation(lastUserForSkill);
-	      const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
-	      const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
+	      const { skillId: activeSkillIdPayload, skill: activeSkillPayload } = resolveSkillContextForMessage(lastUserForSkill);
 
 	      if (instruction) {
 	        chatHistory = [
@@ -1885,6 +1981,7 @@ export function ChatInterface({
 	          conversationId: chatId,
 	          provider: selectedProvider,
 	          model: selectedModel,
+	          skillId: activeSkillIdPayload,
 	          skill: activeSkillPayload,
 	        }),
 	        signal: abortControllerRef.current.signal
@@ -2607,22 +2704,21 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
-    // EMERGENCY DEBUG - REMOVE AFTER FIX
-    console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
-    
-    // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
-    if (input.trim().startsWith("!")) {
+    if (import.meta.env.DEV) {
+      console.debug("[handleSubmit] called at", new Date().toISOString());
+    }
+
+    // Development-only fallback for debugging streaming.
+    if (import.meta.env.DEV && input.trim().startsWith("!")) {
       const cleanInput = input.trim().substring(1); // Remove the "!" prefix
-      console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
+      console.debug("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
       setInput("");
       setAiState("thinking");
       streamingContentRef.current = "";
 	      setStreamingContent("");
 	      
 	      try {
-	        const skillInvocation = parseSkillInvocation(cleanInput);
-	        const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
-	        const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
+	        const { skillId: activeSkillIdPayload, skill: activeSkillPayload } = resolveSkillContextForMessage(cleanInput);
 
 	        const response = await fetch("/api/chat/stream", {
 	          method: "POST",
@@ -2631,12 +2727,13 @@ export function ChatInterface({
 	          body: JSON.stringify({
 	            messages: [{ role: "user", content: cleanInput }],
 	            model: "grok-3",
+	            skillId: activeSkillIdPayload,
 	            skill: activeSkillPayload,
 	          })
 	        });
 	        
 	        if (!response.ok) {
-          console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
+          console.debug("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
           setAiState("idle");
           return;
         }
@@ -2682,17 +2779,17 @@ export function ChatInterface({
         streamingContentRef.current = "";
         setStreamingContent("");
         setAiState("idle");
-        console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
+        console.debug("[DEBUG] EMERGENCY FALLBACK completed successfully");
         return;
       } catch (error) {
-        console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
+        console.debug("[DEBUG] EMERGENCY FALLBACK error:", error);
         setAiState("idle");
         return;
       }
     }
     
     // MOCK CITATION TRIGGER FOR VERIFICATION
-    if (input.trim() === "/test-citation") {
+    if (import.meta.env.DEV && input.trim() === "/test-citation") {
       const mockMsg: Message = {
         id: `mock-${Date.now()}`,
         role: "assistant",
@@ -2752,18 +2849,20 @@ export function ChatInterface({
           throw new Error("Respuesta inválida del servidor");
         }
 
-        createSkill({
+        const created = await createSkill({
           name: generated.name,
           description: generated.description,
           instructions: generated.instructions,
           category: generated.category || "custom",
           enabled: true,
           features: Array.isArray(generated.features) ? generated.features : [],
+          triggers: Array.isArray(generated.triggers) ? generated.triggers : [],
         });
+        setActiveSkillId(created.id);
 
         toast({
           title: "Skill creado",
-          description: `Listo: ${generated.name}. Úsalo con @${generated.name} o @{${generated.name}} al inicio del mensaje.`,
+          description: `Listo: ${generated.name}. Quedó activo para tus próximos mensajes. También puedes invocarlo con @${generated.name} o @{${generated.name}} al inicio del mensaje.`,
         });
       } catch (e: any) {
         toast({
@@ -2776,12 +2875,14 @@ export function ChatInterface({
       return;
     }
 
-    // Skill invocation (optional): "@SkillName ..." or "@{Skill Name} ..."
-    const skillInvocation = parseSkillInvocation(input);
-    const activeSkill = skillInvocation ? findEnabledSkillByName(skillInvocation.name, userSkills) : null;
-    const activeSkillPayload = activeSkill ? { name: activeSkill.name, instructions: activeSkill.instructions } : undefined;
+    // Skill context:
+    // - If message starts with a valid @Skill invocation, it overrides the active skill selector.
+    // - Otherwise, the active skill selector applies automatically.
+    const { skillId: activeSkillIdPayload, skill: activeSkillPayload } = resolveSkillContextForMessage(input);
 
-    console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
+    if (import.meta.env.DEV) {
+      console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
+    }
 
     // Wait for any pending uploads to complete before proceeding
     if (pendingUploadsRef.current.size > 0) {
@@ -2836,7 +2937,9 @@ export function ChatInterface({
     // This bypasses all the complex chat creation logic that's failing
     // Also handle web search tool here
     if (hasInput && !hasAttachableFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
-      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
+      if (import.meta.env.DEV) {
+        console.log("[Direct Stream] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
+      }
       const userInput = input.trim();
       setInput("");
       
@@ -2879,6 +2982,7 @@ export function ChatInterface({
 	            forceWebSearch: isWebSearch,
 	            webSearchAuto: isWebSearch,
 	            docTool: selectedDocTool || null,
+	            skillId: activeSkillIdPayload,
 	            skill: activeSkillPayload,
 	          })
 	        });
@@ -3021,7 +3125,9 @@ export function ChatInterface({
 	        setStreamingContent("");
 	        setAiProcessSteps([]);
 	        setAiState("idle");
-	        console.error("[EMERGENCY BYPASS] Completed successfully");
+	        if (import.meta.env.DEV) {
+	          console.log("[Direct Stream] Completed successfully");
+	        }
 	        return;
       } catch (error) {
         console.error("[EMERGENCY BYPASS] Error:", error);
@@ -3367,6 +3473,7 @@ export function ChatInterface({
               model: selectedModel,
               lastImageBase64,
               lastImageId,
+              skillId: activeSkillIdPayload,
               skill: activeSkillPayload,
             }),
             signal: abortControllerRef.current.signal
@@ -4650,6 +4757,7 @@ IMPORTANTE:
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null,
+                skillId: activeSkillIdPayload,
                 skill: activeSkillPayload,
               }),
               signal: abortControllerRef.current?.signal
@@ -5593,6 +5701,9 @@ IMPORTANTE:
                 handleDocTextDeselect={handleDocTextDeselect}
                 onTextareaFocus={handleCloseModelSelector}
                 isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading")}
+                userSkills={userSkills}
+                activeSkillId={activeSkillId}
+                setActiveSkillId={setActiveSkillId}
               />
             </div>
           </Panel>
@@ -6014,6 +6125,9 @@ IMPORTANTE:
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
             isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading")}
+            userSkills={userSkills}
+            activeSkillId={activeSkillId}
+            setActiveSkillId={setActiveSkillId}
           />
         </div>
       )}

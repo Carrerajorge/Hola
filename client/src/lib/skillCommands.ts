@@ -55,7 +55,7 @@ export function parseSkillInvocation(input: string): SkillInvocation | null {
   return null;
 }
 
-export function findEnabledSkillByName(invocationName: string, skills: SkillLike[]): SkillLike | null {
+export function findEnabledSkillByName<T extends SkillLike>(invocationName: string, skills: T[]): T | null {
   const needle = invocationName.trim().toLowerCase();
   if (!needle) return null;
 
@@ -65,4 +65,3 @@ export function findEnabledSkillByName(invocationName: string, skills: SkillLike
   }
   return null;
 }
-

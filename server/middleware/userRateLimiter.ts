@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import { cache } from '../lib/cache';
 import { createAlert } from '../lib/alertManager';
 import { logger } from '../utils/logger';
+import { getSecureUserId } from '../lib/anonUserHelper';
 
 // Rate limit configurations for different endpoints
 const RATE_LIMIT_CONFIGS = {
@@ -98,12 +99,12 @@ function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRed
  * Combines user ID (if authenticated) with IP for uniqueness
  */
 function getRateLimitKey(req: Request): string {
-    const userId = (req as any).user?.id;
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const stableUserId = getSecureUserId(req);
 
-    // Authenticated users get their own bucket
-    if (userId) {
-        return `user_${userId}`;
+    // Authenticated or session-bound anonymous users get their own bucket.
+    if (stableUserId) {
+        return `user_${stableUserId}`;
     }
 
     // Anonymous users are limited by IP
@@ -193,8 +194,12 @@ export function createCustomRateLimiter(options: {
     }
 
     return async (req: Request, res: Response, next: NextFunction) => {
-        // Use user ID if authenticated, else IP
-        const userId = (req as any).user?.id;
+        // Match the main /api rate limiter behavior (skip in development).
+        const isDev = process.env.NODE_ENV === 'development';
+        if (isDev) return next();
+
+        // Use authenticated ID or session-bound anonymous ID if available, else IP.
+        const userId = getSecureUserId(req);
         const ip = req.ip || req.socket.remoteAddress || 'unknown';
         const key = userId ? `user_${userId}` : `ip_${ip}`;
 
