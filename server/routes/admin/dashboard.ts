@@ -3,6 +3,9 @@ import { storage } from "../../storage";
 import { llmGateway } from "../../lib/llmGateway";
 import { getRealtimeMetrics, getExtendedDashboardStats } from "../../services/realtimeMetrics";
 import { auditLog } from "../../services/auditLogger";
+import { dbRead } from "../../db";
+import { scheduledReports } from "@shared/schema";
+import { eq, sql } from "drizzle-orm";
 
 export const dashboardRouter = Router();
 
@@ -37,7 +40,8 @@ dashboardRouter.get("/", async (req, res) => {
             reports,
             settings,
             allUsers,
-            healthStatus
+            healthStatus,
+            scheduledReportsCount,
         ] = await Promise.all([
             storage.getUserStats(),
             storage.getPaymentStats(),
@@ -47,7 +51,13 @@ dashboardRouter.get("/", async (req, res) => {
             storage.getReports(),
             storage.getSettings(),
             storage.getAllUsers(),
-            llmGateway.healthCheck().catch(() => ({ xai: { available: false }, gemini: { available: false } }))
+            llmGateway.healthCheck().catch(() => ({ xai: { available: false }, gemini: { available: false } })),
+            dbRead
+              .select({ count: sql<number>`count(*)` })
+              .from(scheduledReports)
+              .where(eq(scheduledReports.isActive, "true"))
+              .then((rows) => Number(rows[0]?.count || 0))
+              .catch(() => 0),
         ]);
 
         const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
@@ -93,7 +103,7 @@ dashboardRouter.get("/", async (req, res) => {
             },
             reports: {
                 total: reports.length,
-                scheduled: 0 // scheduledReports not linked in storage.getReports()
+                scheduled: scheduledReportsCount
             },
             settings: {
                 total: settings.length,

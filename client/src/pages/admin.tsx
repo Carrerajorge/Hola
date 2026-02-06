@@ -80,6 +80,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/apiClient";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
@@ -353,11 +354,10 @@ function UsersSection() {
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await apiFetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
-        credentials: "include"
       });
       return res.json();
     },
@@ -369,7 +369,7 @@ function UsersSection() {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include" });
+      await apiFetch(`/api/admin/users/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -378,11 +378,10 @@ function UsersSection() {
 
   const createUserMutation = useMutation({
     mutationFn: async (userData: { email: string; password: string; plan: string; role: string }) => {
-      const res = await fetch("/api/admin/users", {
+      const res = await apiFetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(userData),
-        credentials: "include"
       });
       if (!res.ok) {
         const error = await res.json();
@@ -839,11 +838,10 @@ function ConversationsSection() {
 
   const flagMutation = useMutation({
     mutationFn: async ({ id, flagStatus }: { id: string; flagStatus: string | null }) => {
-      const res = await fetch(`/api/admin/conversations/${id}/flag`, {
+      const res = await apiFetch(`/api/admin/conversations/${id}/flag`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ flagStatus }),
-        credentials: "include"
       });
       return res.json();
     },
@@ -855,11 +853,10 @@ function ConversationsSection() {
 
   const addNoteMutation = useMutation({
     mutationFn: async ({ id, note }: { id: string; note: string }) => {
-      const res = await fetch(`/api/admin/conversations/${id}/notes`, {
+      const res = await apiFetch(`/api/admin/conversations/${id}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note }),
-        credentials: "include"
       });
       return res.json();
     },
@@ -881,11 +878,10 @@ function ConversationsSection() {
     searchTimeoutRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await fetch("/api/admin/conversations/search", {
+        const res = await apiFetch("/api/admin/conversations/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query }),
-          credentials: "include"
         });
         const data = await res.json();
         setSearchResults(data.results || []);
@@ -1550,7 +1546,7 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
+      await apiFetch("/api/admin/models/sync", { method: "POST" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
       refetch();
@@ -1561,11 +1557,10 @@ function AIModelsSection() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
-      const res = await fetch(`/api/admin/models/${id}`, {
+      const res = await apiFetch(`/api/admin/models/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
-        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to update model");
       return res.json();
@@ -1580,7 +1575,7 @@ function AIModelsSection() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      await apiFetch(`/api/admin/models/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
@@ -2013,11 +2008,10 @@ function InvoicesSection() {
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (invoice: any) => {
-      const res = await fetch("/api/admin/finance/invoices", {
+      const res = await apiFetch("/api/admin/finance/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(invoice),
-        credentials: "include"
       });
       return res.json();
     },
@@ -2158,11 +2152,10 @@ function DatabaseSection() {
   const executeQuery = async () => {
     setIsExecuting(true);
     try {
-      const res = await fetch("/api/admin/database/query", {
+      const res = await apiFetch("/api/admin/database/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: sqlQuery }),
-        credentials: "include"
       });
       const result = await res.json();
       setQueryResult(result);
@@ -2576,11 +2569,10 @@ function SecuritySection() {
 
   const createPolicyMutation = useMutation({
     mutationFn: async (policy: any) => {
-      const res = await fetch("/api/admin/security/policies", {
+      const res = await apiFetch("/api/admin/security/policies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(policy),
-        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to create policy");
       return res.json();
@@ -2595,11 +2587,10 @@ function SecuritySection() {
 
   const updatePolicyMutation = useMutation({
     mutationFn: async ({ id, ...data }: any) => {
-      const res = await fetch(`/api/admin/security/policies/${id}`, {
+      const res = await apiFetch(`/api/admin/security/policies/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to update policy");
       return res.json();
@@ -2613,7 +2604,7 @@ function SecuritySection() {
 
   const deletePolicyMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await apiFetch(`/api/admin/security/policies/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete policy");
     },
     onSuccess: () => {
@@ -2624,11 +2615,10 @@ function SecuritySection() {
 
   const togglePolicyMutation = useMutation({
     mutationFn: async ({ id, isEnabled }: { id: string; isEnabled: boolean }) => {
-      const res = await fetch(`/api/admin/security/policies/${id}/toggle`, {
+      const res = await apiFetch(`/api/admin/security/policies/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isEnabled }),
-        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to toggle policy");
       return res.json();
@@ -3286,14 +3276,44 @@ function SecuritySection() {
   );
 }
 
+const REPORT_TABS = new Set(["templates", "generate", "history", "scheduled"]);
+
 function ReportsSection() {
   const queryClient = useQueryClient();
+  const [location, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState("templates");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [reportFormat, setReportFormat] = useState<string>("json");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [historyPage, setHistoryPage] = useState(1);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<any>(null);
+  const [scheduleForm, setScheduleForm] = useState({
+    name: "",
+    type: "user_report",
+    schedule: "0 9 * * *",
+    format: "json",
+    recipients: "",
+    isActive: true,
+  });
+
+  useEffect(() => {
+    const url = new URL(location, window.location.origin);
+    const tab = url.searchParams.get("tab");
+    if (tab && REPORT_TABS.has(tab) && tab !== activeTab) {
+      setActiveTab(tab);
+    }
+  }, [location, activeTab]);
+
+  const setTabWithUrl = (tab: string) => {
+    setActiveTab(tab);
+    const url = new URL(location, window.location.origin);
+    url.searchParams.set("section", "reports");
+    url.searchParams.set("tab", tab);
+    const qs = url.searchParams.toString();
+    setLocation(qs ? `${url.pathname}?${qs}` : url.pathname);
+  };
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ["/api/admin/reports/templates"],
@@ -3314,29 +3334,173 @@ function ReportsSection() {
 
   const generateReportMutation = useMutation({
     mutationFn: async (data: { templateId: string; format: string; parameters?: any }) => {
-      const res = await fetch("/api/admin/reports/generate", {
+      const res = await apiFetch("/api/admin/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-        credentials: "include"
       });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
-      setActiveTab("history");
+      setTabWithUrl("history");
     }
   });
 
   const deleteReportMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/admin/reports/generated/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await apiFetch(`/api/admin/reports/generated/${id}`, { method: "DELETE" });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
     }
   });
+
+  const { data: scheduledReports = [], isLoading: scheduledLoading, refetch: refetchScheduled } = useQuery({
+    queryKey: ["/api/admin/reports/scheduled"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/reports/scheduled", { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeTab === "scheduled",
+    refetchInterval: 10000,
+  });
+
+  const createScheduledMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await apiFetch("/api/admin/reports/scheduled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      toast.success("Programación creada");
+      setShowScheduleDialog(false);
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "No se pudo crear la programación");
+    },
+  });
+
+  const patchScheduledMutation = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: any }) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "No se pudo actualizar la programación");
+    },
+  });
+
+  const deleteScheduledMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/scheduled"] });
+      toast.success("Programación eliminada");
+    },
+    onError: () => toast.error("No se pudo eliminar la programación"),
+  });
+
+  const runNowScheduledMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch(`/api/admin/reports/scheduled/${id}/run-now`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated", historyPage] });
+      toast.success("Reporte en cola");
+    },
+    onError: () => toast.error("No se pudo ejecutar ahora"),
+  });
+
+  const parseRecipients = (raw: string): string[] => {
+    return String(raw || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+
+  const resetScheduleForm = () => {
+    setScheduleForm({
+      name: "",
+      type: "user_report",
+      schedule: "0 9 * * *",
+      format: "json",
+      recipients: "",
+      isActive: true,
+    });
+  };
+
+  const openCreateSchedule = () => {
+    setEditingSchedule(null);
+    resetScheduleForm();
+    setShowScheduleDialog(true);
+  };
+
+  const openEditSchedule = (sched: any) => {
+    setEditingSchedule(sched);
+    setScheduleForm({
+      name: String(sched?.name || ""),
+      type: String(sched?.type || "user_report"),
+      schedule: String(sched?.schedule || "0 9 * * *"),
+      format: String(sched?.parameters?.format || "json"),
+      recipients: Array.isArray(sched?.recipients) ? sched.recipients.join(", ") : "",
+      isActive: String(sched?.isActive || "true") === "true",
+    });
+    setShowScheduleDialog(true);
+  };
+
+  const submitSchedule = () => {
+    const name = scheduleForm.name.trim();
+    const schedule = scheduleForm.schedule.trim();
+    if (!name || !scheduleForm.type || !schedule) {
+      toast.error("Completa nombre, tipo y horario");
+      return;
+    }
+
+    const payload = {
+      name,
+      type: scheduleForm.type,
+      schedule,
+      recipients: parseRecipients(scheduleForm.recipients),
+      isActive: scheduleForm.isActive,
+      format: scheduleForm.format,
+    };
+
+    if (editingSchedule?.id) {
+      patchScheduledMutation.mutate(
+        { id: String(editingSchedule.id), patch: payload },
+        {
+          onSuccess: () => {
+            setShowScheduleDialog(false);
+            setEditingSchedule(null);
+            toast.success("Programación actualizada");
+          },
+        }
+      );
+    } else {
+      createScheduledMutation.mutate(payload);
+    }
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -3370,7 +3534,7 @@ function ReportsSection() {
 
   const handleGenerateFromTemplate = (templateId: string) => {
     setSelectedTemplate(templateId);
-    setActiveTab("generate");
+    setTabWithUrl("generate");
   };
 
   const handleSubmitGenerate = () => {
@@ -3399,11 +3563,12 @@ function ReportsSection() {
         <h2 className="text-lg font-medium">Reports Center</h2>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={setTabWithUrl}>
         <TabsList>
           <TabsTrigger value="templates" data-testid="tab-templates">Templates</TabsTrigger>
           <TabsTrigger value="generate" data-testid="tab-generate">Generate Report</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
+          <TabsTrigger value="scheduled" data-testid="tab-scheduled">Scheduled</TabsTrigger>
         </TabsList>
 
         <TabsContent value="templates" className="mt-6">
@@ -3635,6 +3800,233 @@ function ReportsSection() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="scheduled" className="mt-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Scheduled Reports</CardTitle>
+                <CardDescription>
+                  Programa reportes automáticos. Formato de horario soportado: <span className="font-mono">m h * * *</span> (diario) o <span className="font-mono">m h * * d</span> (semanal).
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchScheduled()}
+                  data-testid="button-refresh-scheduled"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button size="sm" onClick={openCreateSchedule} data-testid="button-create-scheduled">
+                  <Plus className="h-4 w-4 mr-2" />
+                  New
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {scheduledLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : scheduledReports.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  No hay reportes programados. Crea el primero con "New".
+                </div>
+              ) : (
+                <div className="rounded-lg border overflow-hidden">
+                  <table className="w-full">
+                    <thead className="border-b bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Nombre</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Tipo</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Horario</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Activa</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Próxima</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Última</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Formato</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Destinatarios</th>
+                        <th className="px-4 py-3 text-right text-sm font-medium">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduledReports.map((sched: any) => (
+                        <tr key={sched.id} className="border-b last:border-0" data-testid={`row-scheduled-${sched.id}`}>
+                          <td className="px-4 py-3 text-sm font-medium">{sched.name}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <Badge variant={getTypeBadgeVariant(sched.type)} className="text-xs">
+                              {String(sched.type || "").replace(/_/g, " ")}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-sm font-mono text-muted-foreground">{sched.schedule}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <Switch
+                              checked={String(sched.isActive || "true") === "true"}
+                              onCheckedChange={(checked) =>
+                                patchScheduledMutation.mutate({ id: String(sched.id), patch: { isActive: checked } })
+                              }
+                              disabled={patchScheduledMutation.isPending}
+                              data-testid={`switch-scheduled-active-${sched.id}`}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {sched.nextRunAt ? format(new Date(sched.nextRunAt), "MMM dd, yyyy HH:mm") : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {sched.lastRunAt ? format(new Date(sched.lastRunAt), "MMM dd, yyyy HH:mm") : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-sm uppercase">{sched.parameters?.format || "json"}</td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {Array.isArray(sched.recipients) && sched.recipients.length > 0
+                              ? sched.recipients.join(", ")
+                              : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2"
+                                onClick={() => runNowScheduledMutation.mutate(String(sched.id))}
+                                disabled={runNowScheduledMutation.isPending}
+                                data-testid={`button-scheduled-run-now-${sched.id}`}
+                              >
+                                <Play className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2"
+                                onClick={() => openEditSchedule(sched)}
+                                data-testid={`button-scheduled-edit-${sched.id}`}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-destructive hover:text-destructive"
+                                onClick={() => deleteScheduledMutation.mutate(String(sched.id))}
+                                disabled={deleteScheduledMutation.isPending}
+                                data-testid={`button-scheduled-delete-${sched.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Dialog
+            open={showScheduleDialog}
+            onOpenChange={(nextOpen) => {
+              setShowScheduleDialog(nextOpen);
+              if (!nextOpen) setEditingSchedule(null);
+            }}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{editingSchedule ? "Editar programación" : "Nueva programación"}</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>Nombre</Label>
+                  <Input
+                    value={scheduleForm.name}
+                    onChange={(e) => setScheduleForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="Reporte diario de usuarios"
+                    data-testid="input-scheduled-name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Tipo</Label>
+                  <Select value={scheduleForm.type} onValueChange={(v) => setScheduleForm((p) => ({ ...p, type: v }))}>
+                    <SelectTrigger data-testid="select-scheduled-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user_report">Users</SelectItem>
+                      <SelectItem value="ai_models_report">AI Models</SelectItem>
+                      <SelectItem value="security_report">Security Audit</SelectItem>
+                      <SelectItem value="financial_report">Financial Summary</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Horario (cron)</Label>
+                  <Input
+                    value={scheduleForm.schedule}
+                    onChange={(e) => setScheduleForm((p) => ({ ...p, schedule: e.target.value }))}
+                    placeholder="0 9 * * *"
+                    data-testid="input-scheduled-cron"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Ejemplos: <span className="font-mono">0 9 * * *</span> (diario 09:00), <span className="font-mono">30 8 * * 1</span> (lunes 08:30).
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Formato</Label>
+                  <Select value={scheduleForm.format} onValueChange={(v) => setScheduleForm((p) => ({ ...p, format: v }))}>
+                    <SelectTrigger data-testid="select-scheduled-format">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="json">JSON</SelectItem>
+                      <SelectItem value="csv">CSV</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Destinatarios (emails, separados por coma)</Label>
+                  <Input
+                    value={scheduleForm.recipients}
+                    onChange={(e) => setScheduleForm((p) => ({ ...p, recipients: e.target.value }))}
+                    placeholder="ops@empresa.com, admin@empresa.com"
+                    data-testid="input-scheduled-recipients"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Activa</span>
+                    <span className="text-xs text-muted-foreground">Si está desactivada, no se ejecutará.</span>
+                  </div>
+                  <Switch
+                    checked={scheduleForm.isActive}
+                    onCheckedChange={(checked) => setScheduleForm((p) => ({ ...p, isActive: checked }))}
+                    data-testid="switch-scheduled-active"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowScheduleDialog(false)} data-testid="button-scheduled-cancel">
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={submitSchedule}
+                  disabled={createScheduledMutation.isPending || patchScheduledMutation.isPending}
+                  data-testid="button-scheduled-save"
+                >
+                  Guardar
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -3691,11 +4083,10 @@ function SettingsSection() {
 
   const updateSettingMutation = useMutation({
     mutationFn: async ({ key, value }: { key: string; value: any }) => {
-      const res = await fetch(`/api/admin/settings/${key}`, {
+      const res = await apiFetch(`/api/admin/settings/${key}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value }),
-        credentials: "include"
       });
       return res.json();
     },
@@ -3710,11 +4101,10 @@ function SettingsSection() {
 
   const bulkUpdateMutation = useMutation({
     mutationFn: async (settings: { key: string; value: any }[]) => {
-      const res = await fetch("/api/admin/settings/bulk", {
+      const res = await apiFetch("/api/admin/settings/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings }),
-        credentials: "include"
       });
       return res.json();
     },
@@ -3730,10 +4120,9 @@ function SettingsSection() {
 
   const resetSettingMutation = useMutation({
     mutationFn: async (key: string) => {
-      const res = await fetch(`/api/admin/settings/reset/${key}`, {
+      const res = await apiFetch(`/api/admin/settings/reset/${key}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include"
       });
       return res.json();
     },
@@ -4193,11 +4582,10 @@ function AgenticEngineSection() {
     if (!analyzerPrompt.trim()) return;
     setAnalyzing(true);
     try {
-      const res = await fetch("/api/admin/agent/complexity/analyze", {
+      const res = await apiFetch("/api/admin/agent/complexity/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: analyzerPrompt }),
-        credentials: "include"
       });
       const result = await res.json();
       setAnalysisResult(result);
@@ -4688,7 +5076,7 @@ function ExcelManagerSection() {
 
   const saveMutation = useMutation({
     mutationFn: async ({ id, name, data }: { id: string; name: string; data: any[][] }) => {
-      const res = await fetch('/api/admin/excel/save', {
+      const res = await apiFetch('/api/admin/excel/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, name, data })
@@ -4706,7 +5094,7 @@ function ExcelManagerSection() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/excel/${id}`, { method: 'DELETE', credentials: 'include' });
+      await apiFetch(`/api/admin/excel/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/excel/list"] });
@@ -4953,9 +5341,18 @@ function ExcelManagerSection() {
 }
 
 export default function AdminPage() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   
+  // Keep `activeSection` in sync with `?section=` deep-links.
+  useEffect(() => {
+    const url = new URL(location, window.location.origin);
+    const section = url.searchParams.get("section");
+    if (section && navItems.some((n) => n.id === section) && section !== activeSection) {
+      setActiveSection(section as AdminSection);
+    }
+  }, [location, activeSection]);
+
   // Security: Verify admin role
   const { data: currentUser, isLoading: isLoadingUser } = useQuery({
     queryKey: ["/api/auth/user"],
@@ -4968,7 +5365,9 @@ export default function AdminPage() {
 
   // Redirect non-admin users
   useEffect(() => {
-    if (!isLoadingUser && currentUser && currentUser.role !== "admin") {
+    const role = String((currentUser as any)?.role || "");
+    const isAdmin = role === "admin" || role === "superadmin";
+    if (!isLoadingUser && currentUser && !isAdmin) {
       console.warn("[Admin] Access denied - user is not admin:", currentUser.email);
       setLocation("/");
     }
@@ -4984,7 +5383,7 @@ export default function AdminPage() {
   }
 
   // Block access if not admin
-  if (!currentUser || currentUser.role !== "admin") {
+  if (!currentUser || (currentUser.role !== "admin" && currentUser.role !== "superadmin")) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
         <Shield className="h-16 w-16 text-red-500" />
@@ -5058,7 +5457,14 @@ export default function AdminPage() {
                   variant={activeSection === item.id ? "secondary" : "ghost"}
                   size="sm"
                   className="w-full justify-start gap-2 shrink-0"
-                  onClick={() => setActiveSection(item.id)}
+                  onClick={() => {
+                    setActiveSection(item.id);
+                    const url = new URL(location, window.location.origin);
+                    url.searchParams.set("section", item.id);
+                    if (item.id !== "reports") url.searchParams.delete("tab");
+                    const qs = url.searchParams.toString();
+                    setLocation(qs ? `${url.pathname}?${qs}` : url.pathname);
+                  }}
                   data-testid={`nav-${item.id}`}
                 >
                   <item.icon className="h-4 w-4 shrink-0" />

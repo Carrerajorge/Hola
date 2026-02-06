@@ -3,11 +3,13 @@ import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { db } from "../../db";
 import { users, excelDocuments } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 // SECURITY: Admin email moved to environment variable
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_ROLES = new Set(["admin", "superadmin"]);
+const DEBUG_ADMIN_AUTH = String(process.env.DEBUG_ADMIN_AUTH || "").trim().toLowerCase() === "true";
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
@@ -16,7 +18,6 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         
         // Get user info from multiple possible sources
         const userEmail = userReq.user?.claims?.email || 
-                         userReq.user?.email ||
                          session?.passport?.user?.claims?.email || 
                          session?.passport?.user?.email ||
                          (req as any).user?.profile?.emails?.[0]?.value;
@@ -27,17 +28,21 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
                       session?.passport?.user?.claims?.sub ||
                       session?.passport?.user?.id;
 
-        console.log("[Admin] Auth check:", { 
-            userEmail, 
-            userId, 
-            hasUser: !!userReq.user,
-            hasSession: !!session,
-            sessionKeys: session ? Object.keys(session) : []
-        });
+        const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+        const normalizedUserId = String(userId || "").trim();
+
+        if (DEBUG_ADMIN_AUTH) {
+            console.log("[Admin] Auth check:", { 
+                userEmail: normalizedEmail || null, 
+                userId: normalizedUserId || null, 
+                hasUser: !!userReq.user,
+                hasSession: !!session,
+            });
+        }
 
         // If no user info at all, reject
-        if (!userEmail && !userId) {
-            console.log("[Admin] No user info found in request");
+        if (!normalizedEmail && !normalizedUserId) {
+            if (DEBUG_ADMIN_AUTH) console.log("[Admin] No user info found in request");
             return res.status(401).json({ error: "Authentication required" });
         }
 
@@ -45,44 +50,43 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         let isAdmin = false;
 
         // Check against env-configured admin email (if set)
-        if (ADMIN_EMAIL && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        if (ADMIN_EMAIL && normalizedEmail && normalizedEmail === ADMIN_EMAIL) {
             isAdmin = true;
-            console.log("[Admin] Matched ADMIN_EMAIL env var");
+            if (DEBUG_ADMIN_AUTH) console.log("[Admin] Matched ADMIN_EMAIL env var");
         }
 
         // Verify against database role - check by userId OR email
         if (!isAdmin) {
             let dbUser = null;
             
-            if (userId) {
+            if (normalizedUserId) {
                 const result = await db.select({ role: users.role, email: users.email })
-                    .from(users).where(eq(users.id, userId));
+                    .from(users).where(eq(users.id, normalizedUserId)).limit(1);
                 dbUser = result[0];
             }
             
             // Fallback: check by email if userId didn't find admin
-            if (!dbUser?.role && userEmail) {
-                const result = await db.select({ role: users.role, email: users.email, id: users.id })
-                    .from(users).where(eq(users.email, userEmail));
+            if (!dbUser?.role && normalizedEmail) {
+                const result = await db
+                    .select({ role: users.role, email: users.email, id: users.id })
+                    .from(users)
+                    .where(sql`lower(${users.email}) = ${normalizedEmail}`)
+                    .limit(1);
                 dbUser = result[0];
-                
-                // Also try case-insensitive search
-                if (!dbUser) {
-                    const allUsers = await db.select({ role: users.role, email: users.email, id: users.id })
-                        .from(users);
-                    dbUser = allUsers.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
-                }
             }
             
-            isAdmin = dbUser?.role === "admin";
-            console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
+            const roleNorm = String(dbUser?.role || "").toLowerCase();
+            isAdmin = ADMIN_ROLES.has(roleNorm);
+            if (DEBUG_ADMIN_AUTH) {
+                console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
+            }
         }
 
         if (!isAdmin) {
             await storage.createAuditLog({
                 action: "admin_access_denied",
                 resource: "admin_panel",
-                details: { email: userEmail, userId, path: req.path }
+                details: { email: normalizedEmail || userEmail, userId: normalizedUserId || userId, path: req.path }
             });
             return res.status(403).json({ error: "Admin access restricted" });
         }

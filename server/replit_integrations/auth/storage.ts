@@ -12,7 +12,7 @@
 
 import { users, type User } from "@shared/schema";
 import { db } from "../../db";
-import { eq, or } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export type UpsertUser = {
   id: string;
@@ -34,6 +34,33 @@ export interface IAuthStorage {
   updateUserLogin(id: string, loginData: { ipAddress?: string | null; userAgent?: string | null }): Promise<void>;
 }
 
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_ROLES = new Set(["admin", "superadmin"]);
+const ALLOWED_ROLES = new Set(["user", "admin", "superadmin", "editor", "viewer", "api_only"]);
+
+function normalizeEmail(email: unknown): string | null {
+  const raw = String(email || "").trim();
+  if (!raw) return null;
+  return raw.toLowerCase();
+}
+
+function computeNextRole(opts: {
+  existingRole?: string | null;
+  providedRole?: string | null;
+  email?: string | null;
+}): string | null {
+  const existingNorm = String(opts.existingRole || "").trim().toLowerCase();
+  if (ADMIN_ROLES.has(existingNorm)) return existingNorm;
+
+  const emailNorm = normalizeEmail(opts.email);
+  if (ADMIN_EMAIL && emailNorm && emailNorm === ADMIN_EMAIL) return "admin";
+
+  const providedNorm = String(opts.providedRole || "").trim().toLowerCase();
+  if (providedNorm && ALLOWED_ROLES.has(providedNorm)) return providedNorm;
+
+  return existingNorm || null;
+}
+
 class AuthStorage implements IAuthStorage {
   async getUser(id: string): Promise<User | undefined> {
     try {
@@ -47,7 +74,14 @@ class AuthStorage implements IAuthStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
-      const [user] = await db.select().from(users).where(eq(users.email, email));
+      const normalizedEmail = normalizeEmail(email);
+      if (!normalizedEmail) return undefined;
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.email}) = ${normalizedEmail}`)
+        .limit(1);
       return user;
     } catch (error: any) {
       console.error(`[AuthStorage] getUserByEmail failed for email=${email}:`, error.message);
@@ -63,6 +97,12 @@ class AuthStorage implements IAuthStorage {
       const existingById = await this.getUser(userData.id);
       
       if (existingById) {
+        const nextRole = computeNextRole({
+          existingRole: existingById.role,
+          providedRole: userData.role,
+          email: userData.email ?? existingById.email,
+        });
+
         const [updatedUser] = await db
           .update(users)
           .set({
@@ -74,6 +114,7 @@ class AuthStorage implements IAuthStorage {
             profileImageUrl: userData.profileImageUrl ?? existingById.profileImageUrl,
             authProvider: userData.authProvider ?? existingById.authProvider,
             emailVerified: userData.emailVerified ?? existingById.emailVerified,
+            role: nextRole ?? existingById.role,
             updatedAt: new Date(),
           })
           .where(eq(users.id, userData.id))
@@ -94,6 +135,12 @@ class AuthStorage implements IAuthStorage {
       if (userData.email) {
         const existingByEmail = await this.getUserByEmail(userData.email);
         if (existingByEmail) {
+          const nextRole = computeNextRole({
+            existingRole: existingByEmail.role,
+            providedRole: userData.role,
+            email: userData.email ?? existingByEmail.email,
+          });
+
           const [updatedUser] = await db
             .update(users)
             .set({
@@ -105,9 +152,10 @@ class AuthStorage implements IAuthStorage {
               profileImageUrl: userData.profileImageUrl ?? existingByEmail.profileImageUrl,
               authProvider: userData.authProvider ?? existingByEmail.authProvider,
               emailVerified: userData.emailVerified ?? existingByEmail.emailVerified,
+              role: nextRole ?? existingByEmail.role,
               updatedAt: new Date(),
             })
-            .where(eq(users.email, userData.email))
+            .where(sql`lower(${users.email}) = ${normalizeEmail(userData.email)}`)
             .returning();
           
           console.log(JSON.stringify({
@@ -136,7 +184,7 @@ class AuthStorage implements IAuthStorage {
           profileImageUrl: userData.profileImageUrl,
           authProvider: userData.authProvider ?? "email",
           emailVerified: userData.emailVerified ?? "false",
-          role: "user",
+          role: computeNextRole({ existingRole: null, providedRole: userData.role, email: userData.email }) || "user",
           plan: "free",
           createdAt: new Date(),
           updatedAt: new Date(),

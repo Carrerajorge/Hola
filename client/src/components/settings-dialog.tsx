@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,6 +43,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
@@ -1168,11 +1171,50 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
+  const [showTrustedDevicesDialog, setShowTrustedDevicesDialog] = useState(false);
 
   const { settings, updateSetting } = useSettingsContext();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+  const isAuthenticatedUser = !!user && (user as any)?.isAnonymous !== true;
+
+  const {
+    data: sessionsData,
+    isLoading: isLoadingSessions,
+    refetch: refetchSessions,
+  } = useQuery({
+    queryKey: ["/api/auth/sessions"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/auth/sessions");
+      if (!res.ok) throw new Error("Failed to fetch sessions");
+      return res.json();
+    },
+    enabled: open && activeSection === "security" && isAuthenticatedUser,
+    refetchInterval: 30000,
+  });
+
+  const sessions = (sessionsData as any)?.sessions || [];
+
+  const revokeSessionMutation = useMutation({
+    mutationFn: async (sid: string) => {
+      const res = await apiFetch("/api/auth/sessions/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sid }),
+      });
+      if (!res.ok) throw new Error("Failed to revoke session");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/sessions"] });
+      toast({ title: "Sesión revocada", description: "El dispositivo fue desconectado." });
+    },
+  });
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -1198,10 +1240,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     toast({ title: "Sesión cerrada", description: "Has cerrado sesión correctamente." });
   };
 
-  const handleLogoutAll = () => {
-    logout();
+  const handleLogoutAll = async () => {
+    try {
+      await apiFetch("/api/auth/logout-all", { method: "POST" });
+    } catch {
+      // Ignore and proceed with local logout.
+    }
+    await logout();
     onOpenChange(false);
-    toast({ title: "Todas las sesiones cerradas", description: "Se han cerrado todas las sesiones activas." });
     setShowLogoutAllConfirm(false);
   };
 
@@ -1803,7 +1849,22 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               ILIAGPT puede programarse para ejecutarse nuevamente después de completar una tarea.
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
-            <Button variant="outline" data-testid="button-manage-schedules">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!isAdmin) {
+                  toast({
+                    title: "Acceso restringido",
+                    description: "Solo administradores pueden gestionar programaciones.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                onOpenChange(false);
+                setLocation("/admin?section=reports&tab=scheduled");
+              }}
+              data-testid="button-manage-schedules"
+            >
               Administrar
             </Button>
           </div>
@@ -1850,11 +1911,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <button
                 className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                onClick={() => {
+                  if (!isAuthenticatedUser) {
+                    toast({
+                      title: "Inicia sesión",
+                      description: "Necesitas iniciar sesión para ver tus dispositivos.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  setShowTrustedDevicesDialog(true);
+                  refetchSessions();
+                }}
                 data-testid="security-trusted-devices"
               >
                 <span className="text-sm">Dispositivos de confianza</span>
                 <span className="text-sm text-muted-foreground flex items-center gap-1">
-                  1 <ChevronRight className="h-4 w-4" />
+                  {isLoadingSessions ? "..." : sessions.length} <ChevronRight className="h-4 w-4" />
                 </span>
               </button>
 
@@ -2123,6 +2196,80 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showTrustedDevicesDialog} onOpenChange={setShowTrustedDevicesDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Dispositivos de confianza</DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Lista de sesiones activas</DialogDescription>
+            </VisuallyHidden>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Sesiones activas en dispositivos donde has iniciado sesión.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetchSessions()}
+              data-testid="button-refresh-trusted-devices"
+            >
+              <RefreshCw className={cn("h-4 w-4", isLoadingSessions ? "animate-spin" : "")} />
+            </Button>
+          </div>
+
+          <Separator />
+
+          {isLoadingSessions ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : sessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              No hay otras sesiones activas.
+            </p>
+          ) : (
+            <div className="space-y-3 max-h-[360px] overflow-auto pr-2">
+              {sessions.map((s: any) => {
+                const ua = String(s?.device?.userAgent || "Dispositivo");
+                const ip = s?.device?.ipAddress ? String(s.device.ipAddress) : "N/A";
+                const lastSeen = s?.device?.lastSeenAtMs
+                  ? new Date(Number(s.device.lastSeenAtMs)).toLocaleString()
+                  : (s?.expire ? new Date(String(s.expire)).toLocaleString() : "N/A");
+                return (
+                  <div key={s.sid} className="border rounded-lg p-3 flex items-start justify-between gap-3" data-testid={`trusted-device-${s.sid}`}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{ua}</span>
+                        {s.isCurrent && (
+                          <Badge variant="outline" className="text-xs">Este dispositivo</Badge>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        IP: {ip}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Última actividad: {lastSeen}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!!s.isCurrent || revokeSessionMutation.isPending}
+                      onClick={() => revokeSessionMutation.mutate(String(s.sid))}
+                      data-testid={`button-revoke-session-${s.sid}`}
+                    >
+                      Revocar
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

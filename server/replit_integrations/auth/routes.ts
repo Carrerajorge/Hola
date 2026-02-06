@@ -2,10 +2,13 @@ import type { Express } from "express";
 import { authStorage } from "./storage";
 import { isAuthenticated, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
+import { db } from "../../db";
+import { sessions as sessionsTable } from "@shared/schema";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 import { loginSchema, registerSchema, validate } from "../../validation/schemas";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
 import { sendMagicLinkEmail } from "../../services/genericEmailService";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -20,6 +23,52 @@ function sanitizeUser(user: any): any {
   if (!user) return user;
   const { password, ...safeUser } = user;
   return safeUser;
+}
+
+function getEffectiveUserId(req: any): string | null {
+  const sessionUser = req.session?.passport?.user;
+  const effectiveUser = req.user || sessionUser;
+  return (
+    effectiveUser?.claims?.sub ||
+    effectiveUser?.id ||
+    req.session?.authUserId ||
+    null
+  );
+}
+
+function sessionBelongsToUser(sess: any, userId: string): boolean {
+  if (!sess || !userId) return false;
+  if (String(sess.authUserId || "") === userId) return true;
+  const sub = sess?.passport?.user?.claims?.sub;
+  if (String(sub || "") === userId) return true;
+  const id = sess?.passport?.user?.id;
+  if (String(id || "") === userId) return true;
+  return false;
+}
+
+function updateSessionDevice(req: any): boolean {
+  const sess = req.session;
+  if (!sess) return false;
+
+  const now = Date.now();
+  const previousLastSeen = sess.device?.lastSeenAtMs;
+  // Avoid a DB write on every page load/render cycle; update at most once per minute.
+  if (typeof previousLastSeen === "number" && now - previousLastSeen < 60_000) {
+    return false;
+  }
+
+  const createdAtMs =
+    typeof sess.device?.createdAtMs === "number" ? sess.device.createdAtMs : now;
+
+  sess.device = {
+    ...(sess.device || {}),
+    createdAtMs,
+    lastSeenAtMs: now,
+    userAgent: req.headers["user-agent"] || null,
+    ipAddress: req.ip || req.socket?.remoteAddress || null,
+  };
+
+  return true;
 }
 
 // Register auth-specific routes
@@ -354,10 +403,118 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "User not found" });
       }
 
+      // Update device metadata for Security -> Trusted devices.
+      if (updateSessionDevice(req)) {
+        req.session?.save?.(() => undefined);
+      }
+
       res.json(sanitizeUser(user));
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // List active sessions/devices for the current user.
+  app.get("/api/auth/sessions", async (req: any, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const limitRaw = parseInt(String(req.query.limit || "25"), 10);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 25;
+
+      const rows = await db
+        .select({
+          sid: sessionsTable.sid,
+          sess: sessionsTable.sess,
+          expire: sessionsTable.expire,
+        })
+        .from(sessionsTable)
+        .where(sql`(
+          ${sessionsTable.sess}->>'authUserId' = ${userId}
+          OR ${sessionsTable.sess}->'passport'->'user'->'claims'->>'sub' = ${userId}
+          OR ${sessionsTable.sess}->'passport'->'user'->>'id' = ${userId}
+        )`)
+        .orderBy(desc(sessionsTable.expire))
+        .limit(limit);
+
+      const currentSid = req.sessionID;
+      const sessions = rows.map((row) => {
+        const sess = row.sess as any;
+        const device = sess?.device || {};
+        return {
+          sid: row.sid,
+          expire: row.expire,
+          isCurrent: row.sid === currentSid,
+          device: {
+            createdAtMs: device?.createdAtMs ?? null,
+            lastSeenAtMs: device?.lastSeenAtMs ?? null,
+            userAgent: device?.userAgent ?? null,
+            ipAddress: device?.ipAddress ?? null,
+          },
+        };
+      });
+
+      res.json({ sessions });
+    } catch (error) {
+      console.error("[Auth] Failed to list sessions:", error);
+      res.status(500).json({ message: "Failed to list sessions" });
+    }
+  });
+
+  // Revoke a specific session by sid (must belong to the current user).
+  app.post("/api/auth/sessions/revoke", async (req: any, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const sid = String(req.body?.sid || "").trim();
+      if (!sid) return res.status(400).json({ message: "sid is required" });
+
+      const [row] = await db
+        .select({ sid: sessionsTable.sid, sess: sessionsTable.sess })
+        .from(sessionsTable)
+        .where(eq(sessionsTable.sid, sid))
+        .limit(1);
+
+      if (!row) return res.status(404).json({ message: "Session not found" });
+      if (!sessionBelongsToUser(row.sess, userId)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      await db.delete(sessionsTable).where(eq(sessionsTable.sid, sid));
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[Auth] Failed to revoke session:", error);
+      res.status(500).json({ message: "Failed to revoke session" });
+    }
+  });
+
+  // Logout everywhere: revoke all sessions belonging to the current user.
+  app.post("/api/auth/logout-all", async (req: any, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+      const rows = await db
+        .select({ sid: sessionsTable.sid })
+        .from(sessionsTable)
+        .where(sql`(
+          ${sessionsTable.sess}->>'authUserId' = ${userId}
+          OR ${sessionsTable.sess}->'passport'->'user'->'claims'->>'sub' = ${userId}
+          OR ${sessionsTable.sess}->'passport'->'user'->>'id' = ${userId}
+        )`);
+
+      const sids = rows.map((r) => r.sid).filter(Boolean);
+      if (sids.length > 0) {
+        await db.delete(sessionsTable).where(inArray(sessionsTable.sid, sids));
+      }
+
+      res.json({ success: true, count: sids.length });
+    } catch (error) {
+      console.error("[Auth] Failed to logout-all:", error);
+      res.status(500).json({ message: "Failed to logout all sessions" });
     }
   });
 

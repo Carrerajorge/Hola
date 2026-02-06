@@ -1355,7 +1355,7 @@ const shellCommandTool: ToolDefinition = {
     }
 
     const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
+      return spawn("/bin/bash", ["-lc", cmd], {
         cwd: workspaceDir,
         env: { ...process.env, HOME: workspaceDir },
         shell: false,
@@ -1471,7 +1471,7 @@ const shellCommandTool: ToolDefinition = {
         context.signal.addEventListener("abort", abortHandler, { once: true });
       }
 
-      child.on("close", (code, signal) => {
+      child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
@@ -1514,7 +1514,7 @@ const shellCommandTool: ToolDefinition = {
         });
       });
 
-      child.on("error", (err) => {
+      child.on("error", (err: Error) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
