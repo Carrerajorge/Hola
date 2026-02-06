@@ -37,6 +37,7 @@ import {
   Key,
   AlertTriangle,
   Download,
+  Copy,
   RefreshCw,
   Trash2,
   Edit,
@@ -121,6 +122,30 @@ function DashboardSection() {
 
   const d = data || {};
 
+  const formatMoney = (value: any, currency?: string | null) => {
+    const cur = String(currency || "").toUpperCase().trim();
+    const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+
+    if (!Number.isFinite(n)) {
+      return cur ? `${String(value ?? "-")} ${cur}` : String(value ?? "-");
+    }
+
+    if (cur) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(n);
+      } catch {
+        // Ignore invalid currency codes and fall back.
+      }
+    }
+
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const paymentsCurrencies: string[] =
+    d.payments?.currencies || (d.payments?.byCurrency ? Object.keys(d.payments.byCurrency) : []);
+  const paymentsPrimaryCurrency: string | null =
+    d.payments?.primaryCurrency || (paymentsCurrencies.length === 1 ? paymentsCurrencies[0] : null);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -172,9 +197,30 @@ function DashboardSection() {
             </div>
             <span className="text-sm font-medium">Payments</span>
           </div>
-          <p className="text-2xl font-bold">€{parseFloat(d.payments?.total || "0").toLocaleString()}</p>
+          {paymentsPrimaryCurrency ? (
+            <p className="text-2xl font-bold tabular-nums">
+              {formatMoney(d.payments?.total || "0", paymentsPrimaryCurrency)}
+            </p>
+          ) : paymentsCurrencies.length > 1 && d.payments?.byCurrency ? (
+            <div className="space-y-0.5">
+              {paymentsCurrencies.slice(0, 2).map((cur) => (
+                <p key={cur} className="text-lg font-bold tabular-nums">
+                  {cur} {formatMoney(d.payments.byCurrency?.[cur]?.total || "0", cur)}
+                </p>
+              ))}
+              {paymentsCurrencies.length > 2 && (
+                <p className="text-xs text-muted-foreground">+{paymentsCurrencies.length - 2} monedas</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-2xl font-bold tabular-nums">{formatMoney(d.payments?.total || "0", "EUR")}</p>
+          )}
           <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-            <span>€{parseFloat(d.payments?.thisMonth || "0").toLocaleString()} este mes</span>
+            <span>
+              {paymentsPrimaryCurrency
+                ? `${formatMoney(d.payments?.thisMonth || "0", paymentsPrimaryCurrency)} este mes`
+                : "Ver desglose en Payments"}
+            </span>
             <span>{d.payments?.count || 0} transacciones</span>
           </div>
         </div>
@@ -1926,16 +1972,78 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [status, setStatus] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
-  const { data: paymentsData, isLoading } = useQuery({
-    queryKey: ["/api/admin/finance/payments"],
+  useEffect(() => {
+    setPage(1);
+  }, [limit, status, search, dateFrom, dateTo]);
+
+  const buildPaymentsParams = () => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+    if (status && status !== "all") params.set("status", status);
+    if (search.trim()) params.set("search", search.trim());
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return params;
+  };
+
+  const formatMoney = (value: any, currency?: string | null) => {
+    const cur = String(currency || "").toUpperCase().trim();
+    const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+
+    if (!Number.isFinite(n)) {
+      return cur ? `${String(value ?? "-")} ${cur}` : String(value ?? "-");
+    }
+
+    if (cur) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(n);
+      } catch {
+        // Ignore invalid currency codes and fall back.
+      }
+    }
+
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copiado al portapapeles");
+    } catch {
+      toast.error("No se pudo copiar");
+    }
+  };
+
+  const {
+    data: paymentsData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: ["/api/admin/finance/payments", page, limit, status, search, dateFrom, dateTo],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments", { credentials: "include" });
+      const params = buildPaymentsParams();
+      const res = await fetch(`/api/admin/finance/payments?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to fetch payments");
+      }
       return res.json();
     }
   });
-  
-  const payments = paymentsData?.payments || paymentsData || [];
+
+  const payments = paymentsData?.payments || [];
+  const pagination = paymentsData?.pagination || { page, limit, total: payments.length, totalPages: 1 };
 
   const { data: stats } = useQuery({
     queryKey: ["/api/admin/finance/payments/stats"],
@@ -1945,53 +2053,300 @@ function PaymentsSection() {
     }
   });
 
+  const syncStripeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/finance/payments/sync-stripe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 100 }),
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || "Stripe sync failed");
+      }
+      return body;
+    },
+    onSuccess: (data) => {
+      toast.success(`Stripe sincronizado: ${data?.synced || 0} pagos`);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Stripe sync failed"));
+    }
+  });
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar los pagos</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
+  const statsCurrencies: string[] = stats?.currencies || (stats?.byCurrency ? Object.keys(stats.byCurrency) : []);
+  const primaryCurrency: string | null =
+    stats?.primaryCurrency || (statsCurrencies.length === 1 ? statsCurrencies[0] : null);
+
+  const renderStatsAmount = (key: "total" | "thisMonth" | "pendingTotal") => {
+    if (!stats) return "-";
+
+    if (primaryCurrency) {
+      return (
+        <p className="text-xl font-semibold tabular-nums" data-testid={key === "total" ? "text-total-payments" : undefined}>
+          {formatMoney(stats?.[key] || "0", primaryCurrency)}
+        </p>
+      );
+    }
+
+    if (statsCurrencies.length > 1 && stats?.byCurrency) {
+      return (
+        <div className="space-y-0.5">
+          {statsCurrencies.slice(0, 3).map((cur) => (
+            <p key={cur} className="text-sm font-semibold tabular-nums">
+              {cur} {formatMoney(stats.byCurrency?.[cur]?.[key] || "0", cur)}
+            </p>
+          ))}
+          {statsCurrencies.length > 3 && (
+            <p className="text-xs text-muted-foreground">+{statsCurrencies.length - 3} monedas</p>
+          )}
+        </div>
+      );
+    }
+
+    return <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.[key] || "0", "EUR")}</p>;
+  };
+
+  const exportParams = buildPaymentsParams();
+  exportParams.set("format", "csv");
+  const exportUrl = `/api/admin/finance/payments/export?${exportParams.toString()}`;
+
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Payments</h2>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-medium">Payments</h2>
+          <p className="text-xs text-muted-foreground">
+            Vista basada en BD. Usa sincronizacion con Stripe para backfill si faltan registros.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            data-testid="button-refresh-payments"
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
+            Actualizar
+          </Button>
+          <Button variant="outline" size="sm" asChild data-testid="button-export-payments">
+            <a href={exportUrl} target="_blank" rel="noreferrer">
+              <Download className="h-4 w-4 mr-2" />
+              Exportar CSV
+            </a>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => syncStripeMutation.mutate()}
+            disabled={syncStripeMutation.isPending}
+            data-testid="button-sync-stripe"
+          >
+            <RotateCcw className={cn("h-4 w-4 mr-2", syncStripeMutation.isPending && "animate-spin")} />
+            Sincronizar Stripe
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
-          <p className="text-xl font-semibold" data-testid="text-total-payments">€{stats?.total || "0"}</p>
+          {renderStatsAmount("total")}
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground mb-1">Este mes</p>
-          <p className="text-xl font-semibold">€{stats?.thisMonth || "0"}</p>
+          {renderStatsAmount("thisMonth")}
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
-          <p className="text-xl font-semibold">{stats?.count || 0}</p>
+          <p className="text-xl font-semibold tabular-nums">{stats?.count || 0}</p>
+        </div>
+        <div className="rounded-lg border p-4">
+          <p className="text-xs text-muted-foreground mb-1">Pendientes</p>
+          {renderStatsAmount("pendingTotal")}
+          <p className="text-xs text-muted-foreground mt-1">{stats?.pendingCount || 0} pagos</p>
+        </div>
+        <div className="rounded-lg border p-4">
+          <p className="text-xs text-muted-foreground mb-1">Tasa de exito</p>
+          <p className="text-xl font-semibold tabular-nums">{stats?.successRate ?? 0}%</p>
+          <p className="text-xs text-muted-foreground mt-1">{stats?.failedCount || 0} fallidos</p>
         </div>
       </div>
+
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por email, userId, Stripe ID..."
+              className="pl-9 h-9"
+              data-testid="input-search-payments"
+            />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-[160px]" data-testid="select-payment-status">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="completed">Completados</SelectItem>
+                <SelectItem value="pending">Pendientes</SelectItem>
+                <SelectItem value="failed">Fallidos</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-from"
+            />
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-to"
+            />
+            <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
+              <SelectTrigger className="h-9 w-[110px]" data-testid="select-payment-limit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">20 / pag</SelectItem>
+                <SelectItem value="50">50 / pag</SelectItem>
+                <SelectItem value="100">100 / pag</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearch("");
+                setStatus("all");
+                setDateFrom("");
+                setDateTo("");
+              }}
+              data-testid="button-clear-payment-filters"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Limpiar
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-lg border">
-        <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
+        <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>ID</span>
           <span>Usuario</span>
           <span>Cantidad</span>
           <span>Fecha</span>
           <span>Estado</span>
+          <span className="text-right">Stripe</span>
         </div>
         {payments.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground text-center">No hay pagos registrados</div>
+          <div className="p-6 text-sm text-muted-foreground text-center space-y-2">
+            <p>No hay pagos registrados</p>
+            <div className="flex items-center justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => syncStripeMutation.mutate()}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Sincronizar Stripe
+              </Button>
+            </div>
+          </div>
         ) : (
           payments.map((payment: any) => (
-            <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
+            <div key={payment.id} className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm">
               <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
-              <span>{payment.userId || "N/A"}</span>
-              <span className="font-medium">€{payment.amount}</span>
+              <div className="min-w-0">
+                <p className="truncate">{payment.userEmail || payment.userName || payment.userId || "N/A"}</p>
+                {payment.userId && (
+                  <p className="text-xs text-muted-foreground font-mono truncate">{String(payment.userId).slice(0, 16)}</p>
+                )}
+              </div>
+              <span className="font-medium tabular-nums">{formatMoney(payment.amount, payment.currency)}</span>
               <span className="text-muted-foreground">
                 {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
               </span>
               <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
                 {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
               </Badge>
+              <div className="flex justify-end">
+                {payment.stripePaymentId ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => copyToClipboard(String(payment.stripePaymentId))}
+                    data-testid={`button-copy-stripe-${payment.id}`}
+                    title="Copiar Stripe ID"
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                    <span className="text-xs font-mono">{String(payment.stripePaymentId).slice(0, 12)}</span>
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">-</span>
+                )}
+              </div>
             </div>
           ))
         )}
       </div>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground" data-testid="text-payments-pagination-info">
+            Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              data-testid="button-payments-prev-page"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page >= pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              data-testid="button-payments-next-page"
+            >
+              Siguiente
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2525,7 +2880,7 @@ function SecuritySection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
-  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+  const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2558,6 +2913,7 @@ function SecuritySection() {
         page: auditPage.toString(),
         limit: "20",
         ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.actor && { actor: auditFilters.actor }),
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
@@ -2681,14 +3037,50 @@ function SecuritySection() {
     return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
   };
 
-  const getSeverityBadge = (action: string) => {
-    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-    const warningActions = ["warning", "update", "delete"];
-    
-    if (criticalActions.some(a => action?.includes(a))) {
+  const getActorLabel = (log: any) => {
+    const details = (log?.details || {}) as any;
+    const email = details.actorEmail || details.email;
+    if (email) return String(email);
+
+    const userId = log?.userId;
+    if (userId) {
+      const id = String(userId);
+      if (id.startsWith("anon_")) return "Anonymous";
+      return id;
+    }
+
+    return "System";
+  };
+
+  const getSeverityBadge = (log: any) => {
+    const action = String(log?.action || "");
+    const details = (log?.details || {}) as any;
+
+    let severity: string | null =
+      typeof details.severity === "string" ? details.severity.toLowerCase() : null;
+
+    // Derive severity from HTTP status if available.
+    if (!severity && typeof details.statusCode === "number") {
+      severity =
+        details.statusCode >= 500 ? "error" :
+        details.statusCode >= 400 ? "warning" :
+        "info";
+    }
+
+    // Fallback heuristics based on action string.
+    if (!severity) {
+      const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied", "access_denied"];
+      const warningActions = ["warning", "update", "delete", "disable", "enable"];
+
+      if (criticalActions.some(a => action.includes(a))) severity = "critical";
+      else if (warningActions.some(a => action.includes(a))) severity = "warning";
+      else severity = "info";
+    }
+
+    if (severity === "critical" || severity === "error") {
       return <Badge variant="destructive" className="text-xs">Critical</Badge>;
     }
-    if (warningActions.some(a => action?.includes(a))) {
+    if (severity === "warning") {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
@@ -2981,10 +3373,11 @@ function SecuritySection() {
                 recentLogs.map((log: any) => (
                   <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      {getSeverityBadge(log.action)}
+                      {getSeverityBadge(log)}
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -3186,6 +3579,16 @@ function SecuritySection() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">User:</Label>
+              <Input 
+                data-testid="filter-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-44"
+                value={auditFilters.actor}
+                onChange={(e) => setAuditFilters({ ...auditFilters, actor: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
               <Input 
                 data-testid="filter-date-from"
@@ -3209,7 +3612,7 @@ function SecuritySection() {
               variant="outline" 
               size="sm" 
               onClick={() => {
-                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
               }}
               data-testid="button-clear-filters"
@@ -3223,6 +3626,7 @@ function SecuritySection() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
@@ -3232,7 +3636,7 @@ function SecuritySection() {
               <tbody>
                 {auditLogsData?.data?.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
                       No audit logs found matching your filters.
                     </td>
                   </tr>
@@ -3242,10 +3646,11 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
-                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                      <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
                   ))
                 )}

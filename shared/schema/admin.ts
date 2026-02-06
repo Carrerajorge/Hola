@@ -55,6 +55,8 @@ export const payments = pgTable("payments", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("payments_user_idx").on(table.userId),
+    index("payments_created_at_idx").on(table.createdAt),
+    uniqueIndex("payments_stripe_payment_id_unique_idx").on(table.stripePaymentId),
 ]);
 
 export const insertPaymentSchema = createInsertSchema(payments);

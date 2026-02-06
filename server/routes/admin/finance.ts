@@ -2,8 +2,61 @@ import { Router } from "express";
 import { storage } from "../../storage";
 import { sendPaymentEmail } from "../../services/genericEmailService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { dbRead } from "../../db";
+import { payments, users } from "@shared/schema";
+import { getStripeClient } from "../../stripeClient";
+import {
+    getStripeCustomerIdFromInvoice,
+    resolveUserIdFromStripeCustomerId,
+    upsertPaymentFromStripeInvoice,
+} from "../../services/paymentIngestionService";
+import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const financeRouter = Router();
+
+function parseDateInput(value: string | undefined): Date | null {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+}
+
+function buildPaymentsWhereClause(params: {
+    status?: string;
+    userId?: string;
+    search?: string;
+    dateFrom?: string;
+    dateTo?: string;
+}): SQL | undefined {
+    const conditions: SQL[] = [];
+
+    const status = String(params.status || "").trim();
+    const userId = String(params.userId || "").trim();
+    const search = String(params.search || "").trim();
+
+    if (status) conditions.push(eq(payments.status, status));
+    if (userId) conditions.push(eq(payments.userId, userId));
+
+    const fromDate = parseDateInput(params.dateFrom);
+    if (fromDate) conditions.push(gte(payments.createdAt, fromDate));
+
+    const toDate = parseDateInput(params.dateTo);
+    if (toDate) conditions.push(lte(payments.createdAt, toDate));
+
+    if (search) {
+        const like = `%${search}%`;
+        conditions.push(
+            or(
+                ilike(payments.id, like),
+                ilike(payments.userId, like),
+                ilike(payments.stripePaymentId, like),
+                ilike(users.email, like),
+            )!,
+        );
+    }
+
+    return conditions.length ? and(...conditions) : undefined;
+}
 
 // GET /api/admin/finance/payments - List payments with pagination and filters
 financeRouter.get("/payments", async (req, res) => {
@@ -13,6 +66,7 @@ financeRouter.get("/payments", async (req, res) => {
             limit = "20",
             status,
             userId,
+            search,
             dateFrom,
             dateTo
         } = req.query as Record<string, string>;
@@ -21,33 +75,37 @@ financeRouter.get("/payments", async (req, res) => {
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        let payments = await storage.getPayments();
+        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo });
 
-        // Apply filters
-        if (status) {
-            payments = payments.filter(p => p.status === status);
-        }
-        if (userId) {
-            payments = payments.filter(p => p.userId === userId);
-        }
-        if (dateFrom) {
-            const fromDate = new Date(dateFrom);
-            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) >= fromDate);
-        }
-        if (dateTo) {
-            const toDate = new Date(dateTo);
-            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) <= toDate);
-        }
+        let countQuery = dbRead
+            .select({ count: sql<number>`count(*)::int` })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id));
+        if (whereClause) countQuery = countQuery.where(whereClause);
+        const [{ count: total = 0 } = {} as any] = await countQuery;
 
-        // Sort by date descending
-        payments.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-        });
+        let listQuery = dbRead
+            .select({
+                id: payments.id,
+                userId: payments.userId,
+                userEmail: users.email,
+                userName: users.fullName,
+                amount: payments.amount,
+                currency: payments.currency,
+                status: payments.status,
+                method: payments.method,
+                description: payments.description,
+                stripePaymentId: payments.stripePaymentId,
+                createdAt: payments.createdAt,
+            })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id));
+        if (whereClause) listQuery = listQuery.where(whereClause);
 
-        const total = payments.length;
-        const paginatedPayments = payments.slice(offset, offset + limitNum);
+        const paginatedPayments = await listQuery
+            .orderBy(desc(payments.createdAt))
+            .limit(limitNum)
+            .offset(offset);
 
         res.json({
             payments: paginatedPayments,
@@ -72,29 +130,145 @@ financeRouter.get("/payments/stats", async (req, res) => {
     }
 });
 
+// POST /api/admin/finance/payments/sync-stripe - Backfill payments from Stripe invoices (paid)
+financeRouter.post("/payments/sync-stripe", async (req, res) => {
+    try {
+        const limitRaw = (req.body?.limit ?? req.query?.limit ?? 100) as any;
+        const startingAfterRaw = (req.body?.startingAfter ?? req.query?.startingAfter) as any;
+
+        const limit = Math.min(250, Math.max(1, Number(limitRaw) || 100));
+        const startingAfter = typeof startingAfterRaw === "string" && startingAfterRaw.trim() ? startingAfterRaw.trim() : undefined;
+
+        let stripe;
+        try {
+            stripe = getStripeClient();
+        } catch (e: any) {
+            return res.status(400).json({ error: e?.message || "Stripe is not configured" });
+        }
+
+        let result: any;
+        try {
+            result = await stripe.invoices.list({
+                limit,
+                ...(startingAfter ? { starting_after: startingAfter } : {}),
+                status: "paid",
+            });
+        } catch (e) {
+            // Fallback for API versions that don't accept `status` as list param.
+            result = await stripe.invoices.list({
+                limit,
+                ...(startingAfter ? { starting_after: startingAfter } : {}),
+            });
+        }
+
+        const invoices = (result?.data || []) as any[];
+        const paidInvoices = invoices.filter((inv) => inv?.status === "paid" || inv?.paid === true);
+
+        let synced = 0;
+        let matchedUsers = 0;
+        let unmatchedUsers = 0;
+
+        for (const invoice of paidInvoices) {
+            const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+            const userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+
+            if (userId) matchedUsers += 1;
+            else unmatchedUsers += 1;
+
+            await upsertPaymentFromStripeInvoice({
+                invoice,
+                status: "completed",
+                userId,
+                plan: null,
+            });
+            synced += 1;
+        }
+
+        await auditLog(req as any, {
+            action: AuditActions.ADMIN_IMPORT_DATA,
+            resource: "payments",
+            resourceId: null,
+            details: {
+                source: "stripe",
+                fetched: invoices.length,
+                paid: paidInvoices.length,
+                synced,
+                matchedUsers,
+                unmatchedUsers,
+                limit,
+                startingAfter: startingAfter || null,
+            },
+            category: "admin",
+            severity: "info",
+        });
+
+        const nextCursor =
+            result?.has_more && invoices.length > 0
+                ? String(invoices[invoices.length - 1]?.id || "")
+                : null;
+
+        res.json({
+            success: true,
+            fetched: invoices.length,
+            paid: paidInvoices.length,
+            synced,
+            matchedUsers,
+            unmatchedUsers,
+            hasMore: !!result?.has_more,
+            nextCursor: nextCursor || null,
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to sync payments from Stripe" });
+    }
+});
+
 // GET /api/admin/finance/payments/export - Export payments to CSV/Excel
 financeRouter.get("/payments/export", async (req, res) => {
     try {
         const { format = "csv" } = req.query;
-        const payments = await storage.getPayments();
+        const { status, userId, search, dateFrom, dateTo } = req.query as Record<string, string>;
+        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo });
+
+        let exportQuery = dbRead
+            .select({
+                id: payments.id,
+                userId: payments.userId,
+                userEmail: users.email,
+                amount: payments.amount,
+                currency: payments.currency,
+                status: payments.status,
+                method: payments.method,
+                description: payments.description,
+                stripePaymentId: payments.stripePaymentId,
+                createdAt: payments.createdAt,
+            })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id))
+            .orderBy(desc(payments.createdAt));
+        if (whereClause) exportQuery = exportQuery.where(whereClause);
+
+        const paymentRows = await exportQuery;
 
         await storage.createAuditLog({
             action: "payments_export",
             resource: "payments",
-            details: { format, count: payments.length }
+            details: { format, count: paymentRows.length, status, userId, search, dateFrom, dateTo }
         });
 
         if (format === "csv") {
-            const headers = ["id", "userId", "amount", "currency", "status", "method", "createdAt"];
+            const headers = ["id", "userId", "userEmail", "amount", "currency", "status", "method", "description", "stripePaymentId", "createdAt"];
             const csvRows = [headers.join(",")];
-            payments.forEach(p => {
+            paymentRows.forEach(p => {
                 csvRows.push([
                     p.id,
                     p.userId || "",
+                    p.userEmail || "",
                     p.amount || 0,
-                    p.currency || "USD",
+                    p.currency || "EUR",
                     p.status || "",
                     p.method || "",
+                    p.description || "",
+                    p.stripePaymentId || "",
                     p.createdAt?.toISOString?.() || p.createdAt || ""
                 ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
             });
@@ -104,7 +278,7 @@ financeRouter.get("/payments/export", async (req, res) => {
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.json`);
-            res.json(payments);
+            res.json(paymentRows);
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });

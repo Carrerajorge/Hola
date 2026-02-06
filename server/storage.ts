@@ -1267,13 +1267,131 @@ export class MemStorage implements IStorage {
 
   async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
     const allPayments = await dbRead.select().from(payments);
+
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const completedPayments = allPayments.filter(p => p.status === "completed");
-    const thisMonthPayments = completedPayments.filter(p => p.createdAt >= monthStart);
-    const total = completedPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const thisMonth = thisMonthPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    return { total: total.toFixed(2), thisMonth: thisMonth.toFixed(2), count: completedPayments.length };
+
+    const parseAmount = (value: unknown): number => {
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      const raw = String(value ?? "").trim();
+      if (!raw) return 0;
+
+      // If input uses a decimal comma (e.g., "99,00") and no dot is present, normalize.
+      const normalized =
+        raw.includes(",") && !raw.includes(".")
+          ? raw.replace(",", ".").replace(/[^0-9.-]/g, "")
+          : raw.replace(/[^0-9.-]/g, "");
+
+      const n = Number.parseFloat(normalized);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    type CurrencyStats = {
+      total: number;
+      thisMonth: number;
+      count: number;
+      pendingTotal: number;
+      pendingCount: number;
+      failedTotal: number;
+      failedCount: number;
+    };
+
+    const byCurrency: Record<string, CurrencyStats> = {};
+    const ensureCurrency = (currency: string | null) => {
+      const key = (currency || "EUR").toUpperCase();
+      if (!byCurrency[key]) {
+        byCurrency[key] = {
+          total: 0,
+          thisMonth: 0,
+          count: 0,
+          pendingTotal: 0,
+          pendingCount: 0,
+          failedTotal: 0,
+          failedCount: 0,
+        };
+      }
+      return key;
+    };
+
+    for (const p of allPayments) {
+      const currencyKey = ensureCurrency(p.currency || "EUR");
+      const amount = parseAmount(p.amount);
+      const createdAt = p.createdAt ? new Date(p.createdAt) : null;
+      const isThisMonth = !!createdAt && createdAt >= monthStart;
+
+      if (p.status === "completed") {
+        byCurrency[currencyKey]!.total += amount;
+        byCurrency[currencyKey]!.count += 1;
+        if (isThisMonth) byCurrency[currencyKey]!.thisMonth += amount;
+      } else if (p.status === "pending") {
+        byCurrency[currencyKey]!.pendingTotal += amount;
+        byCurrency[currencyKey]!.pendingCount += 1;
+      } else if (p.status === "failed") {
+        byCurrency[currencyKey]!.failedTotal += amount;
+        byCurrency[currencyKey]!.failedCount += 1;
+      }
+    }
+
+    const currencies = Object.keys(byCurrency).sort();
+    const primaryCurrency = currencies.length === 1 ? currencies[0] : null;
+
+    const totals = currencies.reduce(
+      (acc, cur) => {
+        const s = byCurrency[cur]!;
+        acc.total += s.total;
+        acc.thisMonth += s.thisMonth;
+        acc.count += s.count;
+        acc.pendingTotal += s.pendingTotal;
+        acc.pendingCount += s.pendingCount;
+        acc.failedTotal += s.failedTotal;
+        acc.failedCount += s.failedCount;
+        return acc;
+      },
+      {
+        total: 0,
+        thisMonth: 0,
+        count: 0,
+        pendingTotal: 0,
+        pendingCount: 0,
+        failedTotal: 0,
+        failedCount: 0,
+      }
+    );
+
+    const denom = totals.count + totals.failedCount;
+    const successRate = denom > 0 ? (totals.count / denom) * 100 : 0;
+
+    const extended = {
+      total: totals.total.toFixed(2),
+      thisMonth: totals.thisMonth.toFixed(2),
+      count: totals.count,
+      pendingTotal: totals.pendingTotal.toFixed(2),
+      pendingCount: totals.pendingCount,
+      failedTotal: totals.failedTotal.toFixed(2),
+      failedCount: totals.failedCount,
+      successRate: Number(successRate.toFixed(1)),
+      currencies,
+      primaryCurrency,
+      byCurrency: Object.fromEntries(
+        currencies.map((cur) => {
+          const s = byCurrency[cur]!;
+          return [
+            cur,
+            {
+              total: s.total.toFixed(2),
+              thisMonth: s.thisMonth.toFixed(2),
+              count: s.count,
+              pendingTotal: s.pendingTotal.toFixed(2),
+              pendingCount: s.pendingCount,
+              failedTotal: s.failedTotal.toFixed(2),
+              failedCount: s.failedCount,
+            },
+          ] as const;
+        })
+      ),
+    };
+
+    return extended;
   }
 
   // Admin: Invoices

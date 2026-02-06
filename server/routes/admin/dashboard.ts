@@ -72,7 +72,15 @@ dashboardRouter.get("/", async (req, res) => {
             payments: {
                 total: paymentStats.total,
                 thisMonth: paymentStats.thisMonth,
-                count: paymentStats.count
+                count: paymentStats.count,
+                pendingTotal: (paymentStats as any).pendingTotal,
+                pendingCount: (paymentStats as any).pendingCount,
+                failedTotal: (paymentStats as any).failedTotal,
+                failedCount: (paymentStats as any).failedCount,
+                successRate: (paymentStats as any).successRate,
+                currencies: (paymentStats as any).currencies,
+                primaryCurrency: (paymentStats as any).primaryCurrency,
+                byCurrency: (paymentStats as any).byCurrency,
             },
             invoices: {
                 total: invoices.length,

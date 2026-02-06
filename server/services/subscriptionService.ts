@@ -8,6 +8,11 @@ import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../stripeClient";
 import { randomUUID } from "crypto";
+import {
+  getStripeCustomerIdFromInvoice,
+  resolveUserIdFromStripeCustomerId,
+  upsertPaymentFromStripeInvoice,
+} from "./paymentIngestionService";
 
 import { createRequire } from 'module';
 
@@ -619,39 +624,57 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
     return;
   }
   
-  const subscriptionId = invoice.subscription;
-  if (!subscriptionId) return;
-  
+  const subscriptionId = invoice?.subscription;
+  const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+
+  let userId: string | null = null;
+  let planName: string | null = null;
+
   try {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    const userId = subscription.metadata?.userId;
-    
-    if (userId) {
-      await updateUserSubscription(userId, {
-        status: "active",
-        currentPeriodEnd: new Date(((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000),
-      });
-      
-      // For recurring payments (not first payment), send notification
-      if (invoice.billing_reason === "subscription_cycle") {
-        const [user] = await db.select().from(users).where(eq(users.id, userId));
-        if (user) {
-          const planName = getPlanFromPriceId(subscription.items.data[0]?.price?.id);
-          await notifyAdminOfPurchase({
-            userId,
-            userEmail: user.email || "unknown",
-            userName: (user as any).displayName || (user as any).name || user.fullName || [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
-            plan: planName,
-            amount: invoice.amount_paid || subscription.items.data[0]?.price?.unit_amount || 0,
-            currency: invoice.currency || "usd",
-            timestamp: new Date(),
-            stripePaymentId: invoice.id,
-            intentId: invoice.payment_intent,
-          });
+    if (subscriptionId) {
+      const stripe = getStripeClient();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      userId = subscription?.metadata?.userId || null;
+      planName = getPlanFromPriceId(subscription?.items?.data?.[0]?.price?.id);
+
+      if (userId) {
+        await updateUserSubscription(userId, {
+          status: "active",
+          currentPeriodEnd: new Date(
+            ((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000
+          ),
+        });
+
+        // For recurring payments (not first payment), send notification
+        if (invoice?.billing_reason === "subscription_cycle") {
+          const [user] = await db.select().from(users).where(eq(users.id, userId));
+          if (user) {
+            await notifyAdminOfPurchase({
+              userId,
+              userEmail: user.email || "unknown",
+              userName:
+                (user as any).displayName ||
+                (user as any).name ||
+                user.fullName ||
+                [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                undefined,
+              plan: planName || "go",
+              amount: invoice?.amount_paid || subscription?.items?.data?.[0]?.price?.unit_amount || 0,
+              currency: invoice?.currency || "usd",
+              timestamp: new Date(),
+              stripePaymentId: invoice?.id,
+              intentId: invoice?.payment_intent,
+            });
+          }
         }
       }
     }
+
+    if (!userId) {
+      userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+    }
+
+    await upsertPaymentFromStripeInvoice({ invoice, status: "completed", userId, plan: planName });
     
     if (eventId) {
       markEventProcessed(eventId);
@@ -667,13 +690,23 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
     return;
   }
   
-  const subscriptionId = invoice.subscription;
-  if (!subscriptionId) return;
+  const subscriptionId = invoice?.subscription;
+  const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+
+  let userId: string | null = null;
+  let planName: string | null = null;
   
   try {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    const userId = subscription.metadata?.userId;
+    if (subscriptionId) {
+      const stripe = getStripeClient();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      userId = subscription?.metadata?.userId || null;
+      planName = getPlanFromPriceId(subscription?.items?.data?.[0]?.price?.id);
+    }
+
+    if (!userId) {
+      userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+    }
     
     if (userId) {
       await updateUserSubscription(userId, {
@@ -694,6 +727,8 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
         });
       }
     }
+
+    await upsertPaymentFromStripeInvoice({ invoice, status: "failed", userId, plan: planName });
     
     if (eventId) {
       markEventProcessed(eventId);
@@ -707,7 +742,7 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
 // HELPERS
 // ============================================
 
-function getPlanFromPriceId(priceId: string): string {
+function getPlanFromPriceId(priceId?: string | null): string {
   const pricePlanMap: Record<string, string> = {
     price_go_monthly: "go",
     price_plus_monthly: "plus",
@@ -719,7 +754,9 @@ function getPlanFromPriceId(priceId: string): string {
   if (priceId === process.env.STRIPE_PRICE_PLUS) return "plus";
   if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
   if (priceId === process.env.STRIPE_PRICE_BUSINESS) return "business";
-  
+
+  if (!priceId) return "go";
+
   return pricePlanMap[priceId] || "go";
 }
 
