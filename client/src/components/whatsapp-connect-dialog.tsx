@@ -9,6 +9,7 @@ type Status =
   | { state: 'disconnected' }
   | { state: 'connecting' }
   | { state: 'qr'; qr: string }
+  | { state: 'pairing_code'; phone: string; code: string }
   | { state: 'connected'; me?: { id?: string; name?: string } };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -34,6 +35,8 @@ export function WhatsAppConnectDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [countryCode, setCountryCode] = useState('+51');
+  const [phoneNumber, setPhoneNumber] = useState('');
 
   const refreshStatus = async () => {
     const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/status`);
@@ -51,6 +54,26 @@ export function WhatsAppConnectDialog({
       setStatus(res.status);
     } catch (e: any) {
       setError(e?.message || 'No se pudo iniciar la conexión');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generatePairingCode = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const cc = countryCode.trim().replace(/\s+/g, '');
+      const num = phoneNumber.trim().replace(/\s+/g, '');
+      const phone = `${cc}${num}`;
+
+      const res = await api<{ success: true; status: Status }>(`/api/integrations/whatsapp/web/connect/pairing-code`, {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+      });
+      setStatus(res.status);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo generar el código');
     } finally {
       setBusy(false);
     }
@@ -139,7 +162,46 @@ export function WhatsAppConnectDialog({
             </div>
           )}
 
+          {status.state === 'pairing_code' && (
+            <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+              <div className="text-sm">
+                Número: <span className="font-medium">{status.phone}</span>
+              </div>
+              <div className="text-sm">
+                Código: <span className="font-mono font-semibold">{status.code}</span>
+              </div>
+              <ol className="text-sm text-muted-foreground list-decimal pl-5 space-y-1">
+                <li>Abra WhatsApp en su teléfono</li>
+                <li>Dispositivos vinculados → Vincular un dispositivo</li>
+                <li>Elija “Vincular con número / código”</li>
+                <li>Ingrese el código mostrado</li>
+              </ol>
+            </div>
+          )}
+
           {error && <div className="text-sm text-red-600">{error}</div>}
+
+          {status.state !== 'connected' && status.state !== 'qr' && status.state !== 'pairing_code' ? (
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">
+                Vincular por número (alternativa al QR)
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value)}
+                  placeholder="+51"
+                  className="h-9 w-20 rounded-md border bg-background px-2 text-sm"
+                />
+                <input
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="918714054"
+                  className="h-9 flex-1 rounded-md border bg-background px-2 text-sm"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex gap-2">
             {status.state === 'connected' ? (
@@ -147,9 +209,14 @@ export function WhatsAppConnectDialog({
                 Desconectar
               </Button>
             ) : (
-              <Button onClick={start} disabled={busy}>
-                Generar QR
-              </Button>
+              <>
+                <Button onClick={start} disabled={busy}>
+                  Generar QR
+                </Button>
+                <Button variant="secondary" onClick={generatePairingCode} disabled={busy}>
+                  Generar código
+                </Button>
+              </>
             )}
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cerrar

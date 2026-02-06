@@ -20,6 +20,7 @@ export type WhatsAppWebStatus =
   | { state: 'disconnected' }
   | { state: 'connecting' }
   | { state: 'qr'; qr: string }
+  | { state: 'pairing_code'; phone: string; code: string }
   | { state: 'connected'; me?: { id?: string; name?: string } };
 
 export interface WhatsAppWebEvents {
@@ -42,6 +43,14 @@ export class WhatsAppWebManager extends EventEmitter {
   }
 
   async start(userId: string): Promise<WhatsAppWebStatus> {
+    return this.startWithOptions(userId);
+  }
+
+  /**
+   * Start a WhatsApp Web session. If `phone` is provided, we will attempt to generate
+   * a pairing code (link by phone number) instead of requiring QR scanning.
+   */
+  async startWithOptions(userId: string, opts?: { phone?: string }): Promise<WhatsAppWebStatus> {
     const existing = this.sockets.get(userId);
     if (existing) return existing.status;
 
@@ -63,6 +72,36 @@ export class WhatsAppWebManager extends EventEmitter {
     const record = { sock, auth: state, status: { state: 'connecting' } as WhatsAppWebStatus };
     this.sockets.set(userId, record);
     this.emit('status', userId, record.status);
+
+    // Optional: pairing code flow (link by phone number)
+    if (opts?.phone) {
+      const phone = String(opts.phone).trim();
+      const digitsOnly = phone.replace(/[^0-9]/g, '');
+      if (digitsOnly.length < 8) {
+        record.status = { state: 'disconnected' };
+        this.emit('status', userId, record.status);
+        this.sockets.delete(userId);
+        throw new Error('Invalid phone number');
+      }
+
+      // Baileys supports requesting a pairing code for linking.
+      // We keep the socket alive so the user can complete linking in WhatsApp.
+      (async () => {
+        try {
+          const anySock = sock as any;
+          if (typeof anySock.requestPairingCode !== 'function') {
+            throw new Error('Pairing code not supported by WhatsApp Web provider');
+          }
+          const code = await anySock.requestPairingCode(digitsOnly);
+          record.status = { state: 'pairing_code', phone: digitsOnly, code: String(code) };
+          this.emit('status', userId, record.status);
+        } catch (e: any) {
+          record.status = { state: 'disconnected' };
+          this.emit('status', userId, record.status);
+          this.sockets.delete(userId);
+        }
+      })().catch(() => null);
+    }
 
     sock.ev.on('creds.update', async () => {
       try {
@@ -96,7 +135,7 @@ export class WhatsAppWebManager extends EventEmitter {
 
         if (shouldReconnect) {
           // Best-effort reconnect.
-          void this.start(userId).catch(() => null);
+          void this.startWithOptions(userId).catch(() => null);
         }
       }
     });

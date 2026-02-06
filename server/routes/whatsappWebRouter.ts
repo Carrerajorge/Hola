@@ -38,8 +38,24 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const status = await whatsappWebManager.start(userId);
+    const status = await whatsappWebManager.startWithOptions(userId);
     res.json({ success: true, status });
+  });
+
+  // Generate pairing code (link by phone number)
+  router.post('/connect/pairing-code', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const { phone } = (req.body || {}) as { phone?: string };
+    if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+
+    try {
+      const status = await whatsappWebManager.startWithOptions(userId, { phone: String(phone) });
+      res.json({ success: true, status });
+    } catch (e: any) {
+      res.status(400).json({ success: false, error: e?.message || 'Failed to generate pairing code' });
+    }
   });
 
   router.post('/connect/disconnect', async (req, res) => {
