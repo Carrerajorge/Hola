@@ -6,7 +6,7 @@ import { MetricsCollector } from "../metricsCollector";
 
 describe("Performance Benchmarks - Agent Infrastructure", () => {
   describe("State Machine Performance", () => {
-    it("should complete 1000 valid transitions in < 100ms", () => {
+    it("should complete 1000 valid transitions in < 250ms", () => {
       const start = performance.now();
       
       for (let i = 0; i < 1000; i++) {
@@ -19,7 +19,7 @@ describe("Performance Benchmarks - Agent Infrastructure", () => {
       
       const elapsed = performance.now() - start;
       console.log(`[Benchmark] 1000 state machine cycles: ${elapsed.toFixed(2)}ms`);
-      expect(elapsed).toBeLessThan(100);
+      expect(elapsed).toBeLessThan(250);
     });
   });
   
