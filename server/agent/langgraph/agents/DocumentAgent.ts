@@ -216,6 +216,37 @@ Provide:
     const template = task.input.template || null;
     const section = task.input.section || null;
     const tone = task.input.tone || "formal";
+    const citationStyle = task.input.citationStyle || "none";
+    const evidence = task.input.evidence || null;
+
+    const buildEvidenceSnippet = (ev: any): string => {
+      if (!ev) return "";
+
+      const sources = Array.isArray(ev.sources) ? ev.sources : [];
+      const notes = Array.isArray(ev.notes) ? ev.notes : [];
+
+      const srcLines = sources.slice(0, 6).map((s: any, i: number) => {
+        const title = String(s?.title || `Source ${i + 1}`);
+        const excerpt = String(s?.excerpt || s?.content || "").trim();
+        const clipped = excerpt.length > 900 ? excerpt.slice(0, 900) + "..." : excerpt;
+        return `[S${i + 1}] ${title}\n${clipped}`;
+      });
+
+      const noteLines = notes.slice(0, 10).map((n: any) => {
+        const topic = String(n?.topic || "note").slice(0, 80);
+        const content = String(n?.content || "").trim();
+        const clipped = content.length > 280 ? content.slice(0, 280) + "..." : content;
+        return `- ${topic}: ${clipped}`;
+      });
+
+      const parts: string[] = [];
+      if (srcLines.length) parts.push(`FUENTES (usa citas [S#] cuando afirmes algo específico):\n${srcLines.join("\n\n")}`);
+      if (noteLines.length) parts.push(`\nNOTAS:\n${noteLines.join("\n")}`);
+      const out = parts.join("\n\n").trim();
+      return out.length > 12000 ? out.slice(0, 12000) + "..." : out;
+    };
+
+    const evidenceSnippet = buildEvidenceSnippet(evidence);
 
     // Build a targeted prompt based on available information
     let userPrompt = "";
@@ -233,6 +264,10 @@ Objetivo de la sección: ${sectionObjective || "Desarrollar el tema de manera co
 Tono: ${tone}
 Extensión objetivo: Aproximadamente ${targetWords} palabras.
 
+${evidenceSnippet ? `\nEVIDENCIA (NO INVENTES HECHOS; si falta información, dilo como supuesto):\n${evidenceSnippet}\n` : "\nEVIDENCIA: (no se proporcionó evidencia; evita datos específicos no verificados)\n"}
+
+Formato de citas: ${citationStyle}. Si usas evidencia, agrega citas en línea como [S1], [S2] (según las fuentes de arriba).
+
 INSTRUCCIONES:
 1. Escribe contenido sustancial y profesional en español
 2. Usa formato markdown cuando sea apropiado (listas, énfasis)
@@ -247,6 +282,8 @@ Genera el contenido ahora:`;
 Task: ${task.description}
 Template: ${template ? JSON.stringify(template) : "none"}
 Requirements: ${JSON.stringify(task.input)}
+
+${evidenceSnippet ? `\nEvidence (use this; do not fabricate):\n${evidenceSnippet}\n` : ""}
 
 Generate complete document content with proper formatting in markdown.`;
     }

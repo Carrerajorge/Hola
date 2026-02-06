@@ -24,12 +24,13 @@ import type {
     ProductionEvent,
     ProductionEventHandler,
     EvidencePack,
+    EvidenceSource,
     ContentSpec,
     QAReport,
     TraceMap,
     Artifact,
 } from './types';
-import { routeTask } from './taskRouter';
+import { routeTask, type RouterResult } from './taskRouter';
 import { createWorkOrder, enrichWorkOrder, validateWorkOrder } from './workOrderProcessor';
 import { consistencyAgent } from './consistencyAgent';
 import { generateBlueprint } from './blueprintAgent';
@@ -286,9 +287,41 @@ export class ProductionPipeline extends EventEmitter {
     }
 
     private async stageResearch(): Promise<void> {
+        const internalSources: EvidenceSource[] = [];
+        try {
+            const raw = (this.workOrder as any)?.metadata?.internalSources;
+            if (Array.isArray(raw)) {
+                for (let i = 0; i < raw.length; i++) {
+                    const entry = raw[i];
+                    const title = typeof entry?.title === 'string' && entry.title.trim() ? entry.title.trim() : `Internal source ${i + 1}`;
+                    const content = typeof entry?.content === 'string' ? entry.content : '';
+                    if (!content.trim()) continue;
+                    internalSources.push({
+                        id: `internal_${this.workOrder.id}_${i + 1}`,
+                        type: 'internal',
+                        title,
+                        content,
+                        excerpt: content.slice(0, 800),
+                        reliability: 1,
+                        retrievedAt: new Date(),
+                    });
+                }
+            }
+        } catch {
+            // best-effort
+        }
+
         if (this.workOrder.sourcePolicy === 'none') {
             this.updateStage('research', 'skipped', 100, 'Research not required');
-            this.evidencePack = { sources: [], notes: [], dataPoints: [], gaps: [], limitations: ['No research conducted per policy'] };
+            this.evidencePack = {
+                sources: internalSources,
+                notes: [],
+                dataPoints: [],
+                gaps: [],
+                limitations: internalSources.length
+                    ? ['No web research conducted per policy; internal sources provided.']
+                    : ['No research conducted per policy'],
+            };
             return;
         }
 
@@ -319,7 +352,7 @@ export class ProductionPipeline extends EventEmitter {
         } catch (error: any) {
             console.warn('[ProductionPipeline] Research stage timed out/failed, continuing without sources:', error?.message || error);
             this.evidencePack = {
-                sources: [],
+                sources: internalSources,
                 notes: [],
                 dataPoints: [],
                 gaps: [this.workOrder.topic],
@@ -341,6 +374,14 @@ export class ProductionPipeline extends EventEmitter {
             gaps: result.output?.gaps || [],
             limitations: result.output?.limitations || [],
         };
+
+        if (internalSources.length > 0) {
+            this.evidencePack.sources = [...internalSources, ...(this.evidencePack.sources || [])];
+            this.evidencePack.limitations = [
+                ...(this.evidencePack.limitations || []),
+                'Included internal sources supplied by caller.',
+            ];
+        }
 
         // Fallback: if the LLM-based research agent returns 0 sources, hit
         // no-key academic APIs to ensure we have evidence for Excel/Word exports.
@@ -980,10 +1021,17 @@ export async function startProductionPipeline(
     message: string,
     userId: string,
     chatId?: string,
-    onEvent?: ProductionEventHandler
+    onEvent?: ProductionEventHandler,
+    options?: {
+        routerResultOverride?: RouterResult;
+        forceProduction?: boolean;
+        workOrderOverrides?: Partial<WorkOrder>;
+        workOrderMetadata?: Record<string, unknown>;
+    }
 ): Promise<ProductionResult> {
-    // Route the task
-    const routerResult = await routeTask(message);
+    const routerResult = options?.routerResultOverride
+        ? options.routerResultOverride
+        : await routeTask(message, undefined, { forceProduction: options?.forceProduction });
 
     if (routerResult.mode !== 'PRODUCTION') {
         throw new Error('Message does not require production mode');
@@ -995,7 +1043,15 @@ export async function startProductionPipeline(
         message,
         userId,
         chatId,
+        overrides: options?.workOrderOverrides,
     });
+
+    if (options?.workOrderMetadata && Object.keys(options.workOrderMetadata).length > 0) {
+        (workOrder as any).metadata = {
+            ...((workOrder as any).metadata || {}),
+            ...options.workOrderMetadata,
+        };
+    }
 
     // Create and run pipeline
     const pipeline = new ProductionPipeline(workOrder);

@@ -18,10 +18,11 @@ import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
-import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
-import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
-import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
-import { routeIntent, type IntentResult } from "../services/intentRouter";
+	import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
+	import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
+	import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
+	import { requestUnderstandingAgent, type RequestBrief } from "../agent/requestUnderstanding";
+	import { routeIntent, type IntentResult } from "../services/intentRouter";
 import { questionClassifier, type QuestionClassification } from "../services/questionClassifier";
 import { answerFirstEnforcer } from "../services/answerFirstEnforcer";
 import { academicSearchService } from "../services/academicSearchService";
@@ -301,6 +302,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       let attachmentContext = "";
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      let extractedForBrief: Array<{ fileName: string; content: string }> = [];
 
       if (hasAttachments) {
         console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
@@ -312,6 +314,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
           }
 
           const successfulExtractions = extractedContents.filter(e => e.extracted !== null).map(e => e.extracted!);
+          extractedForBrief = successfulExtractions.map(e => ({ fileName: e.fileName, content: e.content }));
           if (successfulExtractions.length > 0) {
             attachmentContext = formatAttachmentsAsContext(successfulExtractions);
             console.log(`[Chat API] Extracted content from ${successfulExtractions.length} attachment(s), context length: ${attachmentContext.length}`);
@@ -346,6 +349,35 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         content: msg.content
       }));
 
+      // Mandatory request-understanding gate: build a canonical brief (structured) before answering.
+      let brief: RequestBrief | null = null;
+      try {
+        const lastUser = [...formattedMessages].reverse().find(m => m.role === "user");
+        const briefText = lastUser?.content || "";
+
+        brief = await requestUnderstandingAgent.buildBrief({
+          text: briefText,
+          attachments: extractedForBrief.map(a => ({
+            type: "document",
+            name: a.fileName,
+            extractedText: (a.content || "").slice(0, 15000),
+          })),
+          userId: userId || undefined,
+          requestId: `chat_ru_${Date.now()}`,
+        });
+
+        if (brief.blocker?.is_blocked) {
+          const question = (brief.blocker.question || "").trim() || "¿Qué información falta para poder completar el encargo?";
+          return res.json({
+            content: question,
+            role: "assistant",
+            metadata: { brief, needs_clarification: true },
+          });
+        }
+      } catch (e) {
+        console.warn("[Chat API] RequestUnderstanding gate failed (best-effort), continuing:", e);
+      }
+
       // Build gptSession info - prefer contract-based session over legacy gptConfig
       const gptSession = gptSessionContract ? {
         contract: gptSessionContract,
@@ -354,7 +386,14 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         legacyConfig: gptConfig
       } : undefined;
 
-      const response = await chatService.chat(formattedMessages, {
+      const briefSystemMessage = brief
+        ? [{
+          role: "system" as const,
+          content: `REQUEST_BRIEF (JSON):\n${JSON.stringify(brief)}`,
+        }]
+        : [];
+
+      const response = await chatService.chat([...briefSystemMessage, ...formattedMessages], {
         useRag,
         conversationId,
         userId,
@@ -410,6 +449,10 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         tool_permissions: gptSessionContract.toolPermissions,
         session_id: serverSessionId || gptSessionContract.sessionId
       } : response;
+
+      if (brief) {
+        responseWithMetadata.metadata = { ...(responseWithMetadata.metadata || {}), brief };
+      }
 
       res.json(responseWithMetadata);
     } catch (error: any) {
@@ -756,16 +799,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
           const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
-          await handleProductionRequest(
-            {
-              message: userMessageText,
-              userId: effectiveUserId,
-              chatId: effectiveChatId,
-              intentResult: syntheticIntent,
-              locale: 'es',
-            },
-            res
-          );
+	          await handleProductionRequest(
+	            {
+	              message: userMessageText,
+	              userId: effectiveUserId,
+	              chatId: effectiveChatId,
+	              intentResult: syntheticIntent,
+	              locale: 'es',
+	              requestId,
+	            },
+	            res
+	          );
 
           // Production handler completed, exit early
           return;
@@ -865,16 +909,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
               const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
-              await handleProductionRequest(
-                {
-                  message: userMessageText,
-                  userId: effectiveUserId,
-                  chatId: effectiveChatId,
-                  intentResult,
-                  locale: intentResult.language_detected || 'es',
-                },
-                res
-              );
+	              await handleProductionRequest(
+	                {
+	                  message: userMessageText,
+	                  userId: effectiveUserId,
+	                  chatId: effectiveChatId,
+	                  intentResult,
+	                  locale: intentResult.language_detected || 'es',
+	                  requestId,
+	                },
+	                res
+	              );
 
               // Production handler completed, exit early
               return;
@@ -1034,16 +1079,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
           try {
-            await handleProductionRequest(
-              {
-                message: userMessageText,
-                userId: effectiveUserId,
-                chatId: effectiveChatId,
-                intentResult,
-                locale: intentResult.language_detected || 'es',
-              },
-              res
-            );
+	            await handleProductionRequest(
+	              {
+	                message: userMessageText,
+	                userId: effectiveUserId,
+	                chatId: effectiveChatId,
+	                intentResult,
+	                locale: intentResult.language_detected || 'es',
+	                requestId,
+	              },
+	              res
+	            );
 
             // Production handler takes over response, we're done
             if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -1370,6 +1416,129 @@ ${attachmentContext}`;
 
       console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
 
+      // Mandatory request-understanding gate: build a canonical brief (structured) before answering.
+      let brief: RequestBrief | null = null;
+      try {
+        const referencesPreviousDoc =
+          /\b(lo|la)\s+anterior\b/i.test(userMessageText) ||
+          /\b(documento|doc|archivo|texto)\s+(anterior|previo|previa|de antes)\b/i.test(userMessageText);
+
+        const clampText = (text: string, maxChars: number): string => {
+          if (!text) return "";
+          if (text.length <= maxChars) return text;
+          return text.slice(0, maxChars) + `\n\n[... truncated to ${maxChars} chars ...]`;
+        };
+
+        const briefAttachments: Array<{ type: "document" | "image"; name?: string; extractedText: string }> = [];
+
+        if (hasAttachments && batchResult) {
+          const byFile = new Map<string, string[]>();
+          const budgets = new Map<string, number>();
+
+          for (const ch of batchResult.chunks) {
+            const remaining = budgets.get(ch.filename) ?? 15000;
+            if (remaining <= 0) continue;
+
+            const loc = ch.location?.page ? `p:${ch.location.page}` :
+              ch.location?.slide ? `slide:${ch.location.slide}` :
+                ch.location?.sheet ? `sheet:${ch.location.sheet}` :
+                  "";
+            const snippet = `${loc ? `[${loc}] ` : ""}${ch.content}`.slice(0, remaining);
+
+            if (!byFile.has(ch.filename)) byFile.set(ch.filename, []);
+            byFile.get(ch.filename)!.push(snippet);
+            budgets.set(ch.filename, remaining - snippet.length);
+          }
+
+          for (const stat of batchResult.stats.filter(s => s.status === 'success')) {
+            const parts = byFile.get(stat.filename) || [];
+            const extractedText = parts.join("\n\n").trim();
+            if (!extractedText) continue;
+            briefAttachments.push({ type: "document", name: stat.filename, extractedText });
+          }
+        }
+
+        if (referencesPreviousDoc) {
+          try {
+            const docs = await storage.getConversationDocuments(effectiveChatIdForPersistence);
+            const lastWithText = [...docs].reverse().find(d => (d.extractedText || "").trim().length > 0);
+            if (lastWithText?.extractedText) {
+              briefAttachments.push({
+                type: "document",
+                name: lastWithText.fileName,
+                extractedText: clampText(lastWithText.extractedText, 15000),
+              });
+
+              // Also feed it to the answer model to prevent "inventing" the missing base doc.
+              systemMessage.content += `\n\nCONTEXTO DEL DOCUMENTO ANTERIOR (extraido):\n${clampText(lastWithText.extractedText, 20000)}`;
+            }
+          } catch (e) {
+            console.warn("[Stream] Failed to load conversation documents for brief (best-effort):", e);
+          }
+        }
+
+        brief = await requestUnderstandingAgent.buildBrief({
+          text: userMessageText,
+          attachments: briefAttachments,
+          userId: userId || undefined,
+          requestId: `${requestId}:brief`,
+        });
+
+        writeSse(res, 'brief', { requestId, runId: effectiveRunId, brief, timestamp: Date.now() });
+        emitTraceEvent(effectiveRunId, 'observation', { metadata: { brief } }).catch(() => { });
+
+        // Feed the canonical brief into the answer model (so the response follows the "encargo").
+        systemMessage.content += `\n\nREQUEST_BRIEF (JSON):\n${JSON.stringify(brief)}`;
+
+        if (brief.blocker?.is_blocked) {
+          const question = (brief.blocker.question || "").trim() || "¿Qué información falta para poder completar el encargo?";
+
+          writeSse(res, 'chunk', {
+            content: question,
+            sequenceId: 1,
+            requestId,
+            runId: effectiveRunId,
+            timestamp: Date.now(),
+          });
+
+          writeSse(res, 'done', {
+            requestId,
+            runId: effectiveRunId,
+            assistantMessageId,
+            timestamp: Date.now(),
+          });
+
+          if (assistantMessageId) {
+            try {
+              await storage.updateChatMessageContent(assistantMessageId, question, 'done', { brief });
+              await conversationStateService.appendMessage(
+                effectiveChatIdForPersistence,
+                'assistant',
+                question,
+                {
+                  chatMessageId: assistantMessageId,
+                  requestId: `${requestId}:state:assistant`,
+                  metadata: { brief },
+                }
+              );
+            } catch (e) {
+              console.warn('[Stream] Failed to finalize blocked assistant message (best-effort):', e);
+            }
+          }
+
+          if (claimedRun) {
+            await storage.updateChatRunStatus(claimedRun.id, 'done');
+          }
+
+          if (heartbeatInterval) clearInterval(heartbeatInterval);
+          isConnectionClosed = true;
+          res.end();
+          return;
+        }
+      } catch (e) {
+        console.warn("[Stream] RequestUnderstanding gate failed (best-effort), continuing:", e);
+      }
+
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
@@ -1439,7 +1608,10 @@ ${attachmentContext}`;
       // Update assistant message with full content + webSources
       if (assistantMessageId) {
         try {
-          const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
+          const metadata = {
+            ...(detectedWebSources.length > 0 ? { webSources: detectedWebSources } : {}),
+            ...(brief ? { brief } : {}),
+          };
           await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
 
           // Also persist assistant into Conversation State so /api/memory/chats/:id/state reflects reality.

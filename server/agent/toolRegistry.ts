@@ -1355,7 +1355,7 @@ const shellCommandTool: ToolDefinition = {
     }
 
     const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
+      return spawn("/bin/bash", ["-lc", cmd], {
         cwd: workspaceDir,
         env: { ...process.env, HOME: workspaceDir },
         shell: false,

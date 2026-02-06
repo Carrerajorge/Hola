@@ -11,11 +11,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { IntentResult } from './intentRouter';
 import { libraryService } from "./libraryService";
+import { storage } from "../storage";
+import { conversationStateService } from "./conversationStateService";
+import { documentIngestion } from "./documentIngestion";
+import { RequestBriefSchema, requestUnderstandingAgent, type RequestBrief } from "../agent/requestUnderstanding";
 import {
     startProductionPipeline,
     type ProductionEvent,
     type ProductionResult,
     type Artifact,
+    type RouterResult,
 } from '../agent/production';
 
 // ============================================================================
@@ -28,6 +33,7 @@ export interface ProductionRequest {
     chatId: string;
     intentResult: IntentResult;
     locale?: string;
+    requestId?: string;
 }
 
 export interface ProductionHandlerResult {
@@ -154,7 +160,7 @@ async function saveArtifact(
     runId: string,
     userId: string,
     chatId: string
-): Promise<{ downloadUrl: string; library?: { fileUuid: string; storageUrl: string } }> {
+): Promise<{ downloadUrl: string; filePath: string; library?: { fileUuid: string; storageUrl: string } }> {
     ensureArtifactsDir();
 
     // Use a readable filename with timestamp to avoid collisions
@@ -211,7 +217,7 @@ async function saveArtifact(
         console.warn("[ProductionHandler] Failed to save artifact to Library:", e?.message || e);
     }
 
-    return { downloadUrl, library };
+    return { downloadUrl, filePath, library };
 }
 
 // ============================================================================
@@ -244,23 +250,74 @@ export async function handleProductionRequest(
     console.log(`[ProductionHandler] Topic: ${intentResult.slots.topic || message}`);
 
     const runId = uuidv4();
+    const requestId = req.requestId || `prod_${runId}`;
     const deliverables = getDeliverables(intentResult);
 
     console.log(`[ProductionHandler] Deliverables: ${deliverables.join(', ')}`);
 
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Transfer-Encoding", "chunked");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("X-Production-Mode", "true");
-    res.setHeader("X-Run-Id", runId);
-    res.flushHeaders();
+    // Ensure chat exists so we can persist messages (critical for memory)
+    try {
+        const existingChat = await storage.getChat(chatId);
+        if (!existingChat) {
+            await storage.createChat({
+                id: chatId,
+                title: "New Chat",
+                userId: userId || undefined,
+            });
+        }
+    } catch (e) {
+        console.warn('[ProductionHandler] Failed to ensure chat exists (best-effort):', e);
+    }
+
+    // Persist the user message + create assistant placeholder so the conversation doesn't lose context.
+    let persistedUserMessageId: string | null = null;
+    let assistantMessageId: string | null = null;
+    try {
+        const userMsg = await storage.createChatMessage({
+            chatId,
+            role: "user",
+            content: message,
+            status: "done",
+            requestId,
+        });
+        persistedUserMessageId = userMsg.id;
+
+        await conversationStateService.appendMessage(chatId, "user", message, {
+            chatMessageId: userMsg.id,
+            requestId: `${requestId}:state:user`,
+        });
+
+        const assistantMsg = await storage.createChatMessage({
+            chatId,
+            role: "assistant",
+            content: "",
+            status: "pending",
+            runId,
+            userMessageId: userMsg.id,
+            requestId: `${requestId}:assistant`,
+        });
+        assistantMessageId = assistantMsg.id;
+    } catch (e) {
+        console.warn('[ProductionHandler] Failed to persist messages (best-effort):', e);
+    }
+
+    // Set SSE headers (only if not already sent by an upstream handler)
+    if (!res.headersSent) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Transfer-Encoding", "chunked");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("X-Production-Mode", "true");
+        res.setHeader("X-Run-Id", runId);
+        res.setHeader("X-Request-Id", requestId);
+        res.flushHeaders();
+    }
 
     // Emit production start
     writeSse(res, 'production_start', {
         runId,
+        requestId,
         intent: intentResult.intent,
         topic: intentResult.slots.topic || message,
         deliverables,
@@ -268,6 +325,123 @@ export async function handleProductionRequest(
     });
 
     try {
+        const referencesPreviousDoc = /\b(lo|la)\s+anterior\b/i.test(message) ||
+            /\b(documento|doc|archivo|texto)\s+(anterior|previo|previa|de antes)\b/i.test(message);
+
+        const clampText = (text: string, maxChars: number): string => {
+            if (!text) return "";
+            if (text.length <= maxChars) return text;
+            return text.slice(0, maxChars) + `\n\n[... truncated to ${maxChars} chars ...]`;
+        };
+
+        // Load the last persisted conversation document when the user references "documento anterior".
+        let baseDoc: { fileName: string; extractedText: string } | null = null;
+        if (referencesPreviousDoc) {
+            try {
+                const docs = await storage.getConversationDocuments(chatId);
+                const lastWithText = [...docs].reverse().find(d => (d.extractedText || "").trim().length > 0);
+                if (lastWithText?.extractedText) {
+                    baseDoc = { fileName: lastWithText.fileName, extractedText: lastWithText.extractedText };
+                }
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to load conversation documents (best-effort):', e);
+            }
+        }
+
+        let brief: RequestBrief | null = null;
+        try {
+            if (referencesPreviousDoc && !baseDoc) {
+                // Hard blocker: we cannot improve "the previous document" if we don't have any persisted content.
+                brief = RequestBriefSchema.parse({
+                    intent: { primary_intent: "Mejorar un documento previo", confidence: 0.6 },
+                    subtasks: [
+                        { title: "Identificar documento base", description: "Identificar el documento a mejorar", priority: "high" },
+                        { title: "Aplicar correcciones/mejoras", description: "Reescribir/editar el documento respetando formato y objetivo", priority: "medium" },
+                    ],
+                    deliverable: {
+                        description: "Documento mejorado",
+                        format: deliverables.join("+") || "word",
+                    },
+                    audience: { audience: "usuario", tone: "directo", language: locale || "es" },
+                    restrictions: [],
+                    data_provided: [],
+                    assumptions: [],
+                    success_criteria: ["Se aplica la mejora sobre el documento base correcto y el resultado es consistente"],
+                    risks: [{ risk: "No se encontró el documento base en el historial de la conversación", severity: "critical" }],
+                    ambiguities: ["No está claro a qué documento anterior te refieres"],
+                    blocker: {
+                        is_blocked: true,
+                        question: "¿Podés adjuntar el documento (o pegar el texto) que querés que corrija/mejore?",
+                    },
+                });
+            } else {
+                const briefAttachments = baseDoc
+                    ? [{ type: "document" as const, name: baseDoc.fileName, extractedText: clampText(baseDoc.extractedText, 15000) }]
+                    : [];
+
+                brief = await requestUnderstandingAgent.buildBrief({
+                    text: message,
+                    attachments: briefAttachments,
+                    userId,
+                    requestId: `${requestId}:brief`,
+                });
+            }
+
+            writeSse(res, 'brief', { runId, requestId, brief });
+        } catch (e) {
+            console.warn('[ProductionHandler] RequestUnderstanding brief failed (best-effort):', e);
+        }
+
+        if (brief?.blocker?.is_blocked) {
+            const question = (brief.blocker.question || "").trim() || "¿Qué información falta para poder completar el encargo?";
+
+            writeSse(res, 'chunk', {
+                content: question,
+                sequenceId: 1,
+                requestId,
+                runId,
+            });
+
+            writeSse(res, 'done', {
+                sequenceId: 2,
+                requestId,
+                runId,
+                timestamp: Date.now(),
+            });
+
+            if (assistantMessageId) {
+                try {
+                    await storage.updateChatMessageContent(assistantMessageId, question, 'done', { brief });
+                    await conversationStateService.appendMessage(chatId, "assistant", question, {
+                        chatMessageId: assistantMessageId,
+                        requestId: `${requestId}:state:assistant`,
+                        metadata: { brief },
+                    });
+                } catch (e) {
+                    console.warn('[ProductionHandler] Failed to finalize blocked assistant message (best-effort):', e);
+                }
+            }
+
+            res.end();
+            return { handled: true, error: question };
+        }
+
+        const internalSources = baseDoc
+            ? [{
+                title: `Base document: ${baseDoc.fileName}`,
+                content: clampText(baseDoc.extractedText, 30000),
+            }]
+            : [];
+
+        const routerResultOverride: RouterResult = {
+            mode: 'PRODUCTION',
+            confidence: 1.0,
+            intent: deliverables.includes('ppt') ? 'presentation' : deliverables.includes('excel') ? 'analysis' : 'report',
+            deliverables,
+            topic: intentResult.slots.topic || message,
+            reasoning: `Forced production via intent=${intentResult.intent}`,
+        };
+
         // Execute production pipeline
         const result = await startProductionPipeline(
             message,
@@ -281,7 +455,17 @@ export async function handleProductionRequest(
                     progress: event.progress,
                     message: event.message,
                     timestamp: event.timestamp,
+                    requestId,
+                    runId,
                 });
+            },
+            {
+                routerResultOverride,
+                forceProduction: true,
+                workOrderMetadata: {
+                    ...(internalSources.length ? { internalSources } : {}),
+                    ...(brief ? { requestBrief: brief } : {}),
+                },
             }
         );
 
@@ -306,12 +490,63 @@ export async function handleProductionRequest(
                 downloadUrl: stored.downloadUrl,
                 size: artifact.size,
                 library: stored.library,
+                requestId,
+                runId,
             });
+
+            // Persist extracted text so "mejora el documento anterior" works reliably.
+            // This also feeds ConversationState RAG indexing.
+            let extractedText: string | null = null;
+            try {
+                extractedText = await documentIngestion.extractContent(artifact.buffer, artifact.mimeType);
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to extract artifact text (best-effort):', e);
+            }
+
+            try {
+                await storage.createConversationDocument({
+                    chatId,
+                    messageId: assistantMessageId || null,
+                    fileName: artifact.filename,
+                    storagePath: stored.library?.storageUrl || stored.downloadUrl || stored.filePath,
+                    mimeType: artifact.mimeType,
+                    fileSize: artifact.size,
+                    extractedText: extractedText ? clampText(extractedText, 200000) : null,
+                    metadata: {
+                        runId,
+                        deliverable: artifact.type,
+                        downloadUrl: stored.downloadUrl,
+                        library: stored.library,
+                    },
+                });
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to persist conversation document (best-effort):', e);
+            }
+
+            try {
+                await conversationStateService.addArtifact(
+                    chatId,
+                    artifact.type,
+                    artifact.mimeType,
+                    stored.library?.storageUrl || stored.downloadUrl,
+                    artifact.filename,
+                    artifact.size,
+                    artifact.buffer,
+                    {
+                        messageId: assistantMessageId || undefined,
+                        extractedText: extractedText ? clampText(extractedText, 200000) : undefined,
+                        metadata: { runId, downloadUrl: stored.downloadUrl, library: stored.library },
+                    }
+                );
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to index artifact in conversation state (best-effort):', e);
+            }
         }
 
         // Emit completion
         writeSse(res, 'production_complete', {
             runId,
+            requestId,
             success: true,
             artifactsCount: result.artifacts.length,
             qaScore: result.qaReport?.overallScore,
@@ -320,21 +555,42 @@ export async function handleProductionRequest(
         });
 
         // Send summary as regular chat content for display
+        const finalContent = formatProductionSummary(result, intentResult, artifactsWithUrls);
         writeSse(res, 'chunk', {
-            content: formatProductionSummary(result, intentResult, artifactsWithUrls),
+            content: finalContent,
             sequenceId: 1,
-            requestId: runId,
+            requestId,
             runId,
         });
 
         writeSse(res, 'done', {
             sequenceId: 2,
-            requestId: runId,
+            requestId,
             runId,
             timestamp: Date.now(),
         });
 
         res.end();
+
+        // Finalize assistant message persistence
+        if (assistantMessageId) {
+            try {
+                const metadata = {
+                    runId,
+                    brief: (brief as any) || undefined,
+                    artifacts: artifactsWithUrls,
+                    qaScore: result.qaReport?.overallScore,
+                };
+                await storage.updateChatMessageContent(assistantMessageId, finalContent, 'done', metadata);
+                await conversationStateService.appendMessage(chatId, "assistant", finalContent, {
+                    chatMessageId: assistantMessageId,
+                    requestId: `${requestId}:state:assistant`,
+                    metadata,
+                });
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to finalize assistant message (best-effort):', e);
+            }
+        }
 
         return {
             handled: true,
@@ -346,26 +602,41 @@ export async function handleProductionRequest(
 
         writeSse(res, 'production_error', {
             runId,
+            requestId,
             error: error.message,
             timestamp: Date.now(),
         });
 
         // Send error as chat content
+        const errorContent = `❌ **Error en la producción documental**\n\n${error.message}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`;
         writeSse(res, 'chunk', {
-            content: `❌ **Error en la producción documental**\n\n${error.message}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`,
+            content: errorContent,
             sequenceId: 1,
-            requestId: runId,
+            requestId,
             runId,
         });
 
         writeSse(res, 'done', {
             sequenceId: 2,
-            requestId: runId,
+            requestId,
             runId,
             timestamp: Date.now(),
         });
 
         res.end();
+
+        if (assistantMessageId) {
+            try {
+                await storage.updateChatMessageContent(assistantMessageId, errorContent, 'failed');
+                await conversationStateService.appendMessage(chatId, "assistant", errorContent, {
+                    chatMessageId: assistantMessageId,
+                    requestId: `${requestId}:state:assistant`,
+                    metadata: { error: error.message },
+                });
+            } catch (e) {
+                console.warn('[ProductionHandler] Failed to persist error assistant message (best-effort):', e);
+            }
+        }
 
         return {
             handled: true,
