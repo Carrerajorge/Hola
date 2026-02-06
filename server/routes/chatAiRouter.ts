@@ -1416,6 +1416,26 @@ ${attachmentContext}`;
         }
       }
 
+      // If upstream agentic pipeline produced no content, don't leave the UI hanging.
+      // Emit a fallback chunk so clients can render something, and persist it.
+      if (!fullContent.trim()) {
+        const fallbackContent = "Lo siento, el modo agente no pudo generar una respuesta esta vez. Intenta de nuevo o desactiva el modo agente para esta pregunta.";
+        fullContent = fallbackContent;
+
+        if (!isConnectionClosed) {
+          const nextSeq = lastAckSequence + 1;
+          lastAckSequence = nextSeq;
+          writeSse(res, 'chunk', {
+            content: fallbackContent,
+            sequenceId: nextSeq,
+            requestId,
+            runId: effectiveRunId,
+            timestamp: Date.now(),
+            isFallback: true,
+          });
+        }
+      }
+
       // Update assistant message with full content + webSources
       if (assistantMessageId) {
         try {
