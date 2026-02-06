@@ -135,6 +135,8 @@ import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyT
 import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
 import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
 import { extractTextFromChildren, isNumericValue } from "./chat-interface/utils";
+import { useSettingsContext } from "@/contexts/SettingsContext";
+import { isAdminUser } from "@/lib/admin";
 
 function AvatarWithFallback({
   src,
@@ -368,6 +370,7 @@ export function ChatInterface({
   }, [selectedProjectId, projects, getProject]);
 
   const { user } = useAuth();
+  const { settings, updateSetting } = useSettingsContext();
   const { toast } = useToast();
   
   // First visit explosion
@@ -376,11 +379,22 @@ export function ChatInterface({
   const userPlanInfo = useMemo(() => {
     if (!user) return null;
     const plan = user.plan || 'free';
-    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'));
+    const isAdmin = isAdminUser(user as any);
     // isPaid = true only if plan is NOT 'free' AND status is 'active'
     const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
     return { plan, isAdmin, isPaid };
   }, [user]);
+
+  const speechLocale = useMemo(() => {
+    const code = settings.spokenLanguage;
+    if (!code || code === "auto") return navigator.language || "es-ES";
+    if (code === "es") return "es-ES";
+    if (code === "en") return "en-US";
+    if (code === "fr") return "fr-FR";
+    if (code === "de") return "de-DE";
+    if (code === "pt") return "pt-PT";
+    return navigator.language || "es-ES";
+  }, [settings.spokenLanguage]);
 
   // Upgrade prompt for free users after 3rd query
   const {
@@ -776,8 +790,9 @@ export function ChatInterface({
       if (found) return found;
     }
     // Default: prefer Gemini models over others (Perplexity has no API key)
-    const preferredModel = availableModels.find((m: any) => 
-      m.provider === 'google' && m.modelId?.includes('gemini')
+    const preferredModel = availableModels.find((m: any) =>
+      (m.provider === "google" || m.provider === "gemini") &&
+      String(m.modelId || "").toLowerCase().includes("gemini")
     );
     return preferredModel || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
@@ -802,6 +817,13 @@ export function ChatInterface({
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
   const [isGmailActive, setIsGmailActive] = useState(true);
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
+
+  // "Independent voice mode" means voice chat is the primary UI until the user exits it.
+  useEffect(() => {
+    if (settings.independentVoiceMode) {
+      setIsVoiceChatOpen(true);
+    }
+  }, [settings.independentVoiceMode]);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -1324,6 +1346,24 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
+  const lastAutoPlayAssistantIdRef = useRef<string | null>(null);
+
+  const updateStreamingProgress = useCallback((content: string) => {
+    // Always keep the ref updated (used by Stop/Cancellation and background streaming).
+    streamingContentRef.current = content;
+
+    // Only render partial tokens when the user enabled streaming in Settings.
+    if (settings.streamResponses) {
+      setStreamingContent(content);
+    }
+  }, [settings.streamResponses]);
+
+  useEffect(() => {
+    // If the user disables streaming mid-generation, hide partial tokens immediately.
+    if (!settings.streamResponses) {
+      setStreamingContent("");
+    }
+  }, [settings.streamResponses]);
 
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
@@ -1448,7 +1488,7 @@ export function ChatInterface({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'es-ES';
+    recognition.lang = speechLocale;
 
     let finalTranscript = '';
     let interimTranscript = '';
@@ -1516,7 +1556,7 @@ export function ChatInterface({
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'es-ES';
+      recognition.lang = speechLocale;
 
       let currentInput = input;
 
@@ -1794,12 +1834,37 @@ export function ChatInterface({
     } else {
       speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(content);
+      utterance.lang = speechLocale;
+      utterance.rate = settings.voiceSpeed ?? 1;
+      utterance.volume = settings.voiceVolume ?? 1;
+      utterance.pitch = settings.voice === "ember" ? 1.2 : settings.voice === "breeze" ? 0.9 : 1;
       utterance.onend = () => setSpeakingMessageId(null);
       utterance.onerror = () => setSpeakingMessageId(null);
       speechSynthesis.speak(utterance);
       setSpeakingMessageId(msgId);
     }
-  }, [speakingMessageId]);
+  }, [speakingMessageId, speechLocale, settings.voiceSpeed, settings.voiceVolume, settings.voice]);
+
+  useEffect(() => {
+    // Avoid auto-speaking previously loaded history when switching conversations.
+    lastAutoPlayAssistantIdRef.current = null;
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!settings.autoPlayResponses) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant") return;
+
+    // First eligible assistant message after mount/chat-switch becomes the baseline.
+    if (lastAutoPlayAssistantIdRef.current === null) {
+      lastAutoPlayAssistantIdRef.current = lastMsg.id;
+      return;
+    }
+
+    if (lastAutoPlayAssistantIdRef.current === lastMsg.id) return;
+    lastAutoPlayAssistantIdRef.current = lastMsg.id;
+    handleReadAloud(lastMsg.id, lastMsg.content);
+  }, [messages, settings.autoPlayResponses, chatId, handleReadAloud]);
 
   const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);
@@ -1890,8 +1955,7 @@ export function ChatInterface({
                 const content = data.content || "";
                 if (content) {
                   fullContent += content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
+                  updateStreamingProgress(fullContent);
                 }
               } else if (currentEventType === "production_start") {
                 setAiState("agent_working");
@@ -1967,7 +2031,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
+  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel, onSendMessage, updateStreamingProgress]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
@@ -2558,112 +2622,6 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
-    // EMERGENCY DEBUG - REMOVE AFTER FIX
-    console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
-    
-    // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
-    if (input.trim().startsWith("!")) {
-      const cleanInput = input.trim().substring(1); // Remove the "!" prefix
-      console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
-      setInput("");
-      setAiState("thinking");
-      
-      try {
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-        if (chatId?.startsWith("pending-")) {
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-        }
-
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            chatId: effectiveChatIdForStream,
-            conversationId: effectiveChatIdForStream,
-            model: selectedModel || "grok-3"
-          })
-        });
-        
-        if (!response.ok) {
-          console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
-          setAiState("idle");
-          return;
-        }
-        
-        // Read the stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  setStreamingContent(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-        
-        // Create the response message
-        const assistantMsg: Message = {
-          id: `emergency-${Date.now()}`,
-          role: "assistant",
-          content: fullContent || "No response received",
-          timestamp: new Date()
-        };
-        onSendMessage(assistantMsg);
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
-        return;
-      } catch (error) {
-        console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
-        setAiState("idle");
-        return;
-      }
-    }
-    
-    // MOCK CITATION TRIGGER FOR VERIFICATION
-    if (input.trim() === "/test-citation") {
-      const mockMsg: Message = {
-        id: `mock-${Date.now()}`,
-        role: "assistant",
-        content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
-        timestamp: new Date(),
-        webSources: [
-          {
-            source: { name: "Documento de Diseño", domain: "example.com" },
-            url: "http://example.com/doc.pdf",
-            title: "Especificación Técnica",
-            domain: "example.com",
-            metadata: {
-              pageNumber: 42,
-              section: "3.5 Arquitectura",
-              totalPages: 100
-            } as any
-          }
-        ]
-      };
-      onSendMessage(mockMsg);
-      setInput("");
-      return;
-    }
-
     console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
 
     // Wait for any pending uploads to complete before proceeding
@@ -2691,12 +2649,12 @@ export function ChatInterface({
       return;
     }
 
-    // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
-    // This bypasses all the complex chat creation logic that's failing
-    // Also handle web search tool here
+    // Fast path: simple text messages (no attachments) stream directly from the SSE endpoint.
+    // Keeps UX responsive and avoids extra roundtrips.
     if (hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
-      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
       const userInput = input.trim();
+      const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+      const cleanInput = userInput.replace(/^🌐\s*/, "");
       setInput("");
       
       // Track query for free users (upgrade prompt)
@@ -2723,31 +2681,25 @@ export function ChatInterface({
       setStreamingContent("");
       
       try {
-        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
-        const cleanInput = userInput.replace(/^🌐\s*/, "");
-        
-        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-        if (chatId?.startsWith("pending-")) {
-          // Upgrade pending client-only chat id to a real stable chat id for server persistence.
-          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
-        }
-
+        abortControllerRef.current = new AbortController();
         const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
           body: JSON.stringify({
             messages: [{ role: "user", content: cleanInput }],
-            chatId: effectiveChatIdForStream,
-            conversationId: effectiveChatIdForStream,
-            model: selectedModel || "grok-3",
+            chatId,
+            conversationId: chatId,
+            provider: selectedProvider,
+            model: selectedModel,
             forceWebSearch: isWebSearch,
             webSearchAuto: isWebSearch
-          })
+          }),
+          signal: abortControllerRef.current.signal
         });
         
         if (!response.ok) {
-          console.error("[EMERGENCY BYPASS] API error:", response.status);
+          abortControllerRef.current = null;
           const errorMsg: Message = {
             id: `error-${Date.now()}`,
             role: "assistant",
@@ -2775,11 +2727,12 @@ export function ChatInterface({
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               try {
-                const data = JSON.parse(line.slice(6));
+                const payload = line.slice(6).trim();
+                if (!payload || payload === "[DONE]") continue;
+                const data = JSON.parse(payload);
                 if (data.content) {
                   fullContent += data.content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
+                  updateStreamingProgress(fullContent);
                 }
               } catch (e) {
                 // Ignore parse errors for incomplete JSON
@@ -2800,10 +2753,11 @@ export function ChatInterface({
         streamingContentRef.current = "";
         setStreamingContent("");
         setAiState("idle");
-        console.error("[EMERGENCY BYPASS] Completed successfully");
+        abortControllerRef.current = null;
         return;
       } catch (error) {
-        console.error("[EMERGENCY BYPASS] Error:", error);
+        if ((error as any)?.name === "AbortError") return;
+        abortControllerRef.current = null;
         const errorMsg: Message = {
           id: `error-${Date.now()}`,
           role: "assistant",
@@ -3179,8 +3133,7 @@ export function ChatInterface({
                     const content = data.content || "";
                     if (content) {
                       fullContent += content;
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     }
                   } else if (currentEventType === "production_start") {
                     setAiState("agent_working");
@@ -4507,8 +4460,7 @@ IMPORTANTE:
                       pptStreaming.processChunk(data.content);
                     } else if (isExcelMode && shouldWriteToDoc) {
                       // Excel mode: show streaming indicator in chat, data goes to Excel at end
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
                       try {
                         // Word mode: Cumulative HTML mode
@@ -4521,8 +4473,7 @@ IMPORTANTE:
                       }
                     } else {
                       // Normal chat mode - update streaming content
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
+                      updateStreamingProgress(fullContent);
                     }
                   }
 
@@ -4813,8 +4764,7 @@ IMPORTANTE:
                 if (currentIndex < fullContent.length) {
                   const chunkSize = Math.floor(Math.random() * 5) + 3;
                   currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-                  streamingContentRef.current = fullContent.slice(0, currentIndex);
-                  setStreamingContent(fullContent.slice(0, currentIndex));
+                  updateStreamingProgress(fullContent.slice(0, currentIndex));
                 } else {
                   if (streamIntervalRef.current) {
                     clearInterval(streamIntervalRef.current);
@@ -4920,8 +4870,7 @@ IMPORTANTE:
                   if (originalChatId) {
                     appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
                   }
-                  streamingContentRef.current = newContent;
-                  setStreamingContent(newContent);
+                  updateStreamingProgress(newContent);
                 }
                 currentIndex += chunkSize;
               } else {
@@ -5797,7 +5746,12 @@ IMPORTANTE:
       {/* Voice Chat Mode - Fullscreen conversation with Grok */}
       <VoiceChatMode
         open={isVoiceChatOpen}
-        onClose={() => setIsVoiceChatOpen(false)}
+        onClose={() => {
+          setIsVoiceChatOpen(false);
+          if (settings.independentVoiceMode) {
+            updateSetting("independentVoiceMode", false);
+          }
+        }}
       />
       {/* Image Lightbox Modal */}
       {lightboxImage && (

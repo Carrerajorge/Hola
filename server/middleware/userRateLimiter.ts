@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import { cache } from '../lib/cache';
 import { createAlert } from '../lib/alertManager';
 import { logger } from '../utils/logger';
+import { getSecureUserId } from '../lib/anonUserHelper';
 
 // Rate limit configurations for different endpoints
 const RATE_LIMIT_CONFIGS = {
@@ -17,13 +18,6 @@ const RATE_LIMIT_CONFIGS = {
         points: 60,          // 60 requests
         duration: 60,        // per 60 seconds
         blockDuration: 120,  // block for 2 minutes if exceeded
-    },
-    // Conversation memory state endpoints can be polled by the UI. Keep these permissive to
-    // avoid retry-loops that lock users out of chat initialization.
-    memoryState: {
-        points: 300,         // 300 requests
-        duration: 60,        // per 60 seconds
-        blockDuration: 30,   // short block; UI should backoff
     },
     // Document generation - more restrictive
     documents: {
@@ -105,7 +99,7 @@ function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRed
  * Combines user ID (if authenticated) with IP for uniqueness
  */
 function getRateLimitKey(req: Request): string {
-    const userId = (req as any).user?.id;
+    const userId = getSecureUserId(req);
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
 
     // Authenticated users get their own bucket
@@ -201,7 +195,7 @@ export function createCustomRateLimiter(options: {
 
     return async (req: Request, res: Response, next: NextFunction) => {
         // Use user ID if authenticated, else IP
-        const userId = (req as any).user?.id;
+        const userId = getSecureUserId(req);
         const ip = req.ip || req.socket.remoteAddress || 'unknown';
         const key = userId ? `user_${userId}` : `ip_${ip}`;
 
@@ -241,12 +235,10 @@ export function createCustomRateLimiter(options: {
  * This is the main middleware to be used in routes
  */
 export const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
-    // NOTE: this middleware is mounted at app.use('/api', rateLimiter).
-    // Use baseUrl + path so routing decisions are stable regardless of mount behavior.
-    const fullPath = `${req.baseUrl || ''}${req.path || ''}`.toLowerCase();
+    const path = req.path.toLowerCase();
 
     // Skip rate limiting for health checks and status endpoints
-    if (fullPath.includes('/health') || fullPath.includes('/status') || fullPath === '/' || fullPath === '/api') {
+    if (path.includes('/health') || path.includes('/status') || path === '/') {
         return next();
     }
 
@@ -259,7 +251,8 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
     const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.includes('localhost');
 
     // Check if user is admin (claims.role or role property depending on object structure)
-    const isAdmin = user?.claims?.role === 'admin' || user?.role === 'admin';
+    const role = String(user?.claims?.role || user?.role || "").toLowerCase().trim();
+    const isAdmin = role === "admin" || role === "superadmin" || role === "team_admin";
 
     // In development, be more permissive - BYPASS rate limiting entirely
     const isDev = process.env.NODE_ENV === 'development';
@@ -269,27 +262,15 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
         return next();
     }
 
-    // Avoid substring matching bugs (e.g. '/memory/chats' accidentally matching '/chat')
-    const hasSegment = (segment: string) => {
-        const re = new RegExp(`(^|/)${segment}(/|$)`, 'i');
-        return re.test(fullPath);
-    };
-
-    // UI polls this endpoint during chat init; keep it permissive to avoid 429/lockouts.
-    // Example: /api/memory/chats/pending-123/state
-    const isConversationMemoryState = /\/api\/memory\/chats\/[^/]+\/state(\/|$)/i.test(fullPath);
-
     if (isAdmin || isLocalhost) {
         tier = 'trusted';
-    } else if (isConversationMemoryState) {
-        tier = 'memoryState';
-    } else if (hasSegment('chat') || hasSegment('message')) {
+    } else if (path.includes('/chat') || path.includes('/message')) {
         tier = 'chat';
-    } else if (fullPath.includes('/document') || fullPath.includes('/export')) {
+    } else if (path.includes('/document') || path.includes('/export')) {
         tier = 'documents';
-    } else if (fullPath.includes('/auth') || fullPath.includes('/login') || fullPath.includes('/register')) {
+    } else if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
         tier = 'auth';
-    } else if (fullPath.includes('/ai') || fullPath.includes('/generate') || fullPath.includes('/model')) {
+    } else if (path.includes('/ai') || path.includes('/generate') || path.includes('/model')) {
         tier = 'ai';
     }
 

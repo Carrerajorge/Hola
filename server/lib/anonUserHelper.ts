@@ -21,7 +21,10 @@ export function getSecureUserId(req: Request): string | null {
     return authUserId;
   }
 
-  const session = req.session as any;
+  // `req.session` is only present if express-session middleware has run.
+  // This helper is called very early (e.g. request logger), so it must be
+  // resilient to missing session middleware.
+  const session = (req as any).session as any | undefined;
 
   // 1.5 Check session.authUserId (workaround for Passport serialization issues)
   if (session?.authUserId) {
@@ -30,6 +33,10 @@ export function getSecureUserId(req: Request): string | null {
 
   // 1.6 Check session.passport.user for user info
   const passportUser = session?.passport?.user;
+  // Many Passport setups serialize just the user id (string).
+  if (typeof passportUser === "string" && passportUser) {
+    return passportUser;
+  }
   if (passportUser?.claims?.sub) {
     return passportUser.claims.sub;
   }
@@ -49,11 +56,9 @@ export function getSecureUserId(req: Request): string | null {
   }
 
   // 3. Fallback to session-bound ID or generate new one
-  if (!session.anonUserId) {
+  if (session && !session.anonUserId) {
     const sessionId = (req as any).sessionID;
-    if (sessionId) {
-      session.anonUserId = `anon_${sessionId}`;
-    }
+    if (sessionId) session.anonUserId = `anon_${sessionId}`;
   }
 
   return session?.anonUserId || null;
@@ -93,7 +98,11 @@ export function isAuthenticated(req: Request): boolean {
   if (session?.authUserId) {
     return true;
   }
-  if (session?.passport?.user?.claims?.sub || session?.passport?.user?.id) {
+  const passportUser = session?.passport?.user;
+  if (typeof passportUser === "string" && passportUser) {
+    return true;
+  }
+  if (passportUser?.claims?.sub || passportUser?.id) {
     return true;
   }
   

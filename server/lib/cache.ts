@@ -10,12 +10,19 @@ export class CacheService {
     private readonly defaultTTL = 60; // 60 seconds
     // Tag to keys mapping for invalidation
     private tagIndex = new Map<string, Set<string>>();
+    private lastRedisErrorLogAt = 0;
 
     constructor() {
         this.initialize();
     }
 
     private initialize() {
+        // Redis is not required for tests and tends to introduce noisy logs / flakiness.
+        if (process.env.NODE_ENV === "test") {
+            Logger.info("[Cache] NODE_ENV=test, Redis disabled (fallback mode)");
+            return;
+        }
+
         if (process.env.REDIS_URL) {
             try {
                 this.redis = new Redis(process.env.REDIS_URL, {
@@ -37,7 +44,12 @@ export class CacheService {
 
                 this.redis.on('error', (err) => {
                     this.isConnected = false;
-                    Logger.warn('[Cache] Redis connection error (running in fallback mode):', err.message);
+                    // Throttle error logs; passing a raw string as metadata breaks pino formatting.
+                    const now = Date.now();
+                    if (now - this.lastRedisErrorLogAt > 30000) {
+                        this.lastRedisErrorLogAt = now;
+                        Logger.warn('[Cache] Redis connection error (running in fallback mode)', { error: err.message });
+                    }
                 });
 
             } catch (error: any) {

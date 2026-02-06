@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev:client": "vite dev --port 5050",
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "worker": "tsx server/worker.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
-    "check": "tsc",
+    "check": "npm run type-check",
     "type-check": "NODE_OPTIONS=--max-old-space-size=4096 tsc -p tsconfig.ci.json",
     "db:push": "drizzle-kit push",
     "test": "vitest",
@@ -276,7 +279,6 @@
     "esbuild": "^0.25.0",
     "happy-dom": "^20.3.4",
     "jsdom": "^27.4.0",
-    "pngjs": "^7.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
@@ -289,6 +291,7 @@
   "overrides": {
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "pdfjs-dist": "4.10.38",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "lodash-es": "4.17.23"
   }
 }

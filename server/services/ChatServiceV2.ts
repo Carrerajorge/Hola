@@ -15,6 +15,7 @@ import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/
 import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type GptSessionContract } from "./gptSessionService";
 import { intentEnginePipeline, type PipelineOptions } from "../intent-engine";
 import { handleChatRequest } from "./chatService";
+import type { LLMProviderOrAuto } from "../lib/llmProviders";
 
 // Re-export constants
 export const AVAILABLE_MODELS = {
@@ -148,7 +149,7 @@ export interface ChatResponse {
     };
 }
 
-export type LLMProvider = "xai" | "gemini";
+export type LLMProvider = LLMProviderOrAuto;
 
 // Helper Functions (Private to module ideally, but kept here)
 function detectDiagramType(prompt: string): DiagramType {

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { ActiveGpt } from "@/types/chat";
 import { useToast } from "@/hooks/use-toast";
 import { AvailableModel } from "@/contexts/ModelAvailabilityContext";
+import { formatProviderLabel } from "@/lib/llmProviders";
 
 interface GptActionMenuProps {
     activeGpt: ActiveGpt;
@@ -43,8 +44,6 @@ export function GptActionMenu({
 }: GptActionMenuProps) {
     const { toast } = useToast();
     const [open, setOpen] = useState(false);
-
-    console.log("[GptActionMenu] Rendering");
 
     // Helper to find selected model data to facilitate UI logic
     // We infer the selected model object from available lists if needed, 
@@ -75,7 +74,7 @@ export function GptActionMenu({
                                 <React.Fragment key={provider}>
                                     {providerIndex > 0 && <DropdownMenuSeparator />}
                                     <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                                        {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
+                                        {formatProviderLabel(provider)}
                                     </div>
                                     {models.map((model) => (
                                         <DropdownMenuItem

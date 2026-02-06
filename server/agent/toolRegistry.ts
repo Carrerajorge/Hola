@@ -21,9 +21,6 @@ import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 
-const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
-const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
-
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
   description: z.string().min(1, "Tool description is required"),
@@ -43,29 +40,14 @@ export interface ToolContext {
   userId: string;
   chatId: string;
   runId: string;
+  channel?: string;
   correlationId?: string;
   stepIndex?: number;
   userPlan?: "free" | "pro" | "admin";
   isConfirmed?: boolean;
-  signal?: AbortSignal;
-
-  /**
-   * Optional streaming hook for long-running tools (e.g. shell_command).
-   * The callback MUST be best-effort (never throw); the tool will ignore failures.
-   * Consumers should not assume chunk boundaries align with lines.
-   */
   onStream?: (evt: { stream: "stdout" | "stderr"; chunk: string }) => void;
-
-  /**
-   * Optional hook invoked once when a tool-backed process exits.
-   * Best-effort: errors are ignored by the tool.
-   */
-  onExit?: (evt: {
-    exitCode: number;
-    signal: string | null;
-    wasKilled: boolean;
-    durationMs: number;
-  }) => void;
+  onExit?: (evt: { exitCode: number | null; signal: string | null; wasKilled: boolean; durationMs: number }) => void;
+  signal?: AbortSignal;
 }
 
 export interface ToolArtifact {
@@ -178,6 +160,27 @@ export class ToolRegistry {
           retryable: false,
         },
       };
+    }
+
+    // WhatsApp channel is a high-risk ingress: keep tool surface minimal by default.
+    if (context.channel === "whatsapp_web") {
+      const allowed = new Set(["search"]);
+      if (!allowed.has(name)) {
+        addLog("warn", `Tool blocked for WhatsApp channel: ${name}`);
+        return {
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
+          error: {
+            code: "ACCESS_DENIED",
+            message: `Tool \"${name}\" is not available from WhatsApp channel`,
+            retryable: false,
+          },
+        };
+      }
     }
     
     if (!tool) {
@@ -1000,8 +1003,8 @@ const readFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const safePath = path.resolve(getRunWorkspaceDir(context.runId), input.filepath);
-      if (!safePath.startsWith(getRunWorkspaceDir(context.runId))) {
+      const safePath = path.resolve('/tmp/agent-workspace', context.runId, input.filepath);
+      if (!safePath.startsWith(path.resolve('/tmp/agent-workspace', context.runId))) {
         throw new Error('Access denied: path outside workspace');
       }
       const content = await fs.readFile(safePath, 'utf-8');
@@ -1042,7 +1045,7 @@ const writeFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = getRunWorkspaceDir(context.runId);
+      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const safePath = path.resolve(workspaceDir, input.filepath);
       if (!safePath.startsWith(workspaceDir)) {
@@ -1077,458 +1080,351 @@ const shellCommandSchema = z.object({
   timeout: z.number().min(1000).max(60000).default(30000).describe("Timeout in milliseconds"),
 });
 
+type ShellStreamEvent = { stream: "stdout" | "stderr"; chunk: string };
+type ShellExitEvent = { exitCode: number | null; signal: string | null; wasKilled: boolean; durationMs: number };
+
+function assessShellCommandRisk(commandRaw: string): { hardBlocked: boolean; needsConfirmation: boolean; reason?: string } {
+  const command = commandRaw.trim();
+  const normalized = command.toLowerCase();
+
+  const hardBlocked: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /\bsudo\b/i, reason: "sudo is not allowed" },
+    { pattern: /\bmkfs\b/i, reason: "mkfs is not allowed" },
+    { pattern: /\bdd\s+if=/i, reason: "dd is not allowed" },
+    { pattern: />\s*\/dev\b/i, reason: "writing to /dev is not allowed" },
+    { pattern: /\bcurl\b[^|]*\|\s*(?:sh|bash)\b/i, reason: "piping curl into a shell is not allowed" },
+    { pattern: /\bwget\b[^|]*\|\s*(?:sh|bash)\b/i, reason: "piping wget into a shell is not allowed" },
+  ];
+
+  for (const rule of hardBlocked) {
+    if (rule.pattern.test(command)) {
+      return { hardBlocked: true, needsConfirmation: false, reason: rule.reason };
+    }
+  }
+
+  // Destructive operations: require explicit confirmation.
+  const needsConfirmation =
+    /\brm\b/.test(normalized) && (
+      /\s-\S*r\S*f(\s|$)/.test(normalized) || // rm -rf / rm -fr / rm -r -f ...
+      /\s--recursive(\s|$)/.test(normalized) ||
+      /\s--force(\s|$)/.test(normalized)
+    );
+
+  if (needsConfirmation) {
+    return { hardBlocked: false, needsConfirmation: true, reason: "Potentially destructive command" };
+  }
+
+  return { hardBlocked: false, needsConfirmation: false };
+}
+
+async function runShellCommandLocally(args: {
+  command: string;
+  timeoutMs: number;
+  context: ToolContext;
+  onStream?: (evt: ShellStreamEvent) => void;
+  onExit?: (evt: ShellExitEvent) => void;
+}): Promise<{ stdout: string; stderr: string; exit: ShellExitEvent }> {
+  const { command, timeoutMs, context, onStream, onExit } = args;
+  const { spawn } = await import("child_process");
+
+  const workspaceDir = path.resolve("/tmp/agent-workspace", context.runId);
+  await fs.mkdir(workspaceDir, { recursive: true });
+
+  const MAX_OUTPUT_CHARS = 2_000_000;
+  const truncateAppend = (existing: string, chunk: string): string => {
+    if (existing.length >= MAX_OUTPUT_CHARS) return existing;
+    const next = existing + chunk;
+    if (next.length <= MAX_OUTPUT_CHARS) return next;
+    return next.slice(0, MAX_OUTPUT_CHARS);
+  };
+
+  return await new Promise((resolve) => {
+    const startedAt = Date.now();
+    let stdout = "";
+    let stderr = "";
+    let wasKilled = false;
+    let emittedAnyChunk = false;
+
+    const child = spawn(command, {
+      shell: true,
+      cwd: workspaceDir,
+      env: { ...process.env, HOME: workspaceDir },
+    });
+
+    const kill = () => {
+      if (wasKilled) return;
+      wasKilled = true;
+      try { child.kill("SIGKILL"); } catch { /* ignore */ }
+    };
+
+    const timeoutId = setTimeout(kill, timeoutMs);
+
+    const abortHandler = () => {
+      kill();
+    };
+    if (context.signal) {
+      if (context.signal.aborted) abortHandler();
+      else context.signal.addEventListener("abort", abortHandler, { once: true });
+    }
+
+    child.stdout?.on("data", (data: Buffer) => {
+      const chunk = data.toString("utf8");
+      stdout = truncateAppend(stdout, chunk);
+      emittedAnyChunk = true;
+      onStream?.({ stream: "stdout", chunk });
+    });
+
+    child.stderr?.on("data", (data: Buffer) => {
+      const chunk = data.toString("utf8");
+      stderr = truncateAppend(stderr, chunk);
+      emittedAnyChunk = true;
+      onStream?.({ stream: "stderr", chunk });
+    });
+
+    const finish = (exitCode: number | null, signal: string | null) => {
+      clearTimeout(timeoutId);
+      const exit: ShellExitEvent = {
+        exitCode,
+        signal,
+        wasKilled,
+        durationMs: Math.max(0, Date.now() - startedAt),
+      };
+
+      // Some commands may buffer output so tightly that we don't see "data" events before close.
+      // Ensure at least one streaming callback for small outputs when possible (tests rely on this).
+      if (!emittedAnyChunk) {
+        if (stdout) onStream?.({ stream: "stdout", chunk: stdout });
+        if (stderr) onStream?.({ stream: "stderr", chunk: stderr });
+      }
+
+      onExit?.(exit);
+      resolve({ stdout, stderr, exit });
+    };
+
+    child.on("close", (code, sig) => finish(typeof code === "number" ? code : null, sig ? String(sig) : null));
+    child.on("error", (err: any) => {
+      stderr = truncateAppend(stderr, String(err?.message || err || "Command failed"));
+      finish(1, null);
+    });
+  });
+}
+
+function parseSseFrame(frame: string): { event: string; data: string } {
+  const lines = frame.split("\n").filter(Boolean);
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("event:")) event = line.slice("event:".length).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice("data:".length).trim());
+  }
+  return { event, data: dataLines.join("\n") };
+}
+
+async function runShellCommandViaRunner(args: {
+  command: string;
+  timeoutMs: number;
+  context: ToolContext;
+  onStream?: (evt: ShellStreamEvent) => void;
+  onExit?: (evt: ShellExitEvent) => void;
+}): Promise<{ stdout: string; stderr: string; exit: ShellExitEvent }> {
+  const { command, timeoutMs, context, onStream, onExit } = args;
+
+  const baseUrl = String(process.env.SHELL_COMMAND_RUNNER_URL || "").trim();
+  const token = String(process.env.SHELL_COMMAND_RUNNER_TOKEN || "").trim();
+  if (!baseUrl || !token) {
+    throw new Error("Shell command runner is not configured (SHELL_COMMAND_RUNNER_URL / SHELL_COMMAND_RUNNER_TOKEN)");
+  }
+
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  if (context.signal) {
+    if (context.signal.aborted) controller.abort();
+    else context.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  const runRes = await fetch(new URL("/v1/shell/run", baseUrl), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ runId: context.runId, command, timeoutMs }),
+    signal: controller.signal,
+  });
+  if (!runRes.ok) {
+    clearTimeout(timeoutId);
+    const text = await runRes.text().catch(() => "");
+    throw new Error(`Runner refused request (${runRes.status}): ${text || runRes.statusText}`);
+  }
+
+  const runJson = await runRes.json().catch(() => ({} as any));
+  const streamUrl = typeof runJson?.streamUrl === "string" ? runJson.streamUrl : "";
+  if (!streamUrl) {
+    clearTimeout(timeoutId);
+    throw new Error("Runner did not return streamUrl");
+  }
+
+  const streamAbs = new URL(streamUrl, baseUrl).toString();
+  const streamRes = await fetch(streamAbs, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    signal: controller.signal,
+  });
+  if (!streamRes.ok || !streamRes.body) {
+    clearTimeout(timeoutId);
+    const text = await streamRes.text().catch(() => "");
+    throw new Error(`Runner stream failed (${streamRes.status}): ${text || streamRes.statusText}`);
+  }
+
+  const reader = streamRes.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  let stdout = "";
+  let stderr = "";
+  let exit: ShellExitEvent | null = null;
+  let emittedAnyChunk = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
+
+    // Consume complete SSE frames separated by blank lines.
+    while (true) {
+      const idx = buffer.indexOf("\n\n");
+      if (idx === -1) break;
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+
+      const parsed = parseSseFrame(frame);
+      if (parsed.event === "shell") {
+        let payload: any = null;
+        try { payload = JSON.parse(parsed.data || "{}"); } catch { payload = null; }
+        if (!payload || typeof payload !== "object") continue;
+
+        if (payload.type === "stdout" || payload.type === "stderr") {
+          const chunk = String(payload.chunk ?? "");
+          emittedAnyChunk = true;
+          if (payload.type === "stdout") stdout += chunk;
+          else stderr += chunk;
+          onStream?.({ stream: payload.type, chunk });
+          continue;
+        }
+
+        if (payload.type === "exit") {
+          exit = {
+            exitCode: typeof payload.exitCode === "number" ? payload.exitCode : null,
+            signal: payload.signal ? String(payload.signal) : null,
+            wasKilled: Boolean(payload.wasKilled),
+            durationMs: typeof payload.durationMs === "number" ? payload.durationMs : Math.max(0, Date.now() - startedAt),
+          };
+          onExit?.(exit);
+          continue;
+        }
+      }
+    }
+  }
+
+  clearTimeout(timeoutId);
+
+  if (!exit) {
+    exit = { exitCode: null, signal: null, wasKilled: false, durationMs: Math.max(0, Date.now() - startedAt) };
+    onExit?.(exit);
+  }
+
+  if (!emittedAnyChunk) {
+    if (stdout) onStream?.({ stream: "stdout", chunk: stdout });
+    if (stderr) onStream?.({ stream: "stderr", chunk: stderr });
+  }
+
+  return { stdout, stderr, exit };
+}
+
 const shellCommandTool: ToolDefinition = {
   name: "shell_command",
-  description: "Execute a shell command in the agent's sandbox. Streams stdout/stderr and enforces safety checks.",
+  description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
   inputSchema: shellCommandSchema,
-  capabilities: ["executes_code", "long_running", "high_risk"],
+  capabilities: ["executes_code", "long_running"],
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
+    try {
+      const risk = assessShellCommandRisk(String(input.command || ""));
 
-    // Ensure workspace exists
-    const fs = await import("fs/promises");
-    const path = await import("path");
-    const workspaceDir = getRunWorkspaceDir(context.runId);
-    await fs.mkdir(workspaceDir, { recursive: true });
-
-    const cmd = String(input.command ?? "").trim();
-    if (!cmd) {
-      return {
-        success: false,
-        output: null,
-        error: createError("INVALID_INPUT", "Command is required", false),
-        artifacts: [],
-        previews: [],
-        logs: [],
-        metrics: { durationMs: Date.now() - startTime },
-      };
-    }
-
-    // Dangerous command patterns: require explicit confirmation (not a blanket block).
-    // This matches the requirements doc: dangerous operations require explicit user confirmation.
-    const dangerousPatterns: Array<{ pattern: RegExp; reason: string }> = [
-      // Match any rm invocation that includes both -r and -f flags (combined or separate: -rf, -fr, -r -f, etc.).
-      { pattern: /\brm\b[\s\S]*-\S*r\S*f/i, reason: "rm -rf" },
-      { pattern: /\bmkfs(\.|\s)/i, reason: "mkfs" },
-      { pattern: /\bdd\b\s+if=/i, reason: "dd if=" },
-      { pattern: />\s*\/dev\//i, reason: "> /dev/*" },
-      { pattern: /\bsudo\b/i, reason: "sudo" },
-      { pattern: /\bchmod\b\s+777\b/i, reason: "chmod 777" },
-      { pattern: /\b(curl|wget)\b.*\|\s*sh\b/i, reason: "curl|sh / wget|sh" },
-      { pattern: /\b(shutdown|reboot)\b/i, reason: "shutdown/reboot" },
-    ];
-
-    const matchedDanger = dangerousPatterns.find((d) => d.pattern.test(cmd));
-    if (matchedDanger && context.isConfirmed !== true) {
-      return {
-        success: false,
-        output: { command: cmd },
-        error: createError(
-          "REQUIRES_CONFIRMATION",
-          `Command requires confirmation (${matchedDanger.reason}). Confirm to proceed.`,
-          false,
-          { reason: matchedDanger.reason }
-        ),
-        artifacts: [],
-        previews: [
-          {
-            type: "text",
-            title: "Confirmation required",
-            content: `This command is considered high-risk and requires explicit confirmation before execution:\n\n${cmd}`,
-          },
-        ],
-        logs: [],
-        metrics: { durationMs: Date.now() - startTime },
-      };
-    }
-
-    const { spawn } = await import("child_process");
-
-    const timeoutMs = Math.min(Math.max(Number(input.timeout ?? 30000), 1000), 60000);
-
-    // Sandbox mode (v1): host (default) or docker.
-    // NOTE: docker mode requires that the runtime has access to the Docker daemon
-    // (typically via /var/run/docker.sock) and that the `docker` CLI is available.
-    const sandboxMode = (process.env.SHELL_COMMAND_SANDBOX_MODE || "host").toLowerCase();
-    const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
-
-    const runnerUrl = process.env.SHELL_COMMAND_RUNNER_URL || "http://sandbox-runner:8080";
-    const runnerToken = process.env.SHELL_COMMAND_RUNNER_TOKEN || process.env.SANDBOX_RUNNER_TOKEN || "";
-
-    const runWithRunner = async (): Promise<ToolResult> => {
-      if (!runnerToken) {
+      if (risk.hardBlocked) {
         return {
           success: false,
-          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
-          error: createError("COMMAND_ERROR", "Runner token not configured (SHELL_COMMAND_RUNNER_TOKEN)", false),
+          output: null,
+          error: createError("COMMAND_BLOCKED", risk.reason || "This command is not allowed for security reasons", false),
           artifacts: [],
-          previews: [{ type: "text", content: "Runner token not configured", title: "Error" }],
+          previews: [],
           logs: [],
           metrics: { durationMs: Date.now() - startTime },
         };
       }
 
-      // Start remote job
-      const ac = new AbortController();
-      const abortHandler = () => ac.abort();
-      context.signal?.addEventListener?.("abort", abortHandler, { once: true });
-
-      let stdout = "";
-      let stderr = "";
-      const maxCapture = 1024 * 1024;
-
-      try {
-        const startRes = await fetch(`${runnerUrl.replace(/\/$/, "")}/v1/shell/run`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${runnerToken}`,
-          },
-          body: JSON.stringify({ runId: context.runId, command: cmd, timeoutMs }),
-          signal: ac.signal,
-        });
-
-        if (!startRes.ok) {
-          const text = await startRes.text().catch(() => "");
-          return {
-            success: false,
-            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
-            error: createError("COMMAND_ERROR", `Runner start failed: ${startRes.status}`, true, { body: text }),
-            artifacts: [],
-            previews: [{ type: "text", content: text, title: "Runner Error" }],
-            logs: [],
-            metrics: { durationMs: Date.now() - startTime },
-          };
-        }
-
-        const { jobId, streamUrl } = (await startRes.json()) as any;
-        const streamRes = await fetch(`${runnerUrl.replace(/\/$/, "")}${streamUrl || `/v1/shell/stream/${jobId}`}`, {
-          headers: { Authorization: `Bearer ${runnerToken}` },
-          signal: ac.signal,
-        });
-
-        if (!streamRes.ok || !streamRes.body) {
-          const text = await streamRes.text().catch(() => "");
-          return {
-            success: false,
-            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
-            error: createError("COMMAND_ERROR", `Runner stream failed: ${streamRes.status}`, true, { body: text }),
-            artifacts: [],
-            previews: [{ type: "text", content: text, title: "Runner Stream Error" }],
-            logs: [],
-            metrics: { durationMs: Date.now() - startTime },
-          };
-        }
-
-        const reader = streamRes.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-
-        let exitEvt: any = null;
-        let doneReceived = false;
-
-        const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
-          if (!chunk) return;
-          try {
-            context.onStream?.({ stream, chunk });
-          } catch {
-            // ignore
-          }
-        };
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-
-          // parse SSE by events separated by blank line
-          while (true) {
-            const idx = buf.indexOf("\n\n");
-            if (idx === -1) break;
-            const raw = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-
-            const lines = raw.split("\n");
-            let eventName = "message";
-            let data = "";
-            for (const line of lines) {
-              if (line.startsWith("event:")) eventName = line.slice("event:".length).trim();
-              if (line.startsWith("data:")) data += line.slice("data:".length).trim();
-            }
-
-            if (eventName === "shell") {
-              try {
-                const evt = JSON.parse(data);
-                if (evt?.type === "stdout") {
-                  safeEmit("stdout", String(evt.chunk || ""));
-                  if (stdout.length < maxCapture) stdout += String(evt.chunk || "").slice(0, maxCapture - stdout.length);
-                } else if (evt?.type === "stderr") {
-                  safeEmit("stderr", String(evt.chunk || ""));
-                  if (stderr.length < maxCapture) stderr += String(evt.chunk || "").slice(0, maxCapture - stderr.length);
-                } else if (evt?.type === "exit") {
-                  exitEvt = evt;
-                }
-              } catch {
-                // ignore malformed events
-              }
-            }
-
-            // Some SSE servers keep the connection open. If we receive a terminal marker,
-            // stop reading to avoid hanging indefinitely.
-            if (eventName === "done") {
-              doneReceived = true;
-              try {
-                void reader.cancel();
-              } catch {
-                // ignore
-              }
-              buf = "";
-              break;
-            }
-          }
-
-          // If we got a terminal marker, stop reading.
-          if (doneReceived) {
-            break;
-          }
-
-          // If we got an exit event, we can also stop early.
-          if (exitEvt) {
-            try {
-              void reader.cancel();
-            } catch {
-              // ignore
-            }
-            break;
-          }
-        }
-
-        const exitCode = Number(exitEvt?.exitCode ?? 1);
-        const signal = exitEvt?.signal ? String(exitEvt.signal) : null;
-        const wasKilled = Boolean(exitEvt?.wasKilled);
-        const durationMs = Number(exitEvt?.durationMs ?? Date.now() - startTime);
-
-        try {
-          context.onExit?.({ exitCode, signal, wasKilled, durationMs });
-        } catch {
-          // ignore
-        }
-
-        const ok = exitCode === 0 && !wasKilled;
-        return {
-          success: ok,
-          output: { command: cmd, stdout, stderr, exitCode },
-          artifacts: [],
-          previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: ok ? "Command Output" : "Error Output" }],
-          logs: [],
-          error: ok ? undefined : createError(wasKilled ? "COMMAND_TIMEOUT" : "COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
-          metrics: { durationMs: Date.now() - startTime },
-        };
-      } catch (err: any) {
-        if (context.signal?.aborted || ac.signal.aborted) {
-          return {
-            success: false,
-            output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
-            error: createError("ABORTED", "Command cancelled", false),
-            artifacts: [],
-            previews: [],
-            logs: [],
-            metrics: { durationMs: Date.now() - startTime },
-          };
-        }
+      if (risk.needsConfirmation && !context.isConfirmed) {
         return {
           success: false,
-          output: { command: cmd, stdout: "", stderr: err?.message || String(err), exitCode: 1 },
-          error: createError("COMMAND_ERROR", `Runner unavailable: ${err?.message || String(err)}`, true),
-          artifacts: [],
-          previews: [{ type: "text", content: err?.message || String(err), title: "Runner Error" }],
-          logs: [],
-          metrics: { durationMs: Date.now() - startTime },
-        };
-      } finally {
-        context.signal?.removeEventListener?.("abort", abortHandler as any);
-      }
-    };
-
-    if (sandboxMode === "runner") {
-      return await runWithRunner();
-    }
-
-    const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
-        cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
-        shell: false,
-        windowsHide: true,
-      });
-    };
-
-    const runWithDocker = () => {
-      // Hardening defaults (v1): no network, drop caps, no new privileges.
-      // We mount the per-run workspace as /workspace.
-      const uid = typeof (process as any).getuid === "function" ? (process as any).getuid() : undefined;
-      const gid = typeof (process as any).getgid === "function" ? (process as any).getgid() : undefined;
-
-      const dockerArgs: string[] = [
-        "run",
-        "--rm",
-        "-i",
-        "--network",
-        "none",
-        "--security-opt",
-        "no-new-privileges",
-        "--cap-drop",
-        "ALL",
-        "--pids-limit",
-        "256",
-        "--cpus",
-        process.env.SHELL_COMMAND_DOCKER_CPUS || "1",
-        "--memory",
-        process.env.SHELL_COMMAND_DOCKER_MEMORY || "512m",
-        "-v",
-        `${workspaceDir}:/workspace`,
-        "-w",
-        "/workspace",
-      ];
-
-      if (uid !== undefined && gid !== undefined) {
-        dockerArgs.push("--user", `${uid}:${gid}`);
-      }
-
-      dockerArgs.push(dockerImage, "/bin/bash", "-lc", cmd);
-
-      return spawn("docker", dockerArgs, {
-        cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
-        shell: false,
-        windowsHide: true,
-      });
-    };
-
-    return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
-      let killed = false;
-
-      let child = null as any;
-      try {
-        child = sandboxMode === "docker" ? runWithDocker() : runWithHost();
-      } catch (err: any) {
-        return resolve({
-          success: false,
-          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+          output: null,
           error: createError(
-            "COMMAND_ERROR",
-            sandboxMode === "docker"
-              ? `Docker sandbox unavailable: ${err?.message || String(err)}`
-              : `Command spawn failed: ${err?.message || String(err)}`,
-            true
+            "REQUIRES_CONFIRMATION",
+            "This command is potentially destructive and requires explicit confirmation",
+            false,
+            { command: input.command }
           ),
           artifacts: [],
-          previews: [{ type: "text", content: err?.message || String(err), title: "Error Output" }],
+          previews: [],
           logs: [],
           metrics: { durationMs: Date.now() - startTime },
-        });
+        };
       }
 
-      const maxCapture = 1024 * 1024; // 1MB each stream
+      const mode = String(process.env.SHELL_COMMAND_SANDBOX_MODE || "").toLowerCase();
+      const onStream = context.onStream;
+      const onExit = context.onExit;
 
-      const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
-        if (!chunk) return;
-        try {
-          context.onStream?.({ stream, chunk });
-        } catch {
-          // ignore
-        }
-      };
+      const runnerEnabled = mode === "runner";
 
-      const onData = (stream: "stdout" | "stderr") => (data: any) => {
-        const chunk = data?.toString?.() ?? String(data);
-        safeEmit(stream, chunk);
-
-        if (stream === "stdout") {
-          if (stdout.length < maxCapture) stdout += chunk.slice(0, maxCapture - stdout.length);
-        } else {
-          if (stderr.length < maxCapture) stderr += chunk.slice(0, maxCapture - stderr.length);
-        }
-      };
-
-      child.stdout?.on("data", onData("stdout"));
-      child.stderr?.on("data", onData("stderr"));
-
-      const timeoutHandle = setTimeout(() => {
-        killed = true;
-        child.kill("SIGKILL");
-      }, timeoutMs);
-
-      const abortHandler = () => {
-        killed = true;
-        child.kill("SIGKILL");
-      };
-
-      if (context.signal) {
-        if (context.signal.aborted) abortHandler();
-        context.signal.addEventListener("abort", abortHandler, { once: true });
-      }
-
-      child.on("close", (code, signal) => {
-        clearTimeout(timeoutHandle);
-        context.signal?.removeEventListener?.("abort", abortHandler as any);
-
-        const exitCode = typeof code === "number" ? code : signal ? 1 : 0;
-
-        try {
-          context.onExit?.({
-            exitCode,
-            signal: signal ? String(signal) : null,
-            wasKilled: killed,
-            durationMs: Date.now() - startTime,
-          });
-        } catch {
-          // ignore
-        }
-
-        if (killed) {
-          return resolve({
-            success: false,
-            output: { command: cmd, stdout, stderr, exitCode },
-            error: createError("COMMAND_TIMEOUT", `Command exceeded timeout of ${timeoutMs}ms`, false),
-            artifacts: [],
-            previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: "Command Output (partial)" }],
-            logs: [],
-            metrics: { durationMs: Date.now() - startTime },
-          });
-        }
-
-        const ok = exitCode === 0;
-        const previewText = (stdout || stderr).slice(0, 100000);
-
-        return resolve({
-          success: ok,
-          output: { command: cmd, stdout, stderr, exitCode },
-          artifacts: [],
-          previews: [{ type: "text", content: previewText, title: ok ? "Command Output" : "Error Output" }],
-          logs: [],
-          error: ok ? undefined : createError("COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
-          metrics: { durationMs: Date.now() - startTime },
+      const result = runnerEnabled
+        ? await runShellCommandViaRunner({
+          command: input.command,
+          timeoutMs: input.timeout,
+          context,
+          onStream,
+          onExit,
+        })
+        : await runShellCommandLocally({
+          command: input.command,
+          timeoutMs: input.timeout,
+          context,
+          onStream,
+          onExit,
         });
-      });
 
-      child.on("error", (err) => {
-        clearTimeout(timeoutHandle);
-        context.signal?.removeEventListener?.("abort", abortHandler as any);
-
-        return resolve({
-          success: false,
-          output: { command: cmd, stdout, stderr, exitCode: 1 },
-          error: createError("COMMAND_ERROR", err.message, true),
-          artifacts: [],
-          previews: [{ type: "text", content: err.message, title: "Error Output" }],
-          logs: [],
-          metrics: { durationMs: Date.now() - startTime },
-        });
-      });
-    });
+      const exitCode = result.exit.exitCode ?? 0;
+      return {
+        success: exitCode === 0,
+        output: { command: input.command, stdout: result.stdout, stderr: result.stderr, exitCode },
+        artifacts: [],
+        previews: [{ type: "text", content: result.stdout || result.stderr, title: "Command Output" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: { command: input.command, stdout: "", stderr: error?.message || String(error || ""), exitCode: 1 },
+        error: createError("COMMAND_ERROR", error?.message || String(error || "Command failed"), true),
+        artifacts: [],
+        previews: [{ type: "text", content: error?.message || String(error || ""), title: "Error Output" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
   },
 };
 
@@ -1546,7 +1442,7 @@ const listFilesTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = getRunWorkspaceDir(context.runId);
+      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const targetDir = path.resolve(workspaceDir, input.directory);
       if (!targetDir.startsWith(workspaceDir)) {

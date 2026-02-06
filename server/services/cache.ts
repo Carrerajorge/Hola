@@ -4,8 +4,15 @@ import { Logger } from "../lib/logger";
 
 export class RedisCacheService implements ICacheService {
     private client: Redis | null = null;
+    private lastErrorLogAt = 0;
 
     constructor() {
+        // Redis is optional and can make test runs noisy/flaky.
+        if (process.env.NODE_ENV === "test") {
+            Logger.info("[RedisCacheService] NODE_ENV=test, Redis disabled (no-op mode)");
+            return;
+        }
+
         // Only initialize Redis if REDIS_URL is configured
         if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
             Logger.info('[RedisCacheService] No Redis configured, running in no-op mode');
@@ -27,7 +34,11 @@ export class RedisCacheService implements ICacheService {
         }
 
         this.client.on('error', (err) => {
-            Logger.error('Redis Cache Error', err);
+            const now = Date.now();
+            if (now - this.lastErrorLogAt > 30000) {
+                this.lastErrorLogAt = now;
+                Logger.error('Redis Cache Error', err);
+            }
         });
     }
 

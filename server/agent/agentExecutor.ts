@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { Response } from "express";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
@@ -7,8 +6,7 @@ import type { RequestSpec } from "./requestSpec";
 import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifactRenderer";
 import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { getGeminiClient } from "../lib/gemini";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -17,6 +15,7 @@ export interface AgentExecutorOptions {
   userId: string;
   chatId: string;
   requestSpec: RequestSpec;
+  channel?: string;
 }
 
 interface FunctionDeclaration {
@@ -194,31 +193,40 @@ async function executeToolCall(
   let artifact: { type: string; url: string; name: string } | undefined;
 
   try {
-    switch (toolName) {
-      case "web_search": {
-        const searchResult = await toolRegistry.execute("search", {
-          query: args.query,
-          maxResults: args.maxResults || 5
-        }, context);
-        result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
-        break;
-      }
+    const blockedByChannel =
+      context.channel === "whatsapp_web" &&
+      ["fetch_url", "create_presentation", "create_document", "create_spreadsheet"].includes(toolName);
 
-      case "fetch_url": {
-        try {
-          const { fetchUrl } = await import("../services/webSearch");
-          const fetchResult = await fetchUrl(args.url, {
-            extractText: args.extractText ?? true,
-            maxLength: 50000
-          });
-          result = fetchResult;
-        } catch (err: any) {
-          result = { error: err.message };
+    if (blockedByChannel) {
+      result = {
+        error: `Tool "${toolName}" is disabled for WhatsApp. Use the web panel for file generation or URL fetch.`,
+      };
+    } else {
+      switch (toolName) {
+        case "web_search": {
+          const searchResult = await toolRegistry.execute("search", {
+            query: args.query,
+            maxResults: args.maxResults || 5
+          }, context);
+          result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
+          break;
         }
-        break;
-      }
 
-      case "create_presentation": {
+        case "fetch_url": {
+          try {
+            const { fetchUrl } = await import("../services/webSearch");
+            const fetchResult = await fetchUrl(args.url, {
+              extractText: args.extractText ?? true,
+              maxLength: 50000
+            });
+            result = fetchResult;
+          } catch (err: any) {
+            result = { error: err.message };
+          }
+          break;
+        }
+
+        case "create_presentation": {
         const slideSpec = {
           title: args.title,
           theme: args.theme || "professional",
@@ -274,9 +282,9 @@ async function executeToolCall(
           }
         });
         break;
-      }
+        }
 
-      case "create_document": {
+        case "create_document": {
         const docSpec = {
           title: args.title,
           sections: args.sections.map((s: any, i: number) => ({
@@ -313,9 +321,9 @@ async function executeToolCall(
           }
         });
         break;
-      }
+        }
 
-      case "create_spreadsheet": {
+        case "create_spreadsheet": {
         const sheetSpec = {
           title: args.title,
           sheets: args.sheets.map((s: any, i: number) => ({
@@ -362,9 +370,9 @@ async function executeToolCall(
           }
         });
         break;
-      }
+        }
 
-      case "analyze_data": {
+        case "analyze_data": {
         try {
           // Dynamic import to keep startup fast
           const ss = await import("simple-statistics");
@@ -413,9 +421,9 @@ async function executeToolCall(
           result = { error: `Analysis failed: ${e.message}` };
         }
         break;
-      }
+        }
 
-      case "generate_chart": {
+        case "generate_chart": {
         // Return a structured Chart.js/Recharts compatible config
         const chartConfig = {
           type: args.chartType,
@@ -442,11 +450,12 @@ async function executeToolCall(
           message: "Chart configuration generated successfully"
         };
         break;
-      }
+        }
 
-      default: {
+        default: {
         const toolResult = await toolRegistry.execute(toolName, args, context);
         result = toolResult.success ? toolResult.output : { error: toolResult.error?.message };
+        }
       }
     }
 
@@ -495,10 +504,29 @@ export async function executeAgentLoop(
   res: Response,
   options: AgentExecutorOptions
 ): Promise<void> {
-  const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
+  const { runId, userId, chatId, requestSpec, maxIterations = 10, channel } = options;
 
-  const tools = getToolsForIntent(requestSpec.intent);
-  const toolContext: ToolContext = { userId, chatId, runId };
+  let ai: any;
+  try {
+    ai = getGeminiClient();
+  } catch (error: any) {
+    writeSse(res, "error", {
+      error: {
+        code: "GEMINI_API_KEY_MISSING",
+        message: error?.message || "Gemini API key is required for agent execution",
+      }
+    });
+    return;
+  }
+
+  let tools = getToolsForIntent(requestSpec.intent);
+  if (channel === "whatsapp_web") {
+    // WhatsApp channel: keep the tool surface extremely small (no file writes, no URL fetch).
+    const allow = new Set(["web_search", "analyze_data", "generate_chart"]);
+    tools = tools.filter(t => allow.has(t.name));
+  }
+
+  const toolContext: ToolContext = { userId, chatId, runId, channel };
 
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
   let iteration = 0;

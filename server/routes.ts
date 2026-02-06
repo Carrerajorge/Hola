@@ -72,6 +72,7 @@ import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
+import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
@@ -930,6 +931,56 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load agents",
+      });
+    }
+  });
+
+  // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
+  // Query: ?source=combined|runtime|langgraph
+  app.get("/api/super-agent/capabilities", async (req: Request, res: Response) => {
+    try {
+      const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
+      const source: SuperAgentCoverageSource =
+        rawSource === "langgraph" || rawSource === "runtime" || rawSource === "combined"
+          ? rawSource
+          : "combined";
+
+      const report = await getSuperAgentCoverageReport(source);
+
+      // Optional filters for quickly spotting gaps:
+      // - ?status=missing|partial|covered
+      // - ?ready=true|false
+      const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
+      const readyFilter = typeof req.query.ready === "string" ? req.query.ready : undefined;
+
+      let capabilities = report.capabilities;
+      if (statusFilter === "missing" || statusFilter === "partial" || statusFilter === "covered") {
+        capabilities = capabilities.filter((c) => c.status === statusFilter);
+      }
+      if (readyFilter === "true" || readyFilter === "false") {
+        const wantReady = readyFilter === "true";
+        capabilities = capabilities.filter((c) => c.availability.ready === wantReady);
+      }
+
+      const summary = {
+        total: capabilities.length,
+        covered: capabilities.filter((c) => c.status === "covered").length,
+        partial: capabilities.filter((c) => c.status === "partial").length,
+        missing: capabilities.filter((c) => c.status === "missing").length,
+        ready: capabilities.filter((c) => c.availability.ready).length,
+        blocked: capabilities.filter((c) => !c.availability.ready).length,
+      };
+      res.json({
+        success: true,
+        ...report,
+        summary,
+        capabilities,
+      });
+    } catch (error: any) {
+      console.error("[SuperAgentCapabilities] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to compute super agent coverage",
       });
     }
   });

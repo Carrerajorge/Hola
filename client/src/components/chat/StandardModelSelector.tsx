@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ChevronDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AvailableModel } from "@/contexts/ModelAvailabilityContext";
+import { formatProviderLabel } from "@/lib/llmProviders";
 
 interface StandardModelSelectorProps {
     availableModels: AvailableModel[];
@@ -70,7 +71,7 @@ export function StandardModelSelector({
                     <React.Fragment key={provider}>
                         {providerIndex > 0 && <DropdownMenuSeparator />}
                         <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                            {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
+                            {formatProviderLabel(provider)}
                         </div>
                         {models.map((model) => (
                             <DropdownMenuItem

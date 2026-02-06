@@ -1,6 +1,7 @@
 import { openai, MODELS } from "../lib/openai";
 import { llmGateway } from "../lib/llmGateway";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
+import { normalizeProvider, type LLMProviderOrAuto } from "../lib/llmProviders";
 import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
 import { storage } from "../storage";
 import { responseCache } from "./responseCache";
@@ -39,7 +40,7 @@ async function setCachedSearch(query: string, results: any): Promise<void> {
 }
 
 
-export type LLMProvider = "xai" | "gemini";
+export type LLMProvider = LLMProviderOrAuto;
 
 export const AVAILABLE_MODELS = {
   xai: {
@@ -420,6 +421,7 @@ export async function handleChatRequest(
   } = {}
 ): Promise<ChatResponse> {
   const { useRag = true, conversationId, userId, images, onAgentProgress, gptSession, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
+  const normalizedProvider = normalizeProvider(provider) ?? "auto";
   const hasImages = images && images.length > 0;
 
   // FAST PATH: Check cache for simple greetings/messages
@@ -2111,7 +2113,7 @@ REGLAS OBLIGATORIAS:
 
   let response;
 
-  if (provider === "gemini") {
+  if (normalizedProvider === "gemini") {
     if (hasImages) {
       return {
         content: "Gemini actualmente no soporta análisis de imágenes en esta versión. Por favor, selecciona xAI Grok 2 Vision para analizar imágenes.",
@@ -2156,6 +2158,11 @@ REGLAS OBLIGATORIAS:
       sources,
       webSources: webSources.length > 0 ? webSources : undefined
     };
+  } else if (hasImages && normalizedProvider !== "xai" && normalizedProvider !== "auto") {
+    return {
+      content: "El análisis de imágenes actualmente solo está habilitado con xAI (Grok Vision). Cambia el modelo/proveedor e inténtalo de nuevo.",
+      role: "assistant"
+    };
   } else if (hasImages) {
     const imageContents = images!.map((img: string) => ({
       type: "image_url" as const,
@@ -2196,10 +2203,11 @@ REGLAS OBLIGATORIAS:
     const gatewayResponse = await llmGateway.chat(
       [systemMessage, ...messages],
       {
+        provider: normalizedProvider,
         model: model || MODELS.TEXT,
         temperature,
         topP,
-        userId: conversationId,
+        userId: userId || conversationId,
         requestId: `chat_${Date.now()}`,
       }
     );

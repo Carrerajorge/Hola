@@ -10,7 +10,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 type SessionState = z.infer<typeof SessionStateSchema>;
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory, chats } from "@shared/schema";
+import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
@@ -202,15 +202,6 @@ export async function createUnifiedRun(
     (request.attachments && request.attachments.length > 0);
 
   try {
-    // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
-    // The UI sometimes generates provisional chat ids (e.g. "chat_<timestamp>") before it has
-    // created the chat via POST /api/chats. We upsert a minimal chat row to avoid FK violations.
-    await db.insert(chats).values({
-      id: request.chatId,
-      userId: request.userId,
-      title: 'New Chat',
-    }).onConflictDoNothing();
-
     await db.insert(agentModeRuns).values({
       id: runId,
       chatId: request.chatId,
@@ -253,6 +244,7 @@ export async function executeUnifiedChat(
     onChunk?: (chunk: string) => void;
     disableImageGeneration?: boolean;
     systemPrompt?: string;
+    channel?: string;
   } = {}
 ): Promise<void> {
   const { requestSpec, runId, isAgenticMode } = context;
@@ -353,6 +345,7 @@ export async function executeUnifiedChat(
         userId: request.userId,
         chatId: request.chatId,
         requestSpec,
+        channel: options.channel,
         maxIterations: 10
       });
 
@@ -378,18 +371,19 @@ export async function executeUnifiedChat(
       });
 
       for await (const chunk of streamGenerator) {
-        if (chunk.type === 'delta' && chunk.content) {
-          fullResponse += chunk.content;
+        const content = (chunk as any)?.content;
+        if (content) {
+          fullResponse += content;
           chunkCount++;
 
           writeSse(res, 'chunk', {
-            content: chunk.content,
+            content,
             sequence: chunkCount,
             runId
           });
 
           if (options.onChunk) {
-            options.onChunk(chunk.content);
+            options.onChunk(content);
           }
 
           if (chunkCount % 50 === 0) {
@@ -401,11 +395,8 @@ export async function executeUnifiedChat(
               }
             });
           }
-        } else if (chunk.type === 'done') {
-          break;
-        } else if (chunk.type === 'error') {
-          throw new Error(chunk.error || 'Stream error');
         }
+        if ((chunk as any)?.done) break;
       }
 
       await emitTraceEvent(runId, 'done', {
