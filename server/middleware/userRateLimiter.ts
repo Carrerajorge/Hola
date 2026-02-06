@@ -18,6 +18,13 @@ const RATE_LIMIT_CONFIGS = {
         duration: 60,        // per 60 seconds
         blockDuration: 120,  // block for 2 minutes if exceeded
     },
+    // Conversation memory state endpoints can be polled by the UI. Keep these permissive to
+    // avoid retry-loops that lock users out of chat initialization.
+    memoryState: {
+        points: 300,         // 300 requests
+        duration: 60,        // per 60 seconds
+        blockDuration: 30,   // short block; UI should backoff
+    },
     // Document generation - more restrictive
     documents: {
         points: 20,
@@ -234,10 +241,12 @@ export function createCustomRateLimiter(options: {
  * This is the main middleware to be used in routes
  */
 export const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
-    const path = req.path.toLowerCase();
+    // NOTE: this middleware is mounted at app.use('/api', rateLimiter).
+    // Use baseUrl + path so routing decisions are stable regardless of mount behavior.
+    const fullPath = `${req.baseUrl || ''}${req.path || ''}`.toLowerCase();
 
     // Skip rate limiting for health checks and status endpoints
-    if (path.includes('/health') || path.includes('/status') || path === '/') {
+    if (fullPath.includes('/health') || fullPath.includes('/status') || fullPath === '/' || fullPath === '/api') {
         return next();
     }
 
@@ -260,15 +269,27 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
         return next();
     }
 
+    // Avoid substring matching bugs (e.g. '/memory/chats' accidentally matching '/chat')
+    const hasSegment = (segment: string) => {
+        const re = new RegExp(`(^|/)${segment}(/|$)`, 'i');
+        return re.test(fullPath);
+    };
+
+    // UI polls this endpoint during chat init; keep it permissive to avoid 429/lockouts.
+    // Example: /api/memory/chats/pending-123/state
+    const isConversationMemoryState = /\/api\/memory\/chats\/[^/]+\/state(\/|$)/i.test(fullPath);
+
     if (isAdmin || isLocalhost) {
         tier = 'trusted';
-    } else if (path.includes('/chat') || path.includes('/message')) {
+    } else if (isConversationMemoryState) {
+        tier = 'memoryState';
+    } else if (hasSegment('chat') || hasSegment('message')) {
         tier = 'chat';
-    } else if (path.includes('/document') || path.includes('/export')) {
+    } else if (fullPath.includes('/document') || fullPath.includes('/export')) {
         tier = 'documents';
-    } else if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
+    } else if (fullPath.includes('/auth') || fullPath.includes('/login') || fullPath.includes('/register')) {
         tier = 'auth';
-    } else if (path.includes('/ai') || path.includes('/generate') || path.includes('/model')) {
+    } else if (fullPath.includes('/ai') || fullPath.includes('/generate') || fullPath.includes('/model')) {
         tier = 'ai';
     }
 
