@@ -1257,32 +1257,45 @@ ${attachmentContext}`;
       }
 
       // Persist the latest user message (best-effort). Without this, server-side memory is empty.
-      let persistedUserMessageId: string | null = null;
-      try {
-        if (userMessageText && effectiveChatIdForPersistence) {
-          const userMsg = await storage.createChatMessage({
-            chatId: effectiveChatIdForPersistence,
-            role: 'user',
-            content: userMessageText,
-            status: 'done',
-            requestId,
-          });
-          persistedUserMessageId = userMsg.id;
+      // Skip if a run was claimed - the user message was already created atomically with the run
+      // via createUserMessageAndRun in the /chats/:id/messages endpoint.
+      let persistedUserMessageId: string | null = claimedRun?.userMessageId || null;
+      if (!claimedRun) {
+        try {
+          if (userMessageText && effectiveChatIdForPersistence) {
+            // Include attachments metadata (without base64 data) so files are associated with the message
+            const sanitizedAttachments = attachments && Array.isArray(attachments)
+              ? attachments.map((att: any) => {
+                  const { imageUrl, ...rest } = att;
+                  return rest;
+                })
+              : null;
 
-          // Also persist into Conversation State (separate store used by /api/memory/chats/:id/state)
-          // Best-effort + idempotent (per-request) to avoid UI retry loops duplicating messages.
-          await conversationStateService.appendMessage(
-            effectiveChatIdForPersistence,
-            'user',
-            userMessageText,
-            {
-              chatMessageId: userMsg.id,
-              requestId: `${requestId}:state:user`,
-            }
-          );
+            const userMsg = await storage.createChatMessage({
+              chatId: effectiveChatIdForPersistence,
+              role: 'user',
+              content: userMessageText,
+              status: 'done',
+              requestId,
+              attachments: sanitizedAttachments,
+            });
+            persistedUserMessageId = userMsg.id;
+
+            // Also persist into Conversation State (separate store used by /api/memory/chats/:id/state)
+            // Best-effort + idempotent (per-request) to avoid UI retry loops duplicating messages.
+            await conversationStateService.appendMessage(
+              effectiveChatIdForPersistence,
+              'user',
+              userMessageText,
+              {
+                chatMessageId: userMsg.id,
+                requestId: `${requestId}:state:user`,
+              }
+            );
+          }
+        } catch (e) {
+          console.warn('[Stream] Failed to persist user message (best-effort):', e);
         }
-      } catch (e) {
-        console.warn('[Stream] Failed to persist user message (best-effort):', e);
       }
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)

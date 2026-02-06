@@ -316,6 +316,27 @@ export function stopRetryProcessor(): void {
   }
 }
 
+// Strip large base64 data (imageUrl, spreadsheetData previews) from attachments
+// before sending to server to prevent 413 Payload Too Large errors.
+// The server stores files at storagePath, so base64 data is not needed server-side.
+function sanitizeAttachmentsForServer(attachments: Message['attachments']): Message['attachments'] {
+  if (!attachments || attachments.length === 0) return attachments;
+  return attachments.map(att => {
+    const { imageUrl, spreadsheetData, ...rest } = att;
+    // Keep spreadsheetData metadata but strip large previewData
+    const cleanSpreadsheet = spreadsheetData ? {
+      uploadId: spreadsheetData.uploadId,
+      sheets: spreadsheetData.sheets,
+      analysisId: spreadsheetData.analysisId,
+      sessionId: spreadsheetData.sessionId,
+    } : undefined;
+    return {
+      ...rest,
+      ...(cleanSpreadsheet ? { spreadsheetData: cleanSpreadsheet } : {}),
+    };
+  });
+}
+
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -338,13 +359,19 @@ function debouncedLocalStorageSave(chats: Chat[], storageKey: string): void {
   localStorageDebounceTimer = setTimeout(() => {
     if (pendingChatsToSave) {
       try {
-        // Strip large data from messages to save space
+        // Strip large data from messages to save space (base64 images, sources, etc.)
         const chatsForStorage = pendingChatsToSave.map(chat => ({
           ...chat,
           messages: chat.messages.map(msg => ({
             ...msg,
             sources: undefined,
-            generatedImage: undefined
+            generatedImage: undefined,
+            // Strip base64 imageUrl from attachments to avoid exceeding localStorage 5MB limit.
+            // Images can be reloaded from storagePath on next session.
+            attachments: msg.attachments?.map(att => {
+              const { imageUrl, ...rest } = att;
+              return rest;
+            })
           }))
         }));
         localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
@@ -371,7 +398,11 @@ export function flushPendingLocalStorageSave(storageKey: string): void {
         messages: chat.messages.map(msg => ({
           ...msg,
           sources: undefined,
-          generatedImage: undefined
+          generatedImage: undefined,
+          attachments: msg.attachments?.map(att => {
+            const { imageUrl, ...rest } = att;
+            return rest;
+          })
         }))
       }));
       localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
@@ -706,7 +737,7 @@ export function useChats() {
                       content: msg.content,
                       requestId: msg.requestId,
                       userMessageId: msg.userMessageId,
-                      attachments: msg.attachments
+                      attachments: sanitizeAttachmentsForServer(msg.attachments)
                     }));
 
                     const res = await fetch("/api/chats", {
@@ -830,7 +861,7 @@ export function useChats() {
               requestId: msg.requestId,
               clientRequestId,
               userMessageId: msg.userMessageId,
-              attachments: msg.attachments,
+              attachments: sanitizeAttachmentsForServer(msg.attachments),
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
@@ -1076,7 +1107,7 @@ export function useChats() {
             requestId: message.requestId,
             clientRequestId, // For run-based idempotency
             userMessageId: message.userMessageId,
-            attachments: message.attachments,
+            attachments: sanitizeAttachmentsForServer(message.attachments),
             sources: message.sources,
             figmaDiagram: message.figmaDiagram,
             googleFormPreview: message.googleFormPreview,

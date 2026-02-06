@@ -446,7 +446,7 @@ export const AttachmentList = memo(function AttachmentList({
                             </span>
                         </div>
                     </div>
-                ) : att.type === "image" && att.imageUrl ? (
+                ) : att.type === "image" && (att.imageUrl || att.storagePath) ? (
                     <div
                         key={i}
                         className={cn(
@@ -457,7 +457,7 @@ export const AttachmentList = memo(function AttachmentList({
                         data-testid={`attachment-image-${i}`}
                     >
                         <LazyImage
-                            src={att.imageUrl}
+                            src={att.imageUrl || att.storagePath || ''}
                             alt={att.name}
                             className="w-full h-auto max-h-[200px] object-cover"
                         />
