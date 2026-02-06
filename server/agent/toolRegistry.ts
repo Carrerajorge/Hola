@@ -1278,7 +1278,7 @@ const shellCommandTool: ToolDefinition = {
             if (eventName === "done") {
               doneReceived = true;
               try {
-                await reader.cancel();
+                void reader.cancel();
               } catch {
                 // ignore
               }
@@ -1295,7 +1295,7 @@ const shellCommandTool: ToolDefinition = {
           // If we got an exit event, we can also stop early.
           if (exitEvt) {
             try {
-              await reader.cancel();
+              void reader.cancel();
             } catch {
               // ignore
             }

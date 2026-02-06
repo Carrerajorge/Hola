@@ -10,7 +10,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 type SessionState = z.infer<typeof SessionStateSchema>;
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } from "@shared/schema";
+import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory, chats } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
@@ -202,6 +202,15 @@ export async function createUnifiedRun(
     (request.attachments && request.attachments.length > 0);
 
   try {
+    // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
+    // The UI sometimes generates provisional chat ids (e.g. "chat_<timestamp>") before it has
+    // created the chat via POST /api/chats. We upsert a minimal chat row to avoid FK violations.
+    await db.insert(chats).values({
+      id: request.chatId,
+      userId: request.userId,
+      title: 'New Chat',
+    }).onConflictDoNothing();
+
     await db.insert(agentModeRuns).values({
       id: runId,
       chatId: request.chatId,

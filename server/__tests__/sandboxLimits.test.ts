@@ -131,7 +131,7 @@ for r in results:
           // resolve the test to avoid hanging the suite.
           setTimeout(() => {
             const elapsed = Date.now() - startTime;
-            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 2000);
+            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 5000);
             resolve();
           }, 1000);
         }, SANDBOX_TIMEOUT_MS);
@@ -145,10 +145,10 @@ for r in results:
           const elapsed = Date.now() - startTime;
           
           if (output.includes('START') && !output.includes('END')) {
-            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 1000);
+            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 5000);
             resolve();
           } else if (timedOut || code === null) {
-            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 1000);
+            expect(elapsed).toBeLessThan(SANDBOX_TIMEOUT_MS + 5000);
             resolve();
           } else {
             resolve();

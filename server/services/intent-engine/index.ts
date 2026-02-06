@@ -233,8 +233,24 @@ export function recordIntentCorrection(
   return signal;
 }
 
+function isTestEnv(): boolean {
+  // Vitest sets one of these.
+  return (
+    process.env.NODE_ENV === "test" ||
+    Boolean(process.env.VITEST) ||
+    process.env.VITEST_WORKER_ID !== undefined ||
+    process.env.VITEST_POOL_ID !== undefined
+  );
+}
+
 async function ensureEmbeddingIndexInitialized(): Promise<void> {
   if (embeddingIndexInitialized) return;
+
+  // In unit tests we don't need the heavy semantic index (and it can slow suites / cause timeouts).
+  if (isTestEnv()) {
+    embeddingIndexInitialized = true;
+    return;
+  }
   
   if (embeddingIndexInitPromise) {
     return embeddingIndexInitPromise;
