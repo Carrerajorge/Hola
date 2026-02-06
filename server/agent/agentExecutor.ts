@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { Response } from "express";
 import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry";
@@ -7,8 +6,7 @@ import type { RequestSpec } from "./requestSpec";
 import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifactRenderer";
 import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { getGeminiClientOrThrow } from "../lib/gemini";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -495,6 +493,7 @@ export async function executeAgentLoop(
   res: Response,
   options: AgentExecutorOptions
 ): Promise<void> {
+  const ai = getGeminiClientOrThrow();
   const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
 
   const tools = getToolsForIntent(requestSpec.intent);

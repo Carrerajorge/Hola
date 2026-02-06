@@ -1,6 +1,30 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+let _client: GoogleGenAI | null = null;
+
+function getGeminiApiKey(): string | null {
+  const raw = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+export function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) return null;
+  if (!_client) {
+    _client = new GoogleGenAI({ apiKey });
+  }
+  return _client;
+}
+
+export function getGeminiClientOrThrow(): GoogleGenAI {
+  const client = getGeminiClient();
+  if (!client) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+  return client;
+}
 
 export const GEMINI_MODELS = {
   FLASH_PREVIEW: "gemini-3-flash-preview",
@@ -33,6 +57,7 @@ export async function geminiChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
 ): Promise<GeminiResponse> {
+  const ai = getGeminiClientOrThrow();
   const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
   
   const contents = messages.map(msg => ({
@@ -69,6 +94,7 @@ export async function* geminiStreamChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
 ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
+  const ai = getGeminiClientOrThrow();
   const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
   
   const contents = messages.map(msg => ({
@@ -102,5 +128,3 @@ export async function* geminiStreamChat(
     throw new Error(`Gemini API error: ${error.message}`);
   }
 }
-
-export { ai as geminiClient };
