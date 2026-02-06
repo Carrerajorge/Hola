@@ -33,6 +33,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../types/express";
+import { auditLog } from "../services/auditLogger";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
@@ -1508,23 +1509,22 @@ ${attachmentContext}`;
         }).catch(() => { });
       }
 
-      if (userId) {
-        try {
-          await storage.createAuditLog({
-            userId,
-            action: "chat_stream",
-            resource: "chats",
-            resourceId: conversationId || null,
-            details: {
-              messageCount: messages.length,
-              requestId,
-              runId: claimedRun?.id,
-              streaming: true
-            }
-          });
-        } catch (auditError) {
-          console.error("Failed to create audit log:", auditError);
-        }
+      try {
+        await auditLog(req, {
+          action: "chat_stream",
+          resource: "chats",
+          resourceId: conversationId || undefined,
+          details: {
+            messageCount: messages.length,
+            requestId,
+            runId: claimedRun?.id,
+            streaming: true,
+          },
+          category: "user",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
       }
 
     } catch (error: any) {

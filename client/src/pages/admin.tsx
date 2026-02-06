@@ -2681,14 +2681,50 @@ function SecuritySection() {
     return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
   };
 
-  const getSeverityBadge = (action: string) => {
-    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-    const warningActions = ["warning", "update", "delete"];
-    
-    if (criticalActions.some(a => action?.includes(a))) {
+  const getActorLabel = (log: any) => {
+    const details = (log?.details || {}) as any;
+    const email = details.actorEmail || details.email;
+    if (email) return String(email);
+
+    const userId = log?.userId;
+    if (userId) {
+      const id = String(userId);
+      if (id.startsWith("anon_")) return "Anonymous";
+      return id;
+    }
+
+    return "System";
+  };
+
+  const getSeverityBadge = (log: any) => {
+    const action = String(log?.action || "");
+    const details = (log?.details || {}) as any;
+
+    let severity: string | null =
+      typeof details.severity === "string" ? details.severity.toLowerCase() : null;
+
+    // Derive severity from HTTP status if available.
+    if (!severity && typeof details.statusCode === "number") {
+      severity =
+        details.statusCode >= 500 ? "error" :
+        details.statusCode >= 400 ? "warning" :
+        "info";
+    }
+
+    // Fallback heuristics based on action string.
+    if (!severity) {
+      const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied", "access_denied"];
+      const warningActions = ["warning", "update", "delete", "disable", "enable"];
+
+      if (criticalActions.some(a => action.includes(a))) severity = "critical";
+      else if (warningActions.some(a => action.includes(a))) severity = "warning";
+      else severity = "info";
+    }
+
+    if (severity === "critical" || severity === "error") {
       return <Badge variant="destructive" className="text-xs">Critical</Badge>;
     }
-    if (warningActions.some(a => action?.includes(a))) {
+    if (severity === "warning") {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
@@ -2981,10 +3017,11 @@ function SecuritySection() {
                 recentLogs.map((log: any) => (
                   <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      {getSeverityBadge(log.action)}
+                      {getSeverityBadge(log)}
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -3245,7 +3282,7 @@ function SecuritySection() {
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
-                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                      <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
                   ))
                 )}

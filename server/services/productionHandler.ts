@@ -16,6 +16,7 @@ import {
     type ProductionEvent,
     type ProductionResult,
     type Artifact,
+    type DocumentIntent,
 } from '../agent/production';
 
 // ============================================================================
@@ -268,6 +269,13 @@ export async function handleProductionRequest(
     });
 
     try {
+        const pipelineIntent: DocumentIntent =
+            intentResult.intent === 'CREATE_PRESENTATION'
+                ? 'presentation'
+                : intentResult.intent === 'CREATE_SPREADSHEET'
+                    ? 'analysis'
+                    : 'report';
+
         // Execute production pipeline
         const result = await startProductionPipeline(
             message,
@@ -282,6 +290,14 @@ export async function handleProductionRequest(
                     message: event.message,
                     timestamp: event.timestamp,
                 });
+            },
+            {
+                // If the user explicitly selected a doc tool or intent router classified this as CREATE_*,
+                // do not allow the production router to downgrade to CHAT.
+                forceProduction: true,
+                deliverables,
+                intent: pipelineIntent,
+                topic: intentResult.slots.topic || message,
             }
         );
 
