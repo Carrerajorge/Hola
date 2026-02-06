@@ -2525,7 +2525,7 @@ function SecuritySection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
-  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+  const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2558,6 +2558,7 @@ function SecuritySection() {
         page: auditPage.toString(),
         limit: "20",
         ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.actor && { actor: auditFilters.actor }),
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
@@ -3223,6 +3224,16 @@ function SecuritySection() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">User:</Label>
+              <Input 
+                data-testid="filter-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-44"
+                value={auditFilters.actor}
+                onChange={(e) => setAuditFilters({ ...auditFilters, actor: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
               <Input 
                 data-testid="filter-date-from"
@@ -3246,7 +3257,7 @@ function SecuritySection() {
               variant="outline" 
               size="sm" 
               onClick={() => {
-                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
               }}
               data-testid="button-clear-filters"
@@ -3260,6 +3271,7 @@ function SecuritySection() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
@@ -3269,7 +3281,7 @@ function SecuritySection() {
               <tbody>
                 {auditLogsData?.data?.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
                       No audit logs found matching your filters.
                     </td>
                   </tr>
@@ -3279,6 +3291,7 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
