@@ -2569,14 +2569,19 @@ export function ChatInterface({
       setAiState("thinking");
       
       try {
+        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        if (chatId?.startsWith("pending-")) {
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+        }
+
         const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
           body: JSON.stringify({
             messages: [{ role: "user", content: cleanInput }],
-            chatId,
-            conversationId: chatId,
+            chatId: effectiveChatIdForStream,
+            conversationId: effectiveChatIdForStream,
             model: selectedModel || "grok-3"
           })
         });
@@ -2721,14 +2726,20 @@ export function ChatInterface({
         const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
         const cleanInput = userInput.replace(/^🌐\s*/, "");
         
+        const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+        if (chatId?.startsWith("pending-")) {
+          // Upgrade pending client-only chat id to a real stable chat id for server persistence.
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+        }
+
         const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
           body: JSON.stringify({
             messages: [{ role: "user", content: cleanInput }],
-            chatId,
-            conversationId: chatId,
+            chatId: effectiveChatIdForStream,
+            conversationId: effectiveChatIdForStream,
             model: selectedModel || "grok-3",
             forceWebSearch: isWebSearch,
             webSearchAuto: isWebSearch
