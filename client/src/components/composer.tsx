@@ -1008,33 +1008,44 @@ export function Composer({
 
 
         <div className="flex flex-col relative">
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onFocus={onTextareaFocus}
-            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-              handleMentionKeyDown(e);
-              if (showMentionPopover) return;
-              handleHistoryNavigation(e);
-              const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
-                e.preventDefault();
-                handleSubmitWithHistory();
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
-                e.preventDefault();
-                handleSubmitWithHistory();
-              }
-            }}
-            onPaste={handlePaste}
-            placeholder={placeholder}
-            aria-label="Message input"
-            aria-describedby="composer-hint"
-            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
-            rows={1}
-          />
+          {/* Inner input contour (thin, minimalist, silver) */}
+          <div
+            className={cn(
+              "rounded-2xl border bg-white/55 dark:bg-zinc-950/15 backdrop-blur-sm",
+              "border-zinc-300/80 dark:border-zinc-600/40",
+              "px-4 py-3",
+              "transition-colors duration-150",
+              "focus-within:border-zinc-400/80 dark:focus-within:border-zinc-500/50"
+            )}
+          >
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onFocus={onTextareaFocus}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                handleMentionKeyDown(e);
+                if (showMentionPopover) return;
+                handleHistoryNavigation(e);
+                const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                }
+              }}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              aria-label="Message input"
+              aria-describedby="composer-hint"
+              className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
+              rows={1}
+            />
+          </div>
 
           <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/40">
             <div className="flex items-center gap-2">
