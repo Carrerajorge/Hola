@@ -159,16 +159,24 @@ export function RecordingPanel({
   return (
     <>
       <Tooltip>
-        <TooltipTrigger asChild>
+      <TooltipTrigger asChild>
           <Button
             variant="ghost"
             onClick={onToggleRecording}
             size="icon"
-            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50"
+            className={cn(
+              "h-9 w-9 rounded-full",
+              "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
+              "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
+              "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
+              "backdrop-blur-sm shadow-none",
+              "transition-colors duration-150",
+              "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+            )}
             aria-label="Start voice dictation"
             data-testid="button-voice-dictation"
           >
-            <Mic className="h-5 w-5" aria-hidden="true" />
+            <Mic className="h-4 w-4" aria-hidden="true" />
           </Button>
         </TooltipTrigger>
         <TooltipContent>Dictar texto</TooltipContent>
@@ -197,13 +205,18 @@ export function RecordingPanel({
             size="icon"
             disabled={isFilesLoading}
             className={cn(
-              "h-9 w-9 rounded-full transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/50",
-              isFilesLoading ? "opacity-50 cursor-not-allowed bg-muted" : "liquid-btn"
+              "h-9 w-9 rounded-full",
+              "border-[0.5px] border-solid backdrop-blur-sm shadow-none",
+              "transition-colors duration-150",
+              "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
+              isFilesLoading
+                ? "opacity-50 cursor-not-allowed bg-white/20 border-[#c7c7c7]/40 text-zinc-400 dark:bg-white/5 dark:border-white/10 dark:text-white/30"
+                : "bg-white/35 hover:bg-white/55 border-[#c7c7c7]/70 text-zinc-700 hover:text-zinc-900 dark:bg-white/5 dark:hover:bg-white/8 dark:border-white/20 dark:text-white/70 dark:hover:text-white/90"
             )}
             aria-label={isFilesLoading ? "Uploading files..." : "Send message (Cmd+Enter)"}
             data-testid="button-send-message"
           >
-            <ArrowUp className="h-5 w-5" aria-hidden="true" />
+            <ArrowUp className="h-4 w-4" aria-hidden="true" />
           </Button>
         </motion.div>
       ) : (
@@ -212,11 +225,19 @@ export function RecordingPanel({
             <Button
               onClick={onOpenVoiceChat}
               size="icon"
-              className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-primary/50"
+              className={cn(
+                "h-9 w-9 rounded-full",
+                "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
+                "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
+                "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
+                "backdrop-blur-sm shadow-none",
+                "transition-colors duration-150",
+                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+              )}
               aria-label="Start voice conversation mode"
               data-testid="button-voice-chat-mode"
             >
-              <AudioLines className="h-5 w-5" aria-hidden="true" />
+              <AudioLines className="h-4 w-4" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Modo conversación por voz</TooltipContent>

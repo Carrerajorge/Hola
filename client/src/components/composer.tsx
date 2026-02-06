@@ -561,11 +561,17 @@ export function Composer({
           aria-label="Open tools menu"
           title="Open tools menu"
           className={cn(
-            "liquid-plus-button h-10 w-10 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
-            isDocumentMode && "h-11 w-11"
+            "h-9 w-9 rounded-[14px] flex-shrink-0",
+            "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
+            "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
+            "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
+            "backdrop-blur-sm shadow-none",
+            "transition-colors duration-150",
+            "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
+            isDocumentMode && "h-10 w-10 rounded-[16px]"
           )}
         >
-          <Plus className="h-5 w-5" />
+          <Plus className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn("p-1", isDocumentMode ? "w-48" : "w-56 p-2")} align="start" side="top">
@@ -856,7 +862,7 @@ export function Composer({
       "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
       "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
       // Shape & Spacing
-      "rounded-[26px] px-5 py-4",
+      "rounded-[24px] px-4 py-3",
       // Elevated Shadow
       "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
       // Focus State (minimal silver)
@@ -1013,10 +1019,10 @@ export function Composer({
           {/* Inner input contour (thin, minimalist, silver) */}
           <div
             className={cn(
-              "rounded-[22px] border-[0.5px] border-solid bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
+              "rounded-[20px] border-[0.5px] border-solid bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
               "border-[#c7c7c7]/80 dark:border-white/20",
               "hover:border-[#bdbdbd]/85 dark:hover:border-white/25",
-              "px-4 py-2.5",
+              "px-4 py-2",
               "transition-colors duration-150",
               "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
             )}
@@ -1045,12 +1051,12 @@ export function Composer({
               placeholder={placeholder}
               aria-label="Message input"
               aria-describedby="composer-hint"
-              className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
+              className="min-h-[22px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-[1.4] overflow-y-auto scrollbar-none"
               rows={1}
             />
           </div>
 
-          <div className="flex items-center justify-between mt-2 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
+          <div className="flex items-center justify-between mt-1.5 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
