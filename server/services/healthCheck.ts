@@ -86,11 +86,13 @@ async function checkLLMService(): Promise<ComponentHealth> {
 
     try {
         // Just verify API key is configured
-        const hasGrok = !!process.env.XAI_API_KEY;
-        const hasGemini = !!process.env.GOOGLE_API_KEY;
+        const hasXai = !!process.env.XAI_API_KEY;
+        const hasGemini = !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY;
+        const hasOpenai = !!process.env.OPENAI_API_KEY;
         const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+        const hasDeepseek = !!process.env.DEEPSEEK_API_KEY;
 
-        const configured = [hasGrok, hasGemini, hasAnthropic].filter(Boolean).length;
+        const configured = [hasXai, hasGemini, hasOpenai, hasAnthropic, hasDeepseek].filter(Boolean).length;
 
         if (configured === 0) {
             return {
@@ -106,9 +108,11 @@ async function checkLLMService(): Promise<ComponentHealth> {
             latency: Date.now() - start,
             lastChecked: new Date(),
             details: {
-                grok: hasGrok,
+                xai: hasXai,
                 gemini: hasGemini,
+                openai: hasOpenai,
                 anthropic: hasAnthropic,
+                deepseek: hasDeepseek,
             },
         };
     } catch (error: any) {

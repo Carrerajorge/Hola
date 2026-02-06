@@ -57,6 +57,20 @@ artifacts/*.tmp
 artifacts/*.zip
 artifacts/*.ics
 
+# Local eval/analysis output
+eval/
+scripts/eval-*.ts
+
+# Logs and local outputs (never commit)
+*.log
+curl_*.txt
+tsc_*.log
+user_router_errors.log
+verify.log
+test_output.docx
+test_excel_output.xlsx
+referencias_final.txt
+
 # Generated runtime artifacts (never commit)
 artifacts/
 generated_reports/
