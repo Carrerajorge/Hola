@@ -74,7 +74,7 @@ const __dirname = dirname(__filename);
   // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts"],
+    entryPoints: ["server/index.ts", "server/worker.ts", "server/agent/sandboxRunner/index.ts"],
     outdir: "dist",
     outExtension: { ".js": ".mjs" },
     splitting: true,
@@ -130,7 +130,19 @@ import(pathToFileURL(join(__dirname, "worker.mjs")).href).catch(err => {
 });
 `;
   await writeFile("dist/worker.cjs", workerWrapper, "utf-8");
+
+  const sandboxRunnerWrapper = `#!/usr/bin/env node
+"use strict";
+const { pathToFileURL } = require("url");
+const { join } = require("path");
+import(pathToFileURL(join(__dirname, "sandboxRunner/index.mjs")).href).catch(err => {
+  console.error("Failed to start sandbox runner:", err);
+  process.exit(1);
+});
+`;
+  await writeFile("dist/sandbox-runner.cjs", sandboxRunnerWrapper, "utf-8");
 }
+
 
 buildAll().catch((err) => {
   console.error(err);
