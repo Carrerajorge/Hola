@@ -852,14 +852,16 @@ export function Composer({
       "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
       // Glass Background & Blur
       "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
-      // Premium Border
-      "border border-black/5 dark:border-white/10",
+      // Premium Border (silver, ultra-thin)
+      "border-[0.5px] border-solid border-[#c7c7c7]/55 dark:border-white/10",
+      "hover:border-[#bdbdbd]/70 dark:hover:border-white/15",
       // Shape & Spacing
       "rounded-[26px] px-5 py-4",
       // Elevated Shadow
       "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
-      // Focus State (Subtle Glow)
-      "focus-within:shadow-[0_0_0_2px_rgba(var(--primary),0.1),0_8px_40px_rgba(0,0,0,0.1)] focus-within:border-primary/30",
+      // Focus State (minimal silver)
+      "focus-within:shadow-[0_0_0_1px_rgba(199,199,199,0.30),0_8px_40px_rgba(0,0,0,0.08)] focus-within:border-[#bdbdbd]/80",
+      "dark:focus-within:shadow-[0_0_0_1px_rgba(255,255,255,0.10),0_8px_40px_rgba(0,0,0,0.35)] dark:focus-within:border-white/20",
 
       selectedDocText && "border-primary/20",
       isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
