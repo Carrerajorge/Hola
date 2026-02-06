@@ -15,7 +15,12 @@ const ITERATIONS = 100000;
 
 // Get encryption key from environment or generate
 const getEncryptionKey = (): Buffer => {
+  // Preferred: ENCRYPTION_KEY (32 bytes / 64 hex chars) for encryption-at-rest.
+  // Back-compat: TOKEN_ENCRYPTION_KEY is already required in production when OAuth is enabled.
+  // If ENCRYPTION_KEY is not set, derive a stable 32-byte key from TOKEN_ENCRYPTION_KEY.
   const envKey = process.env.ENCRYPTION_KEY;
+  const tokenKey = process.env.TOKEN_ENCRYPTION_KEY;
+
   if (envKey) {
     // If hex string, convert to buffer
     if (envKey.length === 64) {
@@ -24,9 +29,20 @@ const getEncryptionKey = (): Buffer => {
     // Hash the key to ensure correct length
     return crypto.createHash("sha256").update(envKey).digest();
   }
-  
-  // Generate a key (in production, this should be set in env)
-  console.warn("[Encryption] No ENCRYPTION_KEY set, using derived key");
+
+  if (tokenKey) {
+    // Derive 32-byte key deterministically from TOKEN_ENCRYPTION_KEY
+    return crypto.createHash("sha256").update(tokenKey).digest();
+  }
+
+  // In production we should never run with an ephemeral/default key.
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ Missing ENCRYPTION_KEY (or TOKEN_ENCRYPTION_KEY) in production. Refusing to start.');
+    process.exit(1);
+  }
+
+  // Dev/test fallback
+  console.warn("[Encryption] No ENCRYPTION_KEY/TOKEN_ENCRYPTION_KEY set, using derived dev key");
   return crypto.createHash("sha256").update("iliagpt-default-key-change-me").digest();
 };
 

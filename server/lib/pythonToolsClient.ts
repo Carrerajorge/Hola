@@ -53,25 +53,34 @@ export class PythonToolsClient {
   }
   
   private handleError(error: unknown, operation: string): never {
+    const isExplicitlyConfigured = !!process.env.PYTHON_TOOLS_API_URL;
+
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
       const statusCode = axiosError.response?.status;
       const errorData = axiosError.response?.data as any;
-      
-      console.error(`[PythonToolsClient] ${operation} failed:`, {
-        statusCode,
-        message: axiosError.message,
-        details: errorData
-      });
-      
+
+      // If Python tools are not explicitly configured, avoid noisy error logs in production.
+      // ToolExecutionEngine will mark them unavailable and continue.
+      if (isExplicitlyConfigured) {
+        console.error(`[PythonToolsClient] ${operation} failed:`, {
+          statusCode,
+          message: axiosError.message,
+          details: errorData
+        });
+      }
+
       throw new PythonToolsClientError(
         errorData?.detail || errorData?.error || axiosError.message,
         statusCode,
         errorData
       );
     }
-    
-    console.error(`[PythonToolsClient] ${operation} failed with unknown error:`, error);
+
+    if (isExplicitlyConfigured) {
+      console.error(`[PythonToolsClient] ${operation} failed with unknown error:`, error);
+    }
+
     throw new PythonToolsClientError(
       error instanceof Error ? error.message : 'Unknown error occurred'
     );

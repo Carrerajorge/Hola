@@ -34,7 +34,15 @@ const EncryptionEnvSchema = z.object({
         .length(64, 'ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)')
         .regex(/^[a-fA-F0-9]+$/, 'ENCRYPTION_KEY must be hexadecimal')
         .optional(),
-});
+    // Back-compat: allow using TOKEN_ENCRYPTION_KEY as the primary secret.
+    TOKEN_ENCRYPTION_KEY: z.string().min(32, 'TOKEN_ENCRYPTION_KEY must be at least 32 characters').optional(),
+}).refine(
+    (data) => {
+        if (process.env.NODE_ENV !== 'production') return true;
+        return !!(data.ENCRYPTION_KEY || data.TOKEN_ENCRYPTION_KEY);
+    },
+    'In production, ENCRYPTION_KEY or TOKEN_ENCRYPTION_KEY must be set'
+);
 
 const PushNotificationsEnvSchema = z.object({
     VAPID_PUBLIC_KEY: z.string().optional(),
