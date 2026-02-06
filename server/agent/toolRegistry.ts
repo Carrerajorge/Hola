@@ -21,6 +21,9 @@ import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 
+const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
+const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
+
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
   description: z.string().min(1, "Tool description is required"),
@@ -997,8 +1000,8 @@ const readFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const safePath = path.resolve('/tmp/agent-workspace', context.runId, input.filepath);
-      if (!safePath.startsWith(path.resolve('/tmp/agent-workspace', context.runId))) {
+      const safePath = path.resolve(getRunWorkspaceDir(context.runId), input.filepath);
+      if (!safePath.startsWith(getRunWorkspaceDir(context.runId))) {
         throw new Error('Access denied: path outside workspace');
       }
       const content = await fs.readFile(safePath, 'utf-8');
@@ -1039,7 +1042,7 @@ const writeFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      const workspaceDir = getRunWorkspaceDir(context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const safePath = path.resolve(workspaceDir, input.filepath);
       if (!safePath.startsWith(workspaceDir)) {
@@ -1085,7 +1088,7 @@ const shellCommandTool: ToolDefinition = {
     // Ensure workspace exists
     const fs = await import("fs/promises");
     const path = await import("path");
-    const workspaceDir = path.resolve("/tmp/agent-workspace", context.runId);
+    const workspaceDir = getRunWorkspaceDir(context.runId);
     await fs.mkdir(workspaceDir, { recursive: true });
 
     const cmd = String(input.command ?? "").trim();
@@ -1148,6 +1151,179 @@ const shellCommandTool: ToolDefinition = {
     // (typically via /var/run/docker.sock) and that the `docker` CLI is available.
     const sandboxMode = (process.env.SHELL_COMMAND_SANDBOX_MODE || "host").toLowerCase();
     const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
+
+    const runnerUrl = process.env.SHELL_COMMAND_RUNNER_URL || "http://sandbox-runner:8080";
+    const runnerToken = process.env.SHELL_COMMAND_RUNNER_TOKEN || process.env.SANDBOX_RUNNER_TOKEN || "";
+
+    const runWithRunner = async (): Promise<ToolResult> => {
+      if (!runnerToken) {
+        return {
+          success: false,
+          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+          error: createError("COMMAND_ERROR", "Runner token not configured (SHELL_COMMAND_RUNNER_TOKEN)", false),
+          artifacts: [],
+          previews: [{ type: "text", content: "Runner token not configured", title: "Error" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
+      // Start remote job
+      const ac = new AbortController();
+      const abortHandler = () => ac.abort();
+      context.signal?.addEventListener?.("abort", abortHandler, { once: true });
+
+      let stdout = "";
+      let stderr = "";
+      const maxCapture = 1024 * 1024;
+
+      try {
+        const startRes = await fetch(`${runnerUrl.replace(/\/$/, "")}/v1/shell/run`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${runnerToken}`,
+          },
+          body: JSON.stringify({ runId: context.runId, command: cmd, timeoutMs }),
+          signal: ac.signal,
+        });
+
+        if (!startRes.ok) {
+          const text = await startRes.text().catch(() => "");
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
+            error: createError("COMMAND_ERROR", `Runner start failed: ${startRes.status}`, true, { body: text }),
+            artifacts: [],
+            previews: [{ type: "text", content: text, title: "Runner Error" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const { jobId, streamUrl } = (await startRes.json()) as any;
+        const streamRes = await fetch(`${runnerUrl.replace(/\/$/, "")}${streamUrl || `/v1/shell/stream/${jobId}`}`, {
+          headers: { Authorization: `Bearer ${runnerToken}` },
+          signal: ac.signal,
+        });
+
+        if (!streamRes.ok || !streamRes.body) {
+          const text = await streamRes.text().catch(() => "");
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
+            error: createError("COMMAND_ERROR", `Runner stream failed: ${streamRes.status}`, true, { body: text }),
+            artifacts: [],
+            previews: [{ type: "text", content: text, title: "Runner Stream Error" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        let exitEvt: any = null;
+
+        const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
+          if (!chunk) return;
+          try {
+            context.onStream?.({ stream, chunk });
+          } catch {
+            // ignore
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+
+          // parse SSE by events separated by blank line
+          while (true) {
+            const idx = buf.indexOf("\n\n");
+            if (idx === -1) break;
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+
+            const lines = raw.split("\n");
+            let eventName = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event:")) eventName = line.slice("event:".length).trim();
+              if (line.startsWith("data:")) data += line.slice("data:".length).trim();
+            }
+
+            if (eventName === "shell") {
+              try {
+                const evt = JSON.parse(data);
+                if (evt?.type === "stdout") {
+                  safeEmit("stdout", String(evt.chunk || ""));
+                  if (stdout.length < maxCapture) stdout += String(evt.chunk || "").slice(0, maxCapture - stdout.length);
+                } else if (evt?.type === "stderr") {
+                  safeEmit("stderr", String(evt.chunk || ""));
+                  if (stderr.length < maxCapture) stderr += String(evt.chunk || "").slice(0, maxCapture - stderr.length);
+                } else if (evt?.type === "exit") {
+                  exitEvt = evt;
+                }
+              } catch {
+                // ignore malformed events
+              }
+            }
+          }
+        }
+
+        const exitCode = Number(exitEvt?.exitCode ?? 1);
+        const signal = exitEvt?.signal ? String(exitEvt.signal) : null;
+        const wasKilled = Boolean(exitEvt?.wasKilled);
+        const durationMs = Number(exitEvt?.durationMs ?? Date.now() - startTime);
+
+        try {
+          context.onExit?.({ exitCode, signal, wasKilled, durationMs });
+        } catch {
+          // ignore
+        }
+
+        const ok = exitCode === 0 && !wasKilled;
+        return {
+          success: ok,
+          output: { command: cmd, stdout, stderr, exitCode },
+          artifacts: [],
+          previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: ok ? "Command Output" : "Error Output" }],
+          logs: [],
+          error: ok ? undefined : createError(wasKilled ? "COMMAND_TIMEOUT" : "COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      } catch (err: any) {
+        if (context.signal?.aborted || ac.signal.aborted) {
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+            error: createError("ABORTED", "Command cancelled", false),
+            artifacts: [],
+            previews: [],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+        return {
+          success: false,
+          output: { command: cmd, stdout: "", stderr: err?.message || String(err), exitCode: 1 },
+          error: createError("COMMAND_ERROR", `Runner unavailable: ${err?.message || String(err)}`, true),
+          artifacts: [],
+          previews: [{ type: "text", content: err?.message || String(err), title: "Runner Error" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      } finally {
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+      }
+    };
+
+    if (sandboxMode === "runner") {
+      return await runWithRunner();
+    }
 
     const runWithHost = () => {
       return spawn("/usr/bin/bash", ["-lc", cmd], {
@@ -1341,7 +1517,7 @@ const listFilesTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      const workspaceDir = getRunWorkspaceDir(context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const targetDir = path.resolve(workspaceDir, input.directory);
       if (!targetDir.startsWith(workspaceDir)) {
