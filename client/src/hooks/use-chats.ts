@@ -337,6 +337,28 @@ function sanitizeAttachmentsForServer(attachments: Message['attachments']): Mess
   });
 }
 
+// Retry an async operation with exponential backoff and jitter.
+// Used for critical operations like message saves that must not silently fail.
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  { maxRetries = 3, baseDelayMs = 800, maxDelayMs = 10000 }: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxRetries) {
+        const delay = Math.min(baseDelayMs * Math.pow(2, attempt) + Math.random() * 200, maxDelayMs);
+        console.warn(`[withRetry] Attempt ${attempt + 1} failed, retrying in ${Math.round(delay)}ms:`, lastError.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -800,6 +822,47 @@ export function useChats() {
       }
 
       setIsLoading(false);
+
+      // Recover failed message saves from previous session
+      const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
+      try {
+        const failedQueue = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
+        if (failedQueue.length > 0) {
+          console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
+          const remaining: any[] = [];
+          for (const queued of failedQueue) {
+            // Skip entries older than 24 hours
+            if (Date.now() - queued.timestamp > 24 * 60 * 60 * 1000) continue;
+            try {
+              const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                credentials: "include",
+                body: JSON.stringify({
+                  role: queued.role,
+                  content: queued.content,
+                  requestId: queued.requestId,
+                  clientRequestId: queued.clientRequestId,
+                  attachments: queued.attachments,
+                })
+              });
+              if (res.ok) {
+                console.log(`[FailedQueue] Recovered message for chat ${queued.chatId}`);
+              } else if (res.status < 500) {
+                // Client error (4xx) — skip, don't retry
+                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
+              } else {
+                remaining.push(queued); // Retry next time
+              }
+            } catch {
+              remaining.push(queued); // Network error, retry next time
+            }
+          }
+          localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(remaining));
+        }
+      } catch (e) {
+        console.warn('[FailedQueue] Error processing recovery queue:', e);
+      }
     };
 
     initChats();
@@ -1097,28 +1160,37 @@ export function useChats() {
         // For user messages, use run-based idempotency with clientRequestId
         const clientRequestId = message.role === 'user' ? (message as any).clientRequestId || generateClientRequestId() : undefined;
 
-        const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            role: message.role,
-            content: message.content,
-            requestId: message.requestId,
-            clientRequestId, // For run-based idempotency
-            userMessageId: message.userMessageId,
-            attachments: sanitizeAttachmentsForServer(message.attachments),
-            sources: message.sources,
-            figmaDiagram: message.figmaDiagram,
-            googleFormPreview: message.googleFormPreview,
-            gmailPreview: message.gmailPreview,
-            generatedImage: message.generatedImage,
-            webSources: message.webSources, // For news cards display
-            confidence: message.confidence,
-            uncertaintyReason: message.uncertaintyReason,
-            retrievalSteps: message.retrievalSteps
-          })
-        });
+        // Retry message saves with exponential backoff for reliability.
+        // Uses idempotent clientRequestId to prevent duplicates on retry.
+        const res = await withRetry(async () => {
+          const response = await fetch(`/api/chats/${resolvedChatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              role: message.role,
+              content: message.content,
+              requestId: message.requestId,
+              clientRequestId, // For run-based idempotency
+              userMessageId: message.userMessageId,
+              attachments: sanitizeAttachmentsForServer(message.attachments),
+              sources: message.sources,
+              figmaDiagram: message.figmaDiagram,
+              googleFormPreview: message.googleFormPreview,
+              gmailPreview: message.gmailPreview,
+              generatedImage: message.generatedImage,
+              webSources: message.webSources,
+              confidence: message.confidence,
+              uncertaintyReason: message.uncertaintyReason,
+              retrievalSteps: message.retrievalSteps
+            })
+          });
+          // Retry on network failures and 5xx server errors; don't retry 4xx client errors
+          if (!response.ok && response.status >= 500) {
+            throw new Error(`Server error ${response.status}`);
+          }
+          return response;
+        }, { maxRetries: 2 });
 
         // Handle run-based response for user messages
         if (res.ok) {
@@ -1174,6 +1246,33 @@ export function useChats() {
         if (message.requestId) {
           processingRequestIds.delete(message.requestId);
         }
+
+        // Queue failed message save for later recovery
+        if (message.role === 'user' && message.attachments?.length) {
+          try {
+            const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
+            const existing = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
+            // Only queue if not already queued (by requestId)
+            if (!existing.some((q: any) => q.requestId === message.requestId)) {
+              existing.push({
+                chatId: resolvedChatId,
+                role: message.role,
+                content: message.content,
+                requestId: message.requestId,
+                clientRequestId: (message as any).clientRequestId,
+                attachments: sanitizeAttachmentsForServer(message.attachments),
+                timestamp: Date.now(),
+              });
+              // Keep only last 20 entries to prevent bloat
+              const trimmed = existing.slice(-20);
+              localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(trimmed));
+              console.log(`[FailedQueue] Queued message with ${message.attachments.length} attachment(s) for retry`);
+            }
+          } catch (queueError) {
+            console.warn('[FailedQueue] Failed to queue message for retry:', queueError);
+          }
+        }
+
         return undefined;
       }
     }
