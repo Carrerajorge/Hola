@@ -2852,6 +2852,7 @@ export function ChatInterface({
           imageUrl: String(f.type || "").startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
           storagePath: f.storagePath,
           fileId: f.id,
+          size: f.size,
           spreadsheetData: f.spreadsheetData,
         }));
 
@@ -2861,6 +2862,7 @@ export function ChatInterface({
           type: f.type,
           mimeType: f.type,
           storagePath: f.storagePath,
+          size: f.size,
           spreadsheetData: f.spreadsheetData
         }));
 
@@ -3694,6 +3696,7 @@ export function ChatInterface({
         imageUrl: f.type.startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
         storagePath: f.storagePath,
         fileId: f.id,
+        size: f.size,
         spreadsheetData: f.spreadsheetData,
       }));
 
@@ -3880,7 +3883,8 @@ export function ChatInterface({
 
         const analyzeResponse = await fetch("/api/analyze", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({
             messages: finalChatHistoryPrecheck,
             attachments: cleanedAttachments,
@@ -4213,7 +4217,7 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
-          const fileContents = uploadedFiles
+          const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
             .join("\n\n");
@@ -4228,7 +4232,7 @@ export function ChatInterface({
           }));
 
           // Extract image data URLs from current files
-          const imageDataUrls = uploadedFiles
+          const imageDataUrls = currentUploadedFiles
             .filter(f => f.type.startsWith("image/") && f.dataUrl)
             .map(f => f.dataUrl as string);
 
@@ -4338,65 +4342,52 @@ IMPORTANTE:
             let fullContent = "";
             let sseError: Error | null = null;
 
-            // try {
-            // Helper function to robustly detect if a file is a document (not an image)
-            // Uses mimeType AND file extension for reliable detection
-            const isDocumentFile = (mimeType: string, fileName: string): boolean => {
-              const lowerMime = (mimeType || "").toLowerCase();
-              const lowerName = (fileName || "").toLowerCase();
+            // Build attachments array for server requests using CAPTURED files
+            // (uploadedFiles state may be cleared immediately after send).
+            const streamAttachments = attachments
+              .map((att: any) => ({
+                type: att.type === "image" ? ("image" as const) : ("document" as const),
+                name: att.name,
+                mimeType: att.mimeType,
+                storagePath: att.storagePath,
+                fileId: att.fileId,
+                size: att.size,
+              }))
+              .filter((att: any) => Boolean(att.storagePath || att.fileId));
 
-              // Check for explicit image MIME types first
-              if (lowerMime.startsWith("image/")) return false;
+            const hasDocumentAttachments = streamAttachments.some((a: any) => a.type === "document");
 
-              // Document MIME types
-              const docMimePatterns = [
-                "pdf", "word", "document", "sheet", "excel",
-                "spreadsheet", "presentation", "powerpoint", "csv",
-                "text/plain", "text/csv", "application/json"
-              ];
-              if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
-
-              // Document file extensions
-              const docExtensions = [
-                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-                ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
-              ];
-              if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
-
-              // If mimeType is empty/unknown and has no extension, treat as document (safer)
-              if (!lowerMime || lowerMime === "application/octet-stream") return true;
-
-              return false;
-            };
-
-            // Build attachments array for streaming endpoint
-            const streamAttachments = uploadedFiles
-              .filter(f => f.status === "ready" || f.status === "processing")
-              .map(f => ({
-                type: f.type.startsWith("image/") ? "image" as const :
-                  f.type.includes("pdf") ? "pdf" as const :
-                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
-                      f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-                        f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                          "document" as const,
-                name: f.name,
-                mimeType: f.type,
-                storagePath: f.storagePath,
-                fileId: f.id,
-                content: f.content,
-              }));
-
-            // Robust document detection using both mimeType AND file extension
-            const hasDocumentAttachments = uploadedFiles
-              .filter(f => f.status === "ready" || f.status === "processing")
-              .some(f => isDocumentFile(f.type, f.name));
-
-            // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
+            // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation.
             if (hasDocumentAttachments) {
+              // Prefer the pre-fetched analysis result (avoids duplicate work).
+              if (preFetchedAnalysisResult) {
+                const analysisMsg: Message = {
+                  id: (Date.now() + 1).toString(),
+                  role: "assistant",
+                  content: preFetchedAnalysisResult.answer_text || "Análisis del documento completado.",
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                  ui_components: preFetchedAnalysisResult.ui_components || [],
+                  documentAnalysis: preFetchedAnalysisResult.documentModel ? {
+                    documentModel: preFetchedAnalysisResult.documentModel,
+                    insights: preFetchedAnalysisResult.insights || [],
+                    suggestedQuestions: preFetchedAnalysisResult.suggestedQuestions || [],
+                  } : undefined,
+                };
+                onSendMessage(analysisMsg);
+
+                setAiState("idle");
+                setAiProcessSteps([]);
+                abortControllerRef.current = null;
+                return;
+              }
+
               console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
               const analyzeResponse = await fetch("/api/analyze", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                credentials: "include",
                 body: JSON.stringify({
                   messages: finalChatHistory,
                   attachments: streamAttachments,
@@ -4751,7 +4742,8 @@ IMPORTANTE:
               try {
                 const analyzeResponse = await fetch("/api/analyze", {
                   method: "POST",
-                  headers: { "Content-Type": "application/json" },
+                  headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                  credentials: "include",
                   body: JSON.stringify({
                     messages: finalChatHistory,
                     attachments: cleanedAttachments,
