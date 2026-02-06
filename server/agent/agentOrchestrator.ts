@@ -956,6 +956,22 @@ Respond with ONLY valid JSON in this exact format:
         userPlan: this.userPlan,
         isConfirmed: opts?.isConfirmed === true,
         signal: this.abortController.signal,
+        stepIndex,
+        onStream: (evt) => {
+          try {
+            // Stream chunks to the UI in near real-time (best-effort)
+            void this.emitTraceEvent("shell_output", {
+              stepIndex,
+              stepId: `step-${stepIndex}`,
+              tool_name: step.toolName,
+              stream: evt.stream,
+              output_snippet: evt.chunk.substring(0, 2000),
+              is_final_chunk: false,
+            });
+          } catch {
+            // ignore streaming errors
+          }
+        },
       });
 
       const completedAt = Date.now();
