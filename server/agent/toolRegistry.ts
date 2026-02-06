@@ -1225,6 +1225,7 @@ const shellCommandTool: ToolDefinition = {
         let buf = "";
 
         let exitEvt: any = null;
+        let doneReceived = false;
 
         const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
           if (!chunk) return;
@@ -1271,6 +1272,34 @@ const shellCommandTool: ToolDefinition = {
                 // ignore malformed events
               }
             }
+
+            // Some SSE servers keep the connection open. If we receive a terminal marker,
+            // stop reading to avoid hanging indefinitely.
+            if (eventName === "done") {
+              doneReceived = true;
+              try {
+                await reader.cancel();
+              } catch {
+                // ignore
+              }
+              buf = "";
+              break;
+            }
+          }
+
+          // If we got a terminal marker, stop reading.
+          if (doneReceived) {
+            break;
+          }
+
+          // If we got an exit event, we can also stop early.
+          if (exitEvt) {
+            try {
+              await reader.cancel();
+            } catch {
+              // ignore
+            }
+            break;
           }
         }
 
