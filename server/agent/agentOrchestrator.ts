@@ -972,6 +972,22 @@ Respond with ONLY valid JSON in this exact format:
             // ignore streaming errors
           }
         },
+        onExit: (evt) => {
+          try {
+            void this.emitTraceEvent("shell_output", {
+              stepIndex,
+              stepId: `step-${stepIndex}`,
+              tool_name: step.toolName,
+              stream: "exit",
+              command: typeof step.input?.command === "string" ? step.input.command : "",
+              exit_code: evt.exitCode,
+              signal: evt.signal,
+              is_final_chunk: true,
+            });
+          } catch {
+            // ignore
+          }
+        },
       });
 
       const completedAt = Date.now();
@@ -1015,15 +1031,7 @@ Respond with ONLY valid JSON in this exact format:
         is_final_chunk: true,
       });
 
-      if (step.toolName === 'shell_command') {
-        await this.emitTraceEvent('shell_output', {
-          stepIndex,
-          stepId: `step-${stepIndex}`,
-          tool_name: 'shell_command',
-          command: typeof step.input?.command === 'string' ? step.input.command : '',
-          output_snippet: outputSnippet,
-        });
-      }
+      // Note: shell_command streaming is emitted via onStream (chunks) + onExit (final exit code).
 
       if (result.success) {
         await this.emitTraceEvent('step_completed', {
