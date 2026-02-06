@@ -17,6 +17,10 @@ sandbox_workspace/.state/
 **/session*.json
 **/secrets*.json
 
+# WhatsApp Web auth state (Baileys multi-file sessions)
+data/whatsapp-web/
+data/whatsapp-web/**
+
 # Environment files
 .env
 .env.*

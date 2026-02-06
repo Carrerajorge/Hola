@@ -1079,7 +1079,7 @@ const shellCommandSchema = z.object({
 
 const shellCommandTool: ToolDefinition = {
   name: "shell_command",
-  description: "Execute a shell command in the agent's sandbox. Streams stdout/stderr and enforces safety checks.",
+  description: "Execute a shell command in the agent's sandbox. Useful for system/terminal tasks (install/uninstall packages, monitor CPU/RAM/disk, manage processes/services, backups/restore). Streams stdout/stderr and enforces safety checks.",
   inputSchema: shellCommandSchema,
   capabilities: ["executes_code", "long_running", "high_risk"],
   execute: async (input, context): Promise<ToolResult> => {
