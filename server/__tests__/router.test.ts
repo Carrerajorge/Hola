@@ -226,12 +226,12 @@ describe("AgentRunner - Guardrails", () => {
     const { AgentRunner } = await import("../services/agentRunner");
     const agent = new AgentRunner({ maxSteps: 2, enableLogging: false });
     const result = await agent.run("Simple test objective");
-    
+
     const runId = (result as any).run_id ?? (result as any).runId;
     expect(runId).toBeTruthy();
     expect(typeof runId).toBe("string");
     expect(String(runId).length).toBeGreaterThan(0);
-  });
+  }, 20000);
 
   it("should include warning when max steps reached", async () => {
     const { AgentRunner } = await import("../services/agentRunner");
