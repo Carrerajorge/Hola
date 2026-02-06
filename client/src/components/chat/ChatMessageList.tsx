@@ -218,6 +218,7 @@ export function ChatMessageList({
             <Virtuoso
                 ref={virtuosoRef}
                 data={messages}
+                computeItemKey={(index, msg) => msg.id}
                 components={{ Footer: ListFooter }}
                 initialTopMostItemIndex={messages.length - 1}
                 followOutput="auto"

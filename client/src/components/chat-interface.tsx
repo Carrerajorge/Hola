@@ -1406,6 +1406,8 @@ export function ChatInterface({
         content: currentContent + "\n\n*[Respuesta detenida por el usuario]*",
         timestamp: new Date(),
       };
+      // Add to optimistic messages BEFORE clearing streaming to prevent flash
+      setOptimisticMessages((prev: Message[]) => [...prev, partialMsg]);
       onSendMessage(partialMsg);
     } else {
       // If stopped during "thinking" phase (no content yet), show a stopped message
@@ -1415,10 +1417,12 @@ export function ChatInterface({
         content: "*[Solicitud cancelada por el usuario]*",
         timestamp: new Date(),
       };
+      // Add to optimistic messages BEFORE clearing streaming to prevent flash
+      setOptimisticMessages((prev: Message[]) => [...prev, stoppedMsg]);
       onSendMessage(stoppedMsg);
     }
 
-    // Reset states
+    // Reset states - safe to clear now because optimistic messages are already set
     streamingContentRef.current = "";
     setAiState("idle");
     setStreamingContent("");
@@ -1932,6 +1936,8 @@ export function ChatInterface({
                   webSources: data.webSources,
                   artifact: data.artifact
                 };
+                // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                setOptimisticMessages((prev: Message[]) => [...prev, finalMsg]);
                 onSendMessage(finalMsg);
                 streamComplete = true;
               } else if (currentEventType === "error") {
@@ -1960,6 +1966,8 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: generateRequestId(),
       };
+      // Add to optimistic messages BEFORE clearing streaming to prevent flash
+      setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
       onSendMessage(errorMsg);
 
       streamingContentRef.current = "";
@@ -2626,6 +2634,8 @@ export function ChatInterface({
           content: fullContent || "No response received",
           timestamp: new Date()
         };
+        // Add to optimistic messages BEFORE clearing streaming to prevent flash
+        setOptimisticMessages((prev: Message[]) => [...prev, assistantMsg]);
         onSendMessage(assistantMsg);
         setStreamingContent("");
         setAiState("idle");
@@ -2763,15 +2773,17 @@ export function ChatInterface({
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let fullContent = "";
+        let sseBuffer = "";
         setAiState("responding");
-        
+
         while (reader) {
           const { done, value } = await reader.read();
           if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
+
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          sseBuffer = lines.pop() || ""; // Keep incomplete line in buffer
+
           for (const line of lines) {
             if (line.startsWith("data: ")) {
               try {
@@ -2787,7 +2799,7 @@ export function ChatInterface({
             }
           }
         }
-        
+
         // Create assistant message with full response
         const assistantMsg: Message = {
           id: `assistant-${Date.now()}`,
@@ -2796,6 +2808,8 @@ export function ChatInterface({
           timestamp: new Date(),
           userMessageId: userMsgId
         };
+        // Add to optimistic messages BEFORE clearing streaming to prevent flash
+        setOptimisticMessages((prev: Message[]) => [...prev, assistantMsg]);
         onSendMessage(assistantMsg);
         streamingContentRef.current = "";
         setStreamingContent("");
@@ -3225,6 +3239,8 @@ export function ChatInterface({
                       artifact: data.artifact,
                       webSources: data.webSources,
                     };
+                    // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                    setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
                     onSendMessage(aiMsg);
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
@@ -3247,9 +3263,12 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId,
           };
+          // Add to optimistic messages BEFORE clearing streaming to prevent flash
+          setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
           onSendMessage(errorMsg);
         }
 
+        // Clear streaming AFTER optimistic messages are set above
         setAiState("idle");
         setAiProcessSteps([]);
         setStreamingContent("");
@@ -4593,6 +4612,8 @@ IMPORTANTE:
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
               };
+              // Add to optimistic messages BEFORE clearing streaming to prevent flash
+              setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
               await onSendMessage(confirmMsg);
             } else {
               // Normal chat mode - create final assistant message
@@ -4608,6 +4629,8 @@ IMPORTANTE:
                 uncertaintyReason: uncertainty.reason,
                 webSources: streamWebSources, // Include captured webSources for NewsCards
               };
+              // Add to optimistic messages BEFORE clearing streaming to prevent flash
+              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
               await onSendMessage(aiMsg);
             }
 
@@ -4833,6 +4856,8 @@ IMPORTANTE:
                     confidence: detectUncertainty(fullContent).confidence,
                     uncertaintyReason: detectUncertainty(fullContent).reason,
                   };
+                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                  setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
                   onSendMessage(aiMsg);
 
                   streamingContentRef.current = "";
@@ -4873,6 +4898,8 @@ IMPORTANTE:
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
                 };
+                // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
                 onSendMessage(confirmMsg);
               } catch (err) {
                 console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
@@ -4884,6 +4911,8 @@ IMPORTANTE:
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
                 };
+                // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
                 onSendMessage(aiMsg);
               }
               streamingContentRef.current = "";
@@ -4950,6 +4979,8 @@ IMPORTANTE:
                     requestId: generateRequestId(),
                     userMessageId: userMsgId,
                   };
+                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                  setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
                   onSendMessage(confirmMsg);
                 } else {
                   const uncertainty = detectUncertainty(fullContent);
@@ -4966,6 +4997,8 @@ IMPORTANTE:
                     confidence: uncertainty.confidence,
                     uncertaintyReason: uncertainty.reason,
                   };
+                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
+                  setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
                   onSendMessage(aiMsg);
                 }
 
