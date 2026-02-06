@@ -2136,7 +2136,7 @@ function PaymentsSection() {
         <div>
           <h2 className="text-lg font-medium">Payments</h2>
           <p className="text-xs text-muted-foreground">
-            Vista basada en BD. Usa sincronizacion con Stripe para backfill si faltan registros.
+            Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -2187,7 +2187,7 @@ function PaymentsSection() {
           <p className="text-xs text-muted-foreground mt-1">{stats?.pendingCount || 0} pagos</p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Tasa de exito</p>
+          <p className="text-xs text-muted-foreground mb-1">Tasa de éxito</p>
           <p className="text-xl font-semibold tabular-nums">{stats?.successRate ?? 0}%</p>
           <p className="text-xs text-muted-foreground mt-1">{stats?.failedCount || 0} fallidos</p>
         </div>
@@ -2236,9 +2236,9 @@ function PaymentsSection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="20">20 / pag</SelectItem>
-                <SelectItem value="50">50 / pag</SelectItem>
-                <SelectItem value="100">100 / pag</SelectItem>
+                <SelectItem value="20">20 / pág</SelectItem>
+                <SelectItem value="50">50 / pág</SelectItem>
+                <SelectItem value="100">100 / pág</SelectItem>
               </SelectContent>
             </Select>
             <Button
