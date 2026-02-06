@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
+import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
@@ -1325,6 +1326,17 @@ export function ChatInterface({
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
 
+  // Centralized streaming→message transition manager.
+  // Guarantees the message is visible in the DOM before streaming is cleared.
+  const streamTransition = useStreamingTransition({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1400,32 +1412,20 @@ export function ChatInterface({
     // Save the partial content as a message if there's any (use ref for latest value)
     const currentContent = streamingContentRef.current;
     if (currentContent && currentContent.trim()) {
-      const partialMsg: Message = {
+      streamTransition.finalize({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: currentContent + "\n\n*[Respuesta detenida por el usuario]*",
         timestamp: new Date(),
-      };
-      // Add to optimistic messages BEFORE clearing streaming to prevent flash
-      setOptimisticMessages((prev: Message[]) => [...prev, partialMsg]);
-      onSendMessage(partialMsg);
+      });
     } else {
-      // If stopped during "thinking" phase (no content yet), show a stopped message
-      const stoppedMsg: Message = {
+      streamTransition.finalize({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: "*[Solicitud cancelada por el usuario]*",
         timestamp: new Date(),
-      };
-      // Add to optimistic messages BEFORE clearing streaming to prevent flash
-      setOptimisticMessages((prev: Message[]) => [...prev, stoppedMsg]);
-      onSendMessage(stoppedMsg);
+      });
     }
-
-    // Reset states - safe to clear now because optimistic messages are already set
-    streamingContentRef.current = "";
-    setAiState("idle");
-    setStreamingContent("");
   };
 
   // Keep handleStopChatRef in sync for keyboard shortcut access
@@ -1925,20 +1925,16 @@ export function ChatInterface({
               } else if (currentEventType === "production_complete") {
                 setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
               } else if (currentEventType === "done" || currentEventType === "finish") {
-                // Determine web sources if available
-                const finalMsg: Message = {
+                streamTransition.finalize({
                   id: (Date.now() + 1).toString(),
                   role: "assistant",
                   content: fullContent,
                   timestamp: new Date(),
                   requestId: data.requestId || generateRequestId(),
-                  userMessageId: undefined, // Lost in regeneration context unless tracked
+                  userMessageId: undefined,
                   webSources: data.webSources,
                   artifact: data.artifact
-                };
-                // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                setOptimisticMessages((prev: Message[]) => [...prev, finalMsg]);
-                onSendMessage(finalMsg);
+                });
                 streamComplete = true;
               } else if (currentEventType === "error") {
                 throw new Error(data.message || "Stream error");
@@ -1950,29 +1946,25 @@ export function ChatInterface({
         }
       }
 
-      setStreamingContent("");
-      streamingContentRef.current = "";
-      setAiState("idle");
+      // If no explicit done event, just clean up streaming state
+      if (!streamComplete) {
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        setAiState("idle");
+      }
       abortControllerRef.current = null;
 
     } catch (error: any) {
       if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
 
-      const errorMsg: Message = {
+      streamTransition.finalize({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
         timestamp: new Date(),
         requestId: generateRequestId(),
-      };
-      // Add to optimistic messages BEFORE clearing streaming to prevent flash
-      setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
-      onSendMessage(errorMsg);
-
-      streamingContentRef.current = "";
-      setStreamingContent("");
-      setAiState("idle");
+      });
       abortControllerRef.current = null;
     }
   }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
@@ -2627,19 +2619,13 @@ export function ChatInterface({
           }
         }
         
-        // Create the response message
-        const assistantMsg: Message = {
+        // Finalize: atomically show message and clear streaming
+        streamTransition.finalize({
           id: `emergency-${Date.now()}`,
           role: "assistant",
           content: fullContent || "No response received",
           timestamp: new Date()
-        };
-        // Add to optimistic messages BEFORE clearing streaming to prevent flash
-        setOptimisticMessages((prev: Message[]) => [...prev, assistantMsg]);
-        onSendMessage(assistantMsg);
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
+        });
         return;
       } catch (error) {
         console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
@@ -2800,32 +2786,23 @@ export function ChatInterface({
           }
         }
 
-        // Create assistant message with full response
-        const assistantMsg: Message = {
+        // Atomically transition from streaming to finalized message
+        streamTransition.finalize({
           id: `assistant-${Date.now()}`,
           role: "assistant",
           content: fullContent || "No se recibió respuesta del servidor.",
           timestamp: new Date(),
           userMessageId: userMsgId
-        };
-        // Add to optimistic messages BEFORE clearing streaming to prevent flash
-        setOptimisticMessages((prev: Message[]) => [...prev, assistantMsg]);
-        onSendMessage(assistantMsg);
-        streamingContentRef.current = "";
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[EMERGENCY BYPASS] Completed successfully");
+        });
         return;
       } catch (error) {
         console.error("[EMERGENCY BYPASS] Error:", error);
-        const errorMsg: Message = {
+        streamTransition.finalize({
           id: `error-${Date.now()}`,
           role: "assistant",
           content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
           timestamp: new Date()
-        };
-        onSendMessage(errorMsg);
-        setAiState("idle");
+        });
         return;
       }
     }
@@ -3229,7 +3206,7 @@ export function ChatInterface({
                     streamComplete = true;
                     setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
-                    const aiMsg: Message = {
+                    streamTransition.finalize({
                       id: (Date.now() + 1).toString(),
                       role: "assistant",
                       content: fullContent,
@@ -3238,10 +3215,7 @@ export function ChatInterface({
                       userMessageId: userMsgId,
                       artifact: data.artifact,
                       webSources: data.webSources,
-                    };
-                    // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                    setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-                    onSendMessage(aiMsg);
+                    });
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
                   }
@@ -3255,24 +3229,15 @@ export function ChatInterface({
         } catch (error: any) {
           if (error.name === "AbortError") return;
           console.error("[Generation] Stream Error:", error);
-          const errorMsg: Message = {
+          streamTransition.finalize({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
-          };
-          // Add to optimistic messages BEFORE clearing streaming to prevent flash
-          setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
-          onSendMessage(errorMsg);
+          });
         }
-
-        // Clear streaming AFTER optimistic messages are set above
-        setAiState("idle");
-        setAiProcessSteps([]);
-        setStreamingContent("");
-        streamingContentRef.current = "";
       } catch (error) {
         console.error("[handleSubmit] Top-level error:", error);
         setAiState("idle");
@@ -4604,21 +4569,18 @@ IMPORTANTE:
                 console.error('[ChatInterface] Error finalizing document:', err);
               }
 
-              const confirmMsg: Message = {
+              streamTransition.finalize({
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
                 content: "✓ Documento generado correctamente",
                 timestamp: new Date(),
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
-              };
-              // Add to optimistic messages BEFORE clearing streaming to prevent flash
-              setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
-              await onSendMessage(confirmMsg);
+              });
             } else {
               // Normal chat mode - create final assistant message
               const uncertainty = detectUncertainty(fullContent);
-              const aiMsg: Message = {
+              streamTransition.finalize({
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
                 content: fullContent,
@@ -4627,17 +4589,10 @@ IMPORTANTE:
                 userMessageId: userMsgId,
                 confidence: uncertainty.confidence,
                 uncertaintyReason: uncertainty.reason,
-                webSources: streamWebSources, // Include captured webSources for NewsCards
-              };
-              // Add to optimistic messages BEFORE clearing streaming to prevent flash
-              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-              await onSendMessage(aiMsg);
+                webSources: streamWebSources,
+              });
             }
 
-            streamingContentRef.current = "";
-            setStreamingContent("");
-            setAiState("idle");
-            setAiProcessSteps([]);
             agent.complete();
             abortControllerRef.current = null;
 
@@ -4844,7 +4799,8 @@ IMPORTANTE:
                     streamIntervalRef.current = null;
                   }
 
-                  const aiMsg: Message = {
+                  const uncertainty = detectUncertainty(fullContent);
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: fullContent,
@@ -4853,17 +4809,9 @@ IMPORTANTE:
                     userMessageId: userMsgId,
                     figmaDiagram,
                     webSources: responseWebSources,
-                    confidence: detectUncertainty(fullContent).confidence,
-                    uncertaintyReason: detectUncertainty(fullContent).reason,
-                  };
-                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                  setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-                  onSendMessage(aiMsg);
-
-                  streamingContentRef.current = "";
-                  setStreamingContent("");
-                  setAiState("idle");
-                  setAiProcessSteps([]);
+                    confidence: uncertainty.confidence,
+                    uncertaintyReason: uncertainty.reason,
+                  });
                   // Only reset doc tool if there's no active document editor
                   if (!activeDocEditorRef.current) {
                     setSelectedDocTool(null);
@@ -4890,35 +4838,25 @@ IMPORTANTE:
               console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
               try {
                 await docInsertContentRef.current(fullContent);
-                const confirmMsg: Message = {
+                streamTransition.finalize({
                   id: (Date.now() + 1).toString(),
                   role: "assistant",
                   content: "✓ Datos generados en la hoja de cálculo",
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
-                };
-                // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
-                onSendMessage(confirmMsg);
+                });
               } catch (err) {
                 console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
-                const aiMsg: Message = {
+                streamTransition.finalize({
                   id: (Date.now() + 1).toString(),
                   role: "assistant",
                   content: fullContent,
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
-                };
-                // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-                onSendMessage(aiMsg);
+                });
               }
-              streamingContentRef.current = "";
-              setStreamingContent("");
-              setAiState("idle");
-              setAiProcessSteps([]);
               agent.complete();
               abortControllerRef.current = null;
               return;
@@ -4971,20 +4909,17 @@ IMPORTANTE:
                     console.error('[ChatInterface] Error finalizing document (legacy):', err);
                   }
 
-                  const confirmMsg: Message = {
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: "✓ Documento generado correctamente",
                     timestamp: new Date(),
                     requestId: generateRequestId(),
                     userMessageId: userMsgId,
-                  };
-                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                  setOptimisticMessages((prev: Message[]) => [...prev, confirmMsg]);
-                  onSendMessage(confirmMsg);
+                  });
                 } else {
                   const uncertainty = detectUncertainty(fullContent);
-                  const aiMsg: Message = {
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: fullContent,
@@ -4996,16 +4931,9 @@ IMPORTANTE:
                     webSources: responseWebSources,
                     confidence: uncertainty.confidence,
                     uncertaintyReason: uncertainty.reason,
-                  };
-                  // Add to optimistic messages BEFORE clearing streaming to prevent flash
-                  setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
-                  onSendMessage(aiMsg);
+                  });
                 }
 
-                streamingContentRef.current = "";
-                setStreamingContent("");
-                setAiState("idle");
-                setAiProcessSteps([]);
                 agent.complete();
                 abortControllerRef.current = null;
               }

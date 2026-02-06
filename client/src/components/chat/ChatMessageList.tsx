@@ -1,7 +1,7 @@
 
-import React, { useRef, useMemo, useEffect } from "react";
+import React, { useRef, useMemo, useEffect, useCallback } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Message } from "@/hooks/use-chats";
 import { MessageItem } from "./MessageItem";
 import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
@@ -12,6 +12,11 @@ import { CleanDataTableComponents, DocumentBlock, parseDocumentBlocks } from "./
 import { detectClientIntent } from "@/lib/clientIntentDetector";
 import { messageLogger } from "@/lib/logger";
 import { AgentArtifact } from "@/components/agent-steps-display";
+
+// Stable ID for the synthetic streaming message — never changes, so React
+// keeps the same DOM node and simply updates its content, avoiding
+// unmount/remount flicker.
+const STREAMING_MSG_ID = "__streaming__";
 
 export interface ChatMessageListProps {
     messages: Message[];
@@ -88,7 +93,7 @@ export function ChatMessageList({
     minimizedDocument,
     onRestoreDocument,
     onSelectSuggestedReply,
-    parentRef, // Note: Virtuoso handles its own scrolling container usually, but we can pass ref if needed or use Virtuoso reference
+    parentRef,
     onAgentCancel,
     onAgentRetry,
     onAgentArtifactPreview,
@@ -101,6 +106,14 @@ export function ChatMessageList({
     aiProcessSteps = []
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+    // Track the previous streaming content length for transition detection.
+    // When streaming goes from non-empty to empty, we know a finalize just
+    // happened — the optimistic message should already be in `messages`.
+    const prevStreamingRef = useRef(streamingContent);
+    useEffect(() => {
+        prevStreamingRef.current = streamingContent;
+    }, [streamingContent]);
 
     // Debug logging
     useEffect(() => {
@@ -138,33 +151,36 @@ export function ChatMessageList({
         return 'processing';
     }, [aiProcessSteps]);
 
-    const isLastMessageAssistant = messages.length > 0 && messages[messages.length - 1].role === "assistant";
+    // ── Merged message list ──
+    // Instead of rendering streaming content in a separate footer (which causes
+    // a visual "teleport" when the final message replaces it), we inject a
+    // synthetic streaming message directly into the list. This means the
+    // streaming text occupies the EXACT SAME position as the final message,
+    // resulting in zero visual jump on finalize.
+    const mergedMessages = useMemo(() => {
+        if (streamingContent && variant === "default") {
+            const streamingMsg: Message = {
+                id: STREAMING_MSG_ID,
+                role: "assistant",
+                content: streamingContent,
+                timestamp: new Date(),
+            };
+            return [...messages, streamingMsg];
+        }
+        return messages;
+    }, [messages, streamingContent, variant]);
+
+    const isLastMessageAssistant = mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === "assistant";
     const showSuggestedReplies = variant === "default" && aiState === "idle" && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
 
     const suggestions = useMemo(() => {
         return showSuggestedReplies && lastAssistantMessage ? generateSuggestions(lastAssistantMessage.content) : [];
     }, [showSuggestedReplies, lastAssistantMessage?.content]);
 
-    // Footer component for Virtuoso
+    // Footer — only for non-streaming overlays (thinking indicator, suggested replies, execution console)
     const ListFooter = useMemo(() => {
         return () => (
             <>
-                {streamingContent && variant === "default" && (
-                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start pb-4">
-                        <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
-                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                                <MarkdownErrorBoundary key={`stream-virt-${streamingContent.length}`} fallbackContent={streamingContent}>
-                                    <MarkdownRenderer
-                                        content={streamingContent}
-                                        customComponents={{ ...CleanDataTableComponents }}
-                                    />
-                                </MarkdownErrorBoundary>
-                                <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {showSuggestedReplies && suggestions.length > 0 && onSelectSuggestedReply && (
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -211,61 +227,102 @@ export function ChatMessageList({
                 )}
             </>
         );
-    }, [streamingContent, variant, showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, realTimePhase, detectedIntent]);
+    }, [showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, streamingContent, variant, realTimePhase, detectedIntent]);
+
+    // Stable key function — streaming message always gets the same key
+    const computeItemKey = useCallback((index: number, msg: Message) => msg.id, []);
+
+    // Render a single item — streaming messages get a specialized renderer
+    const renderItem = useCallback((index: number, msg: Message) => {
+        // Synthetic streaming message — render with markdown + cursor
+        if (msg.id === STREAMING_MSG_ID) {
+            return (
+                <div className="pb-4 px-2">
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                        <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0 animate-in fade-in duration-150">
+                                <MarkdownErrorBoundary key={`stream-inline-${msg.content.length}`} fallbackContent={msg.content}>
+                                    <MarkdownRenderer
+                                        content={msg.content}
+                                        customComponents={{ ...CleanDataTableComponents }}
+                                    />
+                                </MarkdownErrorBoundary>
+                                <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Regular message
+        return (
+            <div className="pb-4 px-2">
+                <MessageItem
+                    message={msg}
+                    msgIndex={index}
+                    totalMessages={mergedMessages.length}
+                    variant={variant}
+                    editingMessageId={editingMessageId}
+                    editContent={editContent}
+                    copiedMessageId={copiedMessageId}
+                    messageFeedback={messageFeedback}
+                    speakingMessageId={speakingMessageId}
+                    isGeneratingImage={isGeneratingImage}
+                    pendingGeneratedImage={pendingGeneratedImage}
+                    latestGeneratedImageRef={latestGeneratedImageRef}
+                    aiState={aiState}
+                    regeneratingMsgIndex={regeneratingMsgIndex}
+                    handleCopyMessage={handleCopyMessage}
+                    handleStartEdit={handleStartEdit}
+                    handleCancelEdit={handleCancelEdit}
+                    handleSendEdit={handleSendEdit}
+                    handleFeedback={handleFeedback}
+                    handleRegenerate={handleRegenerate}
+                    handleShare={handleShare}
+                    handleReadAloud={handleReadAloud}
+                    handleOpenDocumentPreview={handleOpenDocumentPreview}
+                    handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                    handleDownloadImage={handleDownloadImage}
+                    setLightboxImage={setLightboxImage}
+                    handleReopenDocument={handleReopenDocument}
+                    minimizedDocument={minimizedDocument}
+                    onRestoreDocument={onRestoreDocument}
+                    setEditContent={setEditContent}
+                    onAgentCancel={onAgentCancel}
+                    onAgentRetry={onAgentRetry}
+                    onAgentArtifactPreview={onAgentArtifactPreview}
+                    onSuperAgentCancel={onSuperAgentCancel}
+                    onSuperAgentRetry={onSuperAgentRetry}
+                    onQuestionClick={onQuestionClick}
+                />
+            </div>
+        );
+    }, [
+        mergedMessages.length, variant, editingMessageId, editContent,
+        copiedMessageId, messageFeedback, speakingMessageId, isGeneratingImage,
+        pendingGeneratedImage, latestGeneratedImageRef, aiState, regeneratingMsgIndex,
+        handleCopyMessage, handleStartEdit, handleCancelEdit, handleSendEdit,
+        handleFeedback, handleRegenerate, handleShare, handleReadAloud,
+        handleOpenDocumentPreview, handleOpenFileAttachmentPreview,
+        handleDownloadImage, setLightboxImage, handleReopenDocument,
+        minimizedDocument, onRestoreDocument, setEditContent,
+        onAgentCancel, onAgentRetry, onAgentArtifactPreview,
+        onSuperAgentCancel, onSuperAgentRetry, onQuestionClick
+    ]);
 
     return (
         <div className="h-full w-full flex flex-col">
             <Virtuoso
                 ref={virtuosoRef}
-                data={messages}
-                computeItemKey={(index, msg) => msg.id}
+                data={mergedMessages}
+                computeItemKey={computeItemKey}
                 components={{ Footer: ListFooter }}
-                initialTopMostItemIndex={messages.length - 1}
+                initialTopMostItemIndex={mergedMessages.length - 1}
                 followOutput="auto"
                 alignToBottom
                 className="h-full w-full scrollbar-thin scrollbar-thumb-muted-foreground/20 hover:scrollbar-thumb-muted-foreground/40"
-                itemContent={(index, msg) => (
-                    <div className="pb-4 px-2">
-                        <MessageItem
-                            message={msg}
-                            msgIndex={index}
-                            totalMessages={messages.length}
-                            variant={variant}
-                            editingMessageId={editingMessageId}
-                            editContent={editContent}
-                            copiedMessageId={copiedMessageId}
-                            messageFeedback={messageFeedback}
-                            speakingMessageId={speakingMessageId}
-                            isGeneratingImage={isGeneratingImage}
-                            pendingGeneratedImage={pendingGeneratedImage}
-                            latestGeneratedImageRef={latestGeneratedImageRef}
-                            aiState={aiState}
-                            regeneratingMsgIndex={regeneratingMsgIndex}
-                            handleCopyMessage={handleCopyMessage}
-                            handleStartEdit={handleStartEdit}
-                            handleCancelEdit={handleCancelEdit}
-                            handleSendEdit={handleSendEdit}
-                            handleFeedback={handleFeedback}
-                            handleRegenerate={handleRegenerate}
-                            handleShare={handleShare}
-                            handleReadAloud={handleReadAloud}
-                            handleOpenDocumentPreview={handleOpenDocumentPreview}
-                            handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                            handleDownloadImage={handleDownloadImage}
-                            setLightboxImage={setLightboxImage}
-                            handleReopenDocument={handleReopenDocument}
-                            minimizedDocument={minimizedDocument}
-                            onRestoreDocument={onRestoreDocument}
-                            setEditContent={setEditContent}
-                            onAgentCancel={onAgentCancel}
-                            onAgentRetry={onAgentRetry}
-                            onAgentArtifactPreview={onAgentArtifactPreview}
-                            onSuperAgentCancel={onSuperAgentCancel}
-                            onSuperAgentRetry={onSuperAgentRetry}
-                            onQuestionClick={onQuestionClick}
-                        />
-                    </div>
-                )}
+                itemContent={renderItem}
             />
         </div>
     );
