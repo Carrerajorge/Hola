@@ -85,12 +85,28 @@ class InMemoryRunStore implements IRunStore {
 
 export const runStore: IRunStore = new InMemoryRunStore();
 
+const DEFAULT_LLM_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || "8000", 10);
+
 const DEFAULT_CONFIG: AgentRunnerConfig = {
   maxSteps: parseInt(process.env.MAX_AGENT_STEPS || "8", 10),
   stepTimeoutMs: 60000,
   enableLogging: true,
   maxConsecutiveFailures: 2,
 };
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export class AgentRunner extends EventEmitter {
   private config: AgentRunnerConfig;
@@ -137,7 +153,7 @@ export class AgentRunner extends EventEmitter {
 
         const stepResult = await this.executeStep();
         
-        if (stepResult.action === "final_answer") {
+        if (stepResult.tool === "final_answer") {
           this.state.status = "completed";
           await this.persistRun("completed", stepResult.output);
           this.emit("completed", { run_id: this.runId, result: stepResult.output, state: this.state });
@@ -300,7 +316,7 @@ export class AgentRunner extends EventEmitter {
 
   private async decideNextAction(): Promise<{ action: string; tool: string; input: Record<string, any> }> {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!apiKey || process.env.NODE_ENV === "test") {
       this.logStructured("debug", "llm_unavailable", { run_id: this.runId, reason: "GEMINI_API_KEY not configured", fallback: "heuristic" });
       return this.heuristicNextAction();
     }
@@ -349,9 +365,13 @@ Decide la siguiente acción. Responde SOLO con JSON (sin markdown):
 
 Si ya tienes suficiente información para responder, usa final_answer.`;
 
-      const result = await geminiChat(
-        [{ role: "user", parts: [{ text: prompt }] }],
-        { model: "gemini-2.0-flash", maxOutputTokens: 300, temperature: 0.2 }
+      const result = await withTimeout(
+        geminiChat(
+          [{ role: "user", parts: [{ text: prompt }] }],
+          { model: "gemini-2.0-flash", maxOutputTokens: 300, temperature: 0.2 }
+        ),
+        DEFAULT_LLM_TIMEOUT_MS,
+        "geminiChat(decideNextAction)"
       );
 
       const responseText = result.content?.trim() || "";
@@ -491,6 +511,20 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
     const actualToolName = toolAliases[toolName] || toolName;
 
+    // Avoid real external calls in unit tests (keeps tests deterministic and fast).
+    if (process.env.NODE_ENV === "test" && actualToolName === "search") {
+      return {
+        success: true,
+        data: [
+          {
+            title: "Test search result",
+            url: "https://example.com",
+            snippet: "Test mode: external search disabled.",
+          },
+        ],
+      };
+    }
+
     // Check if tool exists in sandbox registry
     if (defaultToolRegistry.has(actualToolName)) {
       this.logStructured("info", "sandbox_tool_executing", { run_id: this.runId, tool: actualToolName, originalTool: toolName });
@@ -607,16 +641,20 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
 
   private async generatePlan(objective: string): Promise<string[]> {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!apiKey || process.env.NODE_ENV === "test") {
       return this.heuristicPlan(objective);
     }
 
     try {
       const { geminiChat } = await import("../lib/gemini");
       
-      const result = await geminiChat(
-        [{ role: "user", parts: [{ text: `Genera un plan de 3-5 pasos para: "${objective}". Responde SOLO con JSON: {"steps":["paso1","paso2"]}` }] }],
-        { model: "gemini-2.0-flash", maxOutputTokens: 150, temperature: 0.3 }
+      const result = await withTimeout(
+        geminiChat(
+          [{ role: "user", parts: [{ text: `Genera un plan de 3-5 pasos para: "${objective}". Responde SOLO con JSON: {"steps":["paso1","paso2"]}` }] }],
+          { model: "gemini-2.0-flash", maxOutputTokens: 150, temperature: 0.3 }
+        ),
+        DEFAULT_LLM_TIMEOUT_MS,
+        "geminiChat(generatePlan)"
       );
 
       const jsonMatch = result.content?.match(/\{[\s\S]*?\}/);
@@ -671,16 +709,20 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    if (!apiKey || process.env.NODE_ENV === "test") {
       return observations.slice(0, 2000);
     }
 
     try {
       const { geminiChat } = await import("../lib/gemini");
       
-      const result = await geminiChat(
-        [{ role: "user", parts: [{ text: `Objetivo: ${this.state!.objective}\n\nInformación recopilada:\n${observations}\n\nGenera una respuesta coherente y útil basada en esta información.` }] }],
-        { model: "gemini-2.0-flash", maxOutputTokens: 1000, temperature: 0.3 }
+      const result = await withTimeout(
+        geminiChat(
+          [{ role: "user", parts: [{ text: `Objetivo: ${this.state!.objective}\n\nInformación recopilada:\n${observations}\n\nGenera una respuesta coherente y útil basada en esta información.` }] }],
+          { model: "gemini-2.0-flash", maxOutputTokens: 1000, temperature: 0.3 }
+        ),
+        DEFAULT_LLM_TIMEOUT_MS,
+        "geminiChat(generateSummary)"
       );
 
       return result.content || observations.slice(0, 2000);
