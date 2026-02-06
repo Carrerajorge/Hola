@@ -2571,10 +2571,13 @@ export function ChatInterface({
       try {
         const response = await fetch("/api/chat/stream", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({
             messages: [{ role: "user", content: cleanInput }],
-            model: "grok-3"
+            chatId,
+            conversationId: chatId,
+            model: selectedModel || "grok-3"
           })
         });
         
@@ -2720,9 +2723,12 @@ export function ChatInterface({
         
         const response = await fetch("/api/chat/stream", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({
             messages: [{ role: "user", content: cleanInput }],
+            chatId,
+            conversationId: chatId,
             model: selectedModel || "grok-3",
             forceWebSearch: isWebSearch,
             webSearchAuto: isWebSearch
