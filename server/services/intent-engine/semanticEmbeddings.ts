@@ -2,11 +2,19 @@ import { GoogleGenAI } from "@google/genai";
 import type { IntentType } from "../../../shared/schemas/intent";
 import { logStructured } from "./telemetry";
 
-// Only initialize AI if we have a valid key
-const hasGeminiKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
+const isTestEnv =
+  process.env.NODE_ENV === "test" ||
+  !!process.env.VITEST_WORKER_ID ||
+  !!process.env.VITEST_POOL_ID;
+
+// Only initialize AI if we have a valid key AND we're not in tests (avoid network flakiness/timeouts)
+const hasGeminiKey =
+  !isTestEnv && !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
 const ai = hasGeminiKey ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! }) : null;
 
-const EMBEDDING_MODEL = "text-embedding-004";
+// NOTE: In some Gemini projects/keys, `text-embedding-004` is not available.
+// Use env override so production can select an available embedding model.
+const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
 const EMBEDDING_DIMENSIONS = 768;
 const BATCH_SIZE = 100;
 const RATE_LIMIT_DELAY_MS = 100;
