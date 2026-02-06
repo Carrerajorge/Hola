@@ -233,9 +233,7 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Session + Passport (registers express-session before passport.session)
-  await setupAuth(app);
-  registerAuthRoutes(app);
+  // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
   // Google (only register if credentials are configured)

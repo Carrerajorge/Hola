@@ -33,6 +33,7 @@ import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
+import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 
 initTracing();
 
@@ -82,14 +83,9 @@ app.use(csrfTokenMiddleware);
 // API-specific security headers for /api routes
 app.use("/api", apiSecurityHeaders());
 
-// CSRF Protection for API (validates header)
-app.use("/api", csrfProtection);
-
-// Rate Limiting (User-based)
-app.use("/api", rateLimiter);
-
-// Idempotency for mutations
-app.use("/api", idempotency);
+// NOTE: Session + Passport must be registered before any middleware that relies on req.user
+// or req.session (rate limiting, auth-dependent logic, etc.).
+// We register setupAuth inside the async bootstrap below to allow awaiting initialization.
 
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
@@ -171,6 +167,19 @@ export function log(message: string, source = "express") {
     }
   }
 
+
+  // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
+  await setupAuth(app);
+  registerAuthRoutes(app);
+
+  // CSRF Protection for API (validates header)
+  app.use("/api", csrfProtection);
+
+  // Rate Limiting (User-based)
+  app.use("/api", rateLimiter);
+
+  // Idempotency for mutations
+  app.use("/api", idempotency);
 
   await registerRoutes(httpServer, app);
 
