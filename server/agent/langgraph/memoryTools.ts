@@ -8,7 +8,7 @@ import crypto from "crypto";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
+  apiKey: process.env.XAI_API_KEY || "missing",
 });
 
 async function generateEmbedding(text: string): Promise<number[]> {

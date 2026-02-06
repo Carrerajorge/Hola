@@ -14,7 +14,7 @@ import { DocumentIntentSchema, type DocumentIntent, type Deliverable } from './t
 
 const xaiClient = new OpenAI({
     baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
+    apiKey: process.env.XAI_API_KEY || "missing",
 });
 
 // ============================================================================

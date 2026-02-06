@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
 import { z } from "zod";
 
+// Load local overrides first, then defaults.
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const boolish = z
@@ -27,6 +29,13 @@ const envSchema = z.object({
   OPENAI_BASE_URL: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
+
+  // Optional model/baseURL overrides
+  OPENAI_MODEL: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().optional(),
+  DEEPSEEK_MODEL: z.string().optional(),
+  DEEPSEEK_BASE_URL: z.string().optional(),
 
   SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
 
@@ -76,19 +85,21 @@ function validateEnv() {
   const data = result.data;
   const hasAnyLlm =
     Boolean(data.XAI_API_KEY) ||
-    Boolean(data.GEMINI_API_KEY) ||
+    Boolean(data.GEMINI_API_KEY || data.GOOGLE_API_KEY) ||
     Boolean(data.OPENAI_API_KEY) ||
-    Boolean(data.ANTHROPIC_API_KEY);
+    Boolean(data.ANTHROPIC_API_KEY) ||
+    Boolean(data.DEEPSEEK_API_KEY);
 
   if (!hasAnyLlm) {
-    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY)");
+    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY)");
     console.warn("   Chat functionality will not work without at least one LLM provider.");
   } else {
     const providers = [];
     if (data.XAI_API_KEY) providers.push("xAI");
-    if (data.GEMINI_API_KEY) providers.push("Gemini");
+    if (data.GEMINI_API_KEY || data.GOOGLE_API_KEY) providers.push("Gemini");
     if (data.OPENAI_API_KEY) providers.push("OpenAI");
     if (data.ANTHROPIC_API_KEY) providers.push("Anthropic");
+    if (data.DEEPSEEK_API_KEY) providers.push("DeepSeek");
     console.log(`✅ LLM Providers configured: ${providers.join(", ")}`);
   }
 

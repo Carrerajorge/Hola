@@ -1354,8 +1354,17 @@ const shellCommandTool: ToolDefinition = {
       return await runWithRunner();
     }
 
+    const { existsSync } = await import("fs");
+    const bashPath =
+      process.env.SHELL_COMMAND_BASH_PATH ||
+      (existsSync("/bin/bash")
+        ? "/bin/bash"
+        : existsSync("/usr/bin/bash")
+          ? "/usr/bin/bash"
+          : "bash");
+
     const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
+      return spawn(bashPath, ["-lc", cmd], {
         cwd: workspaceDir,
         env: { ...process.env, HOME: workspaceDir },
         shell: false,

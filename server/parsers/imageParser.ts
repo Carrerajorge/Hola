@@ -4,7 +4,7 @@ import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
+  apiKey: process.env.XAI_API_KEY || "missing" 
 });
 
 export class ImageParser implements FileParser {

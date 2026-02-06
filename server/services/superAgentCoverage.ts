@@ -35,6 +35,7 @@ export interface SuperAgentCoverageReport {
   toolCount: number;
   summary: CoverageSummary;
   capabilities: CapabilityCoverage[];
+  warnings?: string[];
 }
 
 export interface CapabilityAvailability {
@@ -357,14 +358,30 @@ export async function getSuperAgentCoverageReport(
     return { source, toolCount: langgraphTools.length, summary, capabilities };
   }
 
+  const warnings: string[] = [];
+
   // Runtime tool registry (actual executors) is optional and imported lazily to
   // avoid heavy side effects when only the catalog is needed.
-  const { toolRegistry } = await import("../agent/toolRegistry");
-  const runtimeTools: ToolLike[] = toolRegistry.list().map((t) => ({ name: t.name, description: t.description }));
+  let runtimeTools: ToolLike[] | null = null;
+  try {
+    const { toolRegistry } = await import("../agent/toolRegistry");
+    runtimeTools = toolRegistry.list().map((t) => ({ name: t.name, description: t.description }));
+  } catch (e: any) {
+    const msg = (e as any)?.message ? String((e as any).message) : String(e);
+    warnings.push(`Runtime tool registry unavailable: ${msg}`);
+  }
 
   if (source === "runtime") {
+    if (!runtimeTools) {
+      throw new Error(warnings[0] || "Runtime tool registry unavailable");
+    }
     const { summary, capabilities } = computeCoverage(runtimeTools);
-    return { source, toolCount: runtimeTools.length, summary, capabilities };
+    return { source, toolCount: runtimeTools.length, summary, capabilities, warnings: warnings.length ? warnings : undefined };
+  }
+
+  if (!runtimeTools) {
+    const { summary, capabilities } = computeCoverage(langgraphTools);
+    return { source, toolCount: langgraphTools.length, summary, capabilities, warnings: warnings.length ? warnings : undefined };
   }
 
   // Combined: prefer runtime descriptions when names collide.
@@ -378,7 +395,7 @@ export async function getSuperAgentCoverageReport(
 
   const merged = Array.from(combined.values());
   const { summary, capabilities } = computeCoverage(merged);
-  return { source, toolCount: merged.length, summary, capabilities };
+  return { source, toolCount: merged.length, summary, capabilities, warnings: warnings.length ? warnings : undefined };
 }
 
 function computeCoverage(toolsInput: ToolLike[]): { summary: CoverageSummary; capabilities: CapabilityCoverage[] } {

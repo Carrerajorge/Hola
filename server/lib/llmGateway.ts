@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
+import Anthropic from "@anthropic-ai/sdk";
 import { MODELS } from "./openai";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
 import crypto from "crypto";
@@ -18,6 +19,9 @@ interface RateLimitState {
   lastRefill: number;
 }
 
+type LLMProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
+type LLMProviderOrAuto = LLMProvider | "auto";
+
 interface LLMRequestOptions {
   model?: string;
   temperature?: number;
@@ -26,7 +30,7 @@ interface LLMRequestOptions {
   userId?: string;
   requestId?: string;
   timeout?: number;
-  provider?: "xai" | "gemini" | "auto";
+  provider?: LLMProviderOrAuto;
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
@@ -42,7 +46,7 @@ interface LLMResponse {
   requestId: string;
   latencyMs: number;
   model: string;
-  provider: "xai" | "gemini";
+  provider: LLMProvider;
   cached?: boolean;
   fromFallback?: boolean;
 }
@@ -52,7 +56,7 @@ interface StreamChunk {
   sequenceId: number;
   done: boolean;
   requestId: string;
-  provider?: "xai" | "gemini";
+  provider?: LLMProvider;
   checkpoint?: StreamCheckpoint;
 }
 
@@ -71,7 +75,7 @@ interface InFlightRequest {
 interface TokenUsageRecord {
   requestId: string;
   userId: string;
-  provider: "xai" | "gemini";
+  provider: LLMProvider;
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -142,7 +146,12 @@ const KNOWN_XAI_MODELS = new Set([
   "grok-4-1-fast-reasoning"
 ]);
 
-function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | null {
+const KNOWN_DEEPSEEK_MODELS = new Set([
+  "deepseek-chat",
+  "deepseek-reasoner",
+]);
+
+function detectProviderFromModel(model: string | undefined): LLMProvider | null {
   if (!model) return null;
 
   const normalizedModel = model.toLowerCase();
@@ -153,6 +162,9 @@ function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | 
   if (KNOWN_XAI_MODELS.has(normalizedModel)) {
     return "xai";
   }
+  if (KNOWN_DEEPSEEK_MODELS.has(normalizedModel)) {
+    return "deepseek";
+  }
 
   if (/gemini/i.test(model)) {
     return "gemini";
@@ -160,12 +172,24 @@ function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | 
   if (/grok/i.test(model)) {
     return "xai";
   }
+  if (/^claude/i.test(model)) {
+    return "anthropic";
+  }
+  if (/deepseek/i.test(model)) {
+    return "deepseek";
+  }
+  if (/^(gpt-|o\\d|chatgpt)/i.test(model)) {
+    return "openai";
+  }
 
   return null;
 }
 
 class LLMGateway {
-  private xaiClient: OpenAI;
+  private xaiClient: OpenAI | null = null;
+  private openaiClient: OpenAI | null = null;
+  private deepseekClient: OpenAI | null = null;
+  private anthropicClient: Anthropic | null = null;
 
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
@@ -188,15 +212,13 @@ class LLMGateway {
     byProvider: {
       xai: { requests: number; tokens: number; failures: number };
       gemini: { requests: number; tokens: number; failures: number };
+      openai: { requests: number; tokens: number; failures: number };
+      anthropic: { requests: number; tokens: number; failures: number };
+      deepseek: { requests: number; tokens: number; failures: number };
     };
   };
 
   constructor() {
-    this.xaiClient = new OpenAI({
-      baseURL: "https://api.x.ai/v1",
-      apiKey: process.env.XAI_API_KEY,
-    });
-
     this.metrics = {
       totalRequests: 0,
       successfulRequests: 0,
@@ -212,6 +234,9 @@ class LLMGateway {
       byProvider: {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
+        openai: { requests: 0, tokens: 0, failures: 0 },
+        anthropic: { requests: 0, tokens: 0, failures: 0 },
+        deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
     };
 
@@ -429,30 +454,51 @@ class LLMGateway {
   }
 
   // ===== Provider Selection =====
-  private selectProvider(options: LLMRequestOptions): "xai" | "gemini" {
+  private getGeminiApiKey(): string | undefined {
+    return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  }
+
+  private isProviderConfigured(provider: LLMProvider): boolean {
+    switch (provider) {
+      case "xai":
+        return Boolean(process.env.XAI_API_KEY && process.env.XAI_API_KEY.trim());
+      case "gemini":
+        return Boolean(this.getGeminiApiKey() && this.getGeminiApiKey()!.trim());
+      case "openai":
+        return Boolean(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
+      case "anthropic":
+        return Boolean(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim());
+      case "deepseek":
+        return Boolean(process.env.DEEPSEEK_API_KEY && process.env.DEEPSEEK_API_KEY.trim());
+    }
+  }
+
+  private getConfiguredProvidersInOrder(): LLMProvider[] {
+    const order: LLMProvider[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
+    return order.filter((p) => this.isProviderConfigured(p));
+  }
+
+  private selectProvider(options: LLMRequestOptions): LLMProvider {
     if (options.provider && options.provider !== "auto") {
       return options.provider;
     }
 
-    // Auto-detect provider based on model name using robust patterns
+    // Auto-detect provider based on model name.
     const detectedProvider = detectProviderFromModel(options.model);
-    if (detectedProvider) {
+    if (detectedProvider && this.isProviderConfigured(detectedProvider)) {
       return detectedProvider;
     }
 
-    // Check circuit breaker states
-    const xaiAvailable = getCircuitBreaker("system", "xai").getState() !== CircuitState.OPEN;
-    const geminiAvailable = getCircuitBreaker("system", "gemini").getState() !== CircuitState.OPEN;
-
-    if (xaiAvailable && process.env.XAI_API_KEY) {
-      return "xai";
-    }
-    if (geminiAvailable && process.env.GEMINI_API_KEY) {
-      return "gemini";
+    // Pick the first configured provider whose circuit is not OPEN.
+    for (const provider of this.getConfiguredProvidersInOrder()) {
+      const breaker = getCircuitBreaker("system", provider);
+      if (breaker.getState() !== CircuitState.OPEN) {
+        return provider;
+      }
     }
 
-    // Default to xai if both are available or unavailable
-    return "xai";
+    // If all circuits are OPEN, fall back to the first configured provider (if any).
+    return this.getConfiguredProvidersInOrder()[0] || "xai";
   }
 
   // ===== Token Usage Tracking =====
@@ -474,7 +520,7 @@ class LLMGateway {
     const cutoff = since || Date.now() - 3600000; // Last hour by default
     const relevant = this.tokenUsageHistory.filter(r => r.timestamp >= cutoff);
 
-    const byProvider: Record<string, number> = { xai: 0, gemini: 0 };
+    const byProvider: Record<string, number> = { xai: 0, gemini: 0, openai: 0, anthropic: 0, deepseek: 0 };
     const byUser: Record<string, number> = {};
     let total = 0;
 
@@ -562,12 +608,23 @@ class LLMGateway {
     startTime: number,
     enableFallback: boolean
   ): Promise<LLMResponse> {
-    // Respect explicit provider selection
-    const primaryProvider = this.selectProvider(options);
-    const alternateProvider: "xai" | "gemini" = primaryProvider === "xai" ? "gemini" : "xai";
+    const configuredProviders = this.getConfiguredProvidersInOrder();
+    if (configuredProviders.length === 0) {
+      throw new Error(
+        "No LLM providers configured. Set at least one of: XAI_API_KEY, GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+      );
+    }
 
-    const providers: ("xai" | "gemini")[] = enableFallback
-      ? [primaryProvider, alternateProvider]
+    if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
+      throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
+    }
+
+    // Respect explicit provider selection / auto selection.
+    const selected = this.selectProvider(options);
+    const primaryProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
+
+    const providers: LLMProvider[] = enableFallback
+      ? [primaryProvider, ...configuredProviders.filter((p) => p !== primaryProvider)]
       : [primaryProvider];
 
     let lastError: Error | null = null;
@@ -602,7 +659,7 @@ class LLMGateway {
   }
 
   private async executeOnProvider(
-    provider: "xai" | "gemini",
+    provider: LLMProvider,
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
     startTime: number
@@ -617,7 +674,7 @@ class LLMGateway {
   }
 
   private async executeOnProviderNoBreaker(
-    provider: "xai" | "gemini",
+    provider: LLMProvider,
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
     startTime: number
@@ -626,18 +683,28 @@ class LLMGateway {
 
     let model: string;
     if (provider === "xai") {
-      model = (modelProvider === "xai") ? options.model! : MODELS.TEXT;
+      model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
+    } else if (provider === "gemini") {
+      model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+    } else if (provider === "openai") {
+      model = modelProvider === "openai" ? options.model! : (process.env.OPENAI_MODEL || "gpt-4o-mini");
+    } else if (provider === "deepseek") {
+      model = modelProvider === "deepseek" ? options.model! : (process.env.DEEPSEEK_MODEL || "deepseek-chat");
     } else {
-      model = (modelProvider === "gemini") ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+      // anthropic
+      model = modelProvider === "anthropic" ? options.model! : (process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022");
     }
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
-        if (provider === "xai") {
-          return await this.executeXai(messages, options, model, startTime);
-        } else {
+        if (provider === "gemini") {
           return await this.executeGemini(messages, options, model, startTime);
         }
+        if (provider === "anthropic") {
+          return await this.executeAnthropic(messages, options, model, startTime);
+        }
+        // xai / openai / deepseek
+        return await this.executeOpenAICompatible(provider, messages, options, model, startTime);
       } catch (error: any) {
         const isRetryable =
           error.status === 429 ||
@@ -660,7 +727,37 @@ class LLMGateway {
     throw new Error("Max retries exceeded");
   }
 
-  private async executeXai(
+  private getOpenAICompatibleClient(provider: "xai" | "openai" | "deepseek"): OpenAI {
+    if (provider === "xai") {
+      if (!this.xaiClient) {
+        this.xaiClient = new OpenAI({
+          baseURL: "https://api.x.ai/v1",
+          apiKey: process.env.XAI_API_KEY || "missing",
+        });
+      }
+      return this.xaiClient;
+    }
+
+    if (provider === "openai") {
+      if (!this.openaiClient) {
+        this.openaiClient = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY || "missing",
+        });
+      }
+      return this.openaiClient;
+    }
+
+    if (!this.deepseekClient) {
+      this.deepseekClient = new OpenAI({
+        baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+        apiKey: process.env.DEEPSEEK_API_KEY || "missing",
+      });
+    }
+    return this.deepseekClient;
+  }
+
+  private async executeOpenAICompatible(
+    provider: "xai" | "openai" | "deepseek",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
     model: string,
@@ -670,7 +767,8 @@ class LLMGateway {
     const timeoutId = setTimeout(() => controller.abort(), options.timeout);
 
     try {
-      const response = await this.xaiClient.chat.completions.create(
+      const client = this.getOpenAICompatibleClient(provider);
+      const response = await client.chat.completions.create(
         {
           model,
           messages,
@@ -687,13 +785,14 @@ class LLMGateway {
       const content = response.choices[0]?.message?.content || "";
       const usage = response.usage;
 
-
+      this.metrics.successfulRequests++;
+      this.metrics.byProvider[provider].requests++;
       this.metrics.totalLatencyMs += latencyMs;
 
       const usageRecord: TokenUsageRecord = {
         requestId: options.requestId,
         userId: options.userId || "anonymous",
-        provider: "xai",
+        provider,
         model,
         promptTokens: usage?.prompt_tokens || 0,
         completionTokens: usage?.completion_tokens || 0,
@@ -705,14 +804,12 @@ class LLMGateway {
       };
       this.recordTokenUsage(usageRecord);
 
-      console.log(`[LLMGateway] ${options.requestId} xai completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
+      console.log(`[LLMGateway] ${options.requestId} ${provider} completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
 
-      // Record connector usage for xai
-      recordConnectorUsage("xai", latencyMs, true);
+      recordConnectorUsage(provider, latencyMs, true);
 
-      // Persist API log to database asynchronously
       this.persistApiLog({
-        provider: "xai",
+        provider,
         model,
         endpoint: "/chat/completions",
         latencyMs,
@@ -722,13 +819,12 @@ class LLMGateway {
         userId: options.userId,
       });
 
-      // Analyze response quality and record metrics
       const qualityAnalysis = analyzeResponseQuality(content);
       const qualityScore = calculateQualityScore(content, usage?.total_tokens || 0, latencyMs);
 
       const qualityMetric: QualityMetric = {
         responseId: options.requestId,
-        provider: "xai",
+        provider,
         score: qualityScore,
         tokensUsed: usage?.total_tokens || 0,
         latencyMs,
@@ -749,19 +845,195 @@ class LLMGateway {
         requestId: options.requestId,
         latencyMs,
         model,
-        provider: "xai",
+        provider,
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
       const latencyMs = Date.now() - startTime;
-      // Record connector failure for xai
-      recordConnectorUsage("xai", latencyMs, false);
 
-      // Persist API error log to database asynchronously
+      this.metrics.failedRequests++;
+      this.metrics.byProvider[provider].failures++;
+
+      recordConnectorUsage(provider, latencyMs, false);
+
       this.persistApiLog({
-        provider: "xai",
+        provider,
         model,
         endpoint: "/chat/completions",
+        latencyMs,
+        statusCode: error.status || 500,
+        errorMessage: error.message,
+        userId: options.userId,
+      });
+
+      if (error.name === "AbortError") {
+        throw new Error(`Request timeout after ${options.timeout}ms`);
+      }
+      throw error;
+    }
+  }
+
+  private getAnthropicClient(): Anthropic {
+    if (!this.anthropicClient) {
+      this.anthropicClient = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY || "missing",
+      });
+    }
+    return this.anthropicClient;
+  }
+
+  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }> } {
+    const systemParts: string[] = [];
+    const out: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+    for (const msg of messages) {
+      const role = (msg as any)?.role;
+      const contentRaw = (msg as any)?.content;
+
+      const content = typeof contentRaw === "string"
+        ? contentRaw
+        : Array.isArray(contentRaw)
+          ? contentRaw
+            .map((part: any) => (part?.type === "text" ? part?.text : JSON.stringify(part)))
+            .filter(Boolean)
+            .join("\n")
+          : contentRaw == null
+            ? ""
+            : String(contentRaw);
+
+      if (!content.trim()) continue;
+
+      if (role === "system") {
+        systemParts.push(content);
+        continue;
+      }
+
+      if (role === "assistant" || role === "user") {
+        out.push({ role, content });
+        continue;
+      }
+
+      // Tools/function calls are not supported directly here; keep context as user-visible text.
+      out.push({ role: "user", content: `[${String(role)}] ${content}` });
+    }
+
+    return { system: systemParts.length ? systemParts.join("\n\n") : undefined, messages: out };
+  }
+
+  private async executeAnthropic(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    model: string,
+    startTime: number
+  ): Promise<LLMResponse> {
+    const { system, messages: anthropicMessages } = this.convertToAnthropicMessages(messages);
+    if (anthropicMessages.length === 0) {
+      throw new Error("Anthropic API error: No valid messages after conversion");
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeout);
+
+    try {
+      const client = this.getAnthropicClient();
+      const response = await client.messages.create(
+        {
+          model,
+          system,
+          messages: anthropicMessages,
+          max_tokens: options.maxTokens ?? 1024,
+          temperature: options.temperature ?? 0.7,
+          top_p: options.topP ?? 1,
+        },
+        { signal: controller.signal as any }
+      );
+
+      clearTimeout(timeoutId);
+
+      const latencyMs = Date.now() - startTime;
+      const content = (response.content || [])
+        .map((c: any) => (c?.type === "text" ? c.text : ""))
+        .filter(Boolean)
+        .join("")
+        .trim();
+
+      const promptTokens = (response.usage as any)?.input_tokens ?? 0;
+      const completionTokens = (response.usage as any)?.output_tokens ?? 0;
+      const totalTokens = promptTokens + completionTokens;
+
+      this.metrics.successfulRequests++;
+      this.metrics.byProvider.anthropic.requests++;
+      this.metrics.totalLatencyMs += latencyMs;
+
+      const usageRecord: TokenUsageRecord = {
+        requestId: options.requestId,
+        userId: options.userId || "anonymous",
+        provider: "anthropic",
+        model,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        timestamp: Date.now(),
+        latencyMs,
+        cached: false,
+        fromFallback: false,
+      };
+      this.recordTokenUsage(usageRecord);
+
+      recordConnectorUsage("anthropic", latencyMs, true);
+
+      this.persistApiLog({
+        provider: "anthropic",
+        model,
+        endpoint: "/messages",
+        latencyMs,
+        statusCode: 200,
+        tokensIn: promptTokens,
+        tokensOut: completionTokens,
+        userId: options.userId,
+      });
+
+      const qualityAnalysis = analyzeResponseQuality(content);
+      const qualityScore = calculateQualityScore(content, totalTokens, latencyMs);
+
+      const qualityMetric: QualityMetric = {
+        responseId: options.requestId,
+        provider: "anthropic",
+        score: qualityScore,
+        tokensUsed: totalTokens,
+        latencyMs,
+        timestamp: new Date(),
+        issues: qualityAnalysis.issues,
+        isComplete: qualityAnalysis.isComplete,
+        hasContentIssues: qualityAnalysis.hasContentIssues,
+      };
+      recordQualityMetric(qualityMetric);
+
+      return {
+        content,
+        usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+        },
+        requestId: options.requestId,
+        latencyMs,
+        model,
+        provider: "anthropic",
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+
+      this.metrics.failedRequests++;
+      this.metrics.byProvider.anthropic.failures++;
+
+      recordConnectorUsage("anthropic", latencyMs, false);
+
+      this.persistApiLog({
+        provider: "anthropic",
+        model,
+        endpoint: "/messages",
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
@@ -798,6 +1070,9 @@ class LLMGateway {
       });
     } catch (error: any) {
       const latencyMs = Date.now() - startTime;
+      this.metrics.failedRequests++;
+      this.metrics.byProvider.gemini.failures++;
+
       // Record connector failure for gemini
       recordConnectorUsage("gemini", latencyMs, false);
 
@@ -817,6 +1092,8 @@ class LLMGateway {
 
     const latencyMs = Date.now() - startTime;
 
+    this.metrics.successfulRequests++;
+    this.metrics.byProvider.gemini.requests++;
 
     this.metrics.totalLatencyMs += latencyMs;
 
@@ -896,7 +1173,19 @@ class LLMGateway {
     const enableFallback = options.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    let currentProvider: "xai" | "gemini" = this.selectProvider(options);
+    const configuredProviders = this.getConfiguredProvidersInOrder();
+    if (configuredProviders.length === 0) {
+      throw new Error(
+        "No LLM providers configured. Set at least one of: XAI_API_KEY, GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+      );
+    }
+
+    if (options.provider && options.provider !== "auto" && !this.isProviderConfigured(options.provider)) {
+      throw new Error(`Provider '${options.provider}' requested but not configured (missing API key).`);
+    }
+
+    const selected = this.selectProvider(options);
+    let currentProvider: LLMProvider = this.isProviderConfigured(selected) ? selected : configuredProviders[0];
 
     this.metrics.totalRequests++;
 
@@ -915,7 +1204,9 @@ class LLMGateway {
       console.log(`[LLMGateway] ${requestId} recovering from checkpoint at seq ${sequenceId}`);
     }
 
-    const providers: ("xai" | "gemini")[] = enableFallback ? [currentProvider, currentProvider === "xai" ? "gemini" : "xai"] : [currentProvider];
+    const providers: LLMProvider[] = enableFallback
+      ? [currentProvider, ...configuredProviders.filter((p) => p !== currentProvider)]
+      : [currentProvider];
 
     for (const provider of providers) {
       const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
@@ -924,9 +1215,11 @@ class LLMGateway {
       }
 
       try {
-        const stream = provider === "xai"
-          ? this.streamXai(truncatedMessages, options, requestId)
-          : this.streamGemini(truncatedMessages, options, requestId);
+        const stream = provider === "gemini"
+          ? this.streamGemini(truncatedMessages, options, requestId)
+          : provider === "anthropic"
+            ? this.streamAnthropic(truncatedMessages, options, requestId)
+            : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
 
         for await (const chunk of stream) {
           accumulatedContent += chunk.content;
@@ -1087,14 +1380,25 @@ class LLMGateway {
     }
   }
 
-  private async * streamXai(
+  private async * streamOpenAICompatible(
+    provider: "xai" | "openai" | "deepseek",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = options.model || MODELS.TEXT;
+    const modelProvider = detectProviderFromModel(options.model);
 
-    const stream = await this.xaiClient.chat.completions.create({
+    let model: string;
+    if (provider === "xai") {
+      model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
+    } else if (provider === "openai") {
+      model = modelProvider === "openai" ? options.model! : (process.env.OPENAI_MODEL || "gpt-4o-mini");
+    } else {
+      model = modelProvider === "deepseek" ? options.model! : (process.env.DEEPSEEK_MODEL || "deepseek-chat");
+    }
+
+    const client = this.getOpenAICompatibleClient(provider);
+    const stream = await client.chat.completions.create({
       model,
       messages,
       temperature: options.temperature ?? 0.7,
@@ -1111,10 +1415,55 @@ class LLMGateway {
       buffer += content;
 
       if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
-        yield {
-          content: buffer, done: false
-        };
+        yield { content: buffer, done: false };
         buffer = "";
+      }
+    }
+
+    if (buffer) {
+      yield { content: buffer, done: false };
+    }
+
+    yield { content: "", done: true };
+  }
+
+  private async * streamAnthropic(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions,
+    requestId: string
+  ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
+    const modelProvider = detectProviderFromModel(options.model);
+    const model = modelProvider === "anthropic"
+      ? options.model!
+      : (process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022");
+
+    const { system, messages: anthropicMessages } = this.convertToAnthropicMessages(messages);
+    if (anthropicMessages.length === 0) {
+      throw new Error("Anthropic API error: No valid messages after conversion");
+    }
+
+    const client = this.getAnthropicClient();
+    const stream = await client.messages.create({
+      model,
+      system,
+      messages: anthropicMessages,
+      max_tokens: options.maxTokens ?? 1024,
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 1,
+      stream: true,
+    } as any);
+
+    let buffer = "";
+    const flushThreshold = 50;
+
+    for await (const event of stream as any) {
+      if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta") {
+        const text = String(event.delta.text || "");
+        buffer += text;
+        if (buffer.length >= flushThreshold || text.includes("\n") || text.includes(".")) {
+          yield { content: buffer, done: false };
+          buffer = "";
+        }
       }
     }
 
@@ -1130,7 +1479,8 @@ class LLMGateway {
     options: LLMRequestOptions,
     requestId: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+    const modelProvider = detectProviderFromModel(options.model);
+    const model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
     const stream = geminiStreamChat(geminiMessages, {
@@ -1162,6 +1512,9 @@ class LLMGateway {
       circuitBreakerStatus: {
         xai: getCircuitBreaker("system", "xai").getState(),
         gemini: getCircuitBreaker("system", "gemini").getState(),
+        openai: getCircuitBreaker("system", "openai").getState(),
+        anthropic: getCircuitBreaker("system", "anthropic").getState(),
+        deepseek: getCircuitBreaker("system", "deepseek").getState(),
       },
       cacheSize: this.requestCache.size,
       inFlightRequests: this.inFlightRequests.size,
@@ -1186,6 +1539,9 @@ class LLMGateway {
       byProvider: {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
+        openai: { requests: 0, tokens: 0, failures: 0 },
+        anthropic: { requests: 0, tokens: 0, failures: 0 },
+        deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
     };
   }
@@ -1196,11 +1552,14 @@ class LLMGateway {
   }
 
   // ===== Health Check =====
-  async healthCheck(): Promise<{
-    xai: { available: boolean; latencyMs?: number; error?: string };
-    gemini: { available: boolean; latencyMs?: number; error?: string };
-  }> {
-    const results: any = { xai: { available: false }, gemini: { available: false } };
+  async healthCheck(): Promise<Record<LLMProvider, { available: boolean; latencyMs?: number; error?: string }>> {
+    const results: Record<LLMProvider, { available: boolean; latencyMs?: number; error?: string }> = {
+      xai: { available: false },
+      gemini: { available: false },
+      openai: { available: false },
+      anthropic: { available: false },
+      deepseek: { available: false },
+    };
 
     // Test xAI with quick timeout
     if (process.env.XAI_API_KEY) {
@@ -1208,7 +1567,7 @@ class LLMGateway {
         const start = Date.now();
         const client = new OpenAI({
           baseURL: "https://api.x.ai/v1",
-          apiKey: process.env.XAI_API_KEY,
+          apiKey: process.env.XAI_API_KEY || "missing",
           timeout: 5000,
         });
         await client.chat.completions.create({
@@ -1223,11 +1582,12 @@ class LLMGateway {
     }
 
     // Test Gemini with quick timeout
-    if (process.env.GEMINI_API_KEY) {
+    const geminiKey = this.getGeminiApiKey();
+    if (geminiKey) {
       try {
         const start = Date.now();
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1246,6 +1606,64 @@ class LLMGateway {
         }
       } catch (error: any) {
         results.gemini = { available: false, error: error.message?.slice(0, 100) };
+      }
+    }
+
+    // Test OpenAI with quick timeout
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const start = Date.now();
+        const client = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY || "missing",
+          timeout: 5000,
+        });
+        await client.chat.completions.create({
+          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        });
+        results.openai = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.openai = { available: false, error: error.message?.slice(0, 100) };
+      }
+    }
+
+    // Test DeepSeek (OpenAI-compatible) with quick timeout
+    if (process.env.DEEPSEEK_API_KEY) {
+      try {
+        const start = Date.now();
+        const client = new OpenAI({
+          baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+          apiKey: process.env.DEEPSEEK_API_KEY || "missing",
+          timeout: 5000,
+        });
+        await client.chat.completions.create({
+          model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        });
+        results.deepseek = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.deepseek = { available: false, error: error.message?.slice(0, 100) };
+      }
+    }
+
+    // Test Anthropic with quick timeout
+    if (process.env.ANTHROPIC_API_KEY) {
+      try {
+        const start = Date.now();
+        const client = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY || "missing",
+          timeout: 5000,
+        });
+        await client.messages.create({
+          model: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        } as any);
+        results.anthropic = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.anthropic = { available: false, error: error.message?.slice(0, 100) };
       }
     }
 
