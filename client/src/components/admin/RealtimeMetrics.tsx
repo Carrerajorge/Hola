@@ -12,6 +12,7 @@ import {
   XCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { motion } from "framer-motion";
 
 interface RealtimeMetrics {
@@ -65,7 +66,7 @@ export function RealtimeMetricsPanel() {
   const { data, isLoading, error } = useQuery<RealtimeMetrics>({
     queryKey: ["/api/admin/dashboard/realtime"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/dashboard/realtime", {
+      const res = await apiFetch("/api/admin/dashboard/realtime", {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to fetch realtime metrics");

@@ -980,10 +980,13 @@ export async function startProductionPipeline(
     message: string,
     userId: string,
     chatId?: string,
-    onEvent?: ProductionEventHandler
+    onEvent?: ProductionEventHandler,
+    options?: { forceProduction?: boolean }
 ): Promise<ProductionResult> {
     // Route the task
-    const routerResult = await routeTask(message);
+    const routerResult = await routeTask(message, undefined, {
+        forceProduction: options?.forceProduction,
+    });
 
     if (routerResult.mode !== 'PRODUCTION') {
         throw new Error('Message does not require production mode');

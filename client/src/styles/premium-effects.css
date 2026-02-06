@@ -218,6 +218,100 @@
     }
 }
 
+/* ========================================
+   LUXE (WHITE + SILVER + GOLD) PRESET
+   Used on the /welcome landing page preview.
+======================================== */
+
+/* Clean white background */
+.landing-luxe {
+    background: #ffffff;
+}
+
+/* Light glass card for white backgrounds */
+.glass-luxe {
+    background: rgba(255, 255, 255, 0.78);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow:
+        0 10px 30px rgba(0, 0, 0, 0.10),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Silver fill with illuminated gold stroke (photo-inspired). */
+.text-luxe {
+    --luxe-stroke: 2.5px;
+    --luxe-gold: rgba(216, 179, 95, 0.95);
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    z-index: 0; /* creates stacking context so ::after can sit behind */
+    color: transparent;
+    background: linear-gradient(180deg,
+            #fbfbfb 0%,
+            #d7d7d7 18%,
+            #ffffff 38%,
+            #bdbdbd 62%,
+            #f2f2f2 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.text-luxe::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    color: transparent;
+    -webkit-text-stroke: var(--luxe-stroke) var(--luxe-gold);
+    text-shadow:
+        0 0 6px rgba(255, 220, 140, 0.70),
+        0 0 16px rgba(216, 179, 95, 0.55),
+        0 0 28px rgba(216, 179, 95, 0.32);
+    filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.14));
+}
+
+.text-luxe-sm {
+    --luxe-stroke: 1.4px;
+}
+
+.text-luxe-lg {
+    --luxe-stroke: 3px;
+}
+
+/* Gold shimmer button treatment for the luxe landing. */
+.btn-luxe {
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.btn-luxe::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, transparent 38%, rgba(255, 220, 140, 0.28) 50%, transparent 62%);
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+}
+
+.btn-luxe:hover::before {
+    transform: translateX(100%);
+}
+
+.btn-luxe:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 40px rgba(216, 179, 95, 0.22);
+}
+
+.btn-luxe:active {
+    transform: translateY(0);
+}
+
 /* Pulse Glow */
 .pulse-glow {
     animation: pulseGlow 2s ease-in-out infinite;

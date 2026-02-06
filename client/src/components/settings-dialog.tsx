@@ -2114,7 +2114,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               onClick={() => {
                 if (isAdmin) {
                   onOpenChange(false);
-                  setLocation("/admin?section=settings");
+                  setLocation("/admin?section=reports&tab=scheduled");
                   return;
                 }
                 toast({

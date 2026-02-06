@@ -45,5 +45,18 @@ describe("security hardening", () => {
     expect(res.status).toBe(403);
     expect(typeof res.body?.error).toBe("string");
   });
-});
 
+  it("rejects Stripe billing portal access for non-billing-manager users (403)", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as any).user = { claims: { sub: "user_123", role: "user", email: "user@example.com" } };
+      next();
+    });
+    app.use(createStripeRouter());
+
+    const res = await request(app).post("/api/stripe/portal").send({});
+    expect(res.status).toBe(403);
+    expect(res.body?.code).toBe("PERMISSION_DENIED");
+  });
+});

@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { AuthenticatedRequest } from "../../types/express";
+import { getUserId } from "../../types/express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
-import { dbRead } from "../../db";
-import { payments, users } from "@shared/schema";
-import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { db, dbRead } from "../../db";
+import { payments, scheduledReports, users } from "@shared/schema";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const reportsRouter = Router();
 
@@ -16,6 +16,271 @@ function normalizeReportParameters(parameters: any): Record<string, any> {
     if (params.dateTo && !params.createdTo) params.createdTo = params.dateTo;
 
     return params;
+}
+
+type ParsedCron = { minute: number; hour: number; dayOfWeek: number | null };
+
+function parseSupportedCronExpression(expression: string): ParsedCron | null {
+    const expr = String(expression || "").trim().replace(/\s+/g, " ");
+    const parts = expr.split(" ");
+    if (parts.length != 5) return null;
+
+    const [minStr, hourStr, dom, mon, dowStr] = parts;
+    if (dom != "*" || mon != "*") return null;
+
+    const minute = Number.parseInt(minStr, 10);
+    const hour = Number.parseInt(hourStr, 10);
+    if (!Number.isFinite(minute) || minute < 0 || minute > 59) return null;
+    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+
+    if (dowStr === "*") {
+        return { minute, hour, dayOfWeek: null };
+    }
+
+    const rawDow = Number.parseInt(dowStr, 10);
+    if (!Number.isFinite(rawDow)) return null;
+    // Accept 0-6 (Sun-Sat) and 7 (Sun)
+    const normalized = rawDow === 7 ? 0 : rawDow;
+    if (normalized < 0 || normalized > 6) return null;
+
+    return { minute, hour, dayOfWeek: normalized };
+}
+
+function computeNextRunAt(expression: string, from: Date = new Date()): Date | null {
+    const parsed = parseSupportedCronExpression(expression);
+    if (!parsed) return null;
+
+    const base = new Date(from.getTime());
+    const next = new Date(from.getTime());
+    next.setSeconds(0, 0);
+    next.setHours(parsed.hour, parsed.minute, 0, 0);
+
+    if (parsed.dayOfWeek == null) {
+        if (next.getTime() <= base.getTime()) {
+            next.setDate(next.getDate() + 1);
+        }
+        return next;
+    }
+
+    const currentDow = base.getDay();
+    let deltaDays = (parsed.dayOfWeek - currentDow) % 7;
+    if (deltaDays < 0) deltaDays += 7;
+
+    // If today is the day but time already passed, schedule next week.
+    if (deltaDays == 0 && next.getTime() <= base.getTime()) {
+        deltaDays = 7;
+    }
+
+    next.setDate(base.getDate() + deltaDays);
+    next.setHours(parsed.hour, parsed.minute, 0, 0);
+    return next;
+}
+
+async function generateReportData(reportType: string, parameters: any): Promise<any[]> {
+    switch (reportType) {
+        case "user_report": {
+            // Safety: exporting every user doesn't scale. Support basic filtering + hard limits.
+            const params = normalizeReportParameters(parameters);
+            const limitParam = parseInt(String(params.limit ?? ""), 10);
+            const limitNum = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 5000, 1), 50000);
+
+            const userConditions: SQL[] = [];
+            if (params.plan) userConditions.push(eq(users.plan, String(params.plan)));
+            if (params.status) userConditions.push(eq(users.status, String(params.status)));
+            if (params.role) userConditions.push(eq(users.role, String(params.role)));
+            if (params.createdFrom) userConditions.push(gte(users.createdAt, new Date(String(params.createdFrom))));
+            if (params.createdTo) userConditions.push(lte(users.createdAt, new Date(String(params.createdTo))));
+
+            if (params.search) {
+                const q = `%${String(params.search)}%`;
+                userConditions.push(or(
+                    ilike(users.email, q),
+                    ilike(users.username, q),
+                    ilike(users.fullName, q)
+                ));
+            }
+
+            const whereClause = userConditions.length > 0 ? and(...userConditions) : undefined;
+            const userQuery = whereClause
+                ? dbRead.select({
+                    email: users.email,
+                    fullName: users.fullName,
+                    username: users.username,
+                    plan: users.plan,
+                    role: users.role,
+                    status: users.status,
+                    createdAt: users.createdAt,
+                }).from(users).where(whereClause)
+                : dbRead.select({
+                    email: users.email,
+                    fullName: users.fullName,
+                    username: users.username,
+                    plan: users.plan,
+                    role: users.role,
+                    status: users.status,
+                    createdAt: users.createdAt,
+                }).from(users);
+
+            const userRows = await userQuery
+                .orderBy(desc(users.createdAt), desc(users.id))
+                .limit(limitNum);
+
+            return userRows.map(u => ({
+                email: u.email,
+                fullName: u.fullName || u.username,
+                plan: u.plan,
+                role: u.role,
+                status: u.status,
+                createdAt: u.createdAt,
+            }));
+        }
+
+        case "ai_models_report": {
+            const models = await storage.getAiModels();
+            return models.map(m => ({
+                name: m.name,
+                provider: m.provider,
+                modelId: m.modelId,
+                isEnabled: m.isEnabled,
+                modelType: m.modelType || "text"
+            }));
+        }
+
+        case "security_report": {
+            const logs = await storage.getAuditLogs(1000);
+            return logs.map(l => ({
+                createdAt: l.createdAt,
+                action: l.action,
+                resource: l.resource,
+                ipAddress: l.ipAddress || "N/A",
+                details: l.details
+            }));
+        }
+
+        case "financial_report": {
+            // Safety: exporting every payment doesn't scale. Support basic filtering + hard limits.
+            const paymentParams = normalizeReportParameters(parameters);
+            const paymentLimitParam = parseInt(String(paymentParams.limit ?? ""), 10);
+            const paymentLimitNum = Math.min(Math.max(Number.isFinite(paymentLimitParam) ? paymentLimitParam : 5000, 1), 50000);
+
+            const paymentConditions: SQL[] = [];
+            if (paymentParams.status) paymentConditions.push(eq(payments.status, String(paymentParams.status)));
+            if (paymentParams.userId) paymentConditions.push(eq(payments.userId, String(paymentParams.userId)));
+            if (paymentParams.createdFrom) paymentConditions.push(gte(payments.createdAt, new Date(String(paymentParams.createdFrom))));
+            if (paymentParams.createdTo) paymentConditions.push(lte(payments.createdAt, new Date(String(paymentParams.createdTo))));
+
+            const paymentWhereClause = paymentConditions.length > 0 ? and(...paymentConditions) : undefined;
+            const paymentQuery = paymentWhereClause
+                ? dbRead.select({
+                    createdAt: payments.createdAt,
+                    amount: payments.amount,
+                    status: payments.status,
+                    method: payments.method,
+                }).from(payments).where(paymentWhereClause)
+                : dbRead.select({
+                    createdAt: payments.createdAt,
+                    amount: payments.amount,
+                    status: payments.status,
+                    method: payments.method,
+                }).from(payments);
+
+            const paymentRows = await paymentQuery
+                .orderBy(desc(payments.createdAt), desc(payments.id))
+                .limit(paymentLimitNum);
+
+            return paymentRows.map(p => ({
+                createdAt: p.createdAt,
+                amount: p.amount,
+                status: p.status,
+                method: p.method || "N/A"
+            }));
+        }
+
+        default:
+            return [];
+    }
+}
+
+async function writeReportFile(reportId: string, reportType: string, format: string, data: any[]): Promise<string> {
+    const fs = require("fs").promises;
+    const path = require("path");
+    const reportsDir = path.join(process.cwd(), "generated_reports");
+    await fs.mkdir(reportsDir, { recursive: true });
+
+    const safeType = String(reportType || "report").toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
+    const safeId = String(reportId || Date.now()).replace(/[^a-z0-9_-]+/gi, "_");
+    const safeFormat = format === "csv" ? "csv" : "json";
+
+    const fileName = `${safeId}_${safeType}.${safeFormat}`;
+    const filePath = path.join(reportsDir, fileName);
+
+    if (safeFormat === "json") {
+        await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+        return fileName;
+    }
+
+    // CSV
+    if (data.length > 0) {
+        const headers = Object.keys(data[0]);
+        const csvRows = [headers.join(",")];
+        for (const row of data) {
+            csvRows.push(headers.map((h: string) => {
+                const val = (row as any)[h];
+                if (val === null || val === undefined) return "";
+                if (typeof val === "object") return JSON.stringify(val).replace(/,/g, ";");
+                return String(val).replace(/,/g, ";");
+            }).join(","));
+        }
+        await fs.writeFile(filePath, csvRows.join("\n"));
+    } else {
+        await fs.writeFile(filePath, "");
+    }
+    return fileName;
+}
+
+function startReportGeneration(report: any, reportType: string, parameters: any, format: string): void {
+    (async () => {
+        try {
+            const data = await generateReportData(reportType, parameters);
+            const rowCount = data.length;
+
+            const fileName = await writeReportFile(report.id, reportType, format, data);
+
+            await storage.updateGeneratedReport(report.id, {
+                status: "completed",
+                filePath: fileName,
+                resultSummary: { rowCount },
+                completedAt: new Date()
+            });
+        } catch (err: any) {
+            await storage.updateGeneratedReport(report.id, {
+                status: "failed",
+                resultSummary: { rowCount: 0, aggregates: { error: err?.message || String(err) } }
+            });
+        }
+    })();
+}
+
+async function queueGeneratedReport(params: {
+    templateId?: string | null;
+    name: string;
+    type: string;
+    parameters?: any;
+    format?: string;
+    generatedBy?: string | null;
+}): Promise<any> {
+    const report = await storage.createGeneratedReport({
+        templateId: params.templateId || null,
+        name: params.name,
+        type: params.type,
+        status: "processing",
+        parameters: params.parameters || {},
+        format: params.format || "json",
+        generatedBy: params.generatedBy || null
+    });
+
+    startReportGeneration(report, params.type, params.parameters || {}, params.format || "json");
+    return report;
 }
 
 // Get all report templates
@@ -194,11 +459,190 @@ reportsRouter.get("/generated", async (req, res) => {
     }
 });
 
+// Scheduled reports (recurring)
+reportsRouter.get("/scheduled", async (_req, res) => {
+    try {
+        const rows = await dbRead
+            .select()
+            .from(scheduledReports)
+            .orderBy(desc(scheduledReports.createdAt));
+        res.json(rows);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+reportsRouter.post("/scheduled", async (req, res) => {
+    try {
+        const { name, type, parameters, schedule, recipients, isActive, format } = req.body || {};
+        if (!name || !type || !schedule) {
+            return res.status(400).json({ error: "name, type, and schedule are required" });
+        }
+
+        const createdBy = getUserId(req);
+        if (!createdBy) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const activeText = (isActive === false || isActive === "false" || isActive === 0 || isActive === "0") ? "false" : "true";
+        const nextRunAt = activeText === "true" ? computeNextRunAt(String(schedule), new Date()) : null;
+        if (activeText === "true" && !nextRunAt) {
+            return res.status(400).json({ error: "Unsupported schedule format. Use 'm h * * *' or 'm h * * d'." });
+        }
+
+        const params: any = { ...(parameters || {}) };
+        if (format && !params.format) params.format = String(format);
+
+        const recipientList = Array.isArray(recipients)
+            ? [
+                ...new Set(
+                    recipients
+                        .map((r: any) => String(r || "").trim())
+                        .filter(Boolean)
+                )
+            ]
+            : [];
+
+        const [row] = await db
+            .insert(scheduledReports)
+            .values({
+                name: String(name),
+                type: String(type),
+                parameters: params,
+                schedule: String(schedule),
+                recipients: recipientList.length ? recipientList : null,
+                isActive: activeText,
+                lastRunAt: null,
+                nextRunAt,
+                createdBy,
+                updatedAt: new Date(),
+            })
+            .returning();
+
+        res.json(row);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+reportsRouter.patch("/scheduled/:id", async (req, res) => {
+    try {
+        const id = String(req.params.id || "").trim();
+        if (!id) return res.status(400).json({ error: "id is required" });
+
+        const [existing] = await dbRead.select().from(scheduledReports).where(eq(scheduledReports.id, id)).limit(1);
+        if (!existing) return res.status(404).json({ error: "Scheduled report not found" });
+
+        const body = req.body || {};
+        const updates: any = { updatedAt: new Date() };
+
+        if (body.name != null) updates.name = String(body.name);
+        if (body.type != null) updates.type = String(body.type);
+
+        const nextSchedule = body.schedule != null ? String(body.schedule) : String(existing.schedule);
+        if (body.schedule != null) updates.schedule = nextSchedule;
+
+        const nextActiveText = body.isActive != null
+            ? ((body.isActive === false || body.isActive === "false" || body.isActive === 0 || body.isActive === "0") ? "false" : "true")
+            : String(existing.isActive || "true");
+        if (body.isActive != null) updates.isActive = nextActiveText;
+
+        let nextRunAt = null;
+        if (nextActiveText === "true") {
+            nextRunAt = computeNextRunAt(nextSchedule, new Date());
+            if (!nextRunAt) {
+                return res.status(400).json({ error: "Unsupported schedule format. Use 'm h * * *' or 'm h * * d'." });
+            }
+        }
+        updates.nextRunAt = nextRunAt;
+
+        if (body.recipients != null) {
+            const recipientList = Array.isArray(body.recipients)
+                ? [
+                    ...new Set(
+                        body.recipients
+                            .map((r: any) => String(r || "").trim())
+                            .filter(Boolean)
+                    )
+                ]
+                : [];
+            updates.recipients = recipientList.length ? recipientList : null;
+        }
+
+        if (body.parameters != null) {
+            updates.parameters = { ...(body.parameters || {}) };
+        }
+        if (body.format != null) {
+            updates.parameters = { ...(updates.parameters || existing.parameters || {}), format: String(body.format) };
+        }
+
+        const [row] = await db
+            .update(scheduledReports)
+            .set(updates)
+            .where(eq(scheduledReports.id, id))
+            .returning();
+
+        res.json(row);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+reportsRouter.delete("/scheduled/:id", async (req, res) => {
+    try {
+        const id = String(req.params.id || "").trim();
+        if (!id) return res.status(400).json({ error: "id is required" });
+
+        await db.delete(scheduledReports).where(eq(scheduledReports.id, id));
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+reportsRouter.post("/scheduled/:id/run-now", async (req, res) => {
+    try {
+        const id = String(req.params.id || "").trim();
+        if (!id) return res.status(400).json({ error: "id is required" });
+
+        const [sched] = await dbRead.select().from(scheduledReports).where(eq(scheduledReports.id, id)).limit(1);
+        if (!sched) return res.status(404).json({ error: "Scheduled report not found" });
+
+        const params: any = { ...(sched.parameters || {}), scheduledReportId: sched.id };
+        const format = String((sched as any).parameters?.format || "json");
+
+        const report = await queueGeneratedReport({
+            templateId: null,
+            name: sched.name,
+            type: sched.type,
+            parameters: params,
+            format,
+            generatedBy: sched.createdBy || getUserId(req) || null,
+        });
+
+        const now = new Date();
+        const nextRunAt = String(sched.isActive || "true") === "true" ? computeNextRunAt(String(sched.schedule), now) : null;
+
+        await db
+            .update(scheduledReports)
+            .set({
+                lastRunAt: now,
+                nextRunAt: nextRunAt || null,
+                updatedAt: now,
+            })
+            .where(eq(scheduledReports.id, id));
+
+        res.json({ success: true, report });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Generate a new report
 reportsRouter.post("/generate", async (req, res) => {
     try {
         const { templateId, name, parameters, format = "json" } = req.body;
-        const userId = (req as AuthenticatedRequest).user?.id || null;
+        const userId = getUserId(req) || null;
 
         // Get template if provided
         let template;
@@ -214,194 +658,14 @@ reportsRouter.post("/generate", async (req, res) => {
             reportName = name || template.name;
         }
 
-        // Create report record
-        const report = await storage.createGeneratedReport({
-            templateId,
+        const report = await queueGeneratedReport({
+            templateId: templateId || null,
             name: reportName,
             type: reportType,
-            status: "processing",
             parameters: parameters || {},
             format,
-            generatedBy: userId
+            generatedBy: userId,
         });
-
-        // Generate report data asynchronously
-        (async () => {
-            try {
-                let data: any[] = [];
-                let rowCount = 0;
-
-                switch (reportType) {
-                    case "user_report":
-                        // Safety: exporting every user doesn't scale. Support basic filtering + hard limits.
-                        const params = normalizeReportParameters(parameters);
-                        const limitParam = parseInt(String(params.limit ?? ""), 10);
-                        const limitNum = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 5000, 1), 50000);
-
-                        const userConditions: SQL[] = [];
-                        if (params.plan) userConditions.push(eq(users.plan, String(params.plan)));
-                        if (params.status) userConditions.push(eq(users.status, String(params.status)));
-                        if (params.role) userConditions.push(eq(users.role, String(params.role)));
-                        if (params.createdFrom) userConditions.push(gte(users.createdAt, new Date(String(params.createdFrom))));
-                        if (params.createdTo) userConditions.push(lte(users.createdAt, new Date(String(params.createdTo))));
-
-                        if (params.search) {
-                            const q = `%${String(params.search)}%`;
-                            userConditions.push(or(
-                                ilike(users.email, q),
-                                ilike(users.username, q),
-                                ilike(users.fullName, q)
-                            ));
-                        }
-
-                        const whereClause = userConditions.length > 0 ? and(...userConditions) : undefined;
-                        const userQuery = whereClause
-                            ? dbRead.select({
-                                email: users.email,
-                                fullName: users.fullName,
-                                username: users.username,
-                                plan: users.plan,
-                                role: users.role,
-                                status: users.status,
-                                createdAt: users.createdAt,
-                            }).from(users).where(whereClause)
-                            : dbRead.select({
-                                email: users.email,
-                                fullName: users.fullName,
-                                username: users.username,
-                                plan: users.plan,
-                                role: users.role,
-                                status: users.status,
-                                createdAt: users.createdAt,
-                            }).from(users);
-
-                        const userRows = await userQuery
-                            .orderBy(desc(users.createdAt), desc(users.id))
-                            .limit(limitNum);
-
-                        data = userRows.map(u => ({
-                            email: u.email,
-                            fullName: u.fullName || u.username,
-                            plan: u.plan,
-                            role: u.role,
-                            status: u.status,
-                            createdAt: u.createdAt,
-                        }));
-                        break;
-
-                    case "ai_models_report":
-                        const models = await storage.getAiModels();
-                        data = models.map(m => ({
-                            name: m.name,
-                            provider: m.provider,
-                            modelId: m.modelId,
-                            isEnabled: m.isEnabled,
-                            modelType: m.modelType || "text"
-                        }));
-                        break;
-
-                    case "security_report":
-                        const logs = await storage.getAuditLogs(1000);
-                        data = logs.map(l => ({
-                            createdAt: l.createdAt,
-                            action: l.action,
-                            resource: l.resource,
-                            ipAddress: l.ipAddress || "N/A",
-                            details: l.details
-                        }));
-                        break;
-
-                    case "financial_report":
-                        // Safety: exporting every payment doesn't scale. Support basic filtering + hard limits.
-                        const paymentParams = normalizeReportParameters(parameters);
-                        const paymentLimitParam = parseInt(String(paymentParams.limit ?? ""), 10);
-                        const paymentLimitNum = Math.min(Math.max(Number.isFinite(paymentLimitParam) ? paymentLimitParam : 5000, 1), 50000);
-
-                        const paymentConditions: SQL[] = [];
-                        if (paymentParams.status) paymentConditions.push(eq(payments.status, String(paymentParams.status)));
-                        if (paymentParams.userId) paymentConditions.push(eq(payments.userId, String(paymentParams.userId)));
-                        if (paymentParams.createdFrom) paymentConditions.push(gte(payments.createdAt, new Date(String(paymentParams.createdFrom))));
-                        if (paymentParams.createdTo) paymentConditions.push(lte(payments.createdAt, new Date(String(paymentParams.createdTo))));
-
-                        const paymentWhereClause = paymentConditions.length > 0 ? and(...paymentConditions) : undefined;
-                        const paymentQuery = paymentWhereClause
-                            ? dbRead.select({
-                                createdAt: payments.createdAt,
-                                amount: payments.amount,
-                                status: payments.status,
-                                method: payments.method,
-                            }).from(payments).where(paymentWhereClause)
-                            : dbRead.select({
-                                createdAt: payments.createdAt,
-                                amount: payments.amount,
-                                status: payments.status,
-                                method: payments.method,
-                            }).from(payments);
-
-                        const paymentRows = await paymentQuery
-                            .orderBy(desc(payments.createdAt), desc(payments.id))
-                            .limit(paymentLimitNum);
-
-                        data = paymentRows.map(p => ({
-                            createdAt: p.createdAt,
-                            amount: p.amount,
-                            status: p.status,
-                            method: p.method || "N/A"
-                        }));
-                        break;
-
-                    default:
-                        data = [];
-                }
-
-                rowCount = data.length;
-
-                // Save to file
-                const fs = require("fs").promises;
-                const path = require("path");
-                const reportsDir = path.join(process.cwd(), "generated_reports");
-                await fs.mkdir(reportsDir, { recursive: true });
-
-                const timestamp = Date.now();
-                const fileName = `${reportType}_${timestamp}.${format}`;
-                const filePath = path.join(reportsDir, fileName);
-
-                if (format === "json") {
-                    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-                } else if (format === "csv") {
-                    // Simple CSV generation
-                    if (data.length > 0) {
-                        const headers = Object.keys(data[0]);
-                        const csvRows = [headers.join(",")];
-                        for (const row of data) {
-                            csvRows.push(headers.map((h: string) => {
-                                const val = (row as any)[h];
-                                if (val === null || val === undefined) return "";
-                                if (typeof val === "object") return JSON.stringify(val).replace(/,/g, ";");
-                                return String(val).replace(/,/g, ";");
-                            }).join(","));
-                        }
-                        await fs.writeFile(filePath, csvRows.join("\n"));
-                    } else {
-                        await fs.writeFile(filePath, "");
-                    }
-                }
-
-                // Update report status
-                await storage.updateGeneratedReport(report.id, {
-                    status: "completed",
-                    filePath: `/api/admin/reports/download/${report.id}`,
-                    resultSummary: { rowCount },
-                    completedAt: new Date()
-                });
-
-            } catch (err: any) {
-                await storage.updateGeneratedReport(report.id, {
-                    status: "failed",
-                    resultSummary: { rowCount: 0, aggregates: { error: err.message } }
-                });
-            }
-        })();
 
         res.json(report);
     } catch (error: any) {
@@ -424,14 +688,30 @@ reportsRouter.get("/download/:id", async (req, res) => {
         const path = require("path");
 
         const reportsDir = path.join(process.cwd(), "generated_reports");
-        const files = await fs.readdir(reportsDir);
-        const reportFile = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${report.format}`));
+        const files = await fs.readdir(reportsDir).catch(() => []);
+
+        const candidate = typeof report.filePath === "string" ? report.filePath.trim() : "";
+        let reportFile = "";
+
+        if (candidate && !candidate.startsWith("/") && candidate.endsWith(`.${report.format}`)) {
+            reportFile = path.basename(candidate);
+        }
+
+        if (!reportFile) {
+            // New format: `${id}_${type}.${ext}`
+            reportFile = files.find((f: string) => f.startsWith(`${report.id}_`) && f.endsWith(`.${report.format}`)) || "";
+        }
+
+        if (!reportFile) {
+            // Legacy fallback
+            reportFile = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${report.format}`)) || "";
+        }
 
         if (!reportFile) {
             return res.status(404).json({ error: "Report file not found" });
         }
 
-        const filePath = path.join(reportsDir, reportFile);
+        const filePath = path.join(reportsDir, path.basename(reportFile));
         const content = await fs.readFile(filePath, "utf-8");
 
         const contentType = report.format === "json" ? "application/json" : "text/csv";

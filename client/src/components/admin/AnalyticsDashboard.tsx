@@ -52,6 +52,7 @@ import {
   Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { format } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
@@ -512,7 +513,7 @@ function ChartsSection({ granularity, onGranularityChange }: { granularity: Time
   const { data: chartsData, isLoading } = useQuery({
     queryKey: ["/api/admin/analytics/charts", granularity],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/analytics/charts?granularity=${granularity}`);
+      const res = await apiFetch(`/api/admin/analytics/charts?granularity=${granularity}`);
       return res.json();
     },
   });
@@ -711,7 +712,7 @@ function APILogsExplorer() {
         limit: itemsPerPage.toString(),
         ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v && v !== "all")),
       });
-      const res = await fetch(`/api/admin/analytics/logs?${params}`);
+      const res = await apiFetch(`/api/admin/analytics/logs?${params}`);
       return res.json();
     },
   });
@@ -997,7 +998,7 @@ export default function AnalyticsDashboard() {
   const { data: kpiData, isLoading: kpiLoading, refetch: refetchKpi } = useQuery({
     queryKey: ["/api/admin/analytics/kpi"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/kpi");
+      const res = await apiFetch("/api/admin/analytics/kpi");
       return res.json();
     },
     refetchInterval: 30000,
@@ -1006,7 +1007,7 @@ export default function AnalyticsDashboard() {
   const { data: performanceData, isLoading: perfLoading } = useQuery({
     queryKey: ["/api/admin/analytics/performance"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/performance");
+      const res = await apiFetch("/api/admin/analytics/performance");
       return res.json();
     },
     refetchInterval: 60000,
@@ -1015,7 +1016,7 @@ export default function AnalyticsDashboard() {
   const { data: costData, isLoading: costLoading } = useQuery({
     queryKey: ["/api/admin/analytics/costs"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/costs");
+      const res = await apiFetch("/api/admin/analytics/costs");
       return res.json();
     },
   });
@@ -1023,7 +1024,7 @@ export default function AnalyticsDashboard() {
   const { data: heatmapData, isLoading: heatmapLoading } = useQuery({
     queryKey: ["/api/admin/analytics/heatmap"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/analytics/heatmap");
+      const res = await apiFetch("/api/admin/analytics/heatmap");
       return res.json();
     },
   });

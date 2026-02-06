@@ -16,6 +16,7 @@ import {
   BellOff
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
@@ -74,7 +75,7 @@ export function SecurityAlertsPanel() {
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "50" });
       if (!showResolved) params.append("unresolved", "true");
-      const res = await fetch(`/api/admin/security/alerts?${params}`, {
+      const res = await apiFetch(`/api/admin/security/alerts?${params}`, {
         credentials: "include"
       });
       return res.json();
@@ -84,7 +85,7 @@ export function SecurityAlertsPanel() {
 
   const resolveMutation = useMutation({
     mutationFn: async (alertId: string) => {
-      const res = await fetch(`/api/admin/security/alerts/${alertId}/resolve`, {
+      const res = await apiFetch(`/api/admin/security/alerts/${alertId}/resolve`, {
         method: "POST",
         credentials: "include"
       });

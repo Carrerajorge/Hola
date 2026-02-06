@@ -16,11 +16,73 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
   price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
 
+const BILLING_MANAGER_ROLES = new Set(["admin", "superadmin", "team_admin"]);
+const BILLING_CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
+const billingContactCooldown = new Map<string, number>();
+
 function requireStripeProductSeedingEnabled(_req: any, res: any, next: any) {
   const flag = String(process.env.ALLOW_STRIPE_PRODUCT_SEEDING || "").trim().toLowerCase();
   if (flag === "true" || flag === "1") return next();
   // Hide Stripe product seeding endpoint unless explicitly enabled.
   return res.status(404).json({ error: "Not found" });
+}
+
+function normalizeRole(value: any): string {
+  return String(value || "").toLowerCase().trim();
+}
+
+function normalizeEmail(value: any): string {
+  return String(value || "").toLowerCase().trim();
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getAdminEmailNormalized(): string {
+  return normalizeEmail(process.env.ADMIN_EMAIL);
+}
+
+function isBillingManagerRole(role: string): boolean {
+  return BILLING_MANAGER_ROLES.has(normalizeRole(role));
+}
+
+function isAdminEmail(email: string): boolean {
+  const adminEmail = getAdminEmailNormalized();
+  const normalized = normalizeEmail(email);
+  return !!adminEmail && !!normalized && normalized === adminEmail;
+}
+
+function getActorEmail(req: any): string {
+  const passportUser = req?.session?.passport?.user;
+  return normalizeEmail(
+    req?.user?.claims?.email ||
+      req?.user?.email ||
+      passportUser?.claims?.email ||
+      passportUser?.email ||
+      req?.user?.profile?.emails?.[0]?.value
+  );
+}
+
+function getActorRole(req: any): string {
+  const passportUser = req?.session?.passport?.user;
+  return normalizeRole(
+    req?.user?.claims?.role ||
+      req?.user?.role ||
+      passportUser?.claims?.role ||
+      passportUser?.role
+  );
+}
+
+function canManageBillingForDbUser(dbUser: any): boolean {
+  const role = normalizeRole(dbUser?.role);
+  const email = normalizeEmail(dbUser?.email);
+  return isBillingManagerRole(role) || isAdminEmail(email);
 }
 
 function getEffectiveUserId(req: any): string | undefined {
@@ -636,8 +698,7 @@ export function createStripeRouter() {
       const prefs = (dbUser as any).preferences || {};
       const saved = prefs?.billing?.creditAlerts || {};
 
-      const role = String((dbUser as any).role || "").toLowerCase();
-      const canManage = ["admin", "superadmin", "team_admin"].includes(role);
+      const canManage = canManageBillingForDbUser(dbUser);
       const adminEmail = canManage ? String(process.env.ADMIN_EMAIL || "").trim() : "";
 
       res.json({
@@ -671,13 +732,14 @@ export function createStripeRouter() {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const role = String((dbUser as any).role || "").toLowerCase();
-      if (!["admin", "superadmin", "team_admin"].includes(role)) {
+      const role = normalizeRole((dbUser as any).role);
+      const canManage = canManageBillingForDbUser(dbUser);
+      if (!canManage) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
           resource: "billing.credit_alerts",
           resourceId: userId,
-          details: { reason: "permission_denied", role },
+          details: { reason: "permission_denied", role, actorEmail: getActorEmail(req) || null },
           category: "security",
           severity: "warning",
         });
@@ -733,13 +795,14 @@ export function createStripeRouter() {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const role = String((dbUser as any).role || "").toLowerCase();
-      if (!["admin", "superadmin", "team_admin"].includes(role)) {
+      const role = normalizeRole((dbUser as any).role);
+      const canManage = canManageBillingForDbUser(dbUser);
+      if (!canManage) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
           resource: "billing.credit_alerts_test",
           resourceId: userId,
-          details: { reason: "permission_denied", role },
+          details: { reason: "permission_denied", role, actorEmail: getActorEmail(req) || null },
           category: "security",
           severity: "warning",
         });
@@ -795,6 +858,90 @@ export function createStripeRouter() {
     }
   });
 
+  router.post("/api/billing/contact-admin", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const body = z
+        .object({
+          message: z.string().trim().min(5).max(2000),
+          action: z.string().trim().max(100).optional(),
+          source: z.string().trim().max(100).optional(),
+        })
+        .parse(req.body);
+
+      const adminEmail = String(process.env.ADMIN_EMAIL || "").trim();
+      const recipientEmailParsed = z.string().email().safeParse(adminEmail);
+      if (!recipientEmailParsed.success) {
+        return res.status(500).json({ error: "ADMIN_EMAIL is invalid" });
+      }
+
+      const nowMs = Date.now();
+      const lastMs = billingContactCooldown.get(userId) || 0;
+      const remainingMs = BILLING_CONTACT_COOLDOWN_MS - (nowMs - lastMs);
+      if (remainingMs > 0) {
+        const retryAfterSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+        return res.status(429).json({
+          error: "Too Many Requests",
+          message: "Espera un poco antes de enviar otra solicitud al administrador.",
+          retryAfterSeconds,
+        });
+      }
+      billingContactCooldown.set(userId, nowMs);
+
+      const actorEmail = getActorEmail(req) || null;
+      const actorRole = getActorRole(req) || null;
+      const action = body.action ? String(body.action) : "billing_help";
+
+      const safeMessage = body.message;
+      const html = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <h2>Solicitud de soporte: Facturación</h2>
+          <p><strong>Usuario:</strong> ${escapeHtml(String(actorEmail || userId))}</p>
+          <p><strong>Rol:</strong> ${escapeHtml(String(actorRole || "unknown"))}</p>
+          <p><strong>Accion:</strong> ${escapeHtml(String(action))}</p>
+          <p><strong>Fecha:</strong> ${escapeHtml(new Date().toISOString())}</p>
+          <hr />
+          <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 12px; border-radius: 6px;">${escapeHtml(safeMessage)}</pre>
+        </div>
+      `;
+      const text = `Solicitud de soporte: Facturacion\nUsuario: ${actorEmail || userId}\nRol: ${actorRole || "unknown"}\nAccion: ${action}\nFecha: ${new Date().toISOString()}\n\n${safeMessage}`;
+
+      const result = await sendEmail({
+        to: adminEmail,
+        subject: "Solicitud: Facturacion (IliaGPT)",
+        html,
+        text,
+      });
+
+      if (!result.success) {
+        return res.status(500).json({ error: result.error || "Failed to send request email" });
+      }
+
+      await auditLog(req, {
+        action: "billing.admin_contact_requested",
+        resource: "billing.support",
+        resourceId: userId,
+        details: {
+          action,
+          source: body.source || null,
+          recipientEmail: adminEmail,
+          messageId: result.messageId || null,
+        },
+        category: "user",
+        severity: "info",
+      });
+
+      res.json({ success: true, messageId: result.messageId || null });
+    } catch (error: any) {
+      console.error("Billing contact admin error:", error);
+      res.status(500).json({ error: "Failed to contact admin" });
+    }
+  });
+
   router.post("/api/stripe/portal", async (req, res) => {
     try {
       const userId = getEffectiveUserId(req);
@@ -803,7 +950,37 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
+      const actorRole = getActorRole(req);
+      if (actorRole && !isBillingManagerRole(actorRole) && !isAdminEmail(getActorEmail(req))) {
+        await auditLog(req, {
+          action: AuditActions.SECURITY_ALERT,
+          resource: "stripe.billing_portal",
+          resourceId: userId,
+          details: { reason: "permission_denied", role: actorRole, actorEmail: getActorEmail(req) || null },
+          category: "security",
+          severity: "warning",
+        });
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const canManageBilling = canManageBillingForDbUser(dbUser);
+      if (!canManageBilling) {
+        await auditLog(req, {
+          action: AuditActions.SECURITY_ALERT,
+          resource: "stripe.billing_portal",
+          resourceId: userId,
+          details: { reason: "permission_denied", role: normalizeRole((dbUser as any).role), actorEmail: getActorEmail(req) || null },
+          category: "security",
+          severity: "warning",
+        });
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
       if (!dbUser?.stripeCustomerId) {
         return res.status(400).json({ error: "No subscription found" });
       }

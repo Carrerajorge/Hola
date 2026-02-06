@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { format } from "date-fns";
 import {
   Ban,
@@ -52,7 +53,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
     queryKey: ["/api/admin/dashboard/user-activity", userId],
     queryFn: async () => {
       if (!userId) return null;
-      const res = await fetch(`/api/admin/dashboard/user-activity?userId=${encodeURIComponent(userId)}`, {
+      const res = await apiFetch(`/api/admin/dashboard/user-activity?userId=${encodeURIComponent(userId)}`, {
         credentials: "include",
       });
       if (!res.ok) {
@@ -68,7 +69,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
     queryKey: ["/api/admin/users", userId, "data-controls"],
     queryFn: async () => {
       if (!userId) return null;
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/data-controls`, {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/data-controls`, {
         credentials: "include",
       });
       if (!res.ok) {
@@ -99,7 +100,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
   const updateControlsMutation = useMutation({
     mutationFn: async (patch: Record<string, any>) => {
       if (!userId) throw new Error("Missing userId");
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/data-controls`, {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/data-controls`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -127,7 +128,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
   const clearChatsMutation = useMutation({
     mutationFn: async () => {
       if (!userId) throw new Error("Missing userId");
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/chats/delete-all`, {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/chats/delete-all`, {
         method: "POST",
         credentials: "include",
       });
@@ -153,7 +154,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
   const blockMutation = useMutation({
     mutationFn: async () => {
       if (!userId) throw new Error("Missing userId");
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/block`, {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/block`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: "Blocked by admin" }),
@@ -182,7 +183,7 @@ export function UserInspectorDialog({ open, onOpenChange, userId, onNavigate }: 
   const unblockMutation = useMutation({
     mutationFn: async () => {
       if (!userId) throw new Error("Missing userId");
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/unblock`, {
+      const res = await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/unblock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

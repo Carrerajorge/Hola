@@ -20,6 +20,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -118,7 +119,7 @@ export function ActivityFeed({ limit = 20, onOpenUser }: { limit?: number; onOpe
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/security/audit-logs", limit],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/security/audit-logs?limit=${limit}`, {
+      const res = await apiFetch(`/api/admin/security/audit-logs?limit=${limit}`, {
         credentials: "include",
       });
       return res.json();

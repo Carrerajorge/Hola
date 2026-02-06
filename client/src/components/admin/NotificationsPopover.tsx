@@ -20,6 +20,7 @@ import {
   Trash2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/apiClient";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -50,7 +51,7 @@ export function AdminNotificationsPopover() {
   const { data } = useQuery<{ notifications: AdminNotification[]; unreadCount: number }>({
     queryKey: ["/api/admin/dashboard/notifications"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/dashboard/notifications", { credentials: "include" });
+      const res = await apiFetch("/api/admin/dashboard/notifications", { credentials: "include" });
       return res.json();
     },
     refetchInterval: 30000
@@ -58,7 +59,7 @@ export function AdminNotificationsPopover() {
 
   const markAsReadMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/dashboard/notifications/${id}/read`, {
+      await apiFetch(`/api/admin/dashboard/notifications/${id}/read`, {
         method: "POST",
         credentials: "include"
       });
@@ -70,7 +71,7 @@ export function AdminNotificationsPopover() {
 
   const markAllAsReadMutation = useMutation({
     mutationFn: async () => {
-      await fetch("/api/admin/dashboard/notifications/read-all", {
+      await apiFetch("/api/admin/dashboard/notifications/read-all", {
         method: "POST",
         credentials: "include"
       });
@@ -82,7 +83,7 @@ export function AdminNotificationsPopover() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/dashboard/notifications/${id}`, {
+      await apiFetch(`/api/admin/dashboard/notifications/${id}`, {
         method: "DELETE",
         credentials: "include"
       });

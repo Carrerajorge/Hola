@@ -44,6 +44,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { CreditAlertsDialog } from "@/components/credit-alerts-dialog";
+import { BillingHelpDialog } from "@/components/billing-help-dialog";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -84,6 +85,8 @@ export default function WorkspaceSettingsPage() {
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [billingHelpOpen, setBillingHelpOpen] = useState(false);
+  const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
   const [planSelectKey, setPlanSelectKey] = useState(0);
   const [creditsOffset, setCreditsOffset] = useState(0);
   const [creditsUsage, setCreditsUsage] = useState<{
@@ -195,6 +198,16 @@ export default function WorkspaceSettingsPage() {
   const { uploadFile, isUploading } = useCloudLibrary();
 
   const openStripePortal = async () => {
+    if (!canManageBilling) {
+      toast({
+        title: "Acceso restringido",
+        description: "Solo el administrador puede gestionar la facturación. Puedes contactar al administrador desde aquí.",
+        variant: "destructive",
+      });
+      setBillingHelpAction("billing_portal");
+      setBillingHelpOpen(true);
+      return;
+    }
     try {
       const res = await apiFetch("/api/stripe/portal", { method: "POST" });
       const data = await res.json().catch(() => null);
@@ -711,6 +724,28 @@ export default function WorkspaceSettingsPage() {
               </p>
             </div>
 
+            {!canManageBilling && (
+              <div className="rounded-lg border bg-muted/30 p-4 flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Solo administrador</p>
+                  <p className="text-sm text-muted-foreground">
+                    Este espacio de trabajo está conectado al panel de administración. Para cambiar el plan, administrar facturación o configurar alertas,
+                    contacta al administrador.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setBillingHelpAction("workspace_billing");
+                    setBillingHelpOpen(true);
+                  }}
+                  data-testid="button-billing-contact-admin"
+                >
+                  Contactar administrador
+                </Button>
+              </div>
+            )}
+
             <Tabs defaultValue="plan" className="w-full">
               <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
                 <TabsTrigger 
@@ -883,6 +918,7 @@ export default function WorkspaceSettingsPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!canManageBilling}
                       onClick={() => void openStripePortal()}
                       data-testid="button-open-billing-portal"
                     >
@@ -1337,6 +1373,7 @@ export default function WorkspaceSettingsPage() {
     <div className="min-h-screen bg-background">
       <UpgradePlanDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
       <CreditAlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
+      <BillingHelpDialog open={billingHelpOpen} onOpenChange={setBillingHelpOpen} action={billingHelpAction} />
       {showDeactivationBanner && (
         <div className="flex justify-end px-6 py-3">
           <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
@@ -1347,23 +1384,16 @@ export default function WorkspaceSettingsPage() {
                 Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación{deactivationDateLabel ? ` el ${deactivationDateLabel}.` : "."}
               </span>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-2 flex-shrink-0"
-              data-testid="button-reactivate"
-              onClick={async () => {
-                try {
-                  const res = await apiFetch("/api/stripe/portal", { method: "POST" });
-                  const data = await res.json();
-                  if (data?.url) window.location.href = data.url;
-                } catch {
-                  // ignore
-                }
-              }}
-            >
-              Reactivar
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2 flex-shrink-0"
+                data-testid="button-reactivate"
+                disabled={!canManageBilling}
+                onClick={() => void openStripePortal()}
+              >
+                Reactivar
+              </Button>
           </div>
         </div>
       )}

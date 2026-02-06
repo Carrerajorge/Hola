@@ -11,6 +11,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { IntentResult } from './intentRouter';
 import { libraryService } from "./libraryService";
+import { storage } from "../storage";
+import { normalizeDocument } from "./structuredDocumentNormalizer";
+import { ingestSemanticDocumentToChunks } from "../pipeline/ingestion2026/documentIngestion2026";
+import type { IngestedChunk } from "../pipeline/ingestion2026/ingestionTypes";
 import {
     startProductionPipeline,
     type ProductionEvent,
@@ -28,6 +32,8 @@ export interface ProductionRequest {
     chatId: string;
     intentResult: IntentResult;
     locale?: string;
+    // When true, bypass task router "CHAT vs PRODUCTION" gating. Used by explicit docTool selection.
+    forceProduction?: boolean;
 }
 
 export interface ProductionHandlerResult {
@@ -140,6 +146,69 @@ export function getDeliverables(intentResult: IntentResult): ('word' | 'excel' |
 // ============================================================================
 
 const ARTIFACTS_DIR = path.join(process.cwd(), 'artifacts');
+
+function buildExtractedTextFromChunks(chunks: IngestedChunk[], maxChars = 120_000): string {
+    const parts: string[] = [];
+    for (const c of chunks) {
+        if (c.kind !== "document") continue;
+        const body = (c.rawContent || c.content || "").trim();
+        if (!body) continue;
+        parts.push(body);
+        if (parts.length >= 180) break;
+    }
+    const joined = parts.join("\n\n---\n\n").trim();
+    if (!joined) return "";
+    return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
+}
+
+async function persistArtifactTextToConversationDocuments(args: {
+    artifact: Artifact;
+    chatId: string;
+    runId: string;
+    downloadUrl: string;
+    library?: { fileUuid: string; storageUrl: string };
+}): Promise<void> {
+    const { artifact, chatId, runId, downloadUrl, library } = args;
+
+    if (!chatId) return;
+
+    // Only persist text-extractable artifacts for now.
+    if (artifact.type !== "word") return;
+    const fileName = artifact.filename || `document_${runId}.docx`;
+    const mimeType = artifact.mimeType || "application/octet-stream";
+
+    try {
+        const docModel = await normalizeDocument(artifact.buffer, fileName);
+        const { chunks, summary } = ingestSemanticDocumentToChunks({ model: docModel, mimeType });
+        const extractedText = buildExtractedTextFromChunks(chunks);
+        if (!extractedText) return;
+
+        await storage.createConversationDocument({
+            chatId,
+            messageId: null,
+            fileName,
+            storagePath: null,
+            mimeType,
+            fileSize: artifact.size,
+            extractedText,
+            metadata: {
+                source: "productionHandler",
+                runId,
+                artifactType: artifact.type,
+                artifactFilename: artifact.filename,
+                downloadUrl,
+                libraryFileUuid: library?.fileUuid,
+                libraryStorageUrl: library?.storageUrl,
+                ingestionVersion: "ingestion2026",
+                chunkCount: chunks.length,
+                pageCount: summary.pageCount,
+                sheetCount: summary.sheetCount,
+            },
+        });
+    } catch (e: any) {
+        console.warn("[ProductionHandler] Failed to persist artifact text to conversation_documents:", e?.message || e);
+    }
+}
 
 // Ensure artifacts directory exists
 function ensureArtifactsDir(): void {
@@ -282,7 +351,8 @@ export async function handleProductionRequest(
                     message: event.message,
                     timestamp: event.timestamp,
                 });
-            }
+            },
+            { forceProduction: !!req.forceProduction }
         );
 
         // Save artifacts and generate download URLs
@@ -297,6 +367,18 @@ export async function handleProductionRequest(
                 filename: artifact.filename,
                 downloadUrl: stored.downloadUrl,
                 size: artifact.size,
+            });
+
+            // Persist an extracted-text snapshot for cross-turn "improve the previous document" flows.
+            // This runs out-of-band so it doesn't slow down SSE delivery.
+            setImmediate(() => {
+                void persistArtifactTextToConversationDocuments({
+                    artifact,
+                    chatId,
+                    runId,
+                    downloadUrl: stored.downloadUrl,
+                    library: stored.library,
+                });
             });
 
             // Emit artifact event

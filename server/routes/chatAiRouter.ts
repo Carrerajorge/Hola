@@ -222,7 +222,18 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
     // Only trigger when the user is clearly referring to an existing file/image/table,
     // not when they just say "crear un documento" (production mode already covers that).
-    return /\b(adjunt|archivo|pdf|excel|xlsx|docx|pptx|imagen|captura|screenshot|tabla|hoja|sheet|seg[uú]n|con base en|del\s+(documento|pdf|excel|archivo|adjunto)|en\s+el\s+(documento|pdf|excel|archivo)|en\s+la\s+(imagen|captura))\b/i.test(t);
+    const refersToAttachments = /\b(adjunt|archivo|pdf|excel|xlsx|docx|pptx|imagen|captura|screenshot|tabla|hoja|sheet|seg[uú]n|con base en|del\s+(documento|pdf|excel|archivo|adjunto)|en\s+el\s+(documento|pdf|excel|archivo)|en\s+la\s+(imagen|captura))\b/i.test(t);
+
+    // Also trigger when the user refers to the "previous/earlier" output in the same conversation.
+    // This prevents "context loss" when the user says "mejora el documento anterior" without re-attaching files.
+    const refersToPreviousOutput =
+      /\b(anterior|previo|previ[oa]|de\s+antes|lo\s+anterior|respuesta\s+anterior|versi[oó]n\s+anterior|que\s+me\s+diste|que\s+generaste|que\s+hiciste)\b/i.test(t) &&
+      /\b(documento|doc|archivo|texto|borrador|informe|reporte|presentaci[oó]n|plan)\b/i.test(t);
+
+    const editVerbs = /\b(mejor|corrig|correg|revis|editar|edita|pulir|optimiza|ajusta|refina|reescrib|re-escrib|actualiza)\b/i.test(t);
+    const refersToThatThing = /\b(lo\s+anterior|el\s+anterior|la\s+anterior|ese\s+(documento|archivo|texto)|el\s+documento\s+anterior)\b/i.test(t);
+
+    return refersToAttachments || refersToPreviousOutput || (editVerbs && refersToThatThing);
   };
 
   router.post("/chat", async (req, res) => {
@@ -1306,6 +1317,37 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
         const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
         const userMessageText = lastUserMessage?.content || '';
+        let messageForProduction = userMessageText;
+
+        // If the user is asking to improve/edit a previous document, try to pull the last extracted document
+        // snapshot from conversation_documents and inject it as context for production (so it won't "forget").
+        const looksLikeEdit =
+          /\b(mejor|corrig|correg|revis|editar|edita|pulir|optimiza|ajusta|refina|reescrib|re-escrib|actualiza)\b/i.test(userMessageText) &&
+          /\b(anterior|previo|de\s+antes|lo\s+anterior|respuesta\s+anterior|que\s+me\s+diste|que\s+generaste|ese\s+documento|ese\s+archivo)\b/i.test(userMessageText);
+
+        const existingChatId = (chatId || conversationId || "").trim();
+        const canLoadConversationDocs = !!existingChatId && !existingChatId.startsWith("pending-");
+
+        if (looksLikeEdit && canLoadConversationDocs) {
+          try {
+            const docs = await storage.getConversationDocuments(existingChatId);
+            const lastDoc = [...docs].reverse().find(d => typeof d.extractedText === "string" && d.extractedText.trim().length > 400);
+            if (lastDoc?.extractedText) {
+              const base = lastDoc.extractedText.trim().slice(0, 60_000);
+              messageForProduction = [
+                userMessageText,
+                ``,
+                `DOCUMENTO_BASE (del chat, extracto):`,
+                base,
+              ].join("\n");
+              console.log(`[Stream] DocTool edit context: injected extractedText chars=${base.length}`);
+            } else {
+              console.log(`[Stream] DocTool edit context: no conversation_documents with extractedText found for chatId=${existingChatId}`);
+            }
+          } catch (e: any) {
+            console.warn(`[Stream] DocTool edit context: failed to load conversation_documents for chatId=${existingChatId}:`, e?.message || e);
+          }
+        }
 
         // Map docTool to corresponding intent
         const toolToIntent = {
@@ -1331,11 +1373,12 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
           await handleProductionRequest(
             {
-              message: userMessageText,
+              message: messageForProduction,
               userId: effectiveUserId,
               chatId: effectiveChatId,
               intentResult: syntheticIntent,
               locale: 'es',
+              forceProduction: true,
             },
             res
           );
