@@ -45,6 +45,12 @@ export interface ToolContext {
   userPlan?: "free" | "pro" | "admin";
   isConfirmed?: boolean;
   signal?: AbortSignal;
+
+  /**
+   * Optional streaming hook for long-running tools (e.g. shell_command).
+   * The callback MUST be best-effort (never throw); the tool will ignore failures.
+   */
+  onStream?: (evt: { stream: "stdout" | "stderr"; chunk: string }) => void;
 }
 
 export interface ToolArtifact {
@@ -1058,52 +1064,173 @@ const shellCommandSchema = z.object({
 
 const shellCommandTool: ToolDefinition = {
   name: "shell_command",
-  description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
+  description: "Execute a shell command in the agent's sandbox. Streams stdout/stderr and enforces safety checks.",
   inputSchema: shellCommandSchema,
-  capabilities: ["executes_code", "long_running"],
+  capabilities: ["executes_code", "long_running", "high_risk"],
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
-    const blockedCommands = ['rm -rf', 'sudo', 'chmod 777', 'mkfs', 'dd if=', '> /dev', 'curl | sh', 'wget | sh'];
-    const isBlocked = blockedCommands.some(bc => input.command.toLowerCase().includes(bc));
-    if (isBlocked) {
+
+    // Ensure workspace exists
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const workspaceDir = path.resolve("/tmp/agent-workspace", context.runId);
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    const cmd = String(input.command ?? "").trim();
+    if (!cmd) {
       return {
         success: false,
         output: null,
-        error: createError("COMMAND_BLOCKED", "This command is not allowed for security reasons", false),
+        error: createError("INVALID_INPUT", "Command is required", false),
         artifacts: [],
         previews: [],
         logs: [],
         metrics: { durationMs: Date.now() - startTime },
       };
     }
-    try {
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
-      const { stdout, stderr } = await execAsync(input.command, {
-        timeout: input.timeout,
-        cwd: `/tmp/agent-workspace/${context.runId}`,
-        env: { ...process.env, HOME: `/tmp/agent-workspace/${context.runId}` },
-      });
-      return {
-        success: true,
-        output: { command: input.command, stdout, stderr, exitCode: 0 },
-        artifacts: [],
-        previews: [{ type: "text", content: stdout || stderr, title: "Command Output" }],
-        logs: [],
-        metrics: { durationMs: Date.now() - startTime },
-      };
-    } catch (error: any) {
+
+    // Dangerous command patterns: require explicit confirmation (not a blanket block).
+    // This matches the requirements doc: dangerous operations require explicit user confirmation.
+    const dangerousPatterns: Array<{ pattern: RegExp; reason: string }> = [
+      // Match any rm invocation that includes both -r and -f flags (combined or separate: -rf, -fr, -r -f, etc.).
+      { pattern: /\brm\b[\s\S]*-\S*r\S*f/i, reason: "rm -rf" },
+      { pattern: /\bmkfs(\.|\s)/i, reason: "mkfs" },
+      { pattern: /\bdd\b\s+if=/i, reason: "dd if=" },
+      { pattern: />\s*\/dev\//i, reason: "> /dev/*" },
+      { pattern: /\bsudo\b/i, reason: "sudo" },
+      { pattern: /\bchmod\b\s+777\b/i, reason: "chmod 777" },
+      { pattern: /\b(curl|wget)\b.*\|\s*sh\b/i, reason: "curl|sh / wget|sh" },
+      { pattern: /\b(shutdown|reboot)\b/i, reason: "shutdown/reboot" },
+    ];
+
+    const matchedDanger = dangerousPatterns.find((d) => d.pattern.test(cmd));
+    if (matchedDanger && context.isConfirmed !== true) {
       return {
         success: false,
-        output: { command: input.command, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: error.code || 1 },
-        error: createError("COMMAND_ERROR", error.message, true),
+        output: { command: cmd },
+        error: createError(
+          "REQUIRES_CONFIRMATION",
+          `Command requires confirmation (${matchedDanger.reason}). Confirm to proceed.`,
+          false,
+          { reason: matchedDanger.reason }
+        ),
         artifacts: [],
-        previews: [{ type: "text", content: error.stderr || error.message, title: "Error Output" }],
+        previews: [
+          {
+            type: "text",
+            title: "Confirmation required",
+            content: `This command is considered high-risk and requires explicit confirmation before execution:\n\n${cmd}`,
+          },
+        ],
         logs: [],
         metrics: { durationMs: Date.now() - startTime },
       };
     }
+
+    // Execute with bash -lc to preserve typical shell behavior, but without spawning a shell through exec().
+    const { spawn } = await import("child_process");
+
+    const timeoutMs = Math.min(Math.max(Number(input.timeout ?? 30000), 1000), 60000);
+
+    return new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let killed = false;
+
+      const child = spawn("/usr/bin/bash", ["-lc", cmd], {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: workspaceDir },
+        shell: false,
+        windowsHide: true,
+      });
+
+      const maxCapture = 1024 * 1024; // 1MB each stream
+
+      const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
+        if (!chunk) return;
+        try {
+          context.onStream?.({ stream, chunk });
+        } catch {
+          // ignore
+        }
+      };
+
+      const onData = (stream: "stdout" | "stderr") => (data: any) => {
+        const chunk = data?.toString?.() ?? String(data);
+        safeEmit(stream, chunk);
+
+        if (stream === "stdout") {
+          if (stdout.length < maxCapture) stdout += chunk.slice(0, maxCapture - stdout.length);
+        } else {
+          if (stderr.length < maxCapture) stderr += chunk.slice(0, maxCapture - stderr.length);
+        }
+      };
+
+      child.stdout?.on("data", onData("stdout"));
+      child.stderr?.on("data", onData("stderr"));
+
+      const timeoutHandle = setTimeout(() => {
+        killed = true;
+        child.kill("SIGKILL");
+      }, timeoutMs);
+
+      const abortHandler = () => {
+        killed = true;
+        child.kill("SIGKILL");
+      };
+
+      if (context.signal) {
+        if (context.signal.aborted) abortHandler();
+        context.signal.addEventListener("abort", abortHandler, { once: true });
+      }
+
+      child.on("close", (code, signal) => {
+        clearTimeout(timeoutHandle);
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+
+        const exitCode = typeof code === "number" ? code : signal ? 1 : 0;
+
+        if (killed) {
+          return resolve({
+            success: false,
+            output: { command: cmd, stdout, stderr, exitCode },
+            error: createError("COMMAND_TIMEOUT", `Command exceeded timeout of ${timeoutMs}ms`, false),
+            artifacts: [],
+            previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: "Command Output (partial)" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          });
+        }
+
+        const ok = exitCode === 0;
+        const previewText = (stdout || stderr).slice(0, 100000);
+
+        return resolve({
+          success: ok,
+          output: { command: cmd, stdout, stderr, exitCode },
+          artifacts: [],
+          previews: [{ type: "text", content: previewText, title: ok ? "Command Output" : "Error Output" }],
+          logs: [],
+          error: ok ? undefined : createError("COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(timeoutHandle);
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+
+        return resolve({
+          success: false,
+          output: { command: cmd, stdout, stderr, exitCode: 1 },
+          error: createError("COMMAND_ERROR", err.message, true),
+          artifacts: [],
+          previews: [{ type: "text", content: err.message, title: "Error Output" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      });
+    });
   },
 };
 

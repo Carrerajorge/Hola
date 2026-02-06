@@ -93,8 +93,9 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
   },
   shell_command: {
     capabilities: ["executes_code", "high_risk"],
-    allowedPlans: ["pro", "admin"],
-    requiresConfirmation: true,
+    allowedPlans: ["admin"],
+    // Confirmation is decided by the tool based on the actual command risk.
+    requiresConfirmation: false,
     maxExecutionTimeMs: 60000,
     maxRetries: 1,
     deniedByDefault: false,
