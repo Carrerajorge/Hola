@@ -1011,11 +1011,12 @@ export function Composer({
           {/* Inner input contour (thin, minimalist, silver) */}
           <div
             className={cn(
-              "rounded-2xl border bg-white/55 dark:bg-zinc-950/15 backdrop-blur-sm",
-              "border-zinc-300/80 dark:border-zinc-600/40",
-              "px-4 py-3",
+              "rounded-[22px] border-[0.5px] border-solid bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
+              "border-[#c7c7c7]/80 dark:border-white/20",
+              "hover:border-[#bdbdbd]/85 dark:hover:border-white/25",
+              "px-4 py-2.5",
               "transition-colors duration-150",
-              "focus-within:border-zinc-400/80 dark:focus-within:border-zinc-500/50"
+              "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
             )}
           >
             <Textarea
@@ -1047,7 +1048,7 @@ export function Composer({
             />
           </div>
 
-          <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/40">
+          <div className="flex items-center justify-between mt-2 pt-1 border-t-[0.5px] border-[#c7c7c7]/35 dark:border-white/10">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
