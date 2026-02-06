@@ -3,6 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Trash2, Pause, Play, ArrowUp, Mic, Square, AudioLines } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  SILVER_ICON_BUTTON_BASE,
+  SILVER_ICON_BUTTON_DANGER_TONE,
+  SILVER_ICON_BUTTON_DISABLED_TONE,
+  SILVER_ICON_BUTTON_TONE,
+} from "@/lib/silver-ui";
 
 interface RecordingPanelProps {
   isRecording: boolean;
@@ -75,13 +81,9 @@ export function RecordingPanel({
               size="icon"
               onClick={onDiscard}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-                "border-[0.5px] border-solid border-[#c7c7c7]/70 hover:border-red-400 dark:border-white/20 dark:hover:border-red-300/40",
-                "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
-                "text-zinc-700 hover:text-red-600 dark:text-white/70 dark:hover:text-red-300",
-                "backdrop-blur-sm shadow-none",
-                "transition-colors duration-150",
-                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+                "h-9 w-9 sm:h-8 sm:w-8",
+                SILVER_ICON_BUTTON_BASE,
+                SILVER_ICON_BUTTON_DANGER_TONE
               )}
               aria-label="Discard recording"
               data-testid="button-discard-recording"
@@ -132,13 +134,9 @@ export function RecordingPanel({
               size="icon"
               onClick={isPaused ? onResume : onPause}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-                "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
-                "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
-                "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
-                "backdrop-blur-sm shadow-none",
-                "transition-colors duration-150",
-                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+                "h-9 w-9 sm:h-8 sm:w-8",
+                SILVER_ICON_BUTTON_BASE,
+                SILVER_ICON_BUTTON_TONE
               )}
               aria-label={isPaused ? "Resume recording" : "Pause recording"}
               data-testid={isPaused ? "button-resume-recording" : "button-pause-recording"}
@@ -160,13 +158,9 @@ export function RecordingPanel({
               onClick={onSend}
               disabled={!canSend}
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-                "border-[0.5px] border-solid backdrop-blur-sm shadow-none",
-                "transition-colors duration-150",
-                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
-                canSend
-                  ? "bg-white/35 hover:bg-white/55 border-[#c7c7c7]/70 text-zinc-700 hover:text-zinc-900 dark:bg-white/5 dark:hover:bg-white/8 dark:border-white/20 dark:text-white/70 dark:hover:text-white/90"
-                  : "opacity-50 cursor-not-allowed bg-white/20 border-[#c7c7c7]/40 text-zinc-400 dark:bg-white/5 dark:border-white/10 dark:text-white/30"
+                "h-9 w-9 sm:h-8 sm:w-8",
+                SILVER_ICON_BUTTON_BASE,
+                canSend ? SILVER_ICON_BUTTON_TONE : SILVER_ICON_BUTTON_DISABLED_TONE
               )}
               aria-label="Send message"
               data-testid="button-send-recording"
@@ -189,13 +183,9 @@ export function RecordingPanel({
             onClick={onToggleRecording}
             size="icon"
             className={cn(
-              "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-              "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
-              "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
-              "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
-              "backdrop-blur-sm shadow-none",
-              "transition-colors duration-150",
-              "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+              "h-9 w-9 sm:h-8 sm:w-8",
+              SILVER_ICON_BUTTON_BASE,
+              SILVER_ICON_BUTTON_TONE
             )}
             aria-label="Start voice dictation"
             data-testid="button-voice-dictation"
@@ -229,13 +219,11 @@ export function RecordingPanel({
             size="icon"
             disabled={isFilesLoading}
             className={cn(
-              "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-              "border-[0.5px] border-solid backdrop-blur-sm shadow-none",
-              "transition-colors duration-150",
-              "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]",
+              "h-9 w-9 sm:h-8 sm:w-8",
+              SILVER_ICON_BUTTON_BASE,
               isFilesLoading
-                ? "opacity-50 cursor-not-allowed bg-white/20 border-[#c7c7c7]/40 text-zinc-400 dark:bg-white/5 dark:border-white/10 dark:text-white/30"
-                : "bg-white/35 hover:bg-white/55 border-[#c7c7c7]/70 text-zinc-700 hover:text-zinc-900 dark:bg-white/5 dark:hover:bg-white/8 dark:border-white/20 dark:text-white/70 dark:hover:text-white/90"
+                ? SILVER_ICON_BUTTON_DISABLED_TONE
+                : SILVER_ICON_BUTTON_TONE
             )}
             aria-label={isFilesLoading ? "Uploading files..." : "Send message (Cmd+Enter)"}
             data-testid="button-send-message"
@@ -250,13 +238,9 @@ export function RecordingPanel({
               onClick={onOpenVoiceChat}
               size="icon"
               className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
-                "border-[0.5px] border-solid border-[#c7c7c7]/70 dark:border-white/20",
-                "bg-white/35 hover:bg-white/55 dark:bg-white/5 dark:hover:bg-white/8",
-                "text-zinc-700 hover:text-zinc-900 dark:text-white/70 dark:hover:text-white/90",
-                "backdrop-blur-sm shadow-none",
-                "transition-colors duration-150",
-                "focus-visible:ring-0 focus-visible:shadow-[0_0_0_1px_rgba(199,199,199,0.35)] dark:focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+                "h-9 w-9 sm:h-8 sm:w-8",
+                SILVER_ICON_BUTTON_BASE,
+                SILVER_ICON_BUTTON_TONE
               )}
               aria-label="Start voice conversation mode"
               data-testid="button-voice-chat-mode"
