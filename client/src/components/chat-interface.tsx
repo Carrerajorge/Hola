@@ -374,7 +374,7 @@ export function ChatInterface({
   const { user, isAuthenticated } = useAuth();
   const { settings } = useSettingsContext();
   const { toast } = useToast();
-  const { skills: userSkills, isLoading: isUserSkillsLoading, createSkill } = useUserSkills();
+  const { skills: userSkills, isLoading: isUserSkillsLoading, createSkill, ensureSkill, updateSkill } = useUserSkills();
 
   const [activeSkillId, setActiveSkillId] = useState<string | null>(() => {
     try {
@@ -461,18 +461,19 @@ export function ChatInterface({
     if (!stillValid) setActiveSkillId(null);
   }, [activeSkillId, isUserSkillsLoading, userSkills]);
 
-  const resolveSkillContextForMessage = useCallback((text: string) => {
-    const cleaned = (text || "").replace(/^🌐\s*/, "");
-    const invocation = parseSkillInvocation(cleaned);
-    const invokedSkill = invocation ? findEnabledSkillByName(invocation.name, userSkills) : null;
-    const selectedSkill = activeSkillId ? userSkills.find((s) => s.enabled && s.id === activeSkillId) || null : null;
-    const skill = invokedSkill || selectedSkill;
+	  const resolveSkillContextForMessage = useCallback((text: string) => {
+	    const cleaned = (text || "").replace(/^🌐\s*/, "");
+	    const invocation = parseSkillInvocation(cleaned);
+	    const invokedSkill = invocation ? findEnabledSkillByName(invocation.name, userSkills) : null;
+	    const selectedSkill = activeSkillId ? userSkills.find((s) => s.enabled && s.id === activeSkillId) || null : null;
+	    const skill = invokedSkill || selectedSkill;
 
-    return {
-      skillId: skill?.id,
-      skill: skill ? { name: skill.name, instructions: skill.instructions } : undefined,
-    };
-  }, [activeSkillId, userSkills]);
+	    return {
+	      // If we don't have the skill details yet (initial load), still send the activeSkillId so the server can resolve it.
+	      skillId: skill?.id || activeSkillId || undefined,
+	      skill: skill ? { name: skill.name, instructions: skill.instructions } : undefined,
+	    };
+	  }, [activeSkillId, userSkills]);
   
   // First visit explosion
   const { showExplosion, completeWelcome } = useFirstVisit();
@@ -2703,7 +2704,7 @@ export function ChatInterface({
     adjustTextareaHeight();
   }, [input]);
 
-  const handleSubmit = async () => {
+	  const handleSubmit = async () => {
     if (import.meta.env.DEV) {
       console.debug("[handleSubmit] called at", new Date().toISOString());
     }
@@ -2814,7 +2815,7 @@ export function ChatInterface({
       return;
     }
 
-    // Slash command: create a custom skill from a single prompt.
+	    // Slash command: create a custom skill from a single prompt.
     // Usage: "/skill crea un skill que ..."
     const skillCreatePrompt = parseSkillCreateCommand(input);
     if (skillCreatePrompt !== null) {
@@ -2872,17 +2873,89 @@ export function ChatInterface({
         });
       }
 
-      return;
-    }
+	      return;
+	    }
 
-    // Skill context:
-    // - If message starts with a valid @Skill invocation, it overrides the active skill selector.
-    // - Otherwise, the active skill selector applies automatically.
-    const { skillId: activeSkillIdPayload, skill: activeSkillPayload } = resolveSkillContextForMessage(input);
+	    // Autonomous "@Skill ..." behavior:
+	    // - If the user invokes a missing skill name, generate + create it from the rest of the message.
+	    // - If the user invokes a disabled skill, enable it.
+	    // This is done before building the streaming payload so the skill applies immediately.
+	    let ensuredSkillIdOverride: string | undefined;
+	    let ensuredSkillOverride: { name: string; instructions: string } | undefined;
 
-    if (import.meta.env.DEV) {
-      console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
-    }
+	    const cleanedForSkillInvocation = (input || "").replace(/^🌐\s*/, "");
+	    const trimmedForSkillInvocation = cleanedForSkillInvocation.trimStart();
+	    const invocation = parseSkillInvocation(trimmedForSkillInvocation);
+	    if (invocation) {
+	      const needle = invocation.name.trim().toLowerCase();
+	      const existing = userSkills.find((s) => s.name.trim().toLowerCase() === needle) || null;
+
+	      if (existing) {
+	        if (!existing.enabled) {
+	          try {
+	            await updateSkill(existing.id, { enabled: true });
+	          } catch (e: any) {
+	            toast({
+	              title: "Skill",
+	              description: e?.message || "No se pudo activar el skill",
+	              variant: "destructive",
+	            });
+	            return;
+	          }
+	        }
+
+	        setActiveSkillId(existing.id);
+	        ensuredSkillIdOverride = existing.id;
+	        ensuredSkillOverride = { name: existing.name, instructions: existing.instructions };
+	      } else {
+	        // Use the rest of the message as the prompt to generate the missing skill.
+	        const rest = trimmedForSkillInvocation
+	          .slice(invocation.raw.length)
+	          .trim()
+	          .replace(/^[:\\-\\s]+/, "")
+	          .trim();
+
+	        if (!rest) {
+	          toast({
+	            title: "Skill",
+	            description: `Para crear @${invocation.name}, escribe: "@${invocation.name} <qué debe hacer>"`,
+	            variant: "destructive",
+	          });
+	          return;
+	        }
+
+	        toast({ title: "Skill", description: `Creando "${invocation.name}"...` });
+
+	        try {
+	          const ensured = await ensureSkill({ name: invocation.name, prompt: rest });
+	          if (!ensured.enabled) {
+	            await updateSkill(ensured.id, { enabled: true });
+	          }
+
+	          setActiveSkillId(ensured.id);
+	          ensuredSkillIdOverride = ensured.id;
+	          ensuredSkillOverride = { name: ensured.name, instructions: ensured.instructions };
+	        } catch (e: any) {
+	          toast({
+	            title: "No se pudo crear el skill",
+	            description: e?.message || "Error desconocido",
+	            variant: "destructive",
+	          });
+	          return;
+	        }
+	      }
+	    }
+
+	    // Skill context:
+	    // - If message starts with a valid @Skill invocation, it overrides the active skill selector.
+	    // - Otherwise, the active skill selector applies automatically.
+	    const resolvedSkillContext = resolveSkillContextForMessage(input);
+	    const activeSkillIdPayload = ensuredSkillIdOverride ?? resolvedSkillContext.skillId;
+	    const activeSkillPayload = ensuredSkillOverride ?? resolvedSkillContext.skill;
+
+	    if (import.meta.env.DEV) {
+	      console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
+	    }
 
     // Wait for any pending uploads to complete before proceeding
     if (pendingUploadsRef.current.size > 0) {

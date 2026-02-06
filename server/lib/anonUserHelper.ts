@@ -21,7 +21,9 @@ export function getSecureUserId(req: Request): string | null {
     return authUserId;
   }
 
-  const session = req.session as any;
+  // Note: some test harnesses or misconfigurations may omit session middleware.
+  // In that case, treat as unauthenticated instead of throwing.
+  const session = (req as any).session as any | undefined;
 
   // 1.5 Check session.authUserId (workaround for Passport serialization issues)
   if (session?.authUserId) {
@@ -49,7 +51,7 @@ export function getSecureUserId(req: Request): string | null {
   }
 
   // 3. Fallback to session-bound ID or generate new one
-  if (!session.anonUserId) {
+  if (session && !session.anonUserId) {
     const sessionId = (req as any).sessionID;
     if (sessionId) {
       session.anonUserId = `anon_${sessionId}`;

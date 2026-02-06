@@ -6,6 +6,7 @@ const insertReturningQueue: any[] = [];
 const updateReturningQueue: any[] = [];
 const deleteReturningQueue: any[] = [];
 let lastUpdatePatch: any | null = null;
+const generateSkillFromPromptMock = vi.fn();
 
 const dbMock = {
   select: vi.fn(),
@@ -33,7 +34,11 @@ const dbMock = {
 };
 
 vi.mock("../db", () => ({ db: dbMock }));
-vi.mock("../lib/anonUserHelper", () => ({ getOrCreateSecureUserId: () => "user_test" }));
+vi.mock("../lib/anonUserHelper", () => ({
+  getOrCreateSecureUserId: () => "user_test",
+  getSecureUserId: () => "user_test",
+}));
+vi.mock("../services/skillGenerator", () => ({ generateSkillFromPrompt: generateSkillFromPromptMock }));
 
 async function createTestApp() {
   const { createSkillsRouter } = await import("../routes/skillsRouter");
@@ -200,7 +205,7 @@ describe("skillsRouter", () => {
     expect(res.body.error).toBe("Skill not found");
   });
 
-  it("POST /api/skills/import skips duplicate names (case-insensitive)", async () => {
+	it("POST /api/skills/import skips duplicate names (case-insensitive)", async () => {
     dbMock.select.mockImplementationOnce(() => ({
       from: () => ({
         where: async () => [{ name: "dup" }],
@@ -235,6 +240,84 @@ describe("skillsRouter", () => {
     expect(res.status).toBe(200);
     expect(res.body.imported).toHaveLength(1);
     expect(res.body.imported[0].name).toBe("New");
-    expect(res.body.skipped).toBe(1);
-  });
+		expect(res.body.skipped).toBe(1);
+	});
+
+	it("POST /api/skills/ensure returns existing skill by name (case-insensitive)", async () => {
+		const existingRow = {
+			id: "skill_exist",
+			userId: "user_test",
+			name: "Mi Skill",
+			description: "Desc",
+			instructions: "Instr",
+			category: "custom",
+			enabled: true,
+			features: [],
+			triggers: [],
+			createdAt: new Date("2024-01-01T00:00:00.000Z"),
+			updatedAt: new Date("2024-01-02T00:00:00.000Z"),
+		};
+
+		dbMock.select.mockImplementationOnce(() => ({
+			from: () => ({
+				where: () => ({
+					limit: async () => [existingRow],
+				}),
+			}),
+		}));
+
+		const app = await createTestApp();
+		const res = await request(app)
+			.post("/api/skills/ensure")
+			.send({ name: "mi skill", prompt: "haz algo" });
+
+		expect(res.status).toBe(200);
+		expect(res.body.created).toBe(false);
+		expect(res.body.skill?.id).toBe("skill_exist");
+		expect(generateSkillFromPromptMock).not.toHaveBeenCalled();
+	});
+
+	it("POST /api/skills/ensure creates skill when missing", async () => {
+		dbMock.select.mockImplementationOnce(() => ({
+			from: () => ({
+				where: () => ({
+					limit: async () => [],
+				}),
+			}),
+		}));
+
+		generateSkillFromPromptMock.mockResolvedValueOnce({
+			name: "Gen",
+			description: "Desc",
+			instructions: "Instr",
+			category: "custom",
+			features: [],
+			triggers: [],
+		});
+
+		const createdRow = {
+			id: "skill_created",
+			userId: "user_test",
+			name: "Mi Skill",
+			description: "Desc",
+			instructions: "Instr",
+			category: "custom",
+			enabled: true,
+			features: [],
+			triggers: [],
+			createdAt: new Date("2024-01-01T00:00:00.000Z"),
+			updatedAt: new Date("2024-01-02T00:00:00.000Z"),
+		};
+		insertReturningQueue.push([createdRow]);
+
+		const app = await createTestApp();
+		const res = await request(app)
+			.post("/api/skills/ensure")
+			.send({ name: "Mi Skill", prompt: "haz algo" });
+
+		expect(res.status).toBe(201);
+		expect(res.body.created).toBe(true);
+		expect(res.body.skill?.id).toBe("skill_created");
+		expect(generateSkillFromPromptMock).toHaveBeenCalledTimes(1);
+	});
 });

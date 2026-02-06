@@ -18,6 +18,7 @@ export interface UserSkill {
 
 type UserSkillUpsert = Omit<UserSkill, "id" | "createdAt" | "updatedAt" | "builtIn">;
 type UserSkillPatch = Partial<UserSkillUpsert>;
+type EnsureSkillParams = { name?: string; prompt: string };
 
 const STORAGE_KEY = "sira-user-skills";
 const QUERY_KEY = ["user-skills"];
@@ -229,6 +230,36 @@ export function useUserSkills() {
     await updateMutation.mutateAsync({ id, patch });
   }, [updateMutation]);
 
+  const ensureMutation = useMutation({
+    mutationFn: async (params: EnsureSkillParams): Promise<UserSkill> => {
+      const res = await apiFetch("/api/skills/ensure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || `Error ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      const ensured = coerceSkill(data?.skill);
+      if (!ensured) throw new Error("Respuesta inválida del servidor");
+      return ensured;
+    },
+    onSuccess: (ensured) => {
+      queryClient.setQueryData<UserSkill[]>(QUERY_KEY, (prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const next = [ensured, ...list.filter((s) => s.id !== ensured.id)];
+        saveLocalSkills(next);
+        return next;
+      });
+    },
+  });
+
+  const ensureSkill = useCallback(async (params: EnsureSkillParams) => {
+    return await ensureMutation.mutateAsync(params);
+  }, [ensureMutation]);
+
   const deleteSkill = useCallback(async (id: string) => {
     await deleteMutation.mutateAsync(id);
   }, [deleteMutation]);
@@ -269,6 +300,7 @@ export function useUserSkills() {
     skills: query.data || [],
     isLoading: query.isLoading,
     createSkill,
+    ensureSkill,
     updateSkill,
     deleteSkill,
     toggleSkill,

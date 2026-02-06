@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { customSkills, users } from "@shared/schema";
 import { generateSkillFromPrompt } from "../services/skillGenerator";
@@ -8,6 +8,13 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createCustomRateLimiter } from "../middleware/userRateLimiter";
 
 const generateSchema = z.object({
+  prompt: z.string().min(1).max(2000),
+});
+
+const ensureSchema = z.object({
+  // Optional user-provided name (e.g., invoked via "@{My Skill} ...").
+  name: z.string().min(1).max(64).optional(),
+  // The prompt describing what the skill should do.
   prompt: z.string().min(1).max(2000),
 });
 
@@ -89,6 +96,10 @@ function toClientSkill(row: any) {
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt || new Date().toISOString()),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt || new Date().toISOString()),
   };
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 async function ensureUserRowExists(userId: string): Promise<void> {
@@ -387,6 +398,71 @@ export function createSkillsRouter(): Router {
       });
     } catch (error: any) {
       console.error("[SkillsRouter] import error:", error);
+      return res.status(503).json({ error: "Database unavailable" });
+    }
+  });
+
+  // POST /api/skills/ensure
+  // Ensure a skill exists (by name, if provided). If it doesn't, generate + create it.
+  //
+  // This enables single-prompt flows like:
+  // "@{Mi Skill} haz X..." when "Mi Skill" doesn't exist yet.
+  router.post("/ensure", generateSkillRateLimiter, async (req, res) => {
+    const parsed = ensureSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid request",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const userId = getOrCreateSecureUserId(req);
+    await ensureUserRowExists(userId);
+
+    const desiredName = typeof parsed.data.name === "string" ? parsed.data.name.trim() : "";
+    const prompt = parsed.data.prompt.trim();
+
+    try {
+      if (desiredName) {
+        const existing = await db
+          .select()
+          .from(customSkills)
+          .where(and(
+            eq(customSkills.userId, userId),
+            sql`lower(trim(${customSkills.name})) = ${normalizeName(desiredName)}`
+          ))
+          .limit(1);
+
+        if (existing[0]) {
+          return res.json({ skill: toClientSkill(existing[0]), created: false });
+        }
+      }
+
+      const generationPrompt = desiredName
+        ? `IMPORTANTE: El nombre del skill debe ser EXACTAMENTE: "${desiredName}".\n\n${prompt}`
+        : prompt;
+
+      const generated = await generateSkillFromPrompt(generationPrompt, { userId });
+      const name = desiredName || generated.name;
+
+      const [created] = await db
+        .insert(customSkills)
+        .values({
+          userId,
+          name,
+          description: generated.description,
+          instructions: generated.instructions,
+          category: generated.category,
+          enabled: true,
+          features: generated.features,
+          triggers: triggersToDb(generated.triggers),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      return res.status(201).json({ skill: toClientSkill(created), created: true });
+    } catch (error: any) {
+      console.error("[SkillsRouter] ensure error:", error);
       return res.status(503).json({ error: "Database unavailable" });
     }
   });
