@@ -49,8 +49,20 @@ export interface ToolContext {
   /**
    * Optional streaming hook for long-running tools (e.g. shell_command).
    * The callback MUST be best-effort (never throw); the tool will ignore failures.
+   * Consumers should not assume chunk boundaries align with lines.
    */
   onStream?: (evt: { stream: "stdout" | "stderr"; chunk: string }) => void;
+
+  /**
+   * Optional hook invoked once when a tool-backed process exits.
+   * Best-effort: errors are ignored by the tool.
+   */
+  onExit?: (evt: {
+    exitCode: number;
+    signal: string | null;
+    wasKilled: boolean;
+    durationMs: number;
+  }) => void;
 }
 
 export interface ToolArtifact {
@@ -1189,6 +1201,17 @@ const shellCommandTool: ToolDefinition = {
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
         const exitCode = typeof code === "number" ? code : signal ? 1 : 0;
+
+        try {
+          context.onExit?.({
+            exitCode,
+            signal: signal ? String(signal) : null,
+            wasKilled: killed,
+            durationMs: Date.now() - startTime,
+          });
+        } catch {
+          // ignore
+        }
 
         if (killed) {
           return resolve({
