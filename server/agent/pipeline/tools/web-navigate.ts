@@ -1,0 +1,190 @@
+import { ToolDefinition, ExecutionContext, ToolResult, Artifact } from "../types";
+import { browserSessionManager } from "../../browser";
+import { extractWithReadability } from "../../extractor";
+import { ObjectStorageService } from "../../../objectStorage";
+import crypto from "crypto";
+import { storage } from "../../../storage";
+
+const objectStorage = new ObjectStorageService();
+
+export const webNavigateTool: ToolDefinition = {
+  id: "web_navigate",
+  name: "Navigate Web Page",
+  description: "Navigate to a URL and capture the page content, optionally taking a screenshot",
+  category: "web",
+  capabilities: ["navigate", "browse", "fetch", "url", "website", "webpage"],
+  inputSchema: {
+    url: { type: "string", description: "The URL to navigate to", required: true },
+    takeScreenshot: { type: "boolean", description: "Whether to capture a screenshot", default: true },
+    waitForSelector: { type: "string", description: "CSS selector to wait for before capturing" },
+    timeout: { type: "number", description: "Navigation timeout in ms", default: 30000 }
+  },
+  outputSchema: {
+    html: { type: "string", description: "The page HTML content" },
+    title: { type: "string", description: "The page title" },
+    url: { type: "string", description: "The final URL after any redirects" },
+    screenshot: { type: "string", description: "Path to the screenshot if taken" }
+  },
+  timeout: 60000,
+  
+  async execute(context: ExecutionContext, params: Record<string, any>): Promise<ToolResult> {
+    const { url, takeScreenshot = true, waitForSelector, timeout = 30000 } = params;
+    
+    console.log("WEB_NAVIGATE: Starting with URL:", url);
+
+    // Privacy gate: remote browser requires explicit consent.
+    if (context.userId) {
+      const settings = await storage.getUserSettings(context.userId);
+      const allowed = settings?.privacySettings?.remoteBrowserDataAccess === true;
+      if (!allowed) {
+        return {
+          success: false,
+          error: "Remote browser data access is disabled. Enable it in Privacy settings to use web navigation.",
+        };
+      }
+    }
+    
+    let sessionId: string | null = null;
+    const artifacts: Artifact[] = [];
+    
+    try {
+      console.log("WEB_NAVIGATE: Creating browser session...");
+      sessionId = await browserSessionManager.createSession(
+        `Navigate to ${url}`,
+        { timeout },
+        undefined
+      );
+      console.log("WEB_NAVIGATE: Session created:", sessionId);
+      
+      browserSessionManager.startScreenshotStreaming(sessionId, 1500);
+      console.log("WEB_NAVIGATE: Screenshot streaming started");
+      
+      context.onProgress({
+        runId: context.runId,
+        stepId: `nav_${context.stepIndex}`,
+        status: "progress",
+        message: `Navigating to ${url}...`,
+        progress: 30,
+        detail: { browserSessionId: sessionId, url }
+      });
+      
+      const result = await browserSessionManager.navigate(sessionId, url);
+      
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error || "Navigation failed"
+        };
+      }
+
+      if (waitForSelector) {
+        const waitScript = `
+          new Promise((resolve, reject) => {
+            const selector = ${JSON.stringify(waitForSelector)};
+            const timeout = ${Math.min(timeout, 10000)};
+            const start = Date.now();
+            const check = () => {
+              if (document.querySelector(selector)) {
+                resolve(true);
+              } else if (Date.now() - start > timeout) {
+                resolve(false);
+              } else {
+                requestAnimationFrame(check);
+              }
+            };
+            check();
+          })
+        `;
+        await browserSessionManager.evaluate(sessionId, waitScript);
+      }
+
+      if (takeScreenshot && result.screenshot) {
+        try {
+          const screenshotBuffer = Buffer.from(result.screenshot.replace(/^data:image\/png;base64,/, ""), "base64");
+          const { uploadURL, storagePath } = await objectStorage.getObjectEntityUploadURLWithPath();
+          await fetch(uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": "image/png" },
+            body: screenshotBuffer
+          });
+          
+          artifacts.push({
+            id: crypto.randomUUID(),
+            type: "screenshot",
+            name: `screenshot_${new URL(url).hostname}.png`,
+            storagePath,
+            mimeType: "image/png",
+            metadata: { url, title: result.data?.title }
+          });
+        } catch (e) {
+          console.error("Failed to save screenshot:", e);
+        }
+      }
+
+      const pageState = await browserSessionManager.getPageState(sessionId);
+      
+      let extractedContent: any = null;
+      if (pageState?.visibleText) {
+        extractedContent = {
+          textContent: pageState.visibleText,
+          title: pageState.title,
+          links: pageState.links
+        };
+        
+        artifacts.push({
+          id: crypto.randomUUID(),
+          type: "text",
+          name: `content_${new URL(url).hostname}.txt`,
+          content: pageState.visibleText.slice(0, 50000),
+          metadata: {
+            title: pageState.title,
+            linksCount: pageState.links?.length || 0
+          }
+        });
+      }
+
+      const finalUrl = result.data?.url || url;
+      const finalTitle = result.data?.title || pageState?.title;
+      const domain = new URL(finalUrl).hostname;
+      const webSources = [{
+        url: finalUrl,
+        title: finalTitle || domain,
+        domain: domain,
+        favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+        snippet: extractedContent?.textContent?.slice(0, 200) || ""
+      }];
+
+      return {
+        success: true,
+        data: {
+          url: finalUrl,
+          title: finalTitle,
+          textContent: extractedContent?.textContent?.slice(0, 50000),
+          links: extractedContent?.links?.slice(0, 50),
+          duration: result.duration,
+          webSources
+        },
+        artifacts,
+        metadata: {
+          finalUrl,
+          title: finalTitle,
+          duration: result.duration
+        }
+      };
+    } catch (error: any) {
+      console.error("WEB_NAVIGATE: Error:", error.message, error.stack);
+      return {
+        success: false,
+        error: error.message
+      };
+    } finally {
+      if (sessionId) {
+        browserSessionManager.stopScreenshotStreaming(sessionId);
+        // Delay closing to allow frontend to receive final screenshot
+        setTimeout(async () => {
+          await browserSessionManager.closeSession(sessionId!).catch(() => {});
+        }, 5000);
+      }
+    }
+  }
+};

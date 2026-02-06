@@ -1,0 +1,326 @@
+import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  Brain,
+  CheckCircle2,
+  Clock,
+  Code,
+  Crown,
+  FileText,
+  Image,
+  Infinity,
+  Loader2,
+  MessageSquare,
+  Rocket,
+  Shield,
+  Sparkles,
+  Star,
+  Target,
+  Users,
+  Video,
+  Zap,
+} from "lucide-react";
+
+type PlanTab = "personal" | "empresa";
+
+type ButtonVariant = "default" | "outline" | "secondary" | "ghost" | "destructive" | null | undefined;
+
+type PlanFeature = {
+  icon: React.ComponentType<{ className?: string }>;
+  text: string;
+};
+
+type PlanCard = {
+  name: string;
+  price: number;
+  description: string;
+  buttonText: string;
+  buttonVariant: ButtonVariant;
+  badge?: string;
+  highlight?: boolean;
+  isCurrentPlan?: boolean;
+  /** optional custom button class, used for the Go plan */
+  buttonColor?: string;
+  footerNote?: string;
+  features: PlanFeature[];
+};
+
+const PERSONAL_PLANS: PlanCard[] = [
+  {
+    name: "Gratis",
+    price: 0,
+    description: "Mira lo que la IA puede hacer",
+    buttonText: "Empezar",
+    buttonVariant: "outline",
+    features: [
+      { icon: Sparkles, text: "Obtén explicaciones sencillas" },
+      { icon: MessageSquare, text: "Mantén chats breves para preguntas frecuentes" },
+      { icon: Image, text: "Prueba la generación de imágenes" },
+      { icon: Brain, text: "Guardar memoria y contexto limitados" },
+    ],
+  },
+  {
+    name: "Go",
+    price: 5,
+    badge: "NUEVO",
+    description: "Logra más con una IA más avanzada",
+    buttonText: "Mejorar el plan a Go",
+    buttonVariant: "default",
+    buttonColor: "bg-purple-600 hover:bg-purple-700",
+    highlight: true,
+    features: [
+      { icon: Target, text: "Explora a fondo preguntas más complejas" },
+      { icon: Clock, text: "Chatea más tiempo y carga más contenido" },
+      { icon: Image, text: "Crea imágenes realistas para tus proyectos" },
+      { icon: Brain, text: "Almacena más contexto y obtén respuestas más inteligentes" },
+      { icon: Zap, text: "Obtén ayuda con la planificación y las tareas" },
+      { icon: Star, text: "Explora proyectos, tareas y GPT personalizados" },
+    ],
+    footerNote: "Solo disponible en algunas regiones. Se aplican límites",
+  },
+  {
+    name: "Plus",
+    price: 10,
+    description: "Descubre toda la experiencia",
+    buttonText: "Obtener Plus",
+    buttonVariant: "default",
+    features: [
+      { icon: Sparkles, text: "Resuelve problemas complejos" },
+      { icon: MessageSquare, text: "Ten largas charlas en varias sesiones" },
+      { icon: Image, text: "Cree más imágenes, más rápido" },
+      { icon: Brain, text: "Recuerda objetivos y conversaciones pasadas" },
+      { icon: Target, text: "Planifica viajes y tareas con el modo Agente" },
+      { icon: FileText, text: "Organiza proyectos y GPT personalizados" },
+      { icon: Video, text: "Produce y comparte videos en Sora" },
+      { icon: Code, text: "Escribe código y crea aplicaciones con Codex" },
+    ],
+    footerNote: "Se aplican límites",
+  },
+  {
+    name: "Pro",
+    price: 200,
+    description: "Maximiza tu productividad",
+    buttonText: "Obtener Pro",
+    buttonVariant: "default",
+    features: [
+      { icon: Star, text: "Domina tareas y temas avanzados" },
+      { icon: Infinity, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
+      { icon: Image, text: "Crea imágenes de alta calidad a cualquier escala" },
+      { icon: Brain, text: "Mantén todo el contexto con la memoria máxima" },
+      { icon: Zap, text: "Ejecuta investigaciones y planifica tareas con agentes" },
+      { icon: Target, text: "Adapta tus proyectos y automatiza flujos de trabajo" },
+      { icon: Video, text: "Supera tus límites con la creación de videos en Sora" },
+      { icon: Code, text: "Implementa código más rápido con Codex" },
+      { icon: Star, text: "Obtén acceso anticipado a características experimentales" },
+    ],
+    footerNote: "Ilimitado, sujeto a medidas de protección contra abusos. Obtener más información",
+  },
+];
+
+const EMPRESA_PLANS: PlanCard[] = [
+  {
+    name: "Gratis",
+    price: 0,
+    description: "Mira lo que la IA puede hacer",
+    buttonText: "Empezar",
+    buttonVariant: "outline",
+    features: [
+      { icon: Sparkles, text: "Obtén explicaciones sencillas" },
+      { icon: MessageSquare, text: "Mantén chats breves para preguntas frecuentes" },
+      { icon: Image, text: "Prueba la generación de imágenes" },
+      { icon: Brain, text: "Guardar memoria y contexto limitados" },
+    ],
+  },
+  {
+    name: "Business",
+    price: 25,
+    badge: "RECOMENDADO",
+    description: "Mejora la productividad con la IA para equipos",
+    buttonText: "Obtener Business",
+    buttonVariant: "default",
+    highlight: true,
+    features: [
+      { icon: CheckCircle2, text: "Realiza un análisis profesional" },
+      { icon: Infinity, text: "Obtén mensajes ilimitados con GPT-5" },
+      { icon: Image, text: "Produce imágenes, videos, presentaciones y más" },
+      { icon: Shield, text: "Protege tu espacio con SSO, MFA y más" },
+      { icon: Shield, text: "Protege la privacidad; los datos nunca se usan para fines de entrenamiento" },
+      { icon: Users, text: "Comparte proyectos y GPT personalizados" },
+      { icon: FileText, text: "Se integra con SharePoint y otras herramientas" },
+      { icon: Target, text: "Simplifica la facturación y administración de usuarios" },
+      { icon: MessageSquare, text: "Captura notas de reuniones con transcripción" },
+    ],
+  },
+];
+
+export function PricingPlansSection(props: {
+  /** If true, shows tab switcher (Personal/Empresa). Defaults true. */
+  showTabs?: boolean;
+  /** Called when user clicks a plan CTA. */
+  onSelectPlan: (planName: string, tab: PlanTab) => void;
+  /** Provide current plan name to disable its CTA and show "Tu plan actual". */
+  currentPlanName?: string;
+  /** External loading state by plan name (lowercase). */
+  loadingPlanName?: string | null;
+  /** Override initial tab */
+  defaultTab?: PlanTab;
+}) {
+  const {
+    showTabs = true,
+    onSelectPlan,
+    currentPlanName,
+    loadingPlanName = null,
+    defaultTab = "personal",
+  } = props;
+
+  const [activeTab, setActiveTab] = useState<PlanTab>(defaultTab);
+
+  const plans = useMemo(() => {
+    return activeTab === "personal" ? PERSONAL_PLANS : EMPRESA_PLANS;
+  }, [activeTab]);
+
+  const normalizedCurrent = (currentPlanName || "").toLowerCase();
+
+  return (
+    <div>
+      {showTabs && (
+        <div className="flex justify-center mt-4">
+          <div className="inline-flex bg-muted rounded-full p-1">
+            <button
+              className={cn(
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
+                activeTab === "personal" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("personal")}
+              data-testid="tab-personal"
+              type="button"
+            >
+              Personal
+            </button>
+            <button
+              className={cn(
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
+                activeTab === "empresa" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("empresa")}
+              data-testid="tab-empresa"
+              type="button"
+            >
+              Empresa
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="p-6">
+        <div
+          className={cn(
+            "grid gap-4",
+            activeTab === "personal" ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-4" : "grid-cols-1 md:grid-cols-2",
+          )}
+        >
+          {plans.map((plan) => {
+            const planKey = plan.name.toLowerCase();
+            const isCurrent = normalizedCurrent && planKey === normalizedCurrent;
+            const isLoading = loadingPlanName === planKey;
+
+            return (
+              <div
+                key={`${activeTab}:${plan.name}`}
+                className={cn(
+                  // Pricing page uses a dark/gradient background even when the browser/theme is light.
+                  // Keep a subtle glass surface but force readable (light) text without making the card bright.
+                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/5 text-white border-white/10",
+                  plan.highlight && "border-primary/50 shadow-lg",
+                )}
+                data-testid={`plan-card-${plan.name.toLowerCase()}`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-xl font-semibold">{plan.name}</h3>
+                  {plan.badge && (
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "text-xs",
+                        plan.badge === "NUEVO" && "bg-green-500/15 text-green-300",
+                        plan.badge === "RECOMENDADO" && "bg-primary/20 text-primary",
+                      )}
+                      data-testid="badge-secondary"
+                    >
+                      {plan.badge}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="flex items-baseline gap-0.5 mb-2">
+                  <span className="text-sm">$</span>
+                  <span className="text-4xl font-bold">{plan.price}</span>
+                  <span className="text-sm text-white/70">USD / mes</span>
+                </div>
+
+                <p className="text-sm text-white/70 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                  {plan.description}
+                </p>
+
+                <Button
+                  variant={plan.buttonVariant}
+                  className={cn(
+                    "w-full mb-6",
+                    plan.buttonColor ? plan.buttonColor : plan.highlight && "bg-primary hover:bg-primary/90",
+                  )}
+                  disabled={isCurrent || isLoading}
+                  onClick={() => !isCurrent && onSelectPlan(plan.name, activeTab)}
+                  data-testid={`button-${plan.name.toLowerCase()}`}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Procesando...
+                    </>
+                  ) : isCurrent ? (
+                    "Tu plan actual"
+                  ) : (
+                    plan.buttonText
+                  )}
+                </Button>
+
+                <div className="space-y-3 flex-1">
+                  {plan.features.map((feature, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-sm">
+                      <feature.icon className="h-4 w-4 mt-0.5 text-white/60 flex-shrink-0" />
+                      <span className="text-white/85">{feature.text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {plan.footerNote && (
+                  <p className="text-xs text-white/60 mt-4 pt-4 border-t border-white/10">
+                    {plan.footerNote.includes("Obtener más información") ? (
+                      <>
+                        {plan.footerNote.replace("Obtener más información", "")}
+                        <button type="button" className="underline hover:text-foreground">
+                          Obtener más información
+                        </button>
+                      </>
+                    ) : plan.footerNote.includes("Se aplican límites") ? (
+                      <>
+                        {plan.footerNote.replace("Se aplican límites", "")}
+                        <button type="button" className="underline hover:text-foreground">
+                          Se aplican límites
+                        </button>
+                      </>
+                    ) : (
+                      plan.footerNote
+                    )}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
