@@ -38,3 +38,15 @@ WHERE NOT EXISTS (
   WHERE m."provider" = v."provider" AND m."model_id" = v."model_id"
 );
 
+-- Ensure stable ordering even if rows already existed (e.g., previously inserted with display_order=0)
+UPDATE "ai_models"
+SET "display_order" = CASE "model_id"
+  WHEN 'gemini-2.5-flash' THEN 10
+  WHEN 'gemini-2.5-pro' THEN 20
+  WHEN 'gemini-3-flash-preview' THEN 30
+  WHEN 'gemini-2.0-flash' THEN 40
+  ELSE "display_order"
+END
+WHERE "provider" = 'google'
+  AND "model_id" IN ('gemini-2.5-flash','gemini-2.5-pro','gemini-3-flash-preview','gemini-2.0-flash')
+  AND ("display_order" IS NULL OR "display_order" = 0);
