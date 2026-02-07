@@ -70,13 +70,12 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-fuchsia-200/40 bg-white/80 backdrop-blur-md">
         <div className="flex items-center gap-2">
-          {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 md:hidden"
+            className="rounded-full text-zinc-700 hover:text-fuchsia-700 hover:bg-fuchsia-50 md:hidden"
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
             aria-expanded={mobileMenuOpen}
@@ -85,25 +84,23 @@ export default function LandingPage() {
             <Menu className="h-5 w-5" />
           </Button>
 
-
           <IliaGPTLogo size={32} className="shadow-sm" />
           <span className="font-semibold tracking-wide text-luxe text-luxe-sm" data-text="ILIAGPT">ILIAGPT</span>
-          <ChevronDown className="h-4 w-4 text-zinc-500" />
+          <ChevronDown className="h-4 w-4 text-zinc-400" />
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-amber-700 hover:text-amber-600 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
+          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Aprender</span>
+          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="text-fuchsia-600 hover:text-fuchsia-500 font-medium transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
-          {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
-            className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.20)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -111,13 +108,13 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-black/20 text-zinc-900 hover:bg-black/5 hover:border-amber-400/60 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-fuchsia-300/50 text-zinc-900 hover:bg-fuchsia-50 hover:border-fuchsia-400/70 transition-all duration-300"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
             Suscríbete gratis
           </Button>
-          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-600 hover:text-zinc-900 hover:bg-black/5">
+          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-500 hover:text-fuchsia-600 hover:bg-fuchsia-50">
             <HelpCircle className="h-5 w-5" />
           </Button>
         </div>
@@ -131,10 +128,10 @@ export default function LandingPage() {
         }
         aria-hidden={!mobileMenuOpen}
       >
-        {/* Scrim blocks interactions with the page, but starts below the header so the hamburger stays clickable */}
+        {/* Scrim */}
         <div
           className={
-            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/50 transition-opacity duration-200 " +
+            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/40 transition-opacity duration-200 " +
             (mobileMenuOpen ? "opacity-100" : "opacity-0")
           }
         />
@@ -142,7 +139,7 @@ export default function LandingPage() {
         {/* Drawer */}
         <div
           className={
-            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white/90 backdrop-blur-xl shadow-2xl " +
+            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-fuchsia-200/30 bg-white/95 backdrop-blur-xl shadow-2xl " +
             "transition-transform duration-200 ease-out " +
             (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
           }
@@ -165,8 +162,8 @@ export default function LandingPage() {
                 className={
                   "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
                   (item.label === "Imágenes"
-                    ? "text-amber-700 hover:text-amber-600 hover:bg-black/5"
-                    : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
+                    ? "text-fuchsia-600 hover:text-fuchsia-500 hover:bg-fuchsia-50 font-medium"
+                    : "text-zinc-800 hover:text-fuchsia-700 hover:bg-fuchsia-50")
                 }
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -203,13 +200,13 @@ export default function LandingPage() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400 
+                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400
                     focus-visible:ring-0 focus-visible:ring-offset-0"
                   data-testid="input-landing-search"
                 />
               </div>
-              {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-amber-200/60 via-yellow-100/50 to-amber-200/60 blur-xl opacity-70" />
+              {/* Subtle fuchsia glow effect */}
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-300/40 via-purple-200/30 to-fuchsia-300/40 blur-xl opacity-70" />
             </div>
 
             {/* Feature Buttons */}
@@ -218,9 +215,9 @@ export default function LandingPage() {
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-black/10 bg-white/70 text-zinc-900
-                    hover:bg-white hover:border-amber-300/60 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg fade-in-up`}
+                  className={`rounded-full gap-2 text-sm border-fuchsia-200/40 bg-white/70 text-zinc-800
+                    hover:bg-fuchsia-50 hover:border-fuchsia-400/50 hover:text-fuchsia-700 transition-all duration-300
+                    hover:scale-105 hover:shadow-lg hover:shadow-fuchsia-200/30 fade-in-up`}
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
@@ -238,7 +235,7 @@ export default function LandingPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full"
+                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded-full"
                 onClick={() => setShowPromo(false)}
                 data-testid="button-close-promo"
               >
@@ -248,15 +245,15 @@ export default function LandingPage() {
               <div className="flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-5 w-5 text-amber-400" />
-                    <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Nuevo</span>
+                    <Sparkles className="h-5 w-5 text-fuchsia-500" />
+                    <span className="text-xs font-medium text-fuchsia-500 uppercase tracking-wider">Nuevo</span>
                   </div>
                   <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
                   <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
                     ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
                   </p>
                   <Button
-                    className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300"
+                    className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.20)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >
@@ -268,23 +265,23 @@ export default function LandingPage() {
                 {/* Style Cards */}
                 <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:items-center md:gap-4">
                   {[
-                    { emoji: "🎨", label: "Boceto", gradient: "from-amber-500/30 to-orange-500/30" },
-                    { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/30 to-green-500/30" },
-                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/30 to-violet-500/30" },
-                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-500/30 to-rose-500/30" },
+                    { emoji: "🎨", label: "Boceto", gradient: "from-fuchsia-500/25 to-pink-500/25" },
+                    { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/25 to-teal-500/25" },
+                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/25 to-violet-500/25" },
+                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-400/25 to-rose-400/25" },
                   ].map((style) => (
                     <div
                       key={style.label}
                       className="flex flex-col items-center gap-2 min-w-[70px] cursor-pointer group"
                       onClick={() => setLocation("/login")}
                     >
-                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
-                        flex items-center justify-center border border-black/10
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-amber-400/60
-                        group-hover:shadow-lg`}>
+                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient}
+                        flex items-center justify-center border border-fuchsia-200/30
+                        transition-all duration-300 group-hover:scale-105 group-hover:border-fuchsia-400/50
+                        group-hover:shadow-lg group-hover:shadow-fuchsia-200/20`}>
                         <span className="text-2xl">{style.emoji}</span>
                       </div>
-                      <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
+                      <span className="text-xs text-zinc-600 group-hover:text-fuchsia-600 transition-colors">{style.label}</span>
                     </div>
                   ))}
                 </div>
@@ -293,17 +290,17 @@ export default function LandingPage() {
           )}
 
           {/* Trust Indicators */}
-          <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm fade-in-up fade-in-up-delay-4">
+          <div className="flex items-center justify-center gap-8 text-zinc-400 text-sm fade-in-up fade-in-up-delay-4">
             <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4" />
+              <Shield className="h-4 w-4 text-fuchsia-400" />
               <span>Seguro y privado</span>
             </div>
             <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4" />
+              <Globe className="h-4 w-4 text-purple-400" />
               <span>Disponible 24/7</span>
             </div>
             <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4" />
+              <Zap className="h-4 w-4 text-fuchsia-400" />
               <span>Respuestas instantáneas</span>
             </div>
           </div>
@@ -311,11 +308,11 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white/70 backdrop-blur-md">
+      <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-fuchsia-200/30 bg-white/80 backdrop-blur-md">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
+        <Link href="/terms" className="text-fuchsia-600 hover:text-fuchsia-500 underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
-        <Link href="/privacy-policy" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Política de privacidad</Link>.
+        <Link href="/privacy-policy" className="text-fuchsia-600 hover:text-fuchsia-500 underline transition-colors">Política de privacidad</Link>.
       </footer>
     </div>
   );
