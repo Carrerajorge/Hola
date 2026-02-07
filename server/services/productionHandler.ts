@@ -15,6 +15,7 @@ import { storage } from "../storage";
 import { conversationStateService } from "./conversationStateService";
 import { documentIngestion } from "./documentIngestion";
 import { RequestBriefSchema, requestUnderstandingAgent, type RequestBrief } from "../agent/requestUnderstanding";
+import { requiresSearchFirst, wantsArtifactOutput } from "./productionRouting";
 import {
     startProductionPipeline,
     type ProductionEvent,
@@ -51,48 +52,6 @@ const PRODUCTION_INTENTS = [
     'CREATE_PRESENTATION',
     'CREATE_SPREADSHEET',
 ] as const;
-
-// Patterns that indicate user wants to SEARCH first, not just create a document
-const SEARCH_FIRST_PATTERNS = [
-    // "buscame X articulos/papers"
-    /buscame\s+\d+\s*(art[ií]culos?|papers?|estudios?|investigacion)/i,
-    /buscarme\s+\d+\s*(art[ií]culos?|papers?|estudios?|investigacion)/i,
-    /busca\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
-    /buscar\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
-    /encontrar\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
-    /dame\s+\d+\s*(art[ií]culos?|papers?|estudios?|citas?)/i,
-    /necesito\s+\d+\s*(art[ií]culos?|papers?|estudios?|referencias?)/i,
-    
-    // "articulos cientificos de/sobre"
-    /art[ií]culos?\s+cient[ií]ficos?\s+(de|sobre|en|d)\s*/i,
-    /busca.*art[ií]culos?\s+cient[ií]ficos?/i,
-    /buscame.*art[ií]culos?\s+cient[ií]ficos?/i,
-    
-    // Explicit search requests
-    /buscar?\s*(art[ií]culos?\s+)?cient[ií]ficos?\s+sobre/i,
-    /scholar\s+search/i,
-    /google\s+scholar/i,
-    /scopus/i,
-    /pubmed/i,
-    /scielo/i,
-];
-
-function requiresSearchFirst(message: string): boolean {
-    return SEARCH_FIRST_PATTERNS.some(pattern => pattern.test(message));
-}
-
-function wantsArtifactOutput(message: string): boolean {
-    const lower = message.toLowerCase();
-    // If user mentions any concrete output format/action, we should allow production pipeline.
-    return (
-        /\b(excel|xlsx|hoja\s+de\s+c[aá]lculo|spreadsheet)\b/i.test(message) ||
-        /\b(pptx?|powerpoint|presentaci[oó]n|diapositivas|slides?)\b/i.test(message) ||
-        /\b(word|docx|documento)\b/i.test(message) ||
-        /\bpdf\b/i.test(message) ||
-        /\b(exporta|exportar|genera|generar|crea|crear|haz|hacer|construye|prepara)\b/i.test(message) &&
-        /(excel|xlsx|ppt|pptx|powerpoint|word|docx|pdf)/i.test(message)
-    );
-}
 
 export function isProductionIntent(intentResult: IntentResult | null, message?: string): boolean {
     if (!intentResult) return false;
