@@ -9,39 +9,36 @@ export default function PricingPage() {
   // Plans are rendered via <PricingPlansSection /> to match the in-app upgrade dialog.
 
   return (
-    <div className="min-h-screen gradient-animated flex flex-col relative overflow-hidden">
-      {/* Floating Orbs */}
-      <div className="floating-orb floating-orb-1" />
-      <div className="floating-orb floating-orb-2" />
-      <div className="floating-orb floating-orb-3" />
-
+    <div className="min-h-screen marketing-force-light marketing-paper flex flex-col relative">
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-white/10 backdrop-blur-sm">
+      <header className="sticky top-0 z-20 flex items-center justify-between px-4 md:px-8 h-16 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <Link href="/welcome">
-          <Button variant="ghost" className="text-zinc-400 hover:text-white gap-2">
+          <Button variant="ghost" className="gap-2 text-muted-foreground hover:text-foreground hover:bg-accent/60">
             <ChevronLeft className="h-4 w-4" />
             Volver
           </Button>
         </Link>
-        <span className="font-semibold text-white">Precios</span>
+        <span className="font-medium tracking-tight text-foreground">Precios</span>
         <div className="w-20" />
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 flex flex-col items-center px-4 py-12 overflow-y-auto">
+      <main className="flex-1 flex flex-col items-center px-4 py-10 md:py-14">
         <div className="w-full max-w-6xl space-y-12">
-
           {/* Hero Section */}
           <section className="text-center fade-in-up">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-purple-300 mb-6">
-              <Sparkles className="h-3 w-3" />
-              <span>Planes flexibles</span>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-muted/50 border border-border text-xs font-medium text-foreground/80 mb-6">
+              <Sparkles className="h-3.5 w-3.5 text-future-accent" />
+              <span className="text-future-gradient">Planes flexibles</span>
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white leading-tight">
-              Elige tu <span className="text-gradient-premium">plan perfecto</span>
+            <h1 className="text-4xl md:text-6xl font-semibold mb-6 text-foreground leading-tight tracking-tight">
+              Elige tu{" "}
+              <span className="text-future-gradient">
+                plan perfecto
+              </span>
             </h1>
-            <p className="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-              Desde uso personal hasta soluciones empresariales. 
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+              Desde uso personal hasta soluciones empresariales.
               Comienza gratis, escala cuando lo necesites.
             </p>
           </section>
@@ -55,9 +52,11 @@ export default function PricingPage() {
           </div>
 
           {/* FAQ Section */}
-          <section className="glass-premium rounded-3xl p-8 md:p-12 fade-in-up fade-in-up-delay-2">
-            <h2 className="text-2xl font-bold text-white mb-6 text-center">Preguntas frecuentes</h2>
-            <div className="grid md:grid-cols-2 gap-6">
+          <section className="rounded-3xl border border-border bg-card p-8 md:p-12 fade-in-up fade-in-up-delay-2">
+            <h2 className="text-2xl font-semibold text-foreground mb-8 text-center tracking-tight">
+              Preguntas frecuentes
+            </h2>
+            <div className="grid md:grid-cols-2 gap-8">
               {[
                 { q: "¿Puedo cambiar de plan?", a: "Sí, puedes actualizar o degradar tu plan en cualquier momento desde tu configuración." },
                 { q: "¿Hay contratos?", a: "No, todos los planes son mensuales y puedes cancelar cuando quieras." },
@@ -65,8 +64,8 @@ export default function PricingPage() {
                 { q: "¿Ofrecen descuentos para estudiantes?", a: "Sí, 50% de descuento en Pro con verificación educativa." }
               ].map((faq, i) => (
                 <div key={i} className="space-y-2">
-                  <h4 className="font-medium text-white">{faq.q}</h4>
-                  <p className="text-sm text-zinc-400">{faq.a}</p>
+                  <h4 className="text-sm font-medium text-foreground">{faq.q}</h4>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{faq.a}</p>
                 </div>
               ))}
             </div>

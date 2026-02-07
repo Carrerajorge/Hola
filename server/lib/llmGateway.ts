@@ -454,6 +454,11 @@ class LLMGateway {
   }
 
   // ===== Provider Selection =====
+  private getXaiApiKey(): string | undefined {
+    // Legacy/alias support: some deployments use GROK_API_KEY or ILIAGPT_API_KEY.
+    return process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
+  }
+
   private getGeminiApiKey(): string | undefined {
     return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   }
@@ -461,7 +466,7 @@ class LLMGateway {
   private isProviderConfigured(provider: LLMProvider): boolean {
     switch (provider) {
       case "xai":
-        return Boolean(process.env.XAI_API_KEY && process.env.XAI_API_KEY.trim());
+        return Boolean(this.getXaiApiKey() && this.getXaiApiKey()!.trim());
       case "gemini":
         return Boolean(this.getGeminiApiKey() && this.getGeminiApiKey()!.trim());
       case "openai":
@@ -611,7 +616,7 @@ class LLMGateway {
     const configuredProviders = this.getConfiguredProvidersInOrder();
     if (configuredProviders.length === 0) {
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY, GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -732,7 +737,7 @@ class LLMGateway {
       if (!this.xaiClient) {
         this.xaiClient = new OpenAI({
           baseURL: "https://api.x.ai/v1",
-          apiKey: process.env.XAI_API_KEY || "missing",
+          apiKey: this.getXaiApiKey() || "missing",
         });
       }
       return this.xaiClient;
@@ -1176,7 +1181,7 @@ class LLMGateway {
     const configuredProviders = this.getConfiguredProvidersInOrder();
     if (configuredProviders.length === 0) {
       throw new Error(
-        "No LLM providers configured. Set at least one of: XAI_API_KEY, GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
+        "No LLM providers configured. Set at least one of: XAI_API_KEY (or GROK_API_KEY/ILIAGPT_API_KEY), GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY."
       );
     }
 
@@ -1562,12 +1567,13 @@ class LLMGateway {
     };
 
     // Test xAI with quick timeout
-    if (process.env.XAI_API_KEY) {
+    const xaiKey = this.getXaiApiKey();
+    if (xaiKey) {
       try {
         const start = Date.now();
         const client = new OpenAI({
           baseURL: "https://api.x.ai/v1",
-          apiKey: process.env.XAI_API_KEY || "missing",
+          apiKey: xaiKey || "missing",
           timeout: 5000,
         });
         await client.chat.completions.create({

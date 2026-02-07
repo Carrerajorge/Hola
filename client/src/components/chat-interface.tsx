@@ -120,6 +120,18 @@ import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import {
+  dataImageUrlToFile,
+  extractBareUrlsFromText,
+  extractFilesFromDataTransfer,
+  extractImageUrlsFromHtml,
+  extractLinkUrlsFromHtml,
+  extractUrlsFromUriList,
+  isDataImageUrl,
+  normalizeFileForUpload,
+  normalizeHttpUrl,
+  uniq,
+} from "@/lib/attachmentIngest";
 import { useChats } from "@/hooks/use-chats";
 import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
 import { useProjects } from "@/hooks/use-projects";
@@ -439,6 +451,8 @@ export function ChatInterface({
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -484,6 +498,10 @@ export function ChatInterface({
   const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -2143,12 +2161,27 @@ export function ChatInterface({
 
   const MAX_FILE_SIZE_MB = 100;
   const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+  const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
 
   const processFilesForUpload = async (files: File[]) => {
-    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
-    const invalidTypeFiles = files.filter(file =>
-      !ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")
-    );
+    const normalizedFiles = files.map(normalizeFileForUpload);
+
+    // De-dupe within the same ingest action to avoid accidental duplicates.
+    const seen = new Set<string>();
+    const dedupedFiles: File[] = [];
+    for (const f of normalizedFiles) {
+      const key = `${f.name}::${f.size}::${f.type || ""}::${(f as any).lastModified || 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedFiles.push(f);
+    }
+
+    const oversizedFiles = dedupedFiles.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+    const invalidTypeFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      if (t.startsWith("image/")) return false;
+      return !ALLOWED_TYPES.includes(t);
+    });
 
     if (oversizedFiles.length > 0) {
       const names = oversizedFiles.map(f => f.name).join(", ");
@@ -2169,10 +2202,11 @@ export function ChatInterface({
       });
     }
 
-    const validFiles = files.filter(file =>
-      (ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")) &&
-      file.size <= MAX_FILE_SIZE_BYTES
-    );
+    const validFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      const typeOk = t.startsWith("image/") || ALLOWED_TYPES.includes(t);
+      return typeOk && file.size <= MAX_FILE_SIZE_BYTES;
+    });
 
     if (validFiles.length === 0) return;
 
@@ -2186,7 +2220,7 @@ export function ChatInterface({
       ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
 
       let dataUrl: string | undefined;
-      if (isImage) {
+      if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
         dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -2328,17 +2362,18 @@ export function ChatInterface({
   };
 
   const pollFileStatusFast = async (fileId: string, trackingId: string) => {
-    const maxTime = 3000;
-    const pollInterval = 200;
+    const maxTime = 5000;
+    const pollInterval = 250;
     const startTime = Date.now();
 
     const checkStatus = async (): Promise<void> => {
+      const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+      if (!stillTracked) return;
+
       if (Date.now() - startTime > maxTime) {
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        // Fall back to slower polling. Do NOT mark as ready prematurely, as that
+        // causes "attached but empty" docs and broken analysis.
+        pollFileStatus(fileId, trackingId);
         return;
       }
 
@@ -2371,77 +2406,276 @@ export function ChatInterface({
         setTimeout(checkStatus, pollInterval);
       } catch (error) {
         console.error("Polling error:", error);
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        // Network hiccup: fall back to slower polling instead of lying about readiness.
+        pollFileStatus(fileId, trackingId);
       }
     };
 
     checkStatus();
   };
 
+  const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (blob.size > maxBytes) return null;
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Failed to read blob"));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const importUrlsForUpload = (urls: string[]) => {
+    const normalized = uniq(
+      urls
+        .map((u) => normalizeHttpUrl(u) || null)
+        .filter((u): u is string => !!u)
+    ).slice(0, 10);
+    if (normalized.length === 0) return;
+
+    for (const u of normalized) {
+      const trackingId = `temp-url-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const tempFile: UploadedFile = {
+        id: trackingId,
+        name: u,
+        type: "application/octet-stream",
+        mimeType: "application/octet-stream",
+        size: 0,
+        status: "uploading",
+      };
+
+      setUploadedFiles((prev: UploadedFile[]) => [...prev, tempFile]);
+
+      const doImport = async (): Promise<void> => {
+        const response = await fetch("/api/files/import-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: u }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || `No se pudo importar (${response.status})`);
+        }
+
+        const importedType: string = data.type || data.mimeType || "application/octet-stream";
+        const importedId: string | undefined = data.id;
+        const importedName: string = data.name || u;
+        const importedSize: number = typeof data.size === "number" ? data.size : 0;
+        const importedStoragePath: string | undefined = data.storagePath;
+        const importedStatus: string =
+          data.status || (importedType.startsWith("image/") ? "ready" : "processing");
+
+        // For images, generate a data URL from same-origin storage so vision works reliably.
+        let dataUrl: string | undefined;
+        if (importedType.startsWith("image/")) {
+          if (typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:")) {
+            dataUrl = data.dataUrl;
+          } else if (importedStoragePath) {
+            const preview = await fetchUrlAsDataUrl(importedStoragePath, 15 * 1024 * 1024);
+            if (preview) dataUrl = preview;
+          }
+        }
+
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => {
+            if (f.id !== trackingId) return f;
+            return {
+              ...f,
+              id: importedId || f.id,
+              name: importedName,
+              type: importedType,
+              mimeType: importedType,
+              size: importedSize || f.size,
+              storagePath: importedStoragePath,
+              status: importedStatus,
+              dataUrl: dataUrl || f.dataUrl,
+            };
+          })
+        );
+
+        if (!importedType.startsWith("image/") && importedId && importedStatus === "processing") {
+          pollFileStatusFast(importedId, trackingId);
+        }
+      };
+
+      const promise = doImport().catch((error: any) => {
+        console.error("URL import error:", error);
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => (f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+        toast({
+          title: "No se pudo importar el enlace",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      });
+
+      pendingUploadsRef.current.set(trackingId, promise);
+      promise.finally(() => {
+        pendingUploadsRef.current.delete(trackingId);
+      });
+    }
+  };
+
   const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+    const clipboard = e.clipboardData;
+    const items = clipboard?.items;
+    if (!clipboard) return;
 
     const filesToUpload: File[] = [];
 
-    for (const item of Array.from(items) as any[]) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) {
-          const mimeType = file.type || item.type || "image/png";
-          const ext = mimeType.split("/")[1] || "png";
-          const fileName = file.name && file.name !== "image.png" && file.name !== ""
-            ? file.name
-            : `pasted-${Date.now()}.${ext}`;
-          const renamedFile = new File([file], fileName, { type: mimeType });
-          filesToUpload.push(renamedFile);
-        }
+    const itemsArray = items ? (Array.from(items) as any[]) : [];
+    for (const item of itemsArray) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile?.();
+      if (!file) continue;
+
+      const originalName = (file.name || "").trim();
+      const declaredType = (file.type || item.type || "").trim();
+
+      const isGenericImageName = !originalName || originalName === "image.png" || originalName === "image.jpg";
+      const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+      const cleanedSubtype = subtype.split("+")[0].split(".")[0];
+      const safeExt = declaredType.startsWith("image/") ? (cleanedSubtype || "png") : "bin";
+      const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+
+      const normalized = normalizeFileForUpload(new File([file], fileName, { type: declaredType || file.type }));
+      filesToUpload.push(normalized);
+    }
+
+    // Some browsers expose pasted files via clipboardData.files instead of items.
+    if (clipboard.files && clipboard.files.length > 0) {
+      for (const f of Array.from(clipboard.files)) {
+        filesToUpload.push(normalizeFileForUpload(f));
       }
     }
 
     if (filesToUpload.length > 0) {
       e.preventDefault();
       await processFilesForUpload(filesToUpload);
+      return;
     }
+
+    // Smart paste: if the clipboard content is one or more bare URLs, import them as attachments.
+    const uriList = clipboard.getData("text/uri-list");
+    const html = clipboard.getData("text/html");
+    const text = clipboard.getData("text/plain");
+
+    // Support pasting base64-encoded images (data URLs).
+    if (isDataImageUrl(text)) {
+      const mimeMatch = text.match(/^data:([^;]+);base64,/i);
+      const mime = (mimeMatch?.[1] || "image/png").toLowerCase();
+      const ext =
+        mime === "image/jpeg" || mime === "image/jpg" ? "jpg" :
+          mime === "image/webp" ? "webp" :
+            mime === "image/gif" ? "gif" :
+              mime === "image/bmp" ? "bmp" :
+                mime === "image/tiff" ? "tiff" :
+                  mime === "image/svg+xml" ? "svg" :
+                    "png";
+      const f = dataImageUrlToFile(text, `pasted-${Date.now()}.${ext}`);
+      if (f) {
+        e.preventDefault();
+        await processFilesForUpload([normalizeFileForUpload(f)]);
+        return;
+      }
+    }
+
+    const urlsFromUriList = extractUrlsFromUriList(uriList);
+    const urlsFromBareText = extractBareUrlsFromText(text);
+
+    const urls = uniq([...urlsFromUriList, ...urlsFromBareText]);
+    if (urls.length > 0) {
+      e.preventDefault();
+      importUrlsForUpload(urls);
+      return;
+    }
+
+    // HTML-only: allow importing a single copied image (common in browsers), but avoid mass-importing links
+    // when pasting rich text.
+    const htmlImageUrls = extractImageUrlsFromHtml(html);
+    if (htmlImageUrls.length === 1) {
+      const normalizedText = normalizeHttpUrl(text);
+      if (!text.trim() || normalizedText === htmlImageUrls[0]) {
+        e.preventDefault();
+        importUrlsForUpload([htmlImageUrls[0]]);
+      }
+    }
+  };
+
+  const isFileOrUrlDragEvent = (dt: DataTransfer | null | undefined): boolean => {
+    if (!dt) return false;
+    const types = Array.from(dt.types || []);
+    if (types.includes("Files") || types.includes("application/x-moz-file")) return true;
+    if (types.includes("text/uri-list") || types.includes("text/html")) return true;
+    if (dt.items && Array.from(dt.items).some((it) => (it as any).kind === "file")) return true;
+    if (dt.files && dt.files.length > 0) return true;
+    return false;
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
-    e.stopPropagation();
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
-    e.stopPropagation();
     dragCounterRef.current++;
-    if (e.dataTransfer?.types?.includes("Files")) {
-      setIsDraggingOver(true);
-    }
+    setIsDraggingOver(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
+    if (!isDraggingOver) return;
     e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current--;
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
     if (dragCounterRef.current === 0) {
       setIsDraggingOver(false);
     }
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     dragCounterRef.current = 0;
     setIsDraggingOver(false);
 
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
+    const dt = e.dataTransfer;
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(dt);
+    if (!isFileOrUrlDrag) return;
 
-    await processFilesForUpload(Array.from(files));
+    e.preventDefault();
+
+    const droppedFiles = await extractFilesFromDataTransfer(dt, { maxFiles: 200 });
+    if (droppedFiles.length > 0) {
+      await processFilesForUpload(droppedFiles);
+      return;
+    }
+
+    // Drop-to-import for links/images dragged from the browser.
+    const uriList = dt?.getData?.("text/uri-list") || "";
+    const html = dt?.getData?.("text/html") || "";
+    const text = dt?.getData?.("text/plain") || "";
+
+    const candidateTextUrl = normalizeHttpUrl(text);
+    const urls = uniq([
+      ...(candidateTextUrl ? [candidateTextUrl] : []),
+      ...extractUrlsFromUriList(uriList),
+      ...extractImageUrlsFromHtml(html),
+      ...extractLinkUrlsFromHtml(html),
+    ]);
+
+    if (urls.length > 0) {
+      importUrlsForUpload(urls);
+    }
   };
 
   const getFileIcon = (type: string, fileName?: string) => {

@@ -30,3 +30,14 @@ export function formatPeriodEnd(
   const out = formatZonedDate(periodEnd, { timeZone: tz, dateFormat: opts.dateFormat });
   return out || null;
 }
+
+// Backward-compat wrapper used by older UI surfaces (e.g. workspace settings).
+export function formatPeriodEndEs(periodEnd: string | null | undefined): string | null {
+  let guessedTz = "UTC";
+  try {
+    guessedTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    // ignore
+  }
+  return formatPeriodEnd(periodEnd, { timeZone: guessedTz, dateFormat: "DD/MM/YYYY" });
+}

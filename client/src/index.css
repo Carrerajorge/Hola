@@ -7,6 +7,7 @@
 @import "./styles/mobile.css";
 @import "./styles/micro-animations.css";
 @import "./styles/premium-effects.css";
+@import "./styles/marketing-minimal.css";
 @import "./styles/accessibility.css";
 
 @custom-variant dark (&:is(.dark *));
