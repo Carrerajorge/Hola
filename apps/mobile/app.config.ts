@@ -29,6 +29,9 @@ const config: ExpoConfig = {
   },
   extra: {
     apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://iliagpt.com',
+    eas: {
+      projectId: '1583da88-4d23-4746-8707-71535377475b',
+    },
   },
 };
 
