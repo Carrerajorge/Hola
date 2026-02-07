@@ -30,6 +30,11 @@ interface LLMRequestOptions {
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
+  /**
+   * Provider-specific response_format passthrough (best-effort).
+   * Used for constrained/structured outputs (e.g. json_object/json_schema).
+   */
+  responseFormat?: unknown;
 }
 
 interface LLMResponse {
@@ -265,6 +270,7 @@ class LLMGateway {
       temperature: options.temperature,
       topP: options.topP,
       maxTokens: options.maxTokens,
+      responseFormat: options.responseFormat ?? null,
     });
     return crypto.createHash("sha256").update(content).digest("hex").slice(0, 32);
   }
@@ -677,6 +683,8 @@ class LLMGateway {
           temperature: options.temperature ?? 0.7,
           top_p: options.topP ?? 1,
           max_tokens: options.maxTokens,
+          // OpenAI-compatible field; not all providers support all variants.
+          response_format: options.responseFormat as any,
         },
         { signal: controller.signal }
       );
