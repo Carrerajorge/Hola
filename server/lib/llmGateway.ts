@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
-import Anthropic from "@anthropic-ai/sdk";
 import { MODELS } from "./openai";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
 import crypto from "crypto";
@@ -9,7 +8,7 @@ import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityS
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import type { InsertApiLog } from "@shared/schema";
-import { detectProviderFromModel, normalizeProvider, type LLMProviderId, type LLMProviderOrAuto } from "./llmProviders";
+import { getUserId as getCorrelationUserId } from "../middleware/correlationContext";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
@@ -28,7 +27,7 @@ interface LLMRequestOptions {
   userId?: string;
   requestId?: string;
   timeout?: number;
-  provider?: LLMProviderOrAuto;
+  provider?: "xai" | "gemini" | "auto";
   enableFallback?: boolean;
   skipCache?: boolean;
   disableImageGeneration?: boolean;
@@ -44,7 +43,7 @@ interface LLMResponse {
   requestId: string;
   latencyMs: number;
   model: string;
-  provider: LLMProviderId;
+  provider: "xai" | "gemini";
   cached?: boolean;
   fromFallback?: boolean;
 }
@@ -54,7 +53,7 @@ interface StreamChunk {
   sequenceId: number;
   done: boolean;
   requestId: string;
-  provider?: LLMProviderId;
+  provider?: "xai" | "gemini";
   checkpoint?: StreamCheckpoint;
 }
 
@@ -73,7 +72,7 @@ interface InFlightRequest {
 interface TokenUsageRecord {
   requestId: string;
   userId: string;
-  provider: LLMProviderId;
+  provider: "xai" | "gemini";
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -110,24 +109,108 @@ const CACHE_TTL_MS = 300000; // 5 minutes
 const IN_FLIGHT_TIMEOUT_MS = 120000; // 2 minutes
 const TOKEN_HISTORY_MAX = 1000;
 
-const DEFAULT_PROVIDER_MODELS: Record<LLMProviderId, string> = {
-  xai: MODELS.TEXT,
-  gemini: GEMINI_MODELS.FLASH_PREVIEW,
-  openai: "gpt-4o-mini",
-  anthropic: "claude-3-5-haiku-20241022",
-  deepseek: "deepseek-chat",
+// ===== Provider Mapping =====
+const PROVIDER_MODELS = {
+  xai: {
+    default: MODELS.TEXT,
+    vision: MODELS.VISION,
+  },
+  gemini: {
+    default: GEMINI_MODELS.FLASH_PREVIEW,
+    pro: GEMINI_MODELS.PRO,
+    flash: GEMINI_MODELS.FLASH,
+  },
 };
+
+const KNOWN_GEMINI_MODELS = new Set([
+  GEMINI_MODELS.FLASH_PREVIEW.toLowerCase(),
+  GEMINI_MODELS.FLASH.toLowerCase(),
+  GEMINI_MODELS.PRO.toLowerCase(),
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-2.0-pro",
+]);
+
+const KNOWN_XAI_MODELS = new Set([
+  MODELS.TEXT.toLowerCase(),
+  MODELS.VISION.toLowerCase(),
+  "grok-4-1-fast-non-reasoning",
+  "grok-4-fast-reasoning",
+  "grok-4-fast-non-reasoning",
+  "grok-4-0709",
+  "grok-3-fast",
+  "grok-4-1-fast-reasoning"
+]);
+
+function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | null {
+  if (!model) return null;
+
+  const normalizedModel = model.toLowerCase();
+
+  if (KNOWN_GEMINI_MODELS.has(normalizedModel)) {
+    return "gemini";
+  }
+  if (KNOWN_XAI_MODELS.has(normalizedModel)) {
+    return "xai";
+  }
+
+  if (/gemini/i.test(model)) {
+    return "gemini";
+  }
+  if (/grok/i.test(model)) {
+    return "xai";
+  }
+
+  return null;
+}
+
+function clampText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen);
+}
+
+function safeToString(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function getLastUserMessagePreview(messages: ChatCompletionMessageParam[], maxLen = 800): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as any;
+    if (msg?.role !== "user") continue;
+    const content = safeToString(msg.content);
+    const trimmed = content.trim();
+    if (!trimmed) return null;
+    return clampText(trimmed, maxLen);
+  }
+  return null;
+}
+
+function estimateTokensFromText(text: string): number {
+  if (!text) return 0;
+  // Rough heuristic: ~4 characters per token for English-ish text.
+  return Math.max(0, Math.ceil(text.length / 4));
+}
+
+function estimateTokensFromMessages(messages: ChatCompletionMessageParam[]): number {
+  try {
+    return estimateTokensFromText(JSON.stringify(messages));
+  } catch {
+    let combined = "";
+    for (const msg of messages as any[]) {
+      combined += safeToString(msg?.content);
+    }
+    return estimateTokensFromText(combined);
+  }
+}
 
 class LLMGateway {
   private xaiClient: OpenAI;
-  private openaiClient: OpenAI | null = null;
-  private openaiClientKey = "";
-  private openaiClientBaseUrl = "";
-  private deepseekClient: OpenAI | null = null;
-  private deepseekClientKey = "";
-  private deepseekClientBaseUrl = "";
-  private anthropicClient: Anthropic | null = null;
-  private anthropicClientKey = "";
 
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
@@ -150,9 +233,6 @@ class LLMGateway {
     byProvider: {
       xai: { requests: number; tokens: number; failures: number };
       gemini: { requests: number; tokens: number; failures: number };
-      openai: { requests: number; tokens: number; failures: number };
-      anthropic: { requests: number; tokens: number; failures: number };
-      deepseek: { requests: number; tokens: number; failures: number };
     };
   };
 
@@ -177,9 +257,6 @@ class LLMGateway {
       byProvider: {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
-        openai: { requests: 0, tokens: 0, failures: 0 },
-        anthropic: { requests: 0, tokens: 0, failures: 0 },
-        deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
     };
 
@@ -200,38 +277,54 @@ class LLMGateway {
     statusCode: number;
     tokensIn?: number;
     tokensOut?: number;
+    requestPreview?: string | null;
+    responsePreview?: string | null;
     errorMessage?: string;
     userId?: string;
   }): void {
+    const effectiveUserId = logData.userId ?? getCorrelationUserId();
+
     const apiLog: InsertApiLog = {
-      userId: logData.userId || null,
+      userId: effectiveUserId || null,
       endpoint: logData.endpoint,
       method: "POST",
       statusCode: logData.statusCode,
       latencyMs: logData.latencyMs,
-      tokensIn: logData.tokensIn || null,
-      tokensOut: logData.tokensOut || null,
+      tokensIn: logData.tokensIn ?? null,
+      tokensOut: logData.tokensOut ?? null,
       model: logData.model,
       provider: logData.provider,
-      requestPreview: null,
-      responsePreview: null,
-      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 200) : null,
+      requestPreview: logData.requestPreview ? clampText(logData.requestPreview, 2000) : null,
+      responsePreview: logData.responsePreview ? clampText(logData.responsePreview, 2000) : null,
+      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 500) : null,
       ipAddress: null,
       userAgent: null,
     };
 
-    storage.createApiLog(apiLog).catch((err) => {
-      console.error("[LLMGateway] Failed to persist API log:", err.message);
+    storage.createApiLog(apiLog).catch((err: any) => {
+      const errMsg = err?.message || String(err);
+
+      // If we attempted to attach a userId that doesn't exist in `users`, the FK can reject the log.
+      // We still want to keep the operational log, so retry without userId (best-effort).
+      const isForeignKeyViolation =
+        err?.code === "23503" || /foreign key/i.test(errMsg) || /violates foreign key/i.test(errMsg);
+
+      if (apiLog.userId && isForeignKeyViolation) {
+        storage.createApiLog({ ...apiLog, userId: null }).catch((retryErr: any) => {
+          console.error("[LLMGateway] Failed to persist API log (retry without userId):", retryErr?.message || String(retryErr));
+        });
+        return;
+      }
+
+      console.error("[LLMGateway] Failed to persist API log:", errMsg);
     });
   }
 
   // ===== Request Deduplication =====
   private generateContentHash(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string {
-    const providerKey = normalizeProvider(options.provider) || "auto";
     const content = JSON.stringify({
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       model: options.model,
-      provider: providerKey,
       temperature: options.temperature,
       topP: options.topP,
       maxTokens: options.maxTokens,
@@ -399,363 +492,30 @@ class LLMGateway {
   }
 
   // ===== Provider Selection =====
-  private isProviderConfigured(provider: LLMProviderId): boolean {
-    switch (provider) {
-      case "xai":
-        return Boolean(process.env.XAI_API_KEY);
-      case "gemini":
-        return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-      case "openai":
-        return Boolean(process.env.OPENAI_API_KEY);
-      case "anthropic":
-        return Boolean(process.env.ANTHROPIC_API_KEY);
-      case "deepseek":
-        return Boolean(process.env.DEEPSEEK_API_KEY);
-      default:
-        return false;
-    }
-  }
-
-  private getProviderTryOrder(options: LLMRequestOptions): LLMProviderId[] {
-    const priority: LLMProviderId[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
-
-    const out: LLMProviderId[] = [];
-    const push = (p: LLMProviderId | null) => {
-      if (!p) return;
-      if (!out.includes(p)) out.push(p);
-    };
-
-    const explicit = normalizeProvider(options.provider);
-    if (explicit && explicit !== "auto") {
-      push(explicit);
-    } else {
-      const detected = detectProviderFromModel(options.model);
-      push(detected);
+  private selectProvider(options: LLMRequestOptions): "xai" | "gemini" {
+    if (options.provider && options.provider !== "auto") {
+      return options.provider;
     }
 
-    for (const p of priority) push(p);
-    return out;
-  }
-
-  private selectProvider(options: LLMRequestOptions): LLMProviderId {
-    const candidates = this.getProviderTryOrder(options);
-
-    for (const provider of candidates) {
-      const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
-      if (breaker.getState() === CircuitState.OPEN) continue;
-      if (this.isProviderConfigured(provider)) return provider;
+    // Auto-detect provider based on model name using robust patterns
+    const detectedProvider = detectProviderFromModel(options.model);
+    if (detectedProvider) {
+      return detectedProvider;
     }
 
-    // Final fallback: keep behavior deterministic even without configured keys.
-    return candidates[0] || "xai";
-  }
+    // Check circuit breaker states
+    const xaiAvailable = getCircuitBreaker("system", "xai").getState() !== CircuitState.OPEN;
+    const geminiAvailable = getCircuitBreaker("system", "gemini").getState() !== CircuitState.OPEN;
 
-  private getOpenAIClient(): OpenAI {
-    const apiKey = process.env.OPENAI_API_KEY || "";
-    const baseURL = (process.env.OPENAI_BASE_URL || "").trim();
-
-    if (!this.openaiClient || this.openaiClientKey !== apiKey || this.openaiClientBaseUrl !== baseURL) {
-      this.openaiClient = new OpenAI({
-        apiKey,
-        baseURL: baseURL || undefined,
-      });
-      this.openaiClientKey = apiKey;
-      this.openaiClientBaseUrl = baseURL;
+    if (xaiAvailable && process.env.XAI_API_KEY) {
+      return "xai";
+    }
+    if (geminiAvailable && process.env.GEMINI_API_KEY) {
+      return "gemini";
     }
 
-    return this.openaiClient;
-  }
-
-  private getDeepseekClient(): OpenAI {
-    const apiKey = process.env.DEEPSEEK_API_KEY || "";
-    const baseURL = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1").trim();
-
-    if (!this.deepseekClient || this.deepseekClientKey !== apiKey || this.deepseekClientBaseUrl !== baseURL) {
-      this.deepseekClient = new OpenAI({
-        apiKey,
-        baseURL,
-      });
-      this.deepseekClientKey = apiKey;
-      this.deepseekClientBaseUrl = baseURL;
-    }
-
-    return this.deepseekClient;
-  }
-
-  private getAnthropicClient(): Anthropic {
-    const apiKey = process.env.ANTHROPIC_API_KEY || "";
-    if (!this.anthropicClient || this.anthropicClientKey !== apiKey) {
-      this.anthropicClient = new Anthropic({ apiKey });
-      this.anthropicClientKey = apiKey;
-    }
-    return this.anthropicClient;
-  }
-
-  private resolveModelForProvider(provider: LLMProviderId, options: LLMRequestOptions, primaryProvider: LLMProviderId): string {
-    const requestedModel = typeof options.model === "string" ? options.model.trim() : "";
-    if (!requestedModel) return DEFAULT_PROVIDER_MODELS[provider];
-
-    const explicit = normalizeProvider(options.provider);
-    if (explicit && explicit !== "auto") {
-      return provider === explicit ? requestedModel : DEFAULT_PROVIDER_MODELS[provider];
-    }
-
-    const detected = detectProviderFromModel(requestedModel);
-    if (detected && detected !== provider) return DEFAULT_PROVIDER_MODELS[provider];
-
-    if (!detected && provider !== primaryProvider) return DEFAULT_PROVIDER_MODELS[provider];
-
-    return requestedModel;
-  }
-
-  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }> } {
-    const systemParts: string[] = [];
-    const out: Array<{ role: "user" | "assistant"; content: string }> = [];
-
-    for (const m of messages) {
-      const role = m.role;
-      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-
-      if (role === "system" || role === "developer") {
-        if (content) systemParts.push(content);
-        continue;
-      }
-
-      if (role === "assistant" || role === "user") {
-        out.push({ role, content });
-        continue;
-      }
-
-      out.push({ role: "user", content: `[${String(role)}] ${content}` });
-    }
-
-    const system = systemParts.length ? systemParts.join("\n\n") : undefined;
-    return { system, messages: out };
-  }
-
-  private async executeOpenAICompatible(
-    provider: "xai" | "openai" | "deepseek",
-    client: OpenAI,
-    messages: ChatCompletionMessageParam[],
-    options: LLMRequestOptions & { requestId: string; timeout: number },
-    model: string,
-    startTime: number,
-    endpoint: string
-  ): Promise<LLMResponse> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), options.timeout);
-
-    try {
-      const response = await client.chat.completions.create(
-        {
-          model,
-          messages,
-          temperature: options.temperature ?? 0.7,
-          top_p: options.topP ?? 1,
-          max_tokens: options.maxTokens,
-        },
-        { signal: controller.signal }
-      );
-
-      clearTimeout(timeoutId);
-
-      const latencyMs = Date.now() - startTime;
-      const content = response.choices[0]?.message?.content || "";
-      const usage = response.usage;
-
-      this.metrics.totalLatencyMs += latencyMs;
-
-      const usageRecord: TokenUsageRecord = {
-        requestId: options.requestId,
-        userId: options.userId || "anonymous",
-        provider,
-        model,
-        promptTokens: usage?.prompt_tokens || 0,
-        completionTokens: usage?.completion_tokens || 0,
-        totalTokens: usage?.total_tokens || 0,
-        timestamp: Date.now(),
-        latencyMs,
-        cached: false,
-        fromFallback: false,
-      };
-      this.recordTokenUsage(usageRecord);
-
-      recordConnectorUsage(provider as any, latencyMs, true);
-
-      this.persistApiLog({
-        provider,
-        model,
-        endpoint,
-        latencyMs,
-        statusCode: 200,
-        tokensIn: usage?.prompt_tokens,
-        tokensOut: usage?.completion_tokens,
-        userId: options.userId,
-      });
-
-      const qualityAnalysis = analyzeResponseQuality(content);
-      const qualityScore = calculateQualityScore(content, usage?.total_tokens || 0, latencyMs);
-      const qualityMetric: QualityMetric = {
-        responseId: options.requestId,
-        provider,
-        score: qualityScore,
-        tokensUsed: usage?.total_tokens || 0,
-        latencyMs,
-        timestamp: new Date(),
-        issues: qualityAnalysis.issues,
-        isComplete: qualityAnalysis.isComplete,
-        hasContentIssues: qualityAnalysis.hasContentIssues,
-      };
-      recordQualityMetric(qualityMetric);
-
-      return {
-        content,
-        usage: usage
-          ? {
-              promptTokens: usage.prompt_tokens,
-              completionTokens: usage.completion_tokens,
-              totalTokens: usage.total_tokens,
-            }
-          : undefined,
-        requestId: options.requestId,
-        latencyMs,
-        model,
-        provider,
-      };
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      const latencyMs = Date.now() - startTime;
-      recordConnectorUsage(provider as any, latencyMs, false);
-
-      this.persistApiLog({
-        provider,
-        model,
-        endpoint,
-        latencyMs,
-        statusCode: error.status || 500,
-        errorMessage: error.message,
-        userId: options.userId,
-      });
-
-      if (error.name === "AbortError") {
-        throw new Error(`Request timeout after ${options.timeout}ms`);
-      }
-      throw error;
-    }
-  }
-
-  private async executeAnthropic(
-    messages: ChatCompletionMessageParam[],
-    options: LLMRequestOptions & { requestId: string; timeout: number },
-    model: string,
-    startTime: number
-  ): Promise<LLMResponse> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), options.timeout);
-
-    try {
-      const client = this.getAnthropicClient();
-      const converted = this.convertToAnthropicMessages(messages);
-
-      const response = await client.messages.create(
-        {
-          model,
-          system: converted.system,
-          messages: converted.messages,
-          max_tokens: options.maxTokens ?? 1024,
-          temperature: options.temperature ?? 0.7,
-        },
-        { signal: controller.signal }
-      );
-
-      clearTimeout(timeoutId);
-
-      const latencyMs = Date.now() - startTime;
-      const content = (response as any).content
-        ? (response as any).content.map((block: any) => (block?.type === "text" ? block.text : "")).join("")
-        : "";
-
-      const inputTokens = (response as any).usage?.input_tokens ?? 0;
-      const outputTokens = (response as any).usage?.output_tokens ?? 0;
-      const totalTokens = inputTokens + outputTokens;
-
-      this.metrics.totalLatencyMs += latencyMs;
-
-      const usageRecord: TokenUsageRecord = {
-        requestId: options.requestId,
-        userId: options.userId || "anonymous",
-        provider: "anthropic",
-        model,
-        promptTokens: inputTokens,
-        completionTokens: outputTokens,
-        totalTokens,
-        timestamp: Date.now(),
-        latencyMs,
-        cached: false,
-        fromFallback: false,
-      };
-      this.recordTokenUsage(usageRecord);
-
-      recordConnectorUsage("anthropic", latencyMs, true);
-
-      this.persistApiLog({
-        provider: "anthropic",
-        model,
-        endpoint: "/messages",
-        latencyMs,
-        statusCode: 200,
-        tokensIn: inputTokens,
-        tokensOut: outputTokens,
-        userId: options.userId,
-      });
-
-      const qualityAnalysis = analyzeResponseQuality(content);
-      const qualityScore = calculateQualityScore(content, totalTokens, latencyMs);
-      const qualityMetric: QualityMetric = {
-        responseId: options.requestId,
-        provider: "anthropic",
-        score: qualityScore,
-        tokensUsed: totalTokens,
-        latencyMs,
-        timestamp: new Date(),
-        issues: qualityAnalysis.issues,
-        isComplete: qualityAnalysis.isComplete,
-        hasContentIssues: qualityAnalysis.hasContentIssues,
-      };
-      recordQualityMetric(qualityMetric);
-
-      return {
-        content,
-        usage: {
-          promptTokens: inputTokens,
-          completionTokens: outputTokens,
-          totalTokens,
-        },
-        requestId: options.requestId,
-        latencyMs,
-        model,
-        provider: "anthropic",
-      };
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      const latencyMs = Date.now() - startTime;
-      recordConnectorUsage("anthropic", latencyMs, false);
-
-      this.persistApiLog({
-        provider: "anthropic",
-        model,
-        endpoint: "/messages",
-        latencyMs,
-        statusCode: error.status || 500,
-        errorMessage: error.message,
-        userId: options.userId,
-      });
-
-      if (error.name === "AbortError") {
-        throw new Error(`Request timeout after ${options.timeout}ms`);
-      }
-      throw error;
-    }
+    // Default to xai if both are available or unavailable
+    return "xai";
   }
 
   // ===== Token Usage Tracking =====
@@ -777,7 +537,7 @@ class LLMGateway {
     const cutoff = since || Date.now() - 3600000; // Last hour by default
     const relevant = this.tokenUsageHistory.filter(r => r.timestamp >= cutoff);
 
-    const byProvider: Record<string, number> = { xai: 0, gemini: 0, openai: 0, anthropic: 0, deepseek: 0 };
+    const byProvider: Record<string, number> = { xai: 0, gemini: 0 };
     const byUser: Record<string, number> = {};
     let total = 0;
 
@@ -797,14 +557,15 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const requestId = options.requestId || this.generateRequestId();
     const startTime = Date.now();
-    const userId = options.userId || "anonymous";
+    const userId = options.userId || getCorrelationUserId() || "anonymous";
+    const effectiveOptions: LLMRequestOptions = { ...options, userId };
     const enableFallback = options.enableFallback !== false;
     const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
 
     this.metrics.totalRequests++;
 
     // Check cache first
-    const cacheKey = this.getCacheKey(messages, options);
+    const cacheKey = this.getCacheKey(messages, effectiveOptions);
     if (cacheKey) {
       const cached = this.requestCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -815,7 +576,7 @@ class LLMGateway {
     }
 
     // Check for duplicate in-flight request
-    const contentHash = this.generateContentHash(messages, options);
+    const contentHash = this.generateContentHash(messages, effectiveOptions);
     const inFlight = this.getInFlightRequest(contentHash);
     if (inFlight) {
       this.metrics.deduplicatedRequests++;
@@ -829,12 +590,12 @@ class LLMGateway {
     }
 
     // Truncate context
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(messages, effectiveOptions.maxTokens ? effectiveOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS);
 
     // Create the request promise
     const requestPromise = this.executeWithFallback(
       truncatedMessages,
-      { ...options, requestId, timeout },
+      { ...effectiveOptions, requestId, timeout },
       startTime,
       enableFallback
     );
@@ -865,9 +626,13 @@ class LLMGateway {
     startTime: number,
     enableFallback: boolean
   ): Promise<LLMResponse> {
-    const tryOrder = enableFallback ? this.getProviderTryOrder(options) : [this.selectProvider(options)];
-    const providers: LLMProviderId[] = Array.from(new Set(tryOrder)).filter((p) => this.isProviderConfigured(p));
-    const primaryProvider = providers[0] || this.selectProvider(options);
+    // Respect explicit provider selection
+    const primaryProvider = this.selectProvider(options);
+    const alternateProvider: "xai" | "gemini" = primaryProvider === "xai" ? "gemini" : "xai";
+
+    const providers: ("xai" | "gemini")[] = enableFallback
+      ? [primaryProvider, alternateProvider]
+      : [primaryProvider];
 
     let lastError: Error | null = null;
 
@@ -879,7 +644,7 @@ class LLMGateway {
       }
 
       try {
-        const result = await this.executeOnProvider(provider, messages, options, startTime, primaryProvider);
+        const result = await this.executeOnProvider(provider, messages, options, startTime);
 
         if (providers.indexOf(provider) > 0) {
           this.metrics.fallbackSuccesses++;
@@ -897,75 +662,46 @@ class LLMGateway {
       }
     }
 
-    if (!providers.length) {
-      throw new Error("No LLM providers configured");
-    }
     throw lastError || new Error("All providers failed");
   }
 
   private async executeOnProvider(
-    provider: LLMProviderId,
+    provider: "xai" | "gemini",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
-    startTime: number,
-    primaryProvider: LLMProviderId
+    startTime: number
   ): Promise<LLMResponse> {
     const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
 
     try {
-      return await breaker.execute(() => this.executeOnProviderNoBreaker(provider, messages, options, startTime, primaryProvider));
+      return await breaker.execute(() => this.executeOnProviderNoBreaker(provider, messages, options, startTime));
     } catch (error) {
       throw error;
     }
   }
 
   private async executeOnProviderNoBreaker(
-    provider: LLMProviderId,
+    provider: "xai" | "gemini",
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions & { requestId: string; timeout: number },
-    startTime: number,
-    primaryProvider: LLMProviderId
+    startTime: number
   ): Promise<LLMResponse> {
-    const model = this.resolveModelForProvider(provider, options, primaryProvider);
-    this.metrics.byProvider[provider].requests++;
+    const modelProvider = detectProviderFromModel(options.model);
+
+    let model: string;
+    if (provider === "xai") {
+      model = (modelProvider === "xai") ? options.model! : MODELS.TEXT;
+    } else {
+      model = (modelProvider === "gemini") ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+    }
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
-        const result = await (async () => {
-          switch (provider) {
-            case "xai":
-              return await this.executeXai(messages, options, model, startTime);
-            case "gemini":
-              return await this.executeGemini(messages, options, model, startTime);
-            case "openai":
-              return await this.executeOpenAICompatible(
-                "openai",
-                this.getOpenAIClient(),
-                messages,
-                options,
-                model,
-                startTime,
-                "/chat/completions"
-              );
-            case "deepseek":
-              return await this.executeOpenAICompatible(
-                "deepseek",
-                this.getDeepseekClient(),
-                messages,
-                options,
-                model,
-                startTime,
-                "/chat/completions"
-              );
-            case "anthropic":
-              return await this.executeAnthropic(messages, options, model, startTime);
-            default:
-              throw new Error(`Unsupported provider: ${provider satisfies never}`);
-          }
-        })();
-
-        this.metrics.successfulRequests++;
-        return result;
+        if (provider === "xai") {
+          return await this.executeXai(messages, options, model, startTime);
+        } else {
+          return await this.executeGemini(messages, options, model, startTime);
+        }
       } catch (error: any) {
         const isRetryable =
           error.status === 429 ||
@@ -976,8 +712,6 @@ class LLMGateway {
           error.code === "ETIMEDOUT";
 
         if (!isRetryable || attempt >= RETRY_CONFIG.maxRetries) {
-          this.metrics.failedRequests++;
-          this.metrics.byProvider[provider].failures++;
           throw error;
         }
 
@@ -1049,6 +783,8 @@ class LLMGateway {
         statusCode: 200,
         tokensIn: usage?.prompt_tokens,
         tokensOut: usage?.completion_tokens,
+        requestPreview: getLastUserMessagePreview(messages),
+        responsePreview: content,
         userId: options.userId,
       });
 
@@ -1095,6 +831,7 @@ class LLMGateway {
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
+        requestPreview: getLastUserMessagePreview(messages),
         userId: options.userId,
       });
 
@@ -1139,6 +876,7 @@ class LLMGateway {
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
+        requestPreview: getLastUserMessagePreview(messages),
         userId: options.userId,
       });
 
@@ -1182,6 +920,8 @@ class LLMGateway {
       statusCode: 200,
       tokensIn: usageRecord.promptTokens,
       tokensOut: usageRecord.completionTokens,
+      requestPreview: getLastUserMessagePreview(messages),
+      responsePreview: response.content,
       userId: options.userId,
     });
 
@@ -1222,13 +962,12 @@ class LLMGateway {
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
     const requestId = options.requestId || this.generateRequestId();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
+    const userId = options.userId || getCorrelationUserId() || "anonymous";
+    const effectiveOptions: LLMRequestOptions = { ...options, userId };
+    const enableFallback = effectiveOptions.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    const tryOrder = enableFallback ? this.getProviderTryOrder(options) : [this.selectProvider(options)];
-    const providers: LLMProviderId[] = Array.from(new Set(tryOrder)).filter((p) => this.isProviderConfigured(p));
-    const primaryProvider = providers[0] || this.selectProvider(options);
+    let currentProvider: "xai" | "gemini" = this.selectProvider(effectiveOptions);
 
     this.metrics.totalRequests++;
 
@@ -1236,7 +975,11 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(
+      messages,
+      effectiveOptions.maxTokens ? effectiveOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS
+    );
+    const requestPreview = getLastUserMessagePreview(truncatedMessages);
 
     // Check for existing checkpoint (recovery)
     const existingCheckpoint = this.streamCheckpoints.get(requestId);
@@ -1247,34 +990,27 @@ class LLMGateway {
       console.log(`[LLMGateway] ${requestId} recovering from checkpoint at seq ${sequenceId}`);
     }
 
+    const providers: ("xai" | "gemini")[] = enableFallback ? [currentProvider, currentProvider === "xai" ? "gemini" : "xai"] : [currentProvider];
+
     for (const provider of providers) {
       const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
       if (breaker.getState() === CircuitState.OPEN) {
         continue;
       }
 
+      const attemptStartTime = Date.now();
+      const endpoint = provider === "xai" ? "/chat/completions" : "/generateContent";
+      const detectedModelProvider = detectProviderFromModel(effectiveOptions.model);
+      const model = provider === "xai"
+        ? (detectedModelProvider === "xai" ? (effectiveOptions.model || MODELS.TEXT) : MODELS.TEXT)
+        : (detectedModelProvider === "gemini" ? (effectiveOptions.model || GEMINI_MODELS.FLASH_PREVIEW) : GEMINI_MODELS.FLASH_PREVIEW);
+
       try {
-        const model = this.resolveModelForProvider(provider, options, primaryProvider);
-        this.metrics.byProvider[provider].requests++;
+        const stream = provider === "xai"
+          ? this.streamXai(truncatedMessages, effectiveOptions, requestId, model)
+          : this.streamGemini(truncatedMessages, effectiveOptions, requestId, model);
 
-        const stream = (async () => {
-          switch (provider) {
-            case "xai":
-              return this.streamOpenAICompatible("xai", this.xaiClient, truncatedMessages, options, requestId, model);
-            case "openai":
-              return this.streamOpenAICompatible("openai", this.getOpenAIClient(), truncatedMessages, options, requestId, model);
-            case "deepseek":
-              return this.streamOpenAICompatible("deepseek", this.getDeepseekClient(), truncatedMessages, options, requestId, model);
-            case "gemini":
-              return this.streamGemini(truncatedMessages, options, requestId, model);
-            case "anthropic":
-              return this.streamAnthropic(truncatedMessages, options, requestId, model);
-            default:
-              throw new Error(`Unsupported provider: ${provider satisfies never}`);
-          }
-        })();
-
-        for await (const chunk of await stream) {
+        for await (const chunk of stream) {
           accumulatedContent += chunk.content;
 
           const streamChunk: StreamChunk = {
@@ -1301,11 +1037,61 @@ class LLMGateway {
           if (chunk.done) {
             this.streamCheckpoints.delete(requestId);
             getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
-            this.metrics.successfulRequests++;
+
+            const latencyMs = Date.now() - attemptStartTime;
+            const tokensIn = estimateTokensFromMessages(truncatedMessages);
+            const tokensOut = estimateTokensFromText(accumulatedContent);
+
+            recordConnectorUsage(provider, latencyMs, true);
+            this.recordTokenUsage({
+              requestId,
+              userId,
+              provider,
+              model,
+              promptTokens: tokensIn,
+              completionTokens: tokensOut,
+              totalTokens: tokensIn + tokensOut,
+              timestamp: Date.now(),
+              latencyMs,
+              cached: false,
+              fromFallback: false,
+            });
+            this.persistApiLog({
+              provider,
+              model,
+              endpoint,
+              latencyMs,
+              statusCode: 200,
+              tokensIn,
+              tokensOut,
+              requestPreview,
+              responsePreview: accumulatedContent,
+              userId: effectiveOptions.userId,
+            });
+
             return;
           }
         }
       } catch (error: any) {
+        const latencyMs = Date.now() - attemptStartTime;
+        const tokensIn = estimateTokensFromMessages(truncatedMessages);
+        const tokensOut = estimateTokensFromText(accumulatedContent);
+
+        recordConnectorUsage(provider, latencyMs, false);
+        this.persistApiLog({
+          provider,
+          model,
+          endpoint,
+          latencyMs,
+          statusCode: error?.status || 500,
+          tokensIn,
+          tokensOut,
+          requestPreview,
+          responsePreview: accumulatedContent,
+          errorMessage: error?.message,
+          userId: effectiveOptions.userId,
+        });
+
         // Save checkpoint before failing
         this.streamCheckpoints.set(requestId, {
           requestId,
@@ -1315,8 +1101,6 @@ class LLMGateway {
         });
 
         getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
-        this.metrics.failedRequests++;
-        this.metrics.byProvider[provider].failures++;
         console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
 
         if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
@@ -1327,9 +1111,6 @@ class LLMGateway {
       }
     }
 
-    if (!providers.length) {
-      throw new Error("No LLM providers configured");
-    }
     throw new Error("All providers failed during streaming");
   }
 
@@ -1439,20 +1220,13 @@ class LLMGateway {
     }
   }
 
-  private async * streamOpenAICompatible(
-    provider: "xai" | "openai" | "deepseek",
-    client: OpenAI,
+  private async * streamXai(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string,
-    modelOverride?: string
+    model: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model =
-      modelOverride ||
-      (typeof options.model === "string" && options.model.trim().length > 0 ? options.model.trim() : "") ||
-      (provider === "xai" ? DEFAULT_PROVIDER_MODELS.xai : DEFAULT_PROVIDER_MODELS[provider]);
-
-    const stream = await client.chat.completions.create({
+    const stream = await this.xaiClient.chat.completions.create({
       model,
       messages,
       temperature: options.temperature ?? 0.7,
@@ -1487,9 +1261,8 @@ class LLMGateway {
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string,
-    modelOverride?: string
+    model: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = modelOverride || options.model || GEMINI_MODELS.FLASH_PREVIEW;
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
     const stream = geminiStreamChat(geminiMessages, {
@@ -1504,35 +1277,6 @@ class LLMGateway {
     for await (const chunk of stream) {
       yield chunk;
     }
-  }
-
-  private async * streamAnthropic(
-    messages: ChatCompletionMessageParam[],
-    options: LLMRequestOptions,
-    requestId: string,
-    modelOverride?: string
-  ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = modelOverride || options.model || DEFAULT_PROVIDER_MODELS.anthropic;
-    const client = this.getAnthropicClient();
-    const converted = this.convertToAnthropicMessages(messages);
-
-    const stream = await client.messages.create({
-      model,
-      system: converted.system,
-      messages: converted.messages,
-      max_tokens: options.maxTokens ?? 1024,
-      temperature: options.temperature ?? 0.7,
-      stream: true,
-    });
-
-    for await (const event of stream as any) {
-      if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
-        const text = event.delta.text || "";
-        if (text) yield { content: text, done: false };
-      }
-    }
-
-    yield { content: "", done: true };
   }
 
   // ===== Metrics =====
@@ -1550,9 +1294,6 @@ class LLMGateway {
       circuitBreakerStatus: {
         xai: getCircuitBreaker("system", "xai").getState(),
         gemini: getCircuitBreaker("system", "gemini").getState(),
-        openai: getCircuitBreaker("system", "openai").getState(),
-        anthropic: getCircuitBreaker("system", "anthropic").getState(),
-        deepseek: getCircuitBreaker("system", "deepseek").getState(),
       },
       cacheSize: this.requestCache.size,
       inFlightRequests: this.inFlightRequests.size,
@@ -1577,9 +1318,6 @@ class LLMGateway {
       byProvider: {
         xai: { requests: 0, tokens: 0, failures: 0 },
         gemini: { requests: 0, tokens: 0, failures: 0 },
-        openai: { requests: 0, tokens: 0, failures: 0 },
-        anthropic: { requests: 0, tokens: 0, failures: 0 },
-        deepseek: { requests: 0, tokens: 0, failures: 0 },
       },
     };
   }
@@ -1593,26 +1331,8 @@ class LLMGateway {
   async healthCheck(): Promise<{
     xai: { available: boolean; latencyMs?: number; error?: string };
     gemini: { available: boolean; latencyMs?: number; error?: string };
-    openai: { available: boolean; latencyMs?: number; error?: string };
-    anthropic: { available: boolean; latencyMs?: number; error?: string };
-    deepseek: { available: boolean; latencyMs?: number; error?: string };
   }> {
-    const results: any = {
-      xai: { available: false },
-      gemini: { available: false },
-      openai: { available: false },
-      anthropic: { available: false },
-      deepseek: { available: false },
-    };
-
-    if (process.env.NODE_ENV === "test") {
-      results.xai = { available: Boolean(process.env.XAI_API_KEY) };
-      results.gemini = { available: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) };
-      results.openai = { available: Boolean(process.env.OPENAI_API_KEY) };
-      results.anthropic = { available: Boolean(process.env.ANTHROPIC_API_KEY) };
-      results.deepseek = { available: Boolean(process.env.DEEPSEEK_API_KEY) };
-      return results;
-    }
+    const results: any = { xai: { available: false }, gemini: { available: false } };
 
     // Test xAI with quick timeout
     if (process.env.XAI_API_KEY) {
@@ -1658,63 +1378,6 @@ class LLMGateway {
         }
       } catch (error: any) {
         results.gemini = { available: false, error: error.message?.slice(0, 100) };
-      }
-    }
-
-    // Test OpenAI with quick timeout
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        const start = Date.now();
-        const client = this.getOpenAIClient();
-        await client.chat.completions.create(
-          {
-            model: DEFAULT_PROVIDER_MODELS.openai,
-            messages: [{ role: "user", content: "hi" }],
-            max_tokens: 5,
-          },
-          { signal: AbortSignal.timeout(5000) }
-        );
-        results.openai = { available: true, latencyMs: Date.now() - start };
-      } catch (error: any) {
-        results.openai = { available: false, error: error.message?.slice(0, 100) };
-      }
-    }
-
-    // Test DeepSeek with quick timeout
-    if (process.env.DEEPSEEK_API_KEY) {
-      try {
-        const start = Date.now();
-        const client = this.getDeepseekClient();
-        await client.chat.completions.create(
-          {
-            model: DEFAULT_PROVIDER_MODELS.deepseek,
-            messages: [{ role: "user", content: "hi" }],
-            max_tokens: 5,
-          },
-          { signal: AbortSignal.timeout(5000) }
-        );
-        results.deepseek = { available: true, latencyMs: Date.now() - start };
-      } catch (error: any) {
-        results.deepseek = { available: false, error: error.message?.slice(0, 100) };
-      }
-    }
-
-    // Test Anthropic with quick timeout
-    if (process.env.ANTHROPIC_API_KEY) {
-      try {
-        const start = Date.now();
-        const client = this.getAnthropicClient();
-        await client.messages.create(
-          {
-            model: DEFAULT_PROVIDER_MODELS.anthropic,
-            max_tokens: 5,
-            messages: [{ role: "user", content: "hi" }],
-          },
-          { signal: AbortSignal.timeout(5000) }
-        );
-        results.anthropic = { available: true, latencyMs: Date.now() - start };
-      } catch (error: any) {
-        results.anthropic = { available: false, error: error.message?.slice(0, 100) };
       }
     }
 

@@ -5,7 +5,8 @@
  * Extracts text, tables, charts, and descriptions from images.
  */
 
-import OpenAI from "openai";
+
+import { openai } from "../lib/openai";
 
 // ============== Types ==============
 
@@ -51,10 +52,7 @@ export interface VisionConfig {
 
 // ============== Grok Client ==============
 
-const grokClient = new OpenAI({
-    apiKey: process.env.XAI_API_KEY || "",
-    baseURL: "https://api.x.ai/v1",
-});
+const grokClient = openai;
 
 const VISION_MODEL = "grok-2-vision-1212";
 

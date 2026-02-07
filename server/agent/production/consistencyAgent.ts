@@ -8,15 +8,13 @@
  * - Creates TraceMap for auditing
  */
 
-import OpenAI from 'openai';
+
 import { z } from 'zod';
 import { BaseAgent, BaseAgentConfig, AgentTask, AgentResult, AgentCapability } from '../langgraph/agents/types';
 import type { TraceMap, TraceLink, ContentSpec, EvidencePack } from './types';
+import { openai } from "../../lib/openai";
 
-const xaiClient = new OpenAI({
-    baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 const DEFAULT_MODEL = 'grok-4-1-fast-non-reasoning';
 

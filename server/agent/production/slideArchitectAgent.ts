@@ -8,16 +8,14 @@
  * - Vinculación con Word/Excel
  */
 
-import OpenAI from 'openai';
+
 import { z } from 'zod';
 import type { ContentSpec, EvidencePack } from './types';
 import type { OutlineSpec, DeliverableMap } from './blueprintAgent';
 import type { AnalysisResult, KeyFinding } from './analysisAgent';
+import { openai } from "../../lib/openai";
 
-const xaiClient = new OpenAI({
-    baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 const MODEL = 'grok-4-1-fast-non-reasoning';
 

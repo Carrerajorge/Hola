@@ -6,13 +6,11 @@
  */
 
 import { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, HeadingLevel, convertInchesToTwip } from 'docx';
-import OpenAI from 'openai';
-import * as vm from 'vm';
 
-const xaiClient = new OpenAI({
-    baseURL: "https://api.x.ai/v1",
-    apiKey: process.env.XAI_API_KEY,
-});
+import * as vm from 'vm';
+import { openai } from "../lib/openai";
+
+const xaiClient = openai;
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 

@@ -5,8 +5,9 @@
  * Uses confidence-weighted fusion and auto-selection.
  */
 
-import OpenAI from "openai";
+
 import { GoogleGenAI } from "@google/genai";
+import { openai } from "../lib/openai";
 
 // ============== Types ==============
 
@@ -52,10 +53,7 @@ export interface ModelSpec {
 
 // ============== Clients ==============
 
-const grokClient = new OpenAI({
-    apiKey: process.env.XAI_API_KEY || "",
-    baseURL: "https://api.x.ai/v1",
-});
+const grokClient = openai;
 
 const geminiAI = new GoogleGenAI({
     apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""

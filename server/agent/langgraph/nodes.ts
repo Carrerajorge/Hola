@@ -7,11 +7,9 @@ import { memoryStore } from "./memory";
 import type { AgentState } from "./index";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { openai } from "../../lib/openai";
 
-const xaiClient = new OpenAI({
-  baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 

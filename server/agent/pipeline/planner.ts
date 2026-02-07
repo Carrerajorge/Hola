@@ -1,16 +1,14 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import crypto from "crypto";
 import { toolRegistry } from "./registry";
 import { ExecutionPlan, PlanStep, InterpretedIntent } from "./types";
+import { openai } from "../../lib/openai";
 
 function getOpenAIClient(): OpenAI {
   if (!process.env.XAI_API_KEY) {
     throw new Error("XAI_API_KEY is not configured");
   }
-  return new OpenAI({ 
-    baseURL: "https://api.x.ai/v1", 
-    apiKey: process.env.XAI_API_KEY 
-  });
+  return openai;
 }
 
 async function callWithRetry<T>(

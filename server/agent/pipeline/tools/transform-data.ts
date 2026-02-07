@@ -1,10 +1,6 @@
 import { ToolDefinition, ExecutionContext, ToolResult } from "../types";
-import OpenAI from "openai";
 
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+import { openai } from "../../../lib/openai";
 
 export const transformDataTool: ToolDefinition = {
   id: "transform_data",

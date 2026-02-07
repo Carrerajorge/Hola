@@ -1,11 +1,7 @@
 import { ToolDefinition, ExecutionContext, ToolResult, Artifact } from "../types";
-import OpenAI from "openai";
-import crypto from "crypto";
 
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+import crypto from "crypto";
+import { openai } from "../../../lib/openai";
 
 function cleanCodeBlock(text: string): string {
   const codeBlockMatch = text.match(/```(?:\w+)?\s*([\s\S]*?)\s*```/);

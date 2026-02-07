@@ -8,17 +8,15 @@
  * - Valida estructura interna
  */
 
-import OpenAI from 'openai';
+
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import type { EvidencePack, EvidenceNote, ContentSpec, Section } from './types';
 import type { OutlineSpec, Section as OutlineSection } from './blueprintAgent';
 import type { AnalysisResult, ArgumentNode, KeyFinding } from './analysisAgent';
+import { openai } from "../../lib/openai";
 
-const xaiClient = new OpenAI({
-    baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 const MODEL = 'grok-4-1-fast-non-reasoning';
 

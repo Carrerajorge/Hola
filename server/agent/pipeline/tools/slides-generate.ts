@@ -1,14 +1,10 @@
 import { ToolDefinition, ExecutionContext, ToolResult, Artifact } from "../types";
 import PptxGenJS from "pptxgenjs";
-import OpenAI from "openai";
+
 import * as fs from "fs";
 import * as path from "path";
 import crypto from "crypto";
-
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+import { openai } from "../../../lib/openai";
 
 function getSandboxPath(runId: string): string {
   return `/tmp/agent-${runId}`;

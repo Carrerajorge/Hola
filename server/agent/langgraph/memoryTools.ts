@@ -3,13 +3,11 @@ import { z } from "zod";
 import { db, pool } from "../../db";
 import { agentMemories, agentContext, agentSessionState } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import OpenAI from "openai";
-import crypto from "crypto";
 
-const xaiClient = new OpenAI({
-  baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
-});
+import crypto from "crypto";
+import { openai } from "../../lib/openai";
+
+const xaiClient = openai;
 
 async function generateEmbedding(text: string): Promise<number[]> {
   try {

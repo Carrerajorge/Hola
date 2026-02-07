@@ -1,7 +1,8 @@
 import { z } from "zod";
-import OpenAI from "openai";
+
 import crypto from "crypto";
 import {
+import { openai } from "../../lib/openai";
   BaseAgent,
   BaseAgentConfig,
   AgentTask,
@@ -14,10 +15,7 @@ import { toolRegistry, ToolExecutionResult } from "../registry/toolRegistry";
 import { activityStreamPublisher } from "./activityStream";
 import { agentEventBus } from "../eventBus";
 
-const xaiClient = new OpenAI({
-  baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 

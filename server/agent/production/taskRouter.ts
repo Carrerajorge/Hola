@@ -8,14 +8,12 @@
  * This is the entry point for the agentic production system.
  */
 
-import OpenAI from 'openai';
+
 import { z } from 'zod';
 import { DocumentIntentSchema, type DocumentIntent, type Deliverable } from './types';
+import { openai } from "../../lib/openai";
 
-const xaiClient = new OpenAI({
-    baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 // ============================================================================
 // Detection Patterns

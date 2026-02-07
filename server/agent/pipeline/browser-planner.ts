@@ -1,8 +1,9 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import crypto from "crypto";
 import { browserSessionManager } from "../browser";
 import { guardrails } from "../guardrails";
 import { ExecutionPlan, PlanStep } from "./types";
+import { openai } from "../../lib/openai";
 
 interface BrowserObservation {
   url: string;
@@ -27,10 +28,7 @@ function getOpenAIClient(): OpenAI {
   if (!process.env.XAI_API_KEY) {
     throw new Error("XAI_API_KEY is not configured");
   }
-  return new OpenAI({ 
-    baseURL: "https://api.x.ai/v1", 
-    apiKey: process.env.XAI_API_KEY 
-  });
+  return openai;
 }
 
 export async function planNextAction(

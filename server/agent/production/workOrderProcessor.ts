@@ -6,8 +6,9 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import OpenAI from 'openai';
+
 import {
+import { openai } from "../../lib/openai";
     WorkOrderSchema,
     type WorkOrder,
     type DocumentIntent,
@@ -19,10 +20,7 @@ import {
     type RouterResult
 } from './types';
 
-const xaiClient = new OpenAI({
-    baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
-});
+const xaiClient = openai;
 
 // ============================================================================
 // Default Configurations by Intent

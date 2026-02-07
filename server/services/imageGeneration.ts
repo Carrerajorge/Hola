@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import OpenAI from "openai";
+import type OpenAI from "openai";
+import { openai } from "../lib/openai";
 
 const geminiApiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "";
 const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY || "";
@@ -19,10 +20,7 @@ function getGeminiClient(): GoogleGenAI | null {
 function getXaiClient(): OpenAI | null {
   if (!xaiApiKey) return null;
   if (!_xaiClient) {
-    _xaiClient = new OpenAI({
-      baseURL: "https://api.x.ai/v1",
-      apiKey: xaiApiKey,
-    });
+    _xaiClient = openai;
   }
   return _xaiClient;
 }

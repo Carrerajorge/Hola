@@ -1,11 +1,7 @@
 import Tesseract from "tesseract.js";
-import OpenAI from "openai";
-import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+import type { FileParser, ParsedResult, DetectedFileType } from "./base";
+import { openai } from "../lib/openai";
 
 export class ImageParser implements FileParser {
   name = "image";
