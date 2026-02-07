@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -72,11 +72,45 @@ function getTimeRangeOption(id: string): TimeRangeOption {
   return found || TIME_RANGE_OPTIONS.find((o) => o.id === "30d")!;
 }
 
+function sanitizeFilenamePart(raw: string): string {
+  return (raw || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 60);
+}
+
+function escapeCsvValue(value: unknown): string {
+  const s = value === null || value === undefined ? "" : String(value);
+  if (/[,"\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function downloadTextFile(filename: string, text: string, mimeType: string) {
+  const blob = new Blob([text], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function AgenticEngineDashboard() {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("overview");
   const [rangeId, setRangeId] = useState<string>("30d");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
   const [toolSearch, setToolSearch] = useState("");
+  const [gapsStatus, setGapsStatus] = useState<string>("pending");
+  const [toolCallsStatusFilter, setToolCallsStatusFilter] = useState<string>("all");
+  const [toolCallsToolFilter, setToolCallsToolFilter] = useState<string>("");
+  const [exportingToolCalls, setExportingToolCalls] = useState(false);
 
   const range = getTimeRangeOption(rangeId);
   const rangeDescription = range.unit === "hours" ? `last ${range.value}h` : `last ${range.value}d`;
@@ -136,12 +170,21 @@ export default function AgenticEngineDashboard() {
     },
   });
 
-  const { data: gapsData, refetch: refetchGaps } = useQuery({
-    queryKey: ["/api/admin/agent/gaps", { userId }],
+  const { data: pendingGapsData, refetch: refetchPendingGaps } = useQuery({
+    queryKey: ["/api/admin/agent/gaps", { userId, status: "pending" }],
     queryFn: async () => {
-      const res = await fetch(makeUserUrl("/api/admin/agent/gaps"), { credentials: "include" });
+      const res = await fetch(makeUserUrl("/api/admin/agent/gaps", { status: "pending" }), { credentials: "include" });
       return res.json();
     },
+  });
+
+  const { data: gapsData, refetch: refetchGaps } = useQuery({
+    queryKey: ["/api/admin/agent/gaps", { userId, status: gapsStatus }],
+    queryFn: async () => {
+      const res = await fetch(makeUserUrl("/api/admin/agent/gaps", { status: gapsStatus }), { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeTab === "gaps",
   });
 
   const { data: memoryData, refetch: refetchMemory } = useQuery({
@@ -171,9 +214,13 @@ export default function AgenticEngineDashboard() {
   });
 
   const { data: toolCallsData, isLoading: toolCallsLoading, refetch: refetchToolCalls } = useQuery({
-    queryKey: ["/api/admin/agent/tool-calls", { rangeId, userId, providerId }],
+    queryKey: ["/api/admin/agent/tool-calls", { rangeId, userId, providerId, toolCallsStatusFilter, toolCallsToolFilter }],
     queryFn: async () => {
-      const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", { limit: 12 }), { credentials: "include" });
+      const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", {
+        limit: 12,
+        status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : undefined,
+        toolId: toolCallsToolFilter || undefined,
+      }), { credentials: "include" });
       return res.json();
     },
     enabled: activeTab === "overview",
@@ -210,6 +257,7 @@ export default function AgenticEngineDashboard() {
   const selectedUserLabel = userId ? (selectedUser?.email || selectedUser?.fullName || userId) : "All users";
 
   const tools = toolsData?.tools || [];
+  const pendingGaps = pendingGapsData?.gaps || [];
   const gaps = gapsData?.gaps || [];
   const metrics = metricsData || { successRate: 0, totalCalls: 0, avgLatencyMs: 0, byStatus: {} };
   const memory = memoryData || { totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} };
@@ -238,6 +286,7 @@ export default function AgenticEngineDashboard() {
   const refetchAll = () => {
     refetchTools();
     refetchMetrics();
+    refetchPendingGaps();
     refetchGaps();
     refetchMemory();
     refetchCircuits();
@@ -258,6 +307,105 @@ export default function AgenticEngineDashboard() {
     if (path === "standard") return <RotateCcw className="h-4 w-4" />;
     if (path === "orchestrated") return <Layers className="h-4 w-4" />;
     return <Server className="h-4 w-4" />;
+  };
+
+  const toolCallsHasFilters = toolCallsStatusFilter !== "all" || Boolean(toolCallsToolFilter);
+
+  const updateGapStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "pending" | "resolved" | "ignored" }) => {
+      const res = await fetch(`/api/admin/agent/gaps/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+        credentials: "include",
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "Failed to update gap");
+      }
+      return payload;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/agent/gaps"] });
+      toast.success("Gap updated");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || "Failed to update gap");
+    },
+  });
+
+  const exportToolCalls = async (format: "json" | "csv") => {
+    setExportingToolCalls(true);
+    try {
+      const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", {
+        limit: 5000,
+        status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : undefined,
+        toolId: toolCallsToolFilter || undefined,
+      }), { credentials: "include" });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "Export failed");
+      }
+
+      const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const parts = [
+        "tool-calls",
+        rangeId,
+        selectedUserId === "all" ? "all-users" : sanitizeFilenamePart(selectedUserId),
+        toolCallsStatusFilter !== "all" ? sanitizeFilenamePart(toolCallsStatusFilter) : "all-status",
+        toolCallsToolFilter ? sanitizeFilenamePart(toolCallsToolFilter) : "all-tools",
+        ts,
+      ];
+      const base = parts.filter(Boolean).join("_");
+
+      if (format === "json") {
+        const out = {
+          exportedAt: new Date().toISOString(),
+          filters: {
+            rangeId,
+            range,
+            providerId,
+            userId: userId || null,
+            status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : null,
+            toolId: toolCallsToolFilter || null,
+          },
+          count: logs.length,
+          logs,
+        };
+        downloadTextFile(`${base}.json`, JSON.stringify(out, null, 2), "application/json");
+      } else {
+        const columns = [
+          "id",
+          "createdAt",
+          "userEmail",
+          "userId",
+          "toolId",
+          "providerId",
+          "status",
+          "latencyMs",
+          "errorCode",
+          "errorMessage",
+          "chatId",
+          "runId",
+        ];
+
+        const lines = [columns.join(",")];
+        for (const row of logs) {
+          lines.push(columns.map((c) => escapeCsvValue((row as any)[c])).join(","));
+        }
+        downloadTextFile(`${base}.csv`, lines.join("\n"), "text/csv");
+      }
+
+      toast.success(`Exported ${logs.length} tool calls`);
+    } catch (error: any) {
+      toast.error(error?.message || "Export failed");
+    } finally {
+      setExportingToolCalls(false);
+    }
   };
 
   return (
@@ -319,7 +467,7 @@ export default function AgenticEngineDashboard() {
           <TabsTrigger value="analyzer">Analyzer</TabsTrigger>
           <TabsTrigger value="orchestration">Orchestration</TabsTrigger>
           <TabsTrigger value="gaps">
-            Gaps {gaps.length > 0 && <Badge variant="secondary" className="ml-1 text-xs">{gaps.length}</Badge>}
+            Gaps {pendingGaps.length > 0 && <Badge variant="secondary" className="ml-1 text-xs">{pendingGaps.length}</Badge>}
           </TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="circuits">Circuits</TabsTrigger>
@@ -381,7 +529,7 @@ export default function AgenticEngineDashboard() {
                     <AlertTriangle className="h-5 w-5 text-yellow-500" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-2xl font-bold tabular-nums">{gaps.length}</p>
+                    <p className="text-2xl font-bold tabular-nums">{pendingGaps.length}</p>
                     <p className="text-sm text-muted-foreground">Pending Gaps</p>
                     <p className="text-xs text-muted-foreground truncate">{selectedUserLabel}</p>
                   </div>
@@ -439,6 +587,51 @@ export default function AgenticEngineDashboard() {
                 </div>
               </CardHeader>
               <CardContent>
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {toolCallsStatusFilter !== "all" ? (
+                      <Badge variant="secondary" className="text-xs">
+                        status: {toolCallsStatusFilter}
+                      </Badge>
+                    ) : null}
+                    {toolCallsToolFilter ? (
+                      <Badge variant="secondary" className="text-xs font-mono">
+                        tool: {toolCallsToolFilter}
+                      </Badge>
+                    ) : null}
+                    {toolCallsHasFilters ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => {
+                          setToolCallsStatusFilter("all");
+                          setToolCallsToolFilter("");
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingToolCalls}
+                      onClick={() => exportToolCalls("json")}
+                    >
+                      Export JSON
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={exportingToolCalls}
+                      onClick={() => exportToolCalls("csv")}
+                    >
+                      Export CSV
+                    </Button>
+                  </div>
+                </div>
                 {toolCallsLoading ? (
                   <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
                 ) : toolCalls.length === 0 ? (
@@ -468,16 +661,24 @@ export default function AgenticEngineDashboard() {
                                 {log.userEmail || (log.userId ? `${String(log.userId).slice(0, 8)}...` : "-")}
                               </td>
                               <td className="p-3">
-                                <span className="font-mono text-xs">{log.toolId}</span>
+                                <button
+                                  type="button"
+                                  className="font-mono text-xs hover:underline underline-offset-4"
+                                  onClick={() => setToolCallsToolFilter(String(log.toolId || ""))}
+                                >
+                                  {log.toolId}
+                                </button>
                                 <span className="ml-2 text-xs text-muted-foreground">{log.providerId}</span>
                               </td>
                               <td className="p-3">
-                                <Badge
-                                  variant={log.status === "success" ? "default" : (log.status === "error" ? "destructive" : "secondary")}
-                                  className="text-xs"
-                                >
-                                  {String(log.status || "").toUpperCase()}
-                                </Badge>
+                                <button type="button" onClick={() => setToolCallsStatusFilter(String(log.status || "all"))}>
+                                  <Badge
+                                    variant={log.status === "success" ? "default" : (log.status === "error" ? "destructive" : "secondary")}
+                                    className="text-xs"
+                                  >
+                                    {String(log.status || "").toUpperCase()}
+                                  </Badge>
+                                </button>
                               </td>
                               <td className="p-3 text-right text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                                 {Number.isFinite(Number(log.latencyMs)) ? `${Number(log.latencyMs)}ms` : "-"}
@@ -511,9 +712,15 @@ export default function AgenticEngineDashboard() {
                         .sort((a: any, b: any) => Number(b[1] || 0) - Number(a[1] || 0))
                         .slice(0, 8)
                         .map(([status, count]: [string, any]) => (
-                          <Badge key={status} variant="outline" className="text-xs">
+                          <Button
+                            key={status}
+                            variant={status === toolCallsStatusFilter ? "default" : "outline"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setToolCallsStatusFilter(status)}
+                          >
                             {status}: {Number(count || 0).toLocaleString()}
-                          </Badge>
+                          </Button>
                         ))}
                     </div>
                   )}
@@ -529,13 +736,21 @@ export default function AgenticEngineDashboard() {
                         .filter((t: any) => Number(t?.usageCount || 0) > 0)
                         .slice(0, 8)
                         .map((t: any) => (
-                          <div key={t.id} className="flex items-center justify-between gap-3">
+                          <button
+                            key={t.id}
+                            type="button"
+                            className={cn(
+                              "w-full flex items-center justify-between gap-3 p-2 -mx-2 rounded text-left hover:bg-muted/30 transition-colors",
+                              t.id === toolCallsToolFilter ? "bg-muted/40" : ""
+                            )}
+                            onClick={() => setToolCallsToolFilter(String(t.id || ""))}
+                          >
                             <div className="min-w-0">
                               <p className="text-sm font-medium truncate">{t.name}</p>
                               <p className="text-xs text-muted-foreground truncate">{t.category}</p>
                             </div>
                             <div className="shrink-0 text-sm tabular-nums">{Number(t.usageCount || 0).toLocaleString()}</div>
-                          </div>
+                          </button>
                         ))}
                     </div>
                   )}
@@ -799,24 +1014,46 @@ export default function AgenticEngineDashboard() {
                   <CardTitle>Capability Gaps</CardTitle>
                   <CardDescription className="truncate">Requests for missing functionality · {selectedUserLabel}</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => refetchGaps()}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Select value={gapsStatus} onValueChange={setGapsStatus}>
+                    <SelectTrigger className="w-[160px] h-9">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="resolved">Resolved</SelectItem>
+                      <SelectItem value="ignored">Ignored</SelectItem>
+                      <SelectItem value="all">All</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" size="sm" onClick={() => refetchGaps()}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
               {gaps.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No pending gaps</p>
+                  <p className="font-medium">
+                    {gapsStatus === "pending"
+                      ? "No pending gaps"
+                      : gapsStatus === "resolved"
+                        ? "No resolved gaps"
+                        : gapsStatus === "ignored"
+                          ? "No ignored gaps"
+                          : "No gaps found"}
+                  </p>
+                  <p className="text-sm">Try changing the status filter</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   {gaps.map((gap: any) => (
                     <div key={gap.id} className="p-4 rounded-lg border">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
                           <p className="font-medium">{gap.userPrompt}</p>
                           <p className="text-sm text-muted-foreground mt-1">{gap.gapReason}</p>
                           {selectedUserId === "all" ? (
@@ -824,14 +1061,53 @@ export default function AgenticEngineDashboard() {
                               user: {gap.userEmail || (gap.userId ? `${String(gap.userId).slice(0, 8)}...` : "-")}
                             </p>
                           ) : null}
+                          <p className="text-xs text-muted-foreground mt-2">
+                            updated {formatRelativeTime(gap.updatedAt)}{gap.reviewedBy ? ` · by ${gap.reviewedBy}` : ""}
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant={gap.status === "pending" ? "secondary" : "default"}>
-                            {gap.status}
-                          </Badge>
-                          {gap.frequencyCount > 1 && (
-                            <Badge variant="outline">{gap.frequencyCount}x</Badge>
-                          )}
+                        <div className="shrink-0 flex flex-col items-end gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={gap.status === "pending" ? "secondary" : gap.status === "ignored" ? "outline" : "default"}>
+                              {gap.status}
+                            </Badge>
+                            {gap.frequencyCount > 1 && (
+                              <Badge variant="outline">{gap.frequencyCount}x</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {gap.status === "pending" ? (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8"
+                                  disabled={updateGapStatusMutation.isPending}
+                                  onClick={() => updateGapStatusMutation.mutate({ id: gap.id, status: "resolved" })}
+                                >
+                                  Resolve
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8"
+                                  disabled={updateGapStatusMutation.isPending}
+                                  onClick={() => updateGapStatusMutation.mutate({ id: gap.id, status: "ignored" })}
+                                >
+                                  Ignore
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                disabled={updateGapStatusMutation.isPending}
+                                onClick={() => updateGapStatusMutation.mutate({ id: gap.id, status: "pending" })}
+                              >
+                                Reopen
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

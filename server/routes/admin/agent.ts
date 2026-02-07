@@ -264,9 +264,12 @@ agentRouter.get("/users", async (req, res) => {
 // GET /api/admin/agent/tool-calls - Recent tool call logs (for dashboards)
 agentRouter.get("/tool-calls", async (req, res) => {
     const { since, rangeDays, rangeHours } = parseTimeRange(req.query);
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 25));
+    const limit = Math.min(5000, Math.max(1, Number(req.query.limit) || 25));
     const userId = (req.query.userId as string | undefined) || undefined;
     const toolId = (req.query.toolId as string | undefined) || undefined;
+    const status = typeof req.query.status === "string" && req.query.status.trim() && req.query.status.trim() !== "all"
+        ? req.query.status.trim().slice(0, 40)
+        : undefined;
     const providerIds = parseProviderIds(req.query.providerId);
 
     try {
@@ -274,6 +277,7 @@ agentRouter.get("/tool-calls", async (req, res) => {
             gte(toolCallLogs.createdAt, since),
             userId ? eq(toolCallLogs.userId, userId) : undefined,
             toolId ? eq(toolCallLogs.toolId, toolId) : undefined,
+            status ? eq(toolCallLogs.status, status) : undefined,
             providerIds ? inArray(toolCallLogs.providerId, providerIds) : undefined,
         ].filter(Boolean) as any[];
 
@@ -309,7 +313,8 @@ agentRouter.get("/tool-calls", async (req, res) => {
 // GET /api/admin/agent/gaps - Get capability gaps
 agentRouter.get("/gaps", async (req, res) => {
     try {
-        const status = typeof req.query.status === "string" ? req.query.status : "pending";
+        const statusQuery = typeof req.query.status === "string" ? req.query.status.trim() : "";
+        const status = statusQuery && statusQuery !== "all" ? statusQuery : undefined;
         const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
         const userId = (req.query.userId as string | undefined) || undefined;
         const gapsRaw = await storage.getAgentGapLogs(status, userId);
@@ -339,6 +344,52 @@ agentRouter.get("/gaps", async (req, res) => {
     } catch (error: any) {
         console.error("[AdminAgent] /gaps failed:", error);
         res.json({ gaps: [] });
+    }
+});
+
+// PATCH /api/admin/agent/gaps/:id - Update a gap status (resolve/ignore/reopen)
+agentRouter.patch("/gaps/:id", async (req, res) => {
+    const id = String(req.params.id || "").trim();
+    const statusRaw = typeof req.body?.status === "string" ? req.body.status.trim() : "";
+    const allowed = new Set(["pending", "resolved", "ignored"]);
+    const status = allowed.has(statusRaw) ? statusRaw : "";
+
+    if (!id) return res.status(400).json({ error: "id is required" });
+    if (!status) return res.status(400).json({ error: "Invalid status" });
+
+    try {
+        const reviewedBy =
+            ((req as any).user?.claims?.email as string | undefined) ||
+            ((req as any).user?.email as string | undefined) ||
+            ((req as any).user?.claims?.sub as string | undefined) ||
+            ((req as any).user?.id as string | undefined) ||
+            undefined;
+
+        const updated = await storage.updateAgentGapLog(id, {
+            status,
+            reviewedBy: reviewedBy || null,
+        });
+
+        if (!updated) {
+            return res.status(404).json({ error: "Gap not found" });
+        }
+
+        try {
+            await auditLog(req, {
+                action: "agent.gap.update",
+                resource: "agent_gap_logs",
+                details: { id, status, reviewedBy: reviewedBy || null },
+                category: "admin",
+                severity: "info",
+            });
+        } catch (e: any) {
+            console.warn("[AdminAgent] auditLog failed:", e?.message || e);
+        }
+
+        res.json({ gap: updated });
+    } catch (error: any) {
+        console.error("[AdminAgent] PATCH /gaps failed:", error);
+        res.status(503).json({ error: "Database unavailable" });
     }
 });
 
