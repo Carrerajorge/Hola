@@ -49,31 +49,29 @@ const sections = [
 
 export default function PrivacyPolicyPage() {
   return (
-    <div className="min-h-screen gradient-animated flex flex-col relative overflow-hidden">
-      <div className="floating-orb floating-orb-1" />
-      <div className="floating-orb floating-orb-2" />
-      <div className="floating-orb floating-orb-3" />
-
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-white/10 backdrop-blur-sm">
+    <div className="min-h-screen bg-white text-zinc-900 flex flex-col">
+      <header className="sticky top-0 z-20 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/80 backdrop-blur-md">
         <Link href="/welcome">
-          <Button variant="ghost" className="text-zinc-400 hover:text-white gap-2">
+          <Button variant="ghost" className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 gap-2">
             <ChevronLeft className="h-4 w-4" />
             Volver
           </Button>
         </Link>
-        <span className="font-semibold text-white">Política de privacidad</span>
+        <span className="font-semibold text-zinc-900">Política de privacidad</span>
         <div className="w-20" />
       </header>
 
-      <main className="relative z-10 flex-1 px-4 py-12 overflow-y-auto">
+      <main className="flex-1 px-4 py-12 overflow-y-auto">
         <div className="w-full max-w-4xl mx-auto space-y-10">
           <section className="text-center fade-in-up">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-purple-300 mb-5">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-50 border border-black/10 text-xs font-semibold text-zinc-700 mb-5">
               <FileText className="h-3 w-3" />
               <span>Privacidad</span>
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">Cómo cuidamos tu información</h1>
-            <p className="text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-zinc-950 mb-4">
+              Cómo cuidamos tu información
+            </h1>
+            <p className="text-zinc-600 max-w-2xl mx-auto leading-relaxed">
               Esta política resume los datos que tratamos y las medidas que aplicamos para protegerlos.
             </p>
           </section>
@@ -82,24 +80,24 @@ export default function PrivacyPolicyPage() {
             {highlights.map((item) => (
               <div
                 key={item.title}
-                className="glass-premium p-6 rounded-2xl border border-white/5 hover:border-white/20 transition-all duration-300"
+                className="p-6 rounded-2xl border border-black/10 bg-white shadow-sm hover:shadow-md hover:border-black/20 transition-all duration-300"
               >
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-white/10 to-transparent flex items-center justify-center mb-4 text-white">
+                <div className="w-10 h-10 rounded-xl border border-black/10 bg-zinc-50 flex items-center justify-center mb-4 text-zinc-900">
                   <item.icon className="h-5 w-5" />
                 </div>
-                <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
-                <p className="text-sm text-zinc-400 leading-relaxed">{item.description}</p>
+                <h3 className="text-lg font-semibold text-zinc-950 mb-2">{item.title}</h3>
+                <p className="text-sm text-zinc-600 leading-relaxed">{item.description}</p>
               </div>
             ))}
           </div>
 
-          <section className="glass-premium rounded-3xl p-8 md:p-10 space-y-6 fade-in-up fade-in-up-delay-2">
-            <h2 className="text-2xl font-bold text-white">Detalle de la política</h2>
+          <section className="rounded-3xl border border-black/10 bg-zinc-50 p-8 md:p-10 space-y-6 fade-in-up fade-in-up-delay-2">
+            <h2 className="text-2xl font-extrabold tracking-tight text-zinc-950">Detalle de la política</h2>
             <div className="grid gap-5">
               {sections.map((section) => (
                 <div key={section.title} className="space-y-2">
-                  <h3 className="text-lg font-semibold text-white">{section.title}</h3>
-                  <p className="text-sm text-zinc-400 leading-relaxed">{section.body}</p>
+                  <h3 className="text-lg font-semibold text-zinc-950">{section.title}</h3>
+                  <p className="text-sm text-zinc-600 leading-relaxed">{section.body}</p>
                 </div>
               ))}
             </div>
@@ -111,7 +109,7 @@ export default function PrivacyPolicyPage() {
         </div>
       </main>
 
-      <footer className="relative z-10 py-6 text-center border-t border-white/5 bg-black/20 backdrop-blur-md">
+      <footer className="py-6 text-center border-t border-black/10 bg-white">
         <p className="text-zinc-500 text-sm">© 2026 ILIAGPT. Todos los derechos reservados.</p>
       </footer>
     </div>

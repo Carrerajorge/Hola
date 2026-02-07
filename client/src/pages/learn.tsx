@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, BookOpen, Video, Code, Lightbulb, ArrowRight, PlayCircle } from "lucide-react";
+import { ChevronLeft, BookOpen, Image, Code, Lightbulb, ArrowRight, PlayCircle } from "lucide-react";
 
 export default function LearnPage() {
     const [, setLocation] = useLocation();
@@ -10,48 +10,43 @@ export default function LearnPage() {
             title: "Primeros Pasos",
             desc: "Domina lo básico de ILIAGPT en menos de 5 minutos.",
             icon: BookOpen,
-            color: "text-blue-400",
-            bg: "bg-blue-500/10"
+            color: "text-blue-700",
+            bg: "bg-blue-50"
         },
         {
             title: "Ingeniería de Prompts",
             desc: "Aprende a escribir instrucciones precisas para resultados perfectos.",
             icon: Code,
-            color: "text-purple-400",
-            bg: "bg-purple-500/10"
+            color: "text-violet-700",
+            bg: "bg-violet-50"
         },
         {
             title: "Generación de Imágenes",
             desc: "Guía completa para crear arte digital impresionante.",
-            icon: Video,
-            color: "text-pink-400",
-            bg: "bg-pink-500/10"
+            icon: Image,
+            color: "text-rose-700",
+            bg: "bg-rose-50"
         },
         {
             title: "Casos de Uso Pro",
             desc: "Estrategias avanzadas para productividad y negocio.",
             icon: Lightbulb,
-            color: "text-amber-400",
-            bg: "bg-amber-500/10"
+            color: "text-amber-800",
+            bg: "bg-amber-50"
         }
     ];
 
     return (
-        <div className="min-h-screen gradient-animated flex flex-col relative overflow-hidden">
-            {/* Floating Orbs */}
-            <div className="floating-orb floating-orb-1" />
-            <div className="floating-orb floating-orb-2" />
-            <div className="floating-orb floating-orb-3" />
-
+        <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
             {/* Header */}
-            <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-white/10 backdrop-blur-sm">
+            <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
                 <Link href="/welcome">
-                    <Button variant="ghost" className="text-zinc-400 hover:text-white gap-2">
+                    <Button variant="ghost" className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 gap-2">
                         <ChevronLeft className="h-4 w-4" />
                         Volver
                     </Button>
                 </Link>
-                <span className="font-semibold text-white">Centro de Aprendizaje</span>
+                <span className="font-semibold text-zinc-900">Centro de Aprendizaje</span>
                 <div className="w-20" />
             </header>
 
@@ -61,30 +56,38 @@ export default function LearnPage() {
 
                     {/* Hero Section */}
                     <section className="text-center fade-in-up">
-                        <h1 className="text-4xl md:text-5xl font-bold mb-4 text-white">
-                            Aprende a <span className="text-gradient-premium">Crear Magic</span>
+                        <h1 className="text-4xl md:text-5xl font-bold mb-4 text-zinc-900 tracking-tight">
+                            Aprende a{" "}
+                            <span className="inline-flex items-center px-2 py-1 rounded-xl bg-zinc-100 text-zinc-900">
+                                Crear Magic
+                            </span>
                         </h1>
-                        <p className="text-lg text-zinc-400 max-w-2xl mx-auto">
+                        <p className="text-lg text-zinc-600 max-w-2xl mx-auto">
                             Descubre tutoriales, guías y trucos para sacar el máximo partido a tu asistente de IA.
                         </p>
                     </section>
 
                     {/* Featured Video Card - Large */}
-                    <div className="glass-premium rounded-3xl p-1 overflow-hidden fade-in-up fade-in-up-delay-1 group cursor-pointer hover:shadow-2xl hover:shadow-purple-500/10 transition-all duration-500">
-                        <div className="relative aspect-video rounded-2xl bg-black overflow-hidden flex items-center justify-center">
-                            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/60 z-10" />
+                    <div className="rounded-3xl border border-black/10 bg-white shadow-sm overflow-hidden fade-in-up fade-in-up-delay-1 card-lift">
+                        <div className="relative aspect-video bg-zinc-100 overflow-hidden flex items-center justify-center">
+                            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/35 z-10" />
                             <img
                                 src="https://images.unsplash.com/photo-1620712943543-bcc4688e7485?q=80&w=1200&auto=format&fit=crop"
                                 alt="AI Learning"
-                                className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-700"
+                                className="absolute inset-0 w-full h-full object-cover"
                             />
-                            <PlayCircle className="h-20 w-20 text-white/80 z-20 transition-transform duration-300 group-hover:scale-110 drop-shadow-lg" />
-
-                            <div className="absolute bottom-6 left-6 z-20">
-                                <span className="inline-block px-3 py-1 bg-purple-600 text-white text-xs font-bold rounded-full mb-3">VIDEO DETACADO</span>
-                                <h3 className="text-2xl font-bold text-white mb-1">Introducción a ILIAGPT 2.0</h3>
-                                <p className="text-zinc-300">Un recorrido completo por todas las nuevas funcionalidades.</p>
+                            <div className="absolute inset-0 z-20 flex items-center justify-center">
+                                <div className="rounded-full bg-white/90 border border-white/70 p-4 shadow-sm">
+                                    <PlayCircle className="h-12 w-12 text-zinc-900" />
+                                </div>
                             </div>
+                        </div>
+                        <div className="p-6">
+                            <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-zinc-900">
+                                VIDEO DESTACADO
+                            </span>
+                            <h3 className="mt-3 text-2xl font-bold text-zinc-900">Introducción a ILIAGPT 2.0</h3>
+                            <p className="mt-1 text-zinc-600">Un recorrido completo por todas las nuevas funcionalidades.</p>
                         </div>
                     </div>
 
@@ -93,16 +96,16 @@ export default function LearnPage() {
                         {tutorials.map((item, i) => (
                             <div
                                 key={i}
-                                className="glass-premium p-6 rounded-2xl border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all duration-300 group cursor-pointer"
+                                className="p-6 rounded-2xl border border-black/10 bg-white shadow-sm hover:shadow-md hover:border-black/20 transition-all duration-300 group cursor-pointer"
                             >
                                 <div className="flex items-start gap-4">
-                                    <div className={`p-3 rounded-xl ${item.bg} ${item.color}`}>
+                                    <div className={`p-3 rounded-xl ${item.bg} ${item.color} border border-black/5`}>
                                         <item.icon className="h-6 w-6" />
                                     </div>
                                     <div className="flex-1">
-                                        <h4 className="text-lg font-bold text-white mb-2 group-hover:text-purple-300 transition-colors">{item.title}</h4>
-                                        <p className="text-sm text-zinc-400 leading-relaxed mb-4">{item.desc}</p>
-                                        <div className="flex items-center text-xs font-medium text-white/40 group-hover:text-white transition-colors">
+                                        <h4 className="text-lg font-bold text-zinc-900 mb-2 transition-colors">{item.title}</h4>
+                                        <p className="text-sm text-zinc-600 leading-relaxed mb-4">{item.desc}</p>
+                                        <div className="flex items-center text-xs font-medium text-zinc-700 group-hover:text-zinc-900 transition-colors">
                                             <span>Leer guía</span>
                                             <ArrowRight className="h-3 w-3 ml-2 group-hover:translate-x-1 transition-transform" />
                                         </div>
@@ -116,12 +119,11 @@ export default function LearnPage() {
             </main>
 
             {/* CTA Footer */}
-            <section className="relative z-10 py-16 px-4 text-center border-t border-white/5">
-                <h2 className="text-2xl font-bold text-white mb-4">¿Listo para empezar?</h2>
+            <section className="relative z-10 py-16 px-4 text-center border-t border-black/10 bg-white/70 backdrop-blur-md">
+                <h2 className="text-2xl font-bold text-zinc-900 mb-4">¿Listo para empezar?</h2>
                 <Button
                     onClick={() => setLocation("/signup")}
-                    className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 
-            border-0 shadow-lg shadow-purple-500/25 transition-all duration-300 px-8 py-6 text-lg"
+                    className="rounded-full bg-black text-white hover:bg-zinc-900 border border-black/10 shadow-sm transition-all duration-300 px-8 py-6 text-lg"
                 >
                     Crear cuenta gratis
                 </Button>

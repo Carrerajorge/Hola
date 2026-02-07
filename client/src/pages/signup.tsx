@@ -57,40 +57,54 @@ export default function SignupPage() {
 
   if (!platformLoading && !allowRegistration) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="w-full max-w-md relative space-y-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute -top-2 -right-2"
-            onClick={() => setLocation("/welcome")}
-            data-testid="button-close-signup-disabled"
-          >
-            <X className="h-5 w-5" />
-          </Button>
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="rounded-3xl border border-black/10 bg-white p-8 shadow-sm relative space-y-6">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-4 right-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
+              onClick={() => setLocation("/welcome")}
+              data-testid="button-close-signup-disabled"
+            >
+              <X className="h-5 w-5" />
+            </Button>
 
-          <div className="text-center mb-2 mt-4">
-            <h1 className="text-2xl font-semibold mb-2">Registro deshabilitado</h1>
-            <p className="text-muted-foreground">
-              En este momento no se aceptan nuevas cuentas.
-            </p>
-            {supportEmail ? (
-              <p className="text-sm text-muted-foreground mt-2">
-                Soporte:{" "}
-                <a className="text-primary hover:underline" href={`mailto:${supportEmail}`}>
-                  {supportEmail}
-                </a>
+            <div className="text-center mt-2">
+              <h1 className="text-2xl font-extrabold tracking-tight text-zinc-950 mb-2">
+                Registro deshabilitado
+              </h1>
+              <p className="text-zinc-600">
+                En este momento no se aceptan nuevas cuentas.
               </p>
-            ) : null}
-          </div>
+              {supportEmail ? (
+                <p className="text-sm text-zinc-600 mt-2">
+                  Soporte:{" "}
+                  <a
+                    className="text-zinc-900 font-semibold underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-600"
+                    href={`mailto:${supportEmail}`}
+                  >
+                    {supportEmail}
+                  </a>
+                </p>
+              ) : null}
+            </div>
 
-          <div className="flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setLocation("/login")}>
-              Iniciar sesion
-            </Button>
-            <Button className="flex-1" onClick={() => setLocation("/welcome")}>
-              Volver
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1 border-black/20 text-zinc-900 hover:bg-black/5 rounded-xl"
+                onClick={() => setLocation("/login")}
+              >
+                Iniciar sesión
+              </Button>
+              <Button
+                className="flex-1 bg-black text-white hover:bg-zinc-900 border border-black/10 rounded-xl font-semibold"
+                onClick={() => setLocation("/welcome")}
+              >
+                Volver
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -99,12 +113,13 @@ export default function SignupPage() {
 
   if (step === "email") {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="w-full max-w-md relative">
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="rounded-3xl border border-black/10 bg-white p-8 shadow-sm relative">
           <Button
             variant="ghost"
             size="icon"
-            className="absolute -top-2 -left-2"
+            className="absolute top-4 left-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
             onClick={() => setStep("social")}
             data-testid="button-back-signup"
           >
@@ -114,16 +129,16 @@ export default function SignupPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="absolute -top-2 -right-2"
+            className="absolute top-4 right-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
             onClick={() => setLocation("/welcome")}
             data-testid="button-close-signup-email"
           >
             <X className="h-5 w-5" />
           </Button>
 
-          <div className="text-center mb-8 mt-4">
-            <h1 className="text-3xl font-semibold mb-3">Crea tu cuenta</h1>
-            <p className="text-muted-foreground">
+          <div className="text-center mb-8 mt-2">
+            <h1 className="text-3xl font-extrabold tracking-tight text-zinc-950 mb-3">Crea tu cuenta</h1>
+            <p className="text-zinc-600">
               Ingresa tu correo electrónico y crea una contraseña
             </p>
           </div>
@@ -138,7 +153,7 @@ export default function SignupPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => handleBlur('email')}
-                className={`h-12 text-base ${touched.email && !emailValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                className={`h-12 text-base rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400 ${touched.email && !emailValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                 data-testid="input-signup-email"
               />
               {touched.email && !emailValidation.isValid && (
@@ -165,14 +180,14 @@ export default function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   onBlur={() => handleBlur('password')}
-                  className={`h-12 text-base pr-10 ${touched.password && !passwordValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                  className={`h-12 text-base pr-10 rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400 ${touched.password && !passwordValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   data-testid="input-signup-password"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute right-0 top-0 h-12 w-12"
+                  className="absolute right-0 top-0 h-12 w-12 rounded-full text-zinc-600 hover:text-zinc-900 hover:bg-black/5"
                   onClick={() => setShowPassword(!showPassword)}
                   data-testid="button-toggle-password"
                 >
@@ -193,7 +208,7 @@ export default function SignupPage() {
                       <div
                         key={i}
                         className={`h-1 flex-1 rounded-full transition-colors ${
-                          i <= passwordStrength.score ? strengthColors[passwordStrength.score] : 'bg-muted'
+                          i <= passwordStrength.score ? strengthColors[passwordStrength.score] : 'bg-zinc-200'
                         }`}
                       />
                     ))}
@@ -215,14 +230,14 @@ export default function SignupPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   onBlur={() => handleBlur('confirmPassword')}
-                  className={`h-12 text-base pr-10 ${touched.confirmPassword && !passwordMatchValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                  className={`h-12 text-base pr-10 rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400 ${touched.confirmPassword && !passwordMatchValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   data-testid="input-signup-confirm-password"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="absolute right-0 top-0 h-12 w-12"
+                  className="absolute right-0 top-0 h-12 w-12 rounded-full text-zinc-600 hover:text-zinc-900 hover:bg-black/5"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   data-testid="button-toggle-confirm-password"
                 >
@@ -244,7 +259,7 @@ export default function SignupPage() {
             </div>
 
             <Button
-              className="w-full h-12 text-base mt-4"
+              className="w-full h-12 text-base mt-4 bg-black text-white hover:bg-zinc-900 border border-black/10 rounded-xl font-semibold"
               onClick={handleSignup}
               disabled={!isFormValid}
               data-testid="button-create-account"
@@ -253,33 +268,47 @@ export default function SignupPage() {
             </Button>
           </div>
 
-          <p className="text-center text-xs text-muted-foreground mt-6">
+          <p className="text-center text-xs text-zinc-500 mt-6">
             Al crear una cuenta, aceptas nuestros{" "}
-            <a href="#" className="text-primary hover:underline">Términos de servicio</a>
+            <button
+              type="button"
+              className="text-zinc-900 font-semibold underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-600"
+              onClick={() => setLocation("/terms")}
+            >
+              Términos de servicio
+            </button>
             {" "}y{" "}
-            <a href="#" className="text-primary hover:underline">Política de privacidad</a>
+            <button
+              type="button"
+              className="text-zinc-900 font-semibold underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-600"
+              onClick={() => setLocation("/privacy-policy")}
+            >
+              Política de privacidad
+            </button>
           </p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md relative">
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="rounded-3xl border border-black/10 bg-white p-8 shadow-sm relative">
         <Button
           variant="ghost"
           size="icon"
-          className="absolute -top-2 -right-2"
+          className="absolute top-4 right-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
           onClick={() => setLocation("/welcome")}
           data-testid="button-close-signup"
         >
           <X className="h-5 w-5" />
         </Button>
 
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-semibold mb-3">Crea tu cuenta</h1>
-          <p className="text-muted-foreground">
+        <div className="text-center mb-8 mt-2">
+          <h1 className="text-3xl font-extrabold tracking-tight text-zinc-950 mb-3">Crea tu cuenta</h1>
+          <p className="text-zinc-600">
             Obtendrás respuestas más inteligentes, podrás cargar archivos e imágenes, y más.
           </p>
         </div>
@@ -287,7 +316,7 @@ export default function SignupPage() {
         <div className="space-y-3">
           <Button
             variant="outline"
-            className="w-full h-14 justify-center gap-3 text-base font-medium border-2 hover:bg-muted/50 hover:border-primary/30 transition-all duration-200 rounded-xl shadow-sm"
+            className="w-full h-12 justify-center gap-3 text-base font-semibold border-black/10 bg-white text-zinc-900 hover:bg-zinc-50 transition-colors rounded-xl shadow-sm"
             onClick={handleSocialSignup}
             data-testid="button-signup-google"
           >
@@ -302,7 +331,7 @@ export default function SignupPage() {
 
           <Button
             variant="outline"
-            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            className="w-full h-12 justify-start gap-3 text-base font-normal bg-zinc-50 border-black/10 text-zinc-500 cursor-not-allowed hover:bg-zinc-50"
             disabled
             data-testid="button-signup-apple"
           >
@@ -312,7 +341,7 @@ export default function SignupPage() {
 
           <Button
             variant="outline"
-            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            className="w-full h-12 justify-start gap-3 text-base font-normal bg-zinc-50 border-black/10 text-zinc-500 cursor-not-allowed hover:bg-zinc-50"
             disabled
             data-testid="button-signup-microsoft"
           >
@@ -327,7 +356,7 @@ export default function SignupPage() {
 
           <Button
             variant="outline"
-            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            className="w-full h-12 justify-start gap-3 text-base font-normal bg-zinc-50 border-black/10 text-zinc-500 cursor-not-allowed hover:bg-zinc-50"
             disabled
             data-testid="button-signup-phone"
           >
@@ -337,9 +366,9 @@ export default function SignupPage() {
         </div>
 
         <div className="flex items-center gap-4 my-6">
-          <div className="flex-1 h-px bg-border" />
-          <span className="text-muted-foreground text-sm">o</span>
-          <div className="flex-1 h-px bg-border" />
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-200 to-transparent" />
+          <span className="text-zinc-500 text-sm">o</span>
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-200 to-transparent" />
         </div>
 
         <div className="space-y-4">
@@ -348,11 +377,11 @@ export default function SignupPage() {
             placeholder="Dirección de correo electrónico"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="h-12 text-base"
+            className="h-12 text-base rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
             data-testid="input-signup-email-initial"
           />
           <Button
-            className="w-full h-12 text-base"
+            className="w-full h-12 text-base bg-black text-white hover:bg-zinc-900 border border-black/10 rounded-xl font-semibold"
             onClick={handleEmailContinue}
             disabled={!email}
             data-testid="button-signup-continue"
@@ -361,16 +390,17 @@ export default function SignupPage() {
           </Button>
         </div>
 
-        <p className="text-center text-sm text-muted-foreground mt-6">
+        <p className="text-center text-sm text-zinc-500 mt-6">
           ¿Ya tienes una cuenta?{" "}
           <button
             onClick={() => setLocation("/login")}
-            className="text-primary hover:underline"
+            className="text-zinc-900 font-semibold underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-600"
             data-testid="link-goto-login"
           >
             Inicia sesión
           </button>
         </p>
+        </div>
       </div>
     </div>
   );
