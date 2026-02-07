@@ -436,11 +436,19 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, _setUploadedFiles] = useState<UploadedFile[]>([]);
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
-  useEffect(() => {
-    uploadedFilesRef.current = uploadedFiles;
-  }, [uploadedFiles]);
+  // Keep `uploadedFilesRef` in sync immediately (not one render later) so send/analysis
+  // logic doesn't read stale attachment metadata right after an upload promise resolves.
+  const setUploadedFiles = useCallback((updater: React.SetStateAction<UploadedFile[]>) => {
+    _setUploadedFiles((prev) => {
+      const next = typeof updater === "function"
+        ? (updater as (p: UploadedFile[]) => UploadedFile[])(prev)
+        : updater;
+      uploadedFilesRef.current = next;
+      return next;
+    });
+  }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");

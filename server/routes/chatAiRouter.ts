@@ -1295,27 +1295,30 @@ ${attachmentContext}`;
         console.warn('[Stream] Failed to persist user message (best-effort):', e);
       }
 
-      // Create an assistant message placeholder at the start (so we can stream-update and persist)
-      let assistantMessageId: string | null = null;
-      try {
-        const assistantMessage = await storage.createChatMessage({
-          chatId: effectiveChatIdForPersistence,
-          role: 'assistant',
-          content: '', // Will be updated during streaming
-          status: 'pending',
-          runId: claimedRun?.id,
-          userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,
-          // chat_messages has a global UNIQUE(request_id). The user message above uses requestId,
-          // so the assistant placeholder must NOT reuse it.
-          requestId: claimedRun ? undefined : `${requestId}:assistant`,
-        });
-        assistantMessageId = assistantMessage.id;
+      // Create an assistant message placeholder at the start (so we can stream-update and persist).
+      // If the run already has an assistant message recorded, reuse it to avoid duplicates on retries.
+      let assistantMessageId: string | null = claimedRun?.assistantMessageId || null;
+      if (!assistantMessageId) {
+        try {
+          const assistantMessage = await storage.createChatMessage({
+            chatId: effectiveChatIdForPersistence,
+            role: 'assistant',
+            content: '', // Will be updated at completion
+            status: 'pending',
+            runId: claimedRun?.id,
+            userMessageId: claimedRun?.userMessageId || persistedUserMessageId || undefined,
+            // chat_messages has a global UNIQUE(request_id). The user message above uses requestId,
+            // so the assistant placeholder must NOT reuse it.
+            requestId: claimedRun ? undefined : `${requestId}:assistant`,
+          });
+          assistantMessageId = assistantMessage.id;
 
-        if (claimedRun) {
-          await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
+          if (claimedRun) {
+            await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
+          }
+        } catch (e) {
+          console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
         }
-      } catch (e) {
-        console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
       }
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;

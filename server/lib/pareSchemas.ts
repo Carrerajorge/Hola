@@ -2,6 +2,24 @@ import { z } from "zod";
 
 const MIME_TYPE_REGEX = /^[a-z]+\/[a-z0-9\-\+\.]+$/i;
 
+const ATTACHMENT_TYPE_VALUES = [
+  // Canonical
+  "document",
+  "image",
+  "file",
+  // Legacy / client variants we canonicalize server-side (robustness)
+  "pdf",
+  "word",
+  "excel",
+  "ppt",
+  "spreadsheet",
+  "presentation",
+  "text",
+  "code",
+  "archive",
+  "unknown",
+] as const;
+
 export const MessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
   content: z.string().min(1, "Message content cannot be empty").max(100000, "Message content exceeds 100,000 character limit"),
@@ -10,8 +28,8 @@ export const MessageSchema = z.object({
 export const AttachmentSchema = z.object({
   name: z.string().min(1, "Attachment name is required").max(255, "Attachment name exceeds 255 characters"),
   mimeType: z.string().regex(MIME_TYPE_REGEX, "Invalid mimeType format (expected: type/subtype)"),
-  type: z.enum(["document", "image", "file"], {
-    errorMap: () => ({ message: "Attachment type must be 'document', 'image', or 'file'" }),
+  type: z.enum(ATTACHMENT_TYPE_VALUES, {
+    errorMap: () => ({ message: `Attachment type must be one of: ${ATTACHMENT_TYPE_VALUES.join(", ")}` }),
   }),
   content: z.string().optional(),
   url: z.string().url("Invalid URL format").optional(),
@@ -143,11 +161,77 @@ export function validateChatRequest(body: unknown): ValidationResult<ChatRequest
 }
 
 export function canonicalizeAttachment(attachment: Attachment): Attachment {
+  const canonicalizeType = (
+    rawType: string,
+    mimeType: string,
+    name: string
+  ): "document" | "image" | "file" => {
+    const t = (rawType || "").toLowerCase().trim();
+    const mt = (mimeType || "").toLowerCase().trim();
+    const lowerName = (name || "").toLowerCase();
+
+    // Prefer MIME detection for images.
+    if (t === "image" || t.startsWith("image/") || mt.startsWith("image/")) return "image";
+
+    // Strong document indicators (legacy "pdf/word/excel/ppt" etc).
+    const docTypeSet = new Set([
+      "document",
+      "pdf",
+      "word",
+      "excel",
+      "ppt",
+      "spreadsheet",
+      "presentation",
+    ]);
+    if (docTypeSet.has(t)) return "document";
+
+    // If a client accidentally sends a MIME type string in `type`, treat it as MIME.
+    if (MIME_TYPE_REGEX.test(t)) return t.startsWith("image/") ? "image" : "document";
+
+    // If the declared mimeType looks document-like, treat as document.
+    const docMimeHints = [
+      "pdf",
+      "word",
+      "msword",
+      "officedocument",
+      "excel",
+      "spreadsheet",
+      "powerpoint",
+      "presentation",
+      "text/",
+      "application/json",
+      "application/csv",
+    ];
+    if (docMimeHints.some((h) => mt.includes(h))) return "document";
+
+    // Last-resort extension check.
+    const docExts = [
+      ".pdf",
+      ".doc",
+      ".docx",
+      ".xls",
+      ".xlsx",
+      ".ppt",
+      ".pptx",
+      ".csv",
+      ".txt",
+      ".md",
+      ".json",
+      ".rtf",
+      ".odt",
+      ".ods",
+      ".odp",
+    ];
+    if (docExts.some((ext) => lowerName.endsWith(ext))) return "document";
+
+    return "file";
+  };
+
   return {
     ...attachment,
     name: attachment.name.trim(),
     mimeType: attachment.mimeType.toLowerCase().trim(),
-    type: attachment.type,
+    type: canonicalizeType(attachment.type, attachment.mimeType, attachment.name),
     content: attachment.content?.trim(),
     url: attachment.url?.trim(),
   };
