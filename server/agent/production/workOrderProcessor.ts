@@ -7,8 +7,8 @@
 
 import { v4 as uuidv4 } from 'uuid';
 
-import {
 import { openai } from "../../lib/openai";
+import {
     WorkOrderSchema,
     type WorkOrder,
     type DocumentIntent,

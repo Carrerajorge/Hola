@@ -1,4 +1,5 @@
 import { SourceSignal } from "./contracts";
+import { franc } from "franc";
 
 export interface ScopusArticle {
   scopusId: string;
@@ -129,6 +130,21 @@ const SPANISH_TO_ENGLISH: Record<string, string> = {
   "eclampsia": "eclampsia",
   "mortalidad": "mortality",
   "morbilidad": "morbidity",
+  // Business / Supply Chain / Sustainability (general)
+  "economía": "economy",
+  "economia": "economy",
+  "circular": "circular",
+  "cadena": "chain",
+  "suministro": "supply",
+  "logística": "logistics",
+  "logistica": "logistics",
+  "empresa": "company",
+  "empresas": "companies",
+  "exportadora": "exporting",
+  "exportadoras": "exporting",
+  "exportación": "export",
+  "exportacion": "export",
+  "exportar": "export",
 };
 
 const STOPWORDS = new Set([
@@ -138,12 +154,45 @@ const STOPWORDS = new Set([
   "uso", "the", "and", "or", "of", "in", "to", "for", "from", "with",
   "buscarme", "quiero", "necesito", "dame", "encuentra", "busca",
   "colocalo", "ordenado", "tabla", "excel", "articulos", "cientificos",
+  // Region / filters often included in natural-language prompts
+  "latinoamerica", "latinoamérica", "america", "américa", "latina", "latam",
+  "españa", "espana", "solo", "solamente", "únicamente", "unicamente",
 ]);
 
 export interface ExtractedKeywords {
   coreKeywords: string[];
   allKeywords: string[];
   yearRange?: { start: number; end: number };
+}
+
+function stripAccents(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function quoteIfNeeded(term: string): string {
+  const t = term.trim();
+  if (!t) return "";
+  // Keep wildcard/search operators unquoted.
+  if (/[*?]/.test(t)) return t;
+  if (/\b(AND|OR|NOT)\b/i.test(t)) return t;
+  // Quote phrases or values with punctuation that can break the query.
+  if (/\s|[()]/.test(t)) return `"${t.replace(/"/g, '\\"')}"`;
+  return t.replace(/"/g, '\\"');
+}
+
+function detectLanguageName(text: string): string {
+  const sample = (text || "").replace(/\s+/g, " ").trim().slice(0, 2000);
+  if (sample.length < 30) return "Unknown";
+  const code = franc(sample);
+  switch (code) {
+    case "spa": return "Spanish";
+    case "por": return "Portuguese";
+    case "eng": return "English";
+    case "fra": return "French";
+    case "deu": return "German";
+    case "ita": return "Italian";
+    default: return "Unknown";
+  }
 }
 
 export function extractSearchKeywords(query: string): ExtractedKeywords {
@@ -163,6 +212,26 @@ export function extractSearchKeywords(query: string): ExtractedKeywords {
   const words = cleanQuery.split(/\s+/);
   const allKeywords: string[] = [];
 
+  // Phrase-level enrichment (helps Spanish prompts match English literature in Scopus).
+  // We do this BEFORE single-word extraction so these key concepts have a chance to be included.
+  const cleanNoAccents = stripAccents(cleanQuery);
+  const PHRASE_MAP: Array<{ re: RegExp; add: string[] }> = [
+    // Prefer English phrases to maximize recall in international indexes.
+    // Spanish terms are still captured by the single-word loop below.
+    { re: /\beconomia\s+circular\b/i, add: ["circular economy"] },
+    { re: /\bcadena\s+de\s+suministro\b/i, add: ["supply chain"] },
+    { re: /\bempresa(s)?\s+exportadora(s)?\b/i, add: ["export*"] },
+  ];
+  for (const { re, add } of PHRASE_MAP) {
+    if (re.test(cleanNoAccents)) {
+      for (const term of add) {
+        const t = term.trim();
+        if (!t) continue;
+        if (!allKeywords.includes(t)) allKeywords.push(t);
+      }
+    }
+  }
+
   for (const word of words) {
     if (word.length < 3) continue;
     if (STOPWORDS.has(word)) continue;
@@ -173,9 +242,9 @@ export function extractSearchKeywords(query: string): ExtractedKeywords {
     }
   }
 
-  const coreKeywords = allKeywords.filter(kw =>
-    ["steel", "recycled", "concrete", "strength", "reinforcement", "cement", "mechanical", "properties"].includes(kw)
-  );
+  // "coreKeywords" used to be domain-specific (construction/health). Make it generic:
+  // pick the first 3 high-signal terms for relevance filtering.
+  const coreKeywords = allKeywords.slice(0, 3);
 
   console.log(`[Scopus] Extracted keywords:`, { coreKeywords, allKeywords, yearRange });
 
@@ -191,7 +260,7 @@ export function buildScopusQuery(extracted: ExtractedKeywords): string {
     throw new Error("No valid keywords extracted from query");
   }
 
-  const phraseQuery = keywordsToUse.join(" AND ");
+  const phraseQuery = keywordsToUse.map(quoteIfNeeded).filter(Boolean).join(" AND ");
   let scopusQuery = `TITLE-ABS-KEY(${phraseQuery})`;
 
   if (yearRange) {
@@ -246,6 +315,7 @@ export async function searchScopus(
     startYear?: number;
     endYear?: number;
     documentType?: string;
+    affilCountries?: string[];
   } = {}
 ): Promise<ScopusSearchResult> {
   const apiKey = process.env.SCOPUS_API_KEY;
@@ -253,7 +323,7 @@ export async function searchScopus(
     throw new Error("SCOPUS_API_KEY not configured");
   }
 
-  const { maxResults = 25, documentType } = options;
+  const { maxResults = 25, documentType, affilCountries } = options;
   const startTime = Date.now();
 
   const extracted = extractSearchKeywords(query);
@@ -269,6 +339,10 @@ export async function searchScopus(
   let finalQuery = searchQuery;
   if (documentType) {
     finalQuery += ` AND DOCTYPE(${documentType})`;
+  }
+  if (affilCountries && affilCountries.length > 0) {
+    const clause = buildAffilCountryClause(affilCountries);
+    if (clause) finalQuery += ` AND (${clause})`;
   }
 
   const params = new URLSearchParams({
@@ -337,7 +411,7 @@ export async function searchScopus(
           citationCount: parseInt(entry["citedby-count"] || "0", 10),
           documentType: entry["subtypeDescription"] || "Article",
           subtypeDescription: entry["subtypeDescription"],
-          language: "English",
+          language: detectLanguageName(entry["dc:description"] || entry["dc:title"] || ""),
           affiliations: affiliationsList,
           affiliationCountry: primaryAffiliation.country,
           affiliationCity: primaryAffiliation.city,
@@ -364,7 +438,22 @@ export async function searchScopus(
 
   console.log(`[Scopus] Fetched ${rawArticles.length} raw articles, filtering by relevance...`);
 
-  const filteredArticles = filterByRelevance(rawArticles, extracted.coreKeywords);
+  // Relevance filtering is helpful, but we must not under-deliver when the user asks for many results.
+  // Strategy: try strict core-keyword filter, then relax to broader keywords, then fallback to "has abstract".
+  let filteredArticles = filterByRelevance(rawArticles, extracted.coreKeywords);
+
+  if (filteredArticles.length < maxResults) {
+    const relaxedKeywords = extracted.allKeywords.slice(0, 8);
+    const relaxed = filterByRelevance(rawArticles, relaxedKeywords);
+    if (relaxed.length > filteredArticles.length) {
+      filteredArticles = relaxed;
+    }
+  }
+
+  if (filteredArticles.length < maxResults) {
+    filteredArticles = rawArticles.filter(a => a.abstract && a.abstract.length > 50);
+  }
+
   const finalArticles = filteredArticles.slice(0, maxResults);
 
   console.log(`[Scopus] After filtering: ${filteredArticles.length} relevant articles, returning ${finalArticles.length}`);
@@ -411,6 +500,13 @@ export function scopusArticlesToSourceSignals(articles: ScopusArticle[]): Source
     claims: [],
     scopusData: article,
   }));
+}
+
+export function buildAffilCountryClause(countries: string[]): string {
+  const unique = Array.from(new Set((countries || []).map(c => (c || "").trim()).filter(Boolean)));
+  if (unique.length === 0) return "";
+  // Build: AFFILCOUNTRY(Spain) OR AFFILCOUNTRY("Costa Rica") ...
+  return unique.map(c => `AFFILCOUNTRY(${quoteIfNeeded(c)})`).join(" OR ");
 }
 
 function extractAuthors(entry: any): string[] {

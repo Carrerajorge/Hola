@@ -9,6 +9,7 @@ import { searchScopus, ScopusArticle, isScopusConfigured } from "./scopusClient"
 import { searchPubMed, PubMedArticle, generatePubMedAPA7Citation, isPubMedConfigured } from "./pubmedClient";
 import { searchSciELO, SciELOArticle, generateSciELOAPA7Citation, isSciELOConfigured } from "./scieloClient";
 import { searchRedalyc, RedalycArticle, generateRedalycAPA7Citation, isRedalycConfigured } from "./redalycClient";
+import { searchOpenAlex, type AcademicCandidate } from "./openAlexClient";
 import * as XLSX from "xlsx";
 
 // =============================================================================
@@ -17,7 +18,7 @@ import * as XLSX from "xlsx";
 
 export interface UnifiedArticle {
     id: string;
-    source: "scopus" | "pubmed" | "scielo" | "redalyc";
+    source: "scopus" | "openalex" | "pubmed" | "scielo" | "redalyc";
     title: string;
     authors: string[];
     year: string;
@@ -41,6 +42,7 @@ export interface UnifiedSearchResult {
     articles: UnifiedArticle[];
     totalBySource: {
         scopus: number;
+        openalex: number;
         pubmed: number;
         scielo: number;
         redalyc: number;
@@ -55,8 +57,11 @@ export interface SearchOptions {
     maxPerSource?: number;
     startYear?: number;
     endYear?: number;
-    sources?: ("scopus" | "pubmed" | "scielo" | "redalyc")[];
+    sources?: ("scopus" | "openalex" | "pubmed" | "scielo" | "redalyc")[];
     language?: string;
+    // Scopus-only: filter by affiliation country (e.g. ["Spain","Mexico"]).
+    // Note: SciELO/Redalyc are already LatAm-focused; PubMed doesn't reliably expose affiliation country at search time.
+    affilCountries?: string[];
 }
 
 // =============================================================================
@@ -89,7 +94,8 @@ export async function searchAllSources(
         startYear,
         endYear,
         sources = ["scopus", "pubmed", "scielo", "redalyc"],
-        language
+        language,
+        affilCountries
     } = options;
 
     const startTime = Date.now();
@@ -104,11 +110,13 @@ export async function searchAllSources(
 
     const results: {
         scopus: UnifiedArticle[];
+        openalex: UnifiedArticle[];
         pubmed: UnifiedArticle[];
         scielo: UnifiedArticle[];
         redalyc: UnifiedArticle[];
     } = {
         scopus: [],
+        openalex: [],
         pubmed: [],
         scielo: [],
         redalyc: []
@@ -125,13 +133,34 @@ export async function searchAllSources(
                     const scopusResult = await searchScopus(englishQuery, {
                         maxResults: maxPerSource,
                         startYear,
-                        endYear
+                        endYear,
+                        affilCountries
                     });
                     results.scopus = scopusResult.articles.map(a => convertScopusToUnified(a));
                     console.log(`[UnifiedSearch] Scopus: ${results.scopus.length} articles`);
                 } catch (error: any) {
                     errors.push(`Scopus: ${error.message}`);
                     console.error(`[UnifiedSearch] Scopus error: ${error.message}`);
+                }
+            })()
+        );
+    }
+
+    // OpenAlex (free)
+    if (sources.includes("openalex")) {
+        searchPromises.push(
+            (async () => {
+                try {
+                    const openAlexCandidates = await searchOpenAlex(englishQuery, {
+                        maxResults: Math.min(200, maxPerSource),
+                        yearStart: startYear,
+                        yearEnd: endYear,
+                    });
+                    results.openalex = openAlexCandidates.map(c => convertOpenAlexToUnified(c));
+                    console.log(`[UnifiedSearch] OpenAlex: ${results.openalex.length} articles`);
+                } catch (error: any) {
+                    errors.push(`OpenAlex: ${error.message}`);
+                    console.error(`[UnifiedSearch] OpenAlex error: ${error.message}`);
                 }
             })()
         );
@@ -205,6 +234,7 @@ export async function searchAllSources(
     // Combine and deduplicate by DOI/title
     const allArticles = [
         ...results.scopus,
+        ...results.openalex,
         ...results.pubmed,
         ...results.scielo,
         ...results.redalyc
@@ -219,6 +249,7 @@ export async function searchAllSources(
         articles: finalArticles,
         totalBySource: {
             scopus: results.scopus.length,
+            openalex: results.openalex.length,
             pubmed: results.pubmed.length,
             scielo: results.scielo.length,
             redalyc: results.redalyc.length
@@ -276,7 +307,32 @@ function convertPubMedToUnified(article: PubMedArticle): UnifiedArticle {
     };
 }
 
+function convertOpenAlexToUnified(candidate: AcademicCandidate): UnifiedArticle {
+    const year = candidate.year && candidate.year > 0 ? String(candidate.year) : "n.d.";
+    const doi = (candidate.doi || "").trim();
+
+    return {
+        id: `openalex_${candidate.sourceId}`,
+        source: "openalex",
+        title: candidate.title || "n.d.",
+        authors: candidate.authors || [],
+        year,
+        journal: candidate.journal || "n.d.",
+        abstract: candidate.abstract || "",
+        keywords: candidate.keywords || [],
+        doi: doi || undefined,
+        url: candidate.doiUrl || candidate.landingUrl || "",
+        language: candidate.language || "en",
+        documentType: candidate.documentType || "Article",
+        country: candidate.country || "Unknown",
+        city: candidate.city || "Unknown",
+        citationCount: candidate.citationCount || 0,
+        apaCitation: generateOpenAlexAPA7Citation(candidate),
+    };
+}
+
 function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
+    const country = scieloCollectionToCountry(article.collection);
     return {
         id: `scielo_${article.scielo_id}`,
         source: "scielo",
@@ -292,7 +348,7 @@ function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
         pages: article.pages,
         language: article.language,
         documentType: "Article",
-        country: "LatAm", // SciELO is LatAm focused
+        country, // Derived from SciELO collection when possible
         city: "n.d.",
         apaCitation: generateSciELOAPA7Citation(article)
     };
@@ -345,6 +401,34 @@ function generateScopusAPA7Citation(article: ScopusArticle): string {
     if (article.doi) {
         doiPart = ` https://doi.org/${article.doi}`;
     }
+
+    return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
+}
+
+function generateOpenAlexAPA7Citation(candidate: AcademicCandidate): string {
+    const authors = (candidate.authors || []).filter(Boolean);
+
+    let authorsStr = "";
+    if (authors.length === 0) {
+        authorsStr = "";
+    } else if (authors.length === 1) {
+        authorsStr = formatAuthorAPA(authors[0]);
+    } else if (authors.length === 2) {
+        authorsStr = `${formatAuthorAPA(authors[0])} & ${formatAuthorAPA(authors[1])}`;
+    } else if (authors.length <= 20) {
+        const allAuthors = authors.map(formatAuthorAPA);
+        authorsStr = allAuthors.slice(0, -1).join(", ") + ", & " + allAuthors[allAuthors.length - 1];
+    } else {
+        const first19 = authors.slice(0, 19).map(formatAuthorAPA);
+        authorsStr = first19.join(", ") + ", ... " + formatAuthorAPA(authors[authors.length - 1]);
+    }
+
+    const year = candidate.year ? `(${candidate.year})` : "(n.d.)";
+    const title = candidate.title?.endsWith(".") ? candidate.title : `${candidate.title}.`;
+    const journalPart = candidate.journal ? `*${candidate.journal}*` : "";
+
+    const doi = (candidate.doi || "").trim();
+    const doiPart = doi ? ` https://doi.org/${doi}` : "";
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
 }
@@ -420,6 +504,7 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
     // Group by source
     const bySource: Record<string, UnifiedArticle[]> = {
         scopus: [],
+        openalex: [],
         pubmed: [],
         scielo: [],
         redalyc: []
@@ -450,6 +535,7 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
     lines.push("");
     lines.push("Distribución por fuente:");
     lines.push(`  - Scopus: ${bySource.scopus.length} artículos`);
+    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos`);
     lines.push(`  - PubMed: ${bySource.pubmed.length} artículos`);
     lines.push(`  - SciELO: ${bySource.scielo.length} artículos`);
     lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos`);
@@ -462,27 +548,115 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
  */
 export function generateExcelReport(articles: UnifiedArticle[]): Buffer {
     // Columns: Authors Title Year Journal Abstract Keywords Language Document Type DOI City of publication Country of study Scopus
-    const data = articles.map(a => ({
-        Authors: a.authors.join(", "),
-        Title: a.title,
-        Year: a.year,
-        Journal: a.journal,
-        Abstract: a.abstract,
-        Keywords: a.keywords.join(", "),
-        Language: a.language,
-        "Document Type": a.documentType || "Article",
-        DOI: a.doi || "",
-        "City of publication": a.city || "n.d.",
-        "Country of study": a.country || "n.d.",
-        Scopus: a.source === "scopus" ? "Yes" : "No", // Request asked for "Scopus" column
-        Source: a.source // Extra useful column
-    }));
+    const sorted = [...articles].sort((a, b) => {
+        const aKey = (a.authors[0] || "").toLowerCase();
+        const bKey = (b.authors[0] || "").toLowerCase();
+        if (aKey !== bKey) return aKey.localeCompare(bKey);
+        const at = (a.title || "").toLowerCase();
+        const bt = (b.title || "").toLowerCase();
+        if (at !== bt) return at.localeCompare(bt);
+        return (b.year || "").localeCompare(a.year || "");
+    });
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
+    const headers = [
+        "Authors",
+        "Title",
+        "Year",
+        "Journal",
+        "Abstract",
+        "Keywords",
+        "Language",
+        "Document Type",
+        "DOI",
+        "City of publication",
+        "Country of study",
+        "Scopus",
+    ];
+
+    const rows = [
+        headers,
+        ...sorted.map(a => ([
+            a.authors?.join(", ") || "n.d.",
+            a.title || "n.d.",
+            a.year || "n.d.",
+            a.journal || "n.d.",
+            a.abstract || "n.d.",
+            (a.keywords || []).join(", ") || "n.d.",
+            normalizeLanguageLabel(a.language) || "n.d.",
+            a.documentType || "Article",
+            a.doi || "",
+            a.city || "n.d.",
+            a.country || "n.d.",
+            a.source === "scopus" ? "Yes" : "No",
+        ])),
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Articles");
 
     return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+
+function scieloCollectionToCountry(collection: string): string {
+    const c = (collection || "").trim().toLowerCase();
+    if (!c) return "n.d.";
+
+    const map: Record<string, string> = {
+        // Common SciELO collections (3-letter codes in `in` / `collection`)
+        // NOTE: Some deployments use `scl` for Brazil.
+        arg: "Argentina",
+        bol: "Bolivia",
+        bra: "Brazil",
+        chl: "Chile",
+        col: "Colombia",
+        cri: "Costa Rica",
+        cub: "Cuba",
+        ecu: "Ecuador",
+        mex: "Mexico",
+        nic: "Nicaragua",
+        pan: "Panama",
+        per: "Peru",
+        pry: "Paraguay",
+        ury: "Uruguay",
+        ven: "Venezuela",
+        spa: "Spain",
+        esp: "Spain",
+        prt: "Portugal",
+        scl: "Brazil",
+        // Non-LatAm (still present in SciELO network)
+        zaf: "South Africa",
+        sza: "South Africa",
+    };
+
+    return map[c] || "LatAm";
+}
+
+function normalizeLanguageLabel(lang: string | undefined): string | undefined {
+    const l = (lang || "").trim();
+    if (!l) return undefined;
+    const lower = l.toLowerCase();
+
+    const map: Record<string, string> = {
+        es: "Spanish",
+        spa: "Spanish",
+        spanish: "Spanish",
+        español: "Spanish",
+        espanol: "Spanish",
+        pt: "Portuguese",
+        por: "Portuguese",
+        portuguese: "Portuguese",
+        português: "Portuguese",
+        portugues: "Portuguese",
+        en: "English",
+        eng: "English",
+        english: "English",
+        fr: "French",
+        fra: "French",
+        french: "French",
+    };
+
+    return map[lower] || l;
 }
 
 // =============================================================================
@@ -494,6 +668,7 @@ export const unifiedArticleSearch = {
     generateAPACitationsList,
     generateExcelReport,
     isScopusConfigured,
+    isOpenAlexConfigured: () => true,
     isPubMedConfigured,
     isSciELOConfigured,
     isRedalycConfigured
