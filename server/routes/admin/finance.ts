@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { storage } from "../../storage";
-import { sendPaymentEmail } from "../../services/genericEmailService";
+import { getInvoiceEmailEventId, sendInvoiceEmailIdempotent } from "../../services/invoiceAutomationService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import { dbRead } from "../../db";
-import { payments, users } from "@shared/schema";
+import { invoices, notificationLogs, payments, users } from "@shared/schema";
 import { getStripeClient } from "../../stripeClient";
 import {
     getStripeCustomerIdFromInvoice,
@@ -486,21 +486,49 @@ financeRouter.get("/invoices", async (req, res) => {
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        let invoices = await storage.getInvoices();
+        const statusFilter = String(status || "").trim();
+        const whereClause = statusFilter ? eq(invoices.status, statusFilter) : undefined;
 
-        if (status) {
-            invoices = invoices.filter(i => i.status === status);
-        }
+        let countQuery = dbRead
+            .select({ count: sql<number>`count(*)::int` })
+            .from(invoices);
+        if (whereClause) countQuery = countQuery.where(whereClause);
+        const [{ count: total = 0 } = {} as any] = await countQuery;
 
-        // Sort by date descending
-        invoices.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-        });
+        const invoiceEmailEventId = sql<string>`('invoice_email:' || ${invoices.userId} || ':' || ${invoices.invoiceNumber})`;
 
-        const total = invoices.length;
-        const paginatedInvoices = invoices.slice(offset, offset + limitNum);
+        let listQuery = dbRead
+            .select({
+                id: invoices.id,
+                userId: invoices.userId,
+                userEmail: users.email,
+                paymentId: invoices.paymentId,
+                invoiceNumber: invoices.invoiceNumber,
+                amount: invoices.amount,
+                currency: invoices.currency,
+                status: invoices.status,
+                dueDate: invoices.dueDate,
+                paidAt: invoices.paidAt,
+                pdfPath: invoices.pdfPath,
+                createdAt: invoices.createdAt,
+                emailStatus: notificationLogs.status,
+                emailRetryCount: notificationLogs.retryCount,
+                emailErrorMessage: notificationLogs.errorMessage,
+                emailSentAt: notificationLogs.sentAt,
+            })
+            .from(invoices)
+            .leftJoin(users, eq(invoices.userId, users.id))
+            .leftJoin(
+                notificationLogs,
+                and(eq(notificationLogs.eventId, invoiceEmailEventId), eq(notificationLogs.channel, "email"))!,
+            );
+
+        if (whereClause) listQuery = listQuery.where(whereClause);
+
+        const paginatedInvoices = await listQuery
+            .orderBy(desc(invoices.createdAt))
+            .limit(limitNum)
+            .offset(offset);
 
         res.json({
             invoices: paginatedInvoices,
@@ -518,8 +546,112 @@ financeRouter.get("/invoices", async (req, res) => {
 
 financeRouter.post("/invoices", async (req, res) => {
     try {
-        const invoice = await storage.createInvoice(req.body);
-        res.json(invoice);
+        const body = req.body || {};
+        const invoiceNumber = String(body.invoiceNumber || "").trim();
+        const amount = String(body.amount || "").trim();
+        const userEmail = String(body.userEmail || "").trim();
+
+        if (!invoiceNumber || !amount) {
+            return res.status(400).json({ error: "invoiceNumber and amount are required" });
+        }
+
+        let resolvedUserId: string | null = body.userId ? String(body.userId).trim() : null;
+        let resolvedEmail: string | null = null;
+        if (!resolvedUserId && userEmail) {
+            const user = await storage.getUserByEmail(userEmail);
+            if (!user) {
+                return res.status(400).json({ error: "User not found for provided email" });
+            }
+            resolvedUserId = user.id;
+            resolvedEmail = user.email || null;
+        }
+        if (!resolvedUserId) {
+            return res.status(400).json({ error: "userEmail or userId is required" });
+        }
+
+        let invoice;
+        try {
+            invoice = await storage.createInvoice({
+                invoiceNumber,
+                amount,
+                userId: resolvedUserId,
+                currency: body.currency ? String(body.currency).trim().toUpperCase() : "EUR",
+            });
+        } catch (e: any) {
+            // Unique index: invoices_user_invoice_number_unique_idx
+            if (e?.code === "23505") {
+                const [existing] = await dbRead
+                    .select()
+                    .from(invoices)
+                    .where(and(eq(invoices.userId, resolvedUserId), eq(invoices.invoiceNumber, invoiceNumber)))
+                    .limit(1);
+                if (existing) {
+                    return res.json({ invoice: existing, email: { status: "skipped", reason: "already_exists" } });
+                }
+                return res.status(409).json({ error: "Invoice already exists" });
+            }
+            throw e;
+        }
+
+        await auditLog(req, {
+            action: AuditActions.INVOICE_CREATED,
+            resource: "invoices",
+            resourceId: invoice.id,
+            details: {
+                invoiceNumber: invoice.invoiceNumber,
+                amount: invoice.amount,
+                currency: invoice.currency,
+                userId: invoice.userId || null,
+                createdBy: (req as any).user?.email,
+            },
+            category: "admin",
+            severity: "info",
+        });
+
+        let emailOutcome: any = { status: "skipped", reason: "no_user_email" };
+
+        if (invoice.userId) {
+            const user = resolvedEmail ? { email: resolvedEmail } : await storage.getUser(invoice.userId);
+            if (user?.email) {
+                const baseUrl = process.env.BASE_URL || process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+                const invoiceUrl = invoice.pdfPath
+                    ? (invoice.pdfPath.startsWith("http://") || invoice.pdfPath.startsWith("https://"))
+                        ? invoice.pdfPath
+                        : `${baseUrl}${invoice.pdfPath.startsWith("/") ? "" : "/"}${invoice.pdfPath}`
+                    : undefined;
+
+                const eventId = getInvoiceEmailEventId({ userId: invoice.userId, invoiceNumber: invoice.invoiceNumber });
+
+                emailOutcome = await sendInvoiceEmailIdempotent({
+                    eventId,
+                    userId: invoice.userId,
+                    to: user.email,
+                    invoiceIdForDisplay: invoice.invoiceNumber || invoice.id,
+                    amount: invoice.amount || "0",
+                    currency: invoice.currency || "EUR",
+                    status: (invoice.status as "paid" | "pending" | "failed") || "pending",
+                    invoiceUrl,
+                });
+
+                await auditLog(req, {
+                    action: AuditActions.INVOICE_SENT,
+                    resource: "invoices",
+                    resourceId: invoice.id,
+                    details: {
+                        userId: invoice.userId,
+                        recipientEmail: user.email,
+                        emailStatus: emailOutcome?.status || null,
+                        messageId: emailOutcome?.messageId || null,
+                        error: emailOutcome?.error || null,
+                        sentBy: (req as any).user?.email,
+                    },
+                    category: "admin",
+                    severity: emailOutcome?.status === "sent" ? "info" : emailOutcome?.status === "failed" ? "warning" : "info",
+                });
+            }
+        }
+
+        res.json({ invoice, email: emailOutcome });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
