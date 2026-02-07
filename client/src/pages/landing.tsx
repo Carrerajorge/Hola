@@ -60,17 +60,22 @@ export default function LandingPage() {
   };
 
   const features = [
-    { icon: Sparkles, label: "Adjuntar", color: "from-purple-500 to-pink-500" },
-    { icon: Search, label: "Buscar", color: "from-blue-500 to-cyan-500" },
-    { icon: BookOpen, label: "Estudiemos", color: "from-emerald-500 to-teal-500" },
-    { icon: Image, label: "Crear imagen", color: "from-orange-500 to-amber-500" },
-    { icon: Mic, label: "Voz", color: "from-rose-500 to-pink-500" },
+    { icon: Sparkles, label: "Adjuntar", color: "from-fuchsia-500 to-purple-600" },
+    { icon: Search, label: "Buscar", color: "from-violet-500 to-indigo-600" },
+    { icon: BookOpen, label: "Estudiemos", color: "from-purple-500 to-fuchsia-600" },
+    { icon: Image, label: "Crear imagen", color: "from-pink-500 to-fuchsia-600" },
+    { icon: Mic, label: "Voz", color: "from-fuchsia-600 to-purple-700" },
   ];
 
   return (
     <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
+      {/* Futuristic background orbs */}
+      <div className="floating-orb-light floating-orb-light-1" />
+      <div className="floating-orb-light floating-orb-light-2" />
+      <div className="floating-orb-light floating-orb-light-3" />
+
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-purple-200/40 bg-white/70 backdrop-blur-md">
         <div className="flex items-center gap-2">
           {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
           <Button
@@ -96,14 +101,14 @@ export default function LandingPage() {
           <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
           <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
           <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-amber-700 hover:text-amber-600 transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/login")} className="text-fuchsia-600 hover:text-fuchsia-500 transition-colors duration-200 cursor-pointer">Imágenes</span>
           <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
           {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
-            className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.25)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -111,7 +116,7 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-black/20 text-zinc-900 hover:bg-black/5 hover:border-amber-400/60 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-purple-300/50 text-zinc-900 hover:bg-fuchsia-50 hover:border-fuchsia-400/60 transition-all duration-300"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
@@ -165,7 +170,7 @@ export default function LandingPage() {
                 className={
                   "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
                   (item.label === "Imágenes"
-                    ? "text-amber-700 hover:text-amber-600 hover:bg-black/5"
+                    ? "text-fuchsia-600 hover:text-fuchsia-500 hover:bg-fuchsia-50"
                     : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
                 }
                 onClick={() => {
@@ -189,7 +194,7 @@ export default function LandingPage() {
             <h1 className="text-4xl md:text-6xl font-bold mb-4">
               <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
             </h1>
-            <p className="text-lg text-zinc-600 max-w-xl mx-auto">
+            <p className="text-lg text-zinc-500 max-w-xl mx-auto">
               El asistente de IA más inteligente para crear, investigar y aprender
             </p>
           </div>
@@ -209,7 +214,7 @@ export default function LandingPage() {
                 />
               </div>
               {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-amber-200/60 via-yellow-100/50 to-amber-200/60 blur-xl opacity-70" />
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-300/40 via-purple-200/30 to-fuchsia-300/40 blur-xl opacity-70" />
             </div>
 
             {/* Feature Buttons */}
@@ -218,9 +223,9 @@ export default function LandingPage() {
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-black/10 bg-white/70 text-zinc-900
-                    hover:bg-white hover:border-amber-300/60 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg fade-in-up`}
+                  className={`rounded-full gap-2 text-sm border-purple-200/40 bg-white/70 text-zinc-900
+                    hover:bg-white hover:border-fuchsia-400/60 transition-all duration-300
+                    hover:scale-105 hover:shadow-lg hover:shadow-fuchsia-200/30 fade-in-up`}
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
@@ -248,15 +253,15 @@ export default function LandingPage() {
               <div className="flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-5 w-5 text-amber-400" />
-                    <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Nuevo</span>
+                    <Sparkles className="h-5 w-5 text-fuchsia-500" />
+                    <span className="text-xs font-medium text-fuchsia-500 uppercase tracking-wider">Nuevo</span>
                   </div>
                   <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
                   <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
                     ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
                   </p>
                   <Button
-                    className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300"
+                    className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.25)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >
@@ -278,10 +283,10 @@ export default function LandingPage() {
                       className="flex flex-col items-center gap-2 min-w-[70px] cursor-pointer group"
                       onClick={() => setLocation("/login")}
                     >
-                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
-                        flex items-center justify-center border border-black/10
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-amber-400/60
-                        group-hover:shadow-lg`}>
+                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient}
+                        flex items-center justify-center border border-purple-200/30
+                        transition-all duration-300 group-hover:scale-105 group-hover:border-fuchsia-400/60
+                        group-hover:shadow-lg group-hover:shadow-fuchsia-200/20`}>
                         <span className="text-2xl">{style.emoji}</span>
                       </div>
                       <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
@@ -311,7 +316,7 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white/70 backdrop-blur-md">
+      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-purple-200/40 bg-white/70 backdrop-blur-md">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
         <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
