@@ -2866,8 +2866,13 @@ export function ChatInterface({
       return;
     }
 
-    // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
-    if (input.trim().startsWith("!")) {
+    // EMERGENCY BYPASS (DEV-ONLY): Allows quick debugging by bypassing run persistence/idempotency.
+    // Keep disabled in production.
+    const ENABLE_EMERGENCY_BYPASS =
+      import.meta.env.DEV && import.meta.env.VITE_ENABLE_EMERGENCY_BYPASS === "true";
+
+    // If input is present and starts with "!", do direct API call (dev only).
+    if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {
       const cleanInput = input.trim().substring(1);
       setInput("");
 
@@ -2970,10 +2975,10 @@ export function ChatInterface({
       console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
     }
 
-    // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
-    // This bypasses all the complex chat creation logic that's failing
-    // Also handle web search tool here
-    if (hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
+    // EMERGENCY BYPASS (DEV-ONLY, DISABLED IN PROD): For simple text messages without files, go directly to streaming API
+    // This bypasses normal chat_run creation and WILL break persistence/idempotency if enabled in prod.
+    // Keep behind explicit flag for dev troubleshooting only.
+    if (ENABLE_EMERGENCY_BYPASS && hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
       console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
       const userInput = input.trim();
       setInput("");
