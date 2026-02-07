@@ -34,6 +34,7 @@ import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { maintenanceModeMiddleware } from "./middleware/maintenanceMode";
 
 initTracing();
 
@@ -171,6 +172,9 @@ export function log(message: string, source = "express") {
   // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
   await setupAuth(app);
   registerAuthRoutes(app);
+
+  // Maintenance mode gate (requires session to identify admins).
+  app.use(maintenanceModeMiddleware);
 
   // CSRF Protection for API (validates header)
   app.use("/api", csrfProtection);

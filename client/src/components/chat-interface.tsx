@@ -118,6 +118,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 import {
@@ -375,6 +377,9 @@ export function ChatInterface({
     projects,
     getProject
   } = useProjects();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null;
@@ -4128,7 +4133,7 @@ export function ChatInterface({
                   credentials: "include",
                   body: JSON.stringify({
                     mediaType: "image",
-                    title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
+                    title: `Imagen generada - ${formatZonedDate(Date.now(), { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`,
                     description: userInput.slice(0, 200),
                     storagePath: imageData.imageData,
                     mimeType: "image/png",

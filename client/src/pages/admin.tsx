@@ -78,8 +78,7 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
-import { format } from "date-fns";
+import { type PlatformDateFormat, formatZonedDate, formatZonedDateTime, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { toast } from "sonner";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
@@ -89,6 +88,7 @@ import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
+import { Admin2FAGate } from "@/components/admin/Admin2FAGate";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -108,7 +108,39 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
 ];
 
+function useAdminDateTime(): { timeZone: string; dateFormat: PlatformDateFormat } {
+  const { settings: platformSettings } = usePlatformSettings();
+  return {
+    timeZone: normalizeTimeZone(platformSettings.timezone_default),
+    dateFormat: platformSettings.date_format,
+  };
+}
+
+const SECTION_REQUIRED_ANY: Record<AdminSection, string[]> = {
+  dashboard: ["admin:users", "admin:analytics", "admin:billing", "admin:settings", "admin:audit", "api:admin"],
+  users: ["admin:users"],
+  conversations: ["admin:users", "admin:audit"],
+  "ai-models": ["admin:settings"],
+  payments: ["admin:billing"],
+  invoices: ["admin:billing"],
+  analytics: ["admin:analytics"],
+  database: ["api:admin"],
+  security: ["admin:audit"],
+  reports: ["admin:analytics"],
+  settings: ["admin:settings"],
+  agentic: ["api:admin"],
+  excel: ["api:admin"],
+};
+
+function sectionAllowed(section: AdminSection, permissions: string[]): boolean {
+  if (permissions.includes("*")) return true;
+  const requiredAny = SECTION_REQUIRED_ANY[section] || [];
+  if (requiredAny.length === 0) return true;
+  return requiredAny.some((p) => permissions.includes(p));
+}
+
 function DashboardSection() {
+  const { timeZone, dateFormat } = useAdminDateTime();
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/dashboard"],
     queryFn: async () => {
@@ -309,7 +341,7 @@ function DashboardSection() {
                     <span className="truncate max-w-[200px]">{item.action}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {item.createdAt ? format(new Date(item.createdAt), "dd/MM HH:mm") : ""}
+                    {item.createdAt ? formatZonedDateTime(item.createdAt, { timeZone, dateFormat, includeYear: false }) : ""}
                   </span>
                 </div>
               ))
@@ -331,6 +363,7 @@ function DashboardSection() {
 
 function UsersSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState<any>(null);
   const [viewingUser, setViewingUser] = useState<any>(null);
@@ -492,7 +525,10 @@ function UsersSection() {
                         <SelectItem value="user">User</SelectItem>
                         <SelectItem value="viewer">Viewer</SelectItem>
                         <SelectItem value="editor">Editor</SelectItem>
+                        <SelectItem value="team_member">Team Member</SelectItem>
+                        <SelectItem value="team_admin">Team Admin</SelectItem>
                         <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="superadmin">Super Admin</SelectItem>
                         <SelectItem value="api_only">API Only</SelectItem>
                       </SelectContent>
                     </Select>
@@ -544,7 +580,10 @@ function UsersSection() {
             <SelectContent>
               <SelectItem value="">All Roles</SelectItem>
               <SelectItem value="user">User</SelectItem>
+              <SelectItem value="team_member">Team Member</SelectItem>
+              <SelectItem value="team_admin">Team Admin</SelectItem>
               <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="superadmin">Super Admin</SelectItem>
               <SelectItem value="editor">Editor</SelectItem>
               <SelectItem value="viewer">Viewer</SelectItem>
               <SelectItem value="api_only">API Only</SelectItem>
@@ -610,7 +649,7 @@ function UsersSection() {
                       {user.is2faEnabled === "true" && <Shield className="h-3 w-3 text-blue-500" />}
                     </div>
                   </td>
-                  <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? format(new Date(user.createdAt), "dd/MM/yy") : "-"}</td>
+                  <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? formatZonedDate(user.createdAt, { timeZone, dateFormat }) : "-"}</td>
                   <td className="p-3">
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setViewingUser(user)} data-testid={`button-view-user-${user.id}`}>
@@ -663,8 +702,8 @@ function UsersSection() {
                 <div><span className="text-muted-foreground">2FA Enabled:</span> {viewingUser.is2faEnabled === "true" ? "Yes" : "No"}</div>
                 <div><span className="text-muted-foreground">Last IP:</span> {viewingUser.lastIp || "-"}</div>
                 <div><span className="text-muted-foreground">Country:</span> {viewingUser.countryCode || "-"}</div>
-                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? format(new Date(viewingUser.lastLoginAt), "dd/MM/yyyy HH:mm") : "-"}</div>
-                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? format(new Date(viewingUser.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? formatZonedDateTime(viewingUser.lastLoginAt, { timeZone, dateFormat }) : "-"}</div>
+                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? formatZonedDateTime(viewingUser.createdAt, { timeZone, dateFormat }) : "-"}</div>
                 <div><span className="text-muted-foreground">Referral Code:</span> {viewingUser.referralCode || "-"}</div>
                 <div><span className="text-muted-foreground">Referred By:</span> {viewingUser.referredBy || "-"}</div>
                 <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewingUser.tags?.length ? viewingUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
@@ -697,17 +736,20 @@ function UsersSection() {
                 <div className="space-y-2">
                   <Label>Role</Label>
                   <Select defaultValue={editingUser.role || "user"} onValueChange={(value) => updateUserMutation.mutate({ id: editingUser.id, updates: { role: value } })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="viewer">Viewer</SelectItem>
-                      <SelectItem value="editor">Editor</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="api_only">API Only</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="editor">Editor</SelectItem>
+                    <SelectItem value="team_member">Team Member</SelectItem>
+                    <SelectItem value="team_admin">Team Admin</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="superadmin">Super Admin</SelectItem>
+                    <SelectItem value="api_only">API Only</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+            </div>
               <div className="space-y-2">
                 <Label>Status</Label>
                 <Select defaultValue={editingUser.status || "active"} onValueChange={(value) => updateUserMutation.mutate({ id: editingUser.id, updates: { status: value } })}>
@@ -741,7 +783,7 @@ function formatConvId(id: string): string {
   return `CONV-${hash}`;
 }
 
-function formatRelativeTime(date: Date | string | null): string {
+function formatRelativeTime(date: Date | string | null, opts: { timeZone: string; dateFormat: PlatformDateFormat }): string {
   if (!date) return "-";
   const d = new Date(date);
   const now = new Date();
@@ -754,7 +796,7 @@ function formatRelativeTime(date: Date | string | null): string {
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
-  return format(d, "dd/MM/yy");
+  return formatZonedDate(d, { timeZone: opts.timeZone, dateFormat: opts.dateFormat });
 }
 
 function formatDuration(start: Date | string | null, end: Date | string | null): string {
@@ -770,6 +812,7 @@ function formatDuration(start: Date | string | null, end: Date | string | null):
 
 function ConversationsSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -1236,7 +1279,7 @@ function ConversationsSection() {
                         {conv.user?.email || "Anonymous"}
                       </span>
                     </td>
-                    <td className="p-3 text-xs text-muted-foreground">{formatRelativeTime(conv.createdAt)}</td>
+                    <td className="p-3 text-xs text-muted-foreground">{formatRelativeTime(conv.createdAt, { timeZone, dateFormat })}</td>
                     <td className="p-3 text-muted-foreground tabular-nums">{conv.messageCount || 0}</td>
                     <td className="p-3 text-muted-foreground tabular-nums">{(conv.tokensUsed || 0).toLocaleString()}</td>
                     <td className="p-3"><span className="text-xs font-mono">{conv.aiModelUsed || "-"}</span></td>
@@ -1404,14 +1447,14 @@ function ConversationsSection() {
                       >
                         {msg.role}
                       </Badge>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {msg.tokens && <span className="tabular-nums">{msg.tokens} tokens</span>}
-                        <span>{msg.createdAt ? format(new Date(msg.createdAt), "HH:mm:ss") : ""}</span>
-                      </div>
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                  </div>
-                ))}
+	                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+	                        {msg.tokens && <span className="tabular-nums">{msg.tokens} tokens</span>}
+	                        <span>{msg.createdAt ? formatZonedTime(msg.createdAt, { timeZone, includeSeconds: true }) : ""}</span>
+	                      </div>
+	                    </div>
+	                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+	                  </div>
+	                ))}
               </div>
             )}
           </div>
@@ -2228,6 +2271,7 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
 
   const { data: paymentsData, isLoading } = useQuery({
     queryKey: ["/api/admin/finance/payments"],
@@ -2283,13 +2327,13 @@ function PaymentsSection() {
             <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
               <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
               <span>{payment.userId || "N/A"}</span>
-              <span className="font-medium">€{payment.amount}</span>
-              <span className="text-muted-foreground">
-                {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
-              </span>
-              <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
-                {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
-              </Badge>
+	              <span className="font-medium">€{payment.amount}</span>
+	              <span className="text-muted-foreground">
+	                {payment.createdAt ? formatZonedDate(payment.createdAt, { timeZone, dateFormat }) : "-"}
+	              </span>
+	              <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
+	                {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
+	              </Badge>
             </div>
           ))
         )}
@@ -2300,6 +2344,7 @@ function PaymentsSection() {
 
 function InvoicesSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
 
@@ -2389,16 +2434,16 @@ function InvoicesSection() {
         ) : (
           invoices.map((invoice: any) => (
             <div key={invoice.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
-              <span className="font-mono text-xs">{invoice.invoiceNumber}</span>
-              <span>{invoice.userId || "N/A"}</span>
-              <span className="font-medium">€{invoice.amount}</span>
-              <span className="text-muted-foreground">
-                {invoice.createdAt ? format(new Date(invoice.createdAt), "dd MMM yyyy") : "-"}
-              </span>
-              <div className="flex items-center gap-2">
-                <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
-                  {invoice.status === "paid" ? "Pagada" : "Pendiente"}
-                </Badge>
+	              <span className="font-mono text-xs">{invoice.invoiceNumber}</span>
+	              <span>{invoice.userId || "N/A"}</span>
+	              <span className="font-medium">€{invoice.amount}</span>
+	              <span className="text-muted-foreground">
+	                {invoice.createdAt ? formatZonedDate(invoice.createdAt, { timeZone, dateFormat }) : "-"}
+	              </span>
+	              <div className="flex items-center gap-2">
+	                <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
+	                  {invoice.status === "paid" ? "Pagada" : "Pendiente"}
+	                </Badge>
                 <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
                   <Download className="h-3 w-3" />
                 </Button>
@@ -2823,6 +2868,7 @@ const APPLIED_TO_OPTIONS = [
 
 function SecuritySection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [activeTab, setActiveTab] = useState("overview");
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
@@ -3326,13 +3372,13 @@ function SecuritySection() {
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
                         <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {log.createdAt ? format(new Date(log.createdAt), "dd/MM HH:mm") : ""}
-                    </span>
-                  </div>
-                ))
-              )}
+	                    </div>
+	                    <span className="text-xs text-muted-foreground">
+	                      {log.createdAt ? formatZonedDateTime(log.createdAt, { timeZone, dateFormat, includeYear: false }) : ""}
+	                    </span>
+	                  </div>
+	                ))
+	              )}
             </ScrollArea>
           </div>
         </TabsContent>
@@ -3589,13 +3635,13 @@ function SecuritySection() {
                   </tr>
                 ) : (
                   auditLogsData?.data?.map((log: any) => (
-                    <tr key={log.id} className="border-t" data-testid={`row-audit-${log.id}`}>
-                      <td className="p-3 text-sm">
-                        {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
-                      </td>
-                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
-                      <td className="p-3 font-medium text-sm">{log.action}</td>
-                      <td className="p-3 text-sm">{log.resource || "-"}</td>
+	                    <tr key={log.id} className="border-t" data-testid={`row-audit-${log.id}`}>
+	                      <td className="p-3 text-sm">
+	                        {log.createdAt ? formatZonedDateTime(log.createdAt, { timeZone, dateFormat, includeSeconds: true }) : "-"}
+	                      </td>
+	                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
+	                      <td className="p-3 font-medium text-sm">{log.action}</td>
+	                      <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
                       <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
@@ -3640,6 +3686,7 @@ function SecuritySection() {
 
 function ReportsSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [activeTab, setActiveTab] = useState("templates");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [reportFormat, setReportFormat] = useState<string>("json");
@@ -3922,13 +3969,13 @@ function ReportsSection() {
                             </Badge>
                           </td>
                           <td className="px-4 py-3 text-sm">{getStatusBadge(report.status)}</td>
-                          <td className="px-4 py-3 text-sm uppercase">{report.format}</td>
-                          <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {report.createdAt ? format(new Date(report.createdAt), "MMM dd, yyyy HH:mm") : "-"}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              {report.status === "completed" && (
+	                          <td className="px-4 py-3 text-sm uppercase">{report.format}</td>
+	                          <td className="px-4 py-3 text-sm text-muted-foreground">
+	                            {report.createdAt ? formatZonedDateTime(report.createdAt, { timeZone, dateFormat }) : "-"}
+	                          </td>
+	                          <td className="px-4 py-3 text-right">
+	                            <div className="flex items-center justify-end gap-2">
+	                              {report.status === "completed" && (
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
@@ -3992,7 +4039,7 @@ function ReportsSection() {
   );
 }
 
-type SettingsCategory = "general" | "branding" | "users" | "ai_models" | "security" | "notifications" | "advanced";
+type SettingsCategory = "general" | "branding" | "users" | "ai_models" | "security" | "notifications" | "audit" | "advanced";
 
 const settingsCategories: { id: SettingsCategory; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "general", label: "General", icon: Settings },
@@ -4001,6 +4048,7 @@ const settingsCategories: { id: SettingsCategory; label: string; icon: React.Com
   { id: "ai_models", label: "AI Models", icon: Bot },
   { id: "security", label: "Security", icon: Shield },
   { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "audit", label: "Audit", icon: Activity },
   { id: "advanced", label: "Advanced", icon: Code },
 ];
 
@@ -4010,9 +4058,12 @@ const themeModes = ["dark", "light", "auto"];
 
 function SettingsSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
   const [localSettings, setLocalSettings] = useState<Record<string, any>>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [auditPage, setAuditPage] = useState(1);
+  const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
 
   const { data: settingsData, isLoading } = useQuery({
     queryKey: ["/api/admin/settings"],
@@ -4028,6 +4079,21 @@ function SettingsSection() {
       const res = await fetch("/api/ai-models", { credentials: "include" });
       return res.json();
     }
+  });
+
+  const { data: settingsAuditData, isLoading: isAuditLoading, refetch: refetchAudit } = useQuery({
+    queryKey: ["/api/admin/security/audit-logs", "settings_config", auditPage],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: auditPage.toString(),
+        limit: "50",
+        action: "admin.settings_changed",
+        resource: "settings_config",
+      });
+      const res = await fetch(`/api/admin/security/audit-logs?${params.toString()}`, { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeCategory === "audit",
   });
 
   useEffect(() => {
@@ -4421,6 +4487,145 @@ function SettingsSection() {
     </div>
   );
 
+  const renderAuditSettings = () => {
+    const logs: any[] = settingsAuditData?.logs || settingsAuditData?.data || [];
+    const pagination = settingsAuditData?.pagination;
+
+    const shortValue = (value: any): string => {
+      if (value === null) return "null";
+      if (value === undefined) return "undefined";
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) return '""';
+        return trimmed.length > 60 ? `${trimmed.slice(0, 57)}...` : trimmed;
+      }
+      try {
+        const raw = JSON.stringify(value);
+        return raw.length > 60 ? `${raw.slice(0, 57)}...` : raw;
+      } catch {
+        return String(value);
+      }
+    };
+
+    const actorLabel = (log: any): string => {
+      const d = log?.details || {};
+      return d.actorEmail || d.changedBy || d.email || log.userId || "—";
+    };
+
+    const settingKey = (log: any): string => {
+      const d = log?.details || {};
+      return d.key || log.resourceId || "—";
+    };
+
+    const changeSummary = (log: any): string => {
+      const d = log?.details || {};
+      if (log.resourceId === "bulk" || log.resourceId === "diff") {
+        const count = d.count ?? (Array.isArray(d.keys) ? d.keys.length : undefined) ?? (Array.isArray(d.updated) ? d.updated.length : undefined);
+        return typeof count === "number" ? `${count} cambios` : "Cambios masivos";
+      }
+      if (d.resetToDefault) return "Reset a default";
+      if ("previousValue" in d || "newValue" in d) {
+        return `${shortValue(d.previousValue)} → ${shortValue(d.newValue)}`;
+      }
+      return "—";
+    };
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            Historial de cambios de configuracion (quien, que, cuando, desde que IP).
+          </p>
+          <Button variant="outline" size="sm" onClick={() => refetchAudit()} data-testid="button-refresh-settings-audit">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+
+        {isAuditLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : (
+          <div className="rounded-lg border overflow-hidden">
+            <table className="w-full">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Cuando</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Actor</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Setting</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Cambio</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground">IP</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground">Detalles</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      No hay eventos de cambios de settings.
+                    </td>
+                  </tr>
+                ) : (
+                  logs.map((log: any) => (
+                    <tr key={log.id} className="border-b last:border-0" data-testid={`row-settings-audit-${log.id}`}>
+                      <td className="px-4 py-3 text-sm tabular-nums">
+                        {log.createdAt ? formatZonedDateTime(log.createdAt, { timeZone, dateFormat, includeSeconds: true }) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground max-w-[220px] truncate">{actorLabel(log)}</td>
+                      <td className="px-4 py-3 text-sm font-mono">{settingKey(log)}</td>
+                      <td className="px-4 py-3 text-sm text-muted-foreground">{changeSummary(log)}</td>
+                      <td className="px-4 py-3 text-sm font-mono">{log.ipAddress || "—"}</td>
+                      <td className="px-4 py-3 text-right">
+                        <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setSelectedAuditLog(log)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {pagination?.totalPages > 1 && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={auditPage <= 1} onClick={() => setAuditPage((p) => p - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={auditPage >= pagination.totalPages}
+                onClick={() => setAuditPage((p) => p + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <Dialog open={!!selectedAuditLog} onOpenChange={(open) => !open && setSelectedAuditLog(null)}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Detalles de auditoria</DialogTitle>
+            </DialogHeader>
+            <div className="rounded-lg border bg-muted/30 p-4 max-h-[60vh] overflow-auto">
+              <pre className="text-xs font-mono whitespace-pre-wrap">
+                {selectedAuditLog ? JSON.stringify(selectedAuditLog, null, 2) : ""}
+              </pre>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  };
+
   const renderCategoryContent = () => {
     switch (activeCategory) {
       case "general": return renderGeneralSettings();
@@ -4429,6 +4634,7 @@ function SettingsSection() {
       case "ai_models": return renderAIModelsSettings();
       case "security": return renderSecuritySettings();
       case "notifications": return renderNotificationsSettings();
+      case "audit": return renderAuditSettings();
       case "advanced": return renderAdvancedSettings();
       default: return renderGeneralSettings();
     }
@@ -4460,12 +4666,12 @@ function SettingsSection() {
                   return <Icon className="h-5 w-5" />;
                 })()
               )}
-              {settingsCategories.find(c => c.id === activeCategory)?.label} Settings
+              {settingsCategories.find(c => c.id === activeCategory)?.label} {activeCategory === "audit" ? "Log" : "Settings"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             {renderCategoryContent()}
-            {activeCategory !== "advanced" && (
+            {activeCategory !== "advanced" && activeCategory !== "audit" && (
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <Button
                   variant="outline"
@@ -4502,6 +4708,7 @@ function SettingsSection() {
 }
 
 function AgenticEngineSection() {
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [activeTab, setActiveTab] = useState("overview");
   
   const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
@@ -4991,7 +5198,7 @@ function AgenticEngineSection() {
                         <div className="text-sm text-muted-foreground space-y-1">
                           <p>Failures: {circuit.failures}</p>
                           {circuit.lastFailure && (
-                            <p>Last failure: {format(new Date(circuit.lastFailure), 'HH:mm:ss')}</p>
+                            <p>Last failure: {formatZonedTime(circuit.lastFailure, { timeZone, includeSeconds: true })}</p>
                           )}
                         </div>
                       </CardContent>
@@ -5019,6 +5226,7 @@ interface ExcelDocument {
 
 function ExcelManagerSection() {
   const queryClient = useQueryClient();
+  const { timeZone, dateFormat } = useAdminDateTime();
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [currentDoc, setCurrentDoc] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -5072,9 +5280,7 @@ function ExcelManagerSection() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('es-ES', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  const formatDate = (date: string) => formatZonedDateTime(date, { timeZone, dateFormat }) || "-";
 
   const filtered = documents.filter((d: ExcelDocument) => 
     d.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -5307,27 +5513,38 @@ function ExcelManagerSection() {
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
-  
-  // Security: Verify admin role
-  const { data: currentUser, isLoading: isLoadingUser } = useQuery({
-    queryKey: ["/api/auth/user"],
+
+  const { data: probe, isLoading: isLoadingProbe, refetch: refetchProbe } = useQuery({
+    queryKey: ["/api/admin/probe"],
     queryFn: async () => {
-      const res = await fetch("/api/auth/user", { credentials: "include" });
-      if (!res.ok) return null;
-      return res.json();
-    }
+      try {
+        const res = await fetch("/api/admin/probe", { credentials: "include" });
+        const payload = await res.json().catch(() => ({}));
+        if (res.ok) {
+          return { ok: true, ...(payload || {}) };
+        }
+        return { ok: false, status: res.status, ...(payload || {}) };
+      } catch (e: any) {
+        return { ok: false, status: 0, error: e?.message || "Failed to reach server" };
+      }
+    },
+    retry: false,
+    refetchOnWindowFocus: true,
   });
 
-  // Redirect non-admin users
-  useEffect(() => {
-    if (!isLoadingUser && currentUser && currentUser.role !== "admin") {
-      console.warn("[Admin] Access denied - user is not admin:", currentUser.email);
-      setLocation("/");
-    }
-  }, [currentUser, isLoadingUser, setLocation]);
+  const permissions: string[] = probe?.ok ? (probe.permissions || []) : [];
+  const allowedNavItems = navItems.filter((item) => sectionAllowed(item.id, permissions));
+  const allowedNavKey = allowedNavItems.map((i) => i.id).join("|");
 
-  // Show loading while checking auth
-  if (isLoadingUser) {
+  useEffect(() => {
+    if (!probe?.ok) return;
+    if (allowedNavItems.length === 0) return;
+    if (!allowedNavItems.some((i) => i.id === activeSection)) {
+      setActiveSection(allowedNavItems[0].id);
+    }
+  }, [probe?.ok, activeSection, allowedNavKey]);
+
+  if (isLoadingProbe) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -5335,18 +5552,38 @@ export default function AdminPage() {
     );
   }
 
-  // Block access if not admin
-  if (!currentUser || currentUser.role !== "admin") {
+  if (!probe?.ok) {
+    const code = (probe as any)?.code;
+    if ((probe as any)?.status === 403 && code === "2FA_SETUP_REQUIRED") {
+      return <Admin2FAGate mode="setup_required" onVerified={() => void refetchProbe()} />;
+    }
+    if ((probe as any)?.status === 403 && code === "2FA_REQUIRED") {
+      return <Admin2FAGate mode="verify_required" onVerified={() => void refetchProbe()} />;
+    }
+
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
         <Shield className="h-16 w-16 text-red-500" />
         <h1 className="text-2xl font-bold">Acceso Denegado</h1>
-        <p className="text-muted-foreground">No tienes permisos de administrador.</p>
+        <p className="text-muted-foreground">
+          {(probe as any)?.error || (probe as any)?.message || "No tienes permisos para acceder al panel de administracion."}
+        </p>
         <Button onClick={() => setLocation("/")}>Volver al inicio</Button>
       </div>
     );
   }
 
+  if (allowedNavItems.length === 0) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
+        <Shield className="h-16 w-16 text-red-500" />
+        <h1 className="text-2xl font-bold">Acceso Denegado</h1>
+        <p className="text-muted-foreground">Tu rol no tiene secciones disponibles en el admin.</p>
+        <Button onClick={() => setLocation("/")}>Volver al inicio</Button>
+      </div>
+    );
+  }
+  
   const renderSection = () => {
     switch (activeSection) {
       case "dashboard":
@@ -5404,7 +5641,7 @@ export default function AdminPage() {
               <AdminNotificationsPopover />
             </div>
             <nav className="flex flex-col gap-1">
-              {navItems.map((item) => (
+              {allowedNavItems.map((item) => (
                 <Button
                   key={item.id}
                   variant={activeSection === item.id ? "secondary" : "ghost"}

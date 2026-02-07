@@ -6,6 +6,24 @@ import { is2FAEnabled } from "../../services/twoFactorAuth";
 
 export const settingsRouter = Router();
 
+function isSensitiveSetting(setting: any): boolean {
+    const raw = setting?.isSensitive;
+    if (typeof raw === "boolean") return raw;
+    return String(raw || "").toLowerCase().trim() === "true";
+}
+
+function valuePresent(value: any): boolean {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    return true;
+}
+
+function redactIfSensitive(setting: any, value: any): any {
+    return isSensitiveSetting(setting) ? "<redacted>" : value;
+}
+
 settingsRouter.get("/", async (req, res) => {
     try {
         await storage.seedDefaultSettings();
@@ -69,6 +87,7 @@ settingsRouter.put("/:key", async (req, res) => {
         }
 
         const previousValue = existing.value;
+        const sensitive = isSensitiveSetting(existing);
         const updated = await storage.upsertSettingsConfig({
             ...existing,
             value: req.body.value,
@@ -84,8 +103,11 @@ settingsRouter.put("/:key", async (req, res) => {
             resourceId: req.params.key,
             details: { 
                 key: req.params.key, 
-                previousValue,
-                newValue: req.body.value,
+                previousValue: redactIfSensitive(existing, previousValue),
+                newValue: redactIfSensitive(existing, req.body.value),
+                sensitive,
+                previousValuePresent: valuePresent(previousValue),
+                newValuePresent: valuePresent(req.body.value),
                 category: existing.category,
                 changedBy: actorEmail
             },
@@ -120,7 +142,15 @@ settingsRouter.post("/bulk", async (req, res) => {
         }
 
         const results = [];
-        const changes: Array<{ key: string; previousValue: any; newValue: any; category?: string }> = [];
+        const changes: Array<{
+            key: string;
+            previousValue: any;
+            newValue: any;
+            category?: string;
+            sensitive?: boolean;
+            previousValuePresent?: boolean;
+            newValuePresent?: boolean;
+        }> = [];
 
         for (const s of settings) {
             if (!s?.key) continue;
@@ -130,6 +160,7 @@ settingsRouter.post("/bulk", async (req, res) => {
 
             const previousValue = existing.value;
             const nextValue = s.value;
+            const sensitive = isSensitiveSetting(existing);
 
             // Only write changes (prevents noisy updatedAt churn).
             if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) continue;
@@ -141,7 +172,15 @@ settingsRouter.post("/bulk", async (req, res) => {
                 defaultValue: existing.defaultValue as any
             });
             results.push(updated);
-            changes.push({ key: s.key, previousValue, newValue: nextValue, category: existing.category });
+            changes.push({
+                key: s.key,
+                previousValue: redactIfSensitive(existing, previousValue),
+                newValue: redactIfSensitive(existing, nextValue),
+                category: existing.category,
+                sensitive,
+                previousValuePresent: valuePresent(previousValue),
+                newValuePresent: valuePresent(nextValue),
+            });
         }
 
         if (results.length > 0) {
@@ -176,6 +215,7 @@ settingsRouter.post("/reset/:key", async (req, res) => {
         const actorId = getActorIdFromRequest(req);
         const actorEmail = getActorEmailFromRequest(req);
         const previousValue = existing.value;
+        const sensitive = isSensitiveSetting(existing);
         const updated = await storage.upsertSettingsConfig({
             ...existing,
             value: existing.defaultValue as any,
@@ -191,8 +231,11 @@ settingsRouter.post("/reset/:key", async (req, res) => {
             resourceId: req.params.key,
             details: {
                 key: req.params.key,
-                previousValue,
-                newValue: existing.defaultValue,
+                previousValue: redactIfSensitive(existing, previousValue),
+                newValue: redactIfSensitive(existing, existing.defaultValue),
+                sensitive,
+                previousValuePresent: valuePresent(previousValue),
+                newValuePresent: valuePresent(existing.defaultValue),
                 category: existing.category,
                 changedBy: actorEmail,
                 resetToDefault: true,
@@ -276,7 +319,14 @@ settingsRouter.post("/diff", async (req, res) => {
                     updated: updated.map(u => u.key),
                     unchanged: unchanged.length,
                     errors: errors.length,
-                    changes: updated.map(u => ({ key: u.key, oldValue: u.oldValue, newValue: u.newValue })),
+                    changes: updated.map(u => ({
+                        key: u.key,
+                        oldValue: redactIfSensitive(u.setting, u.oldValue),
+                        newValue: redactIfSensitive(u.setting, u.newValue),
+                        sensitive: isSensitiveSetting(u.setting),
+                        oldValuePresent: valuePresent(u.oldValue),
+                        newValuePresent: valuePresent(u.newValue),
+                    })),
                     changedBy: actorEmail,
                 },
                 category: "config",

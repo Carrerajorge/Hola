@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "../../types/express";
-import { storage } from "../../storage";
 import { db } from "../../db";
 import { users, excelDocuments } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
@@ -8,14 +7,15 @@ import { nanoid } from "nanoid";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 
 // SECURITY: Admin email moved to environment variable
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+const PRIVILEGED_ROLES = new Set(["team_admin", "admin", "superadmin"]);
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
         const userReq = req as AuthenticatedRequest;
         const session = req.session as any;
         
-        // Get user info from multiple possible sources
+        // Get user info from multiple possible sources.
         const userEmail = userReq.user?.claims?.email || 
                          userReq.user?.email ||
                          session?.passport?.user?.claims?.email || 
@@ -28,55 +28,62 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
                       session?.passport?.user?.claims?.sub ||
                       session?.passport?.user?.id;
 
-        console.log("[Admin] Auth check:", { 
-            userEmail, 
-            userId, 
-            hasUser: !!userReq.user,
-            hasSession: !!session,
-            sessionKeys: session ? Object.keys(session) : []
-        });
-
         // If no user info at all, reject
         if (!userEmail && !userId) {
-            console.log("[Admin] No user info found in request");
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        // SECURITY: Check both email (from env) and database role
-        let isAdmin = false;
+        const roleFromSession =
+          (userReq.user as any)?.role ||
+          (userReq.user as any)?.claims?.role ||
+          session?.passport?.user?.role ||
+          session?.passport?.user?.claims?.role ||
+          null;
 
-        // Check against env-configured admin email (if set)
-        if (ADMIN_EMAIL && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-            isAdmin = true;
-            console.log("[Admin] Matched ADMIN_EMAIL env var");
+        let effectiveRole: string | null = null;
+        const normalizedSessionRole = String(roleFromSession || "").toLowerCase().trim();
+        if (normalizedSessionRole && PRIVILEGED_ROLES.has(normalizedSessionRole)) {
+          effectiveRole = normalizedSessionRole;
         }
 
-        // Verify against database role - check by userId OR email
-        if (!isAdmin) {
-            let dbUser = null;
-            
+        if (!effectiveRole) {
+            // Check against env-configured admin email (if set).
+            const normalizedEmail = String(userEmail || "").toLowerCase().trim();
+            if (ADMIN_EMAIL && normalizedEmail && normalizedEmail === ADMIN_EMAIL) {
+              effectiveRole = "admin";
+            }
+        }
+
+        if (!effectiveRole) {
+            // Verify against database role - check by userId OR email.
+            let dbRole: string | null = null;
             if (userId) {
-                const result = await db.select({ role: users.role, email: users.email })
-                    .from(users).where(eq(users.id, userId));
-                dbUser = result[0];
+              const [row] = await db
+                .select({ role: users.role })
+                .from(users)
+                .where(eq(users.id, userId))
+                .limit(1);
+              dbRole = (row?.role as any) ?? null;
             }
-            
-            // Fallback: check by email if userId didn't find admin
-            if (!dbUser?.role && userEmail) {
-                const normalizedEmail = userEmail.toLowerCase().trim();
-                const result = await db
-                    .select({ role: users.role, email: users.email, id: users.id })
-                    .from(users)
-                    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
-                    .limit(1);
-                dbUser = result[0];
+
+            // Fallback: check by email if userId didn't find an admin role.
+            if (!dbRole && userEmail) {
+              const normalizedEmail = String(userEmail).toLowerCase().trim();
+              const [row] = await db
+                .select({ role: users.role })
+                .from(users)
+                .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+                .limit(1);
+              dbRole = (row?.role as any) ?? null;
             }
-            
-            isAdmin = dbUser?.role === "admin";
-            console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
+
+            const normalizedDbRole = String(dbRole || "").toLowerCase().trim();
+            if (normalizedDbRole && PRIVILEGED_ROLES.has(normalizedDbRole)) {
+              effectiveRole = normalizedDbRole;
+            }
         }
 
-        if (!isAdmin) {
+        if (!effectiveRole) {
             await auditLog(req, {
                 action: AuditActions.ADMIN_DENIED,
                 resource: "admin_panel",
@@ -84,15 +91,18 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
                 category: "admin",
                 severity: "warning",
             });
-            return res.status(403).json({ error: "Admin access restricted" });
+            return res.status(403).json({ error: "Admin access required", code: "ADMIN_REQUIRED" });
         }
 
-        // Propagate role for downstream middleware (e.g. 2FA enforcement).
+        // Propagate role for downstream middleware (e.g. 2FA enforcement + RBAC).
         if (userReq.user && typeof userReq.user === "object") {
-            (userReq.user as any).role = "admin";
+            (userReq.user as any).role = effectiveRole;
+            if ((userReq.user as any).claims && typeof (userReq.user as any).claims === "object") {
+              (userReq.user as any).claims.role = (userReq.user as any).claims.role || effectiveRole;
+            }
         } else {
             const existingUser = (req as any).user;
-            (req as any).user = { ...(existingUser || {}), role: "admin" };
+            (req as any).user = { ...(existingUser || {}), role: effectiveRole };
         }
         (req as any).isAdmin = true;
 

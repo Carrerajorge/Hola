@@ -92,6 +92,7 @@ import { academicSearchRouter } from "./routes/academicSearchRouter";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { getPublicSettings } from "./services/settingsConfigService";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
@@ -326,6 +327,15 @@ export async function registerRoutes(
 
   // Global Audit Middleware (Logs mutations)
   app.use(globalAuditMiddleware);
+
+  // Public platform settings for client branding and date/time behavior.
+  app.get("/api/settings/public", async (_req: Request, res: Response) => {
+    try {
+      res.json(await getPublicSettings());
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "Failed to load settings" });
+    }
+  });
 
   // Session identity endpoint for consistent user ID across frontend/backend
 

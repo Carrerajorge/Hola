@@ -30,10 +30,11 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
             anyReq.user?.claims?.role ||
             (await storage.getUser(userId))?.role ||
             null;
-        const isAdmin = String(role || "").toLowerCase() === "admin";
+        const roleName = String(role || "").toLowerCase();
+        const isPrivileged = ["admin", "team_admin", "superadmin"].includes(roleName);
 
         const enabled = await is2FAEnabled(userId);
-        if (isAdmin && requireAdmins2FA && !enabled) {
+        if (isPrivileged && requireAdmins2FA && !enabled) {
             return res.status(403).json({
                 error: "2FA Setup Required",
                 code: "2FA_SETUP_REQUIRED",
@@ -45,7 +46,7 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
             return next();
         }
 
-        if (enabled || (isAdmin && requireAdmins2FA)) {
+        if (enabled || (isPrivileged && requireAdmins2FA)) {
             return res.status(403).json({
                 error: "2FA Verification Required",
                 code: "2FA_REQUIRED",

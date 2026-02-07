@@ -39,6 +39,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { apiFetch } from "@/lib/apiClient";
 import { isAdminUser, isBillingManagerUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -65,6 +67,9 @@ export default function WorkspaceSettingsPage() {
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const { user } = useAuth();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const isAdmin = isAdminUser(user as any);
   const canManageBilling = isBillingManagerUser(user as any);
   const canManageWorkspace = canManageBilling;
@@ -298,7 +303,7 @@ export default function WorkspaceSettingsPage() {
   const formatCycleShort = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { month: "short", day: "numeric" });
+    return formatZonedDate(d, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false }) || "—";
   };
 
   const planLabel = (planRaw: string | null | undefined) => {
@@ -355,7 +360,7 @@ export default function WorkspaceSettingsPage() {
     if (!iso) return "—";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
+    return formatZonedDate(d, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) || "—";
   };
 
   const handleLogoUpload = async (file: File) => {
