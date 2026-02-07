@@ -107,23 +107,6 @@ class ConversationStateService {
     content: string,
     options: AppendMessageOptions = {}
   ): Promise<{ state: HydratedConversationState; messageId: string | null }> {
-    // Best-effort dedup: avoid duplicating identical messages on quick retries or dual endpoints.
-    try {
-      const existing = await this.hydrateState(chatId, undefined, { forceRefresh: false });
-      const last = existing?.messages?.length ? existing.messages[existing.messages.length - 1] : null;
-      if (
-        last &&
-        last.role === role &&
-        last.content === content &&
-        typeof last.createdAt === "string" &&
-        Date.now() - Date.parse(last.createdAt) < 30000
-      ) {
-        return { state: existing as HydratedConversationState, messageId: last.id || null };
-      }
-    } catch {
-      // ignore
-    }
-
     if (options.requestId) {
       const { wasProcessed, messageId } = await conversationStateRepository.checkRequestProcessed(options.requestId);
       if (wasProcessed) {
