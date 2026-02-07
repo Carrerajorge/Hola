@@ -1975,22 +1975,107 @@ function PaymentsSection() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [status, setStatus] = useState<string>("all");
+  const [currency, setCurrency] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "amount">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  const [isHydrated, setIsHydrated] = useState(false);
+  const didInitRef = useRef(false);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    const pageParam = Number(params.get("pay_page") || "");
+    if (Number.isFinite(pageParam) && pageParam >= 1) setPage(Math.floor(pageParam));
+
+    const limitParam = Number(params.get("pay_limit") || "");
+    if (Number.isFinite(limitParam) && [20, 50, 100].includes(limitParam)) setLimit(limitParam);
+
+    const statusParam = params.get("pay_status");
+    if (statusParam && ["all", "completed", "pending", "failed"].includes(statusParam)) setStatus(statusParam);
+
+    const currencyParam = params.get("pay_currency");
+    if (currencyParam) {
+      setCurrency(currencyParam.toLowerCase() === "all" ? "all" : currencyParam.toUpperCase());
+    }
+
+    const searchParam = params.get("pay_search");
+    if (typeof searchParam === "string") setSearch(searchParam);
+
+    const fromParam = params.get("pay_from");
+    if (fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam)) setDateFrom(fromParam);
+
+    const toParam = params.get("pay_to");
+    if (toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)) setDateTo(toParam);
+
+    const minParam = params.get("pay_min");
+    if (typeof minParam === "string") setMinAmount(minParam);
+
+    const maxParam = params.get("pay_max");
+    if (typeof maxParam === "string") setMaxAmount(maxParam);
+
+    const sortByParam = params.get("pay_sortBy");
+    if (sortByParam === "amount" || sortByParam === "createdAt") setSortBy(sortByParam);
+
+    const sortOrderParam = params.get("pay_sortOrder");
+    if (sortOrderParam === "asc" || sortOrderParam === "desc") setSortOrder(sortOrderParam);
+
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      return;
+    }
     setPage(1);
-  }, [limit, status, search, dateFrom, dateTo]);
+  }, [isHydrated, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const setOrDelete = (key: string, value: string, defaultValue?: string) => {
+      if (!value || value === defaultValue) params.delete(key);
+      else params.set(key, value);
+    };
+
+    setOrDelete("pay_page", String(page), "1");
+    setOrDelete("pay_limit", String(limit), "20");
+    setOrDelete("pay_status", status, "all");
+    setOrDelete("pay_currency", currency, "all");
+    setOrDelete("pay_search", search.trim(), "");
+    setOrDelete("pay_from", dateFrom, "");
+    setOrDelete("pay_to", dateTo, "");
+    setOrDelete("pay_min", minAmount, "");
+    setOrDelete("pay_max", maxAmount, "");
+    setOrDelete("pay_sortBy", sortBy, "createdAt");
+    setOrDelete("pay_sortOrder", sortOrder, "desc");
+
+    const qs = params.toString();
+    const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+  }, [isHydrated, page, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
 
   const buildPaymentsParams = () => {
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", String(limit));
     if (status && status !== "all") params.set("status", status);
+    if (currency && currency !== "all") params.set("currency", currency);
     if (search.trim()) params.set("search", search.trim());
     if (dateFrom) params.set("dateFrom", dateFrom);
     if (dateTo) params.set("dateTo", dateTo);
+    if (minAmount.trim()) params.set("minAmount", minAmount.trim());
+    if (maxAmount.trim()) params.set("maxAmount", maxAmount.trim());
+    if (sortBy !== "createdAt") params.set("sortBy", sortBy);
+    if (sortOrder !== "desc") params.set("sortOrder", sortOrder);
     return params;
   };
 
@@ -2030,7 +2115,7 @@ function PaymentsSection() {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ["/api/admin/finance/payments", page, limit, status, search, dateFrom, dateTo],
+    queryKey: ["/api/admin/finance/payments", page, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder],
     queryFn: async () => {
       const params = buildPaymentsParams();
       const res = await fetch(`/api/admin/finance/payments?${params.toString()}`, { credentials: "include" });
@@ -2055,10 +2140,14 @@ function PaymentsSection() {
 
   const syncStripeMutation = useMutation({
     mutationFn: async () => {
+      const payload: any = { maxInvoices: 200 };
+      if (dateFrom) payload.dateFrom = dateFrom;
+      if (dateTo) payload.dateTo = dateTo;
+
       const res = await fetch("/api/admin/finance/payments/sync-stripe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 100 }),
+        body: JSON.stringify(payload),
         credentials: "include",
       });
       const body = await res.json().catch(() => ({}));
@@ -2068,7 +2157,19 @@ function PaymentsSection() {
       return body;
     },
     onSuccess: (data) => {
-      toast.success(`Stripe sincronizado: ${data?.synced || 0} pagos`);
+      const created = Number(data?.created || 0);
+      const updated = Number(data?.updated || 0);
+      const errors = Number(data?.errors || 0);
+      const unmatched = Array.isArray(data?.unmatchedInvoiceIds) ? data.unmatchedInvoiceIds.length : 0;
+
+      const parts = [
+        `Stripe sincronizado: ${data?.synced || 0} pagos`,
+        created || updated ? `(${created} creados, ${updated} actualizados)` : null,
+        errors ? `${errors} errores` : null,
+        unmatched ? `${unmatched} sin usuario` : null,
+      ].filter(Boolean);
+
+      toast.success(parts.join(" • "));
       queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
     },
@@ -2078,7 +2179,50 @@ function PaymentsSection() {
   });
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-medium">Payments</h2>
+            <p className="text-xs text-muted-foreground">
+              Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Actualizar
+            </Button>
+            <Button variant="outline" size="sm" disabled>
+              <Download className="h-4 w-4 mr-2" />
+              Exportar CSV
+            </Button>
+            <Button size="sm" disabled>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Sincronizar Stripe
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-7 w-28" />
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <Skeleton className="h-9 w-full max-w-[420px]" />
+            <Skeleton className="h-9 w-full max-w-[520px]" />
+          </div>
+        </div>
+
+        <TableSkeleton rows={6} columns={6} />
+      </div>
+    );
   }
 
   if (isError) {
@@ -2129,6 +2273,15 @@ function PaymentsSection() {
   const exportParams = buildPaymentsParams();
   exportParams.set("format", "csv");
   const exportUrl = `/api/admin/finance/payments/export?${exportParams.toString()}`;
+
+  const toggleSort = (next: "createdAt" | "amount") => {
+    if (sortBy !== next) {
+      setSortBy(next);
+      setSortOrder("desc");
+      return;
+    }
+    setSortOrder((o) => (o === "desc" ? "asc" : "desc"));
+  };
 
   return (
     <div className="space-y-6">
@@ -2217,6 +2370,39 @@ function PaymentsSection() {
                 <SelectItem value="failed">Fallidos</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={currency} onValueChange={setCurrency}>
+              <SelectTrigger className="h-9 w-[130px]" data-testid="select-payment-currency">
+                <SelectValue placeholder="Moneda" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {statsCurrencies.map((cur) => (
+                  <SelectItem key={cur} value={cur}>
+                    {cur}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={minAmount}
+              onChange={(e) => setMinAmount(e.target.value)}
+              placeholder="Min"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-min"
+            />
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={maxAmount}
+              onChange={(e) => setMaxAmount(e.target.value)}
+              placeholder="Max"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-max"
+            />
             <Input
               type="date"
               value={dateFrom}
@@ -2248,8 +2434,13 @@ function PaymentsSection() {
               onClick={() => {
                 setSearch("");
                 setStatus("all");
+                setCurrency("all");
                 setDateFrom("");
                 setDateTo("");
+                setMinAmount("");
+                setMaxAmount("");
+                setSortBy("createdAt");
+                setSortOrder("desc");
               }}
               data-testid="button-clear-payment-filters"
             >
@@ -2264,8 +2455,32 @@ function PaymentsSection() {
         <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>ID</span>
           <span>Usuario</span>
-          <span>Cantidad</span>
-          <span>Fecha</span>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("amount")}
+            data-testid="button-sort-payments-amount"
+          >
+            Cantidad
+            {sortBy === "amount" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("createdAt")}
+            data-testid="button-sort-payments-date"
+          >
+            Fecha
+            {sortBy === "createdAt" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
           <span>Estado</span>
           <span className="text-right">Stripe</span>
         </div>
