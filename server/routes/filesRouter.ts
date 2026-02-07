@@ -76,18 +76,33 @@ async function signObjectURLForMultipart({
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
     let content: Buffer;
+    const fs = await import("fs");
+    const path = await import("path");
+
+    console.log(`[processFileAsync] Starting processing for file ${fileId}, storagePath: ${storagePath}, mimeType: ${mimeType}`);
 
     // Check if this is a local storage path (from our local fallback)
-    if (storagePath.startsWith('/objects/uploads/')) {
+    // Local paths start with /objects/uploads/ and the file exists in ./uploads/
+    const isLocalPath = storagePath.startsWith('/objects/uploads/');
+
+    if (isLocalPath) {
       // Extract the object ID from the path and read from local uploads directory
       const objectId = storagePath.replace('/objects/uploads/', '');
-      const fs = await import("fs");
-      const path = await import("path");
       const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
 
-      console.log(`[processFileAsync] Reading local file: ${localFilePath}`);
+      console.log(`[processFileAsync] Attempting to read local file: ${localFilePath}`);
+
+      // Wait a bit for the file to be fully written (upload might still be in progress)
+      let attempts = 0;
+      const maxAttempts = 10;
+      while (!fs.default.existsSync(localFilePath) && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+        console.log(`[processFileAsync] Waiting for file... attempt ${attempts}/${maxAttempts}`);
+      }
 
       if (!fs.default.existsSync(localFilePath)) {
+        console.error(`[processFileAsync] Local file not found after ${maxAttempts} attempts: ${localFilePath}`);
         throw new Error(`Local file not found: ${localFilePath}`);
       }
 
@@ -95,12 +110,41 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
       console.log(`[processFileAsync] Read ${content.length} bytes from local file`);
     } else {
       // Use object storage for non-local paths
-      const objectStorageService = new ObjectStorageService();
-      const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
-      content = await objectStorageService.getFileContent(objectFile);
+      try {
+        const objectStorageService = new ObjectStorageService();
+        const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
+        content = await objectStorageService.getFileContent(objectFile);
+        console.log(`[processFileAsync] Read ${content.length} bytes from object storage`);
+      } catch (storageError: any) {
+        console.error(`[processFileAsync] Object storage error for ${storagePath}:`, storageError.message);
+
+        // Fallback: try to read as local file if object storage fails
+        const objectId = storagePath.replace('/objects/', '');
+        const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
+
+        if (fs.default.existsSync(localFilePath)) {
+          console.log(`[processFileAsync] Fallback to local file: ${localFilePath}`);
+          content = await fs.promises.readFile(localFilePath);
+        } else {
+          throw storageError;
+        }
+      }
+    }
+
+    if (!content || content.length === 0) {
+      console.error(`[processFileAsync] Empty content for file ${fileId}`);
+      throw new Error('File content is empty');
     }
 
     const result = await processDocument(content, mimeType, filename);
+
+    if (!result.text || result.text.trim().length === 0) {
+      console.warn(`[processFileAsync] No text extracted from file ${fileId}, setting as ready with empty content`);
+      // Still mark as ready but with no chunks - allows the file to be used
+      await storage.updateFileStatus(fileId, "ready");
+      return;
+    }
+
     const chunks = chunkText(result.text, 1500, 150);
 
     const chunksWithoutEmbeddings = chunks.map((chunk) => ({
@@ -115,12 +159,16 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     await storage.createFileChunks(chunksWithoutEmbeddings);
     await storage.updateFileStatus(fileId, "ready");
 
-    console.log(`File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
+    console.log(`[processFileAsync] File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
 
     generateEmbeddingsAsync(fileId, chunks);
-  } catch (error) {
-    console.error(`Error processing file ${fileId}:`, error);
-    await storage.updateFileStatus(fileId, "error");
+  } catch (error: any) {
+    console.error(`[processFileAsync] Error processing file ${fileId}:`, error.message || error);
+    try {
+      await storage.updateFileStatus(fileId, "error");
+    } catch (updateError) {
+      console.error(`[processFileAsync] Failed to update file status to error:`, updateError);
+    }
   }
 }
 
@@ -537,7 +585,7 @@ export function createFilesRouter() {
     }
   });
 
-  // Serve locally uploaded files
+  // Serve locally uploaded files with proper content type
   router.get("/api/local-files/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
@@ -550,10 +598,43 @@ export function createFilesRouter() {
         return res.status(404).json({ error: "File not found" });
       }
 
+      // Try to get the file record for content type
+      const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
+      const contentType = file?.type || "application/octet-stream";
+
+      res.setHeader("Content-Type", contentType);
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);
     } catch (error: any) {
       console.error("Error serving file:", error);
+      res.status(500).json({ error: "Failed to serve file" });
+    }
+  });
+
+  // Serve files from /objects/uploads/ path (local storage fallback)
+  router.get("/objects/uploads/:objectId", async (req, res) => {
+    try {
+      const { objectId } = req.params;
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
+
+      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+
+      if (!fsSync.default.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      // Try to get the file record for content type
+      const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
+      const contentType = file?.type || "application/octet-stream";
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+
+      const content = await fsSync.promises.readFile(filePath);
+      res.send(content);
+    } catch (error: any) {
+      console.error("Error serving local object:", error);
       res.status(500).json({ error: "Failed to serve file" });
     }
   });
