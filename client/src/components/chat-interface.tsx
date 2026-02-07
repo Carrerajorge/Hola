@@ -450,9 +450,19 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, setUploadedFilesState] = useState<UploadedFile[]>([]);
   // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  const setUploadedFiles = useCallback((value: React.SetStateAction<UploadedFile[]>) => {
+    setUploadedFilesState((prev: UploadedFile[]) => {
+      const next =
+        typeof value === "function"
+          ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
+          : value;
+      uploadedFilesRef.current = next;
+      return next;
+    });
+  }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -498,10 +508,6 @@ export function ChatInterface({
   const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    uploadedFilesRef.current = uploadedFiles;
-  }, [uploadedFiles]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -2776,7 +2782,7 @@ export function ChatInterface({
     }
 
     // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
+    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
@@ -2784,7 +2790,7 @@ export function ChatInterface({
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFiles.length > 0;
+    const hasFiles = uploadedFilesRef.current.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
@@ -3679,7 +3685,7 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately
     const userInput = input;
-    const currentUploadedFiles = [...uploadedFiles];
+    const currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = Date.now().toString();
 
     // Reset UI state immediately
