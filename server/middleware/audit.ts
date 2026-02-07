@@ -69,6 +69,7 @@ export const logAudit = async (
         Logger.error("Failed to log manual audit event", err);
     }
 };
+
 export const globalAuditMiddleware = async (req: Request, res: Response, next: NextFunction) => {
     // Only log mutations (non-GET)
     if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {

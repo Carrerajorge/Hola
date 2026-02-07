@@ -6,6 +6,7 @@ import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
@@ -17,7 +18,10 @@ import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { Loader2 } from "lucide-react";
 const Home = lazy(() => import("@/pages/home"));
-import { AuthProvider } from "@/hooks/use-auth";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { isAdminUser } from "@/lib/admin";
+const MaintenancePage = lazy(() => import("@/pages/maintenance"));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -70,6 +74,7 @@ function GlobalKeyboardShortcuts() {
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { chats } = useChats();
+  const { settings } = useSettingsContext();
 
   const handleNewChat = useCallback(() => {
     setLocation("/");
@@ -111,7 +116,7 @@ function GlobalKeyboardShortcuts() {
     { key: "k", ctrl: true, shift: true, action: handleOpenToolCatalog, description: "Tool Catalog" },
     { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
-  ]);
+  ], { enabled: settings.keyboardShortcuts });
 
   return (
     <>
@@ -179,35 +184,60 @@ function Router() {
   );
 }
 
+function AppContent() {
+  const [location] = useLocation();
+  const { settings: platformSettings, isLoading: platformLoading } = usePlatformSettings();
+  const { user } = useAuth();
+
+  const isLoginRoute = location.startsWith("/login");
+  const allowDuringMaintenance = isLoginRoute;
+
+  if (!platformLoading && platformSettings.maintenance_mode && !isAdminUser(user) && !allowDuringMaintenance) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <MaintenancePage />
+      </Suspense>
+    );
+  }
+
+  return (
+    <>
+      <SkipLink />
+      <OfflineIndicator />
+      {/* AuthCallbackHandler removed, moved to AuthProvider */}
+      <GlobalKeyboardShortcuts />
+      <Toaster />
+      <SonnerToaster
+        position="bottom-right"
+        richColors
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: "text-sm",
+            actionButton: "text-xs font-medium",
+          },
+        }}
+      />
+      <Router />
+      <BackgroundNotificationContainer onNavigateToChat={() => {}} />
+    </>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <SettingsProvider>
-          <ModelAvailabilityProvider>
-            <TooltipProvider>
-              <SkipLink />
-              <OfflineIndicator />
-              {/* AuthCallbackHandler removed, moved to AuthProvider */}
-              <GlobalKeyboardShortcuts />
-              <Toaster />
-              <SonnerToaster
-                position="bottom-right"
-                richColors
-                closeButton
-                toastOptions={{
-                  classNames: {
-                    toast: 'text-sm',
-                    actionButton: 'text-xs font-medium',
-                  }
-                }}
-              />
-              <Router />
-              <BackgroundNotificationContainer onNavigateToChat={() => { }} />
-            </TooltipProvider>
-          </ModelAvailabilityProvider>
-        </SettingsProvider>
-      </AuthProvider>
+      <PlatformSettingsProvider>
+        <AuthProvider>
+          <SettingsProvider>
+            <ModelAvailabilityProvider>
+              <TooltipProvider>
+                <AppContent />
+              </TooltipProvider>
+            </ModelAvailabilityProvider>
+          </SettingsProvider>
+        </AuthProvider>
+      </PlatformSettingsProvider>
     </QueryClientProvider>
   );
 }

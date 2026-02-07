@@ -258,7 +258,7 @@ export class AgentLoopFacade extends EventEmitter {
           executionResult = await this.executeSingleAgentPath(message, analysis, route, runId);
           break;
         case "multi_agent":
-          executionResult = await this.executeMultiAgentPath(message, analysis, route, runId);
+          executionResult = await this.executeMultiAgentPath(message, analysis, route, runId, validatedContext);
           break;
         default:
           executionResult = await this.executeDirectPath(message, analysis, validatedContext);
@@ -581,7 +581,8 @@ Provide a clear, helpful response.`;
     message: string,
     analysis: AnalysisResult,
     route: RouteDecision,
-    runId: string
+    runId: string,
+    context: PipelineContext
   ): Promise<{
     content: string;
     artifacts: Artifact[];
@@ -611,6 +612,8 @@ Provide a clear, helpful response.`;
         context: {
           deliverables: analysis.deliverables,
           runId,
+          userId: context.userId,
+          chatId: context.chatId,
         },
       },
       {

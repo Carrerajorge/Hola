@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
 interface MemoryChunk {
     id: string;
@@ -70,6 +72,9 @@ const TYPE_COLORS: Record<string, string> = {
 export default function MemoryPage() {
     const { user } = useAuth();
     const { toast } = useToast();
+    const { settings: platformSettings } = usePlatformSettings();
+    const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+    const platformDateFormat = platformSettings.date_format;
     
     const [memories, setMemories] = useState<MemoryChunk[]>([]);
     const [stats, setStats] = useState<MemoryStats | null>(null);
@@ -183,15 +188,8 @@ export default function MemoryPage() {
         ? memories 
         : memories.filter(m => m.type === selectedType);
 
-    const formatDate = (dateStr: string) => {
-        return new Date(dateStr).toLocaleDateString("es", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit"
-        });
-    };
+    const formatDate = (dateStr: string) =>
+        formatZonedDateTime(dateStr, { timeZone: platformTimeZone, dateFormat: platformDateFormat });
 
     if (!user) {
         return (

@@ -43,9 +43,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
 import {
   Sparkles,
   CheckSquare,
@@ -76,6 +79,14 @@ type SettingsSection = "general" | "notifications" | "personalization" | "apps" 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+function mapPlatformDateFormatToUserDateFormat(
+  fmt: string
+): "dd/mm/yyyy" | "mm/dd/yyyy" | "yyyy-mm-dd" {
+  if (fmt === "YYYY-MM-DD") return "yyyy-mm-dd";
+  if (fmt === "MM/DD/YYYY") return "mm/dd/yyyy";
+  return "dd/mm/yyyy";
 }
 
 const menuItems: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -413,6 +424,8 @@ function AppsSection() {
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { data: integrationsData, isLoading: isLoadingIntegrations, refetch } = useQuery<IntegrationsData>({
@@ -779,7 +792,7 @@ function AppsSection() {
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   {log.latencyMs && <span>{log.latencyMs}ms</span>}
-                  <span>{new Date(log.createdAt).toLocaleTimeString()}</span>
+                  <span>{formatZonedTime(log.createdAt, { timeZone: platformTimeZone, includeSeconds: true })}</span>
                 </div>
               </div>
             ))}
@@ -800,6 +813,9 @@ function DataControlsSection() {
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [showArchivedDialog, setShowArchivedDialog] = useState(false);
   const [showSharedLinksDialog, setShowSharedLinksDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1043,12 +1059,12 @@ function DataControlsSection() {
               <div className="space-y-2">
                 {archivedChats.map((chat) => (
                   <div key={chat.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`archived-chat-${chat.id}`}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{chat.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(chat.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
+	                      <div className="flex-1 min-w-0">
+	                        <p className="text-sm font-medium truncate">{chat.title}</p>
+	                        <p className="text-xs text-muted-foreground">
+	                          {formatZonedDate(chat.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+	                        </p>
+	                      </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1098,11 +1114,11 @@ function DataControlsSection() {
                           )}>
                             {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
                           </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Creado: {new Date(link.createdAt).toLocaleDateString()} · {link.accessCount} accesos
-                        </p>
-                      </div>
+	                        </div>
+	                        <p className="text-xs text-muted-foreground mt-1">
+	                          Creado: {formatZonedDate(link.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })} · {link.accessCount} accesos
+	                        </p>
+	                      </div>
                       {link.isRevoked === 'false' && (
                         <Button
                           variant="ghost"
@@ -1170,9 +1186,17 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
 
   const { settings, updateSetting } = useSettingsContext();
+  const { settings: platformSettings } = usePlatformSettings();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const { availableModels } = useModelAvailability();
+  const platformUserDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
+  const effectiveDefaultModel = settings.defaultModel || platformSettings.default_model;
+  const themeManagedByPlatform = platformSettings.theme_mode !== "auto";
+  const effectiveAppearance = themeManagedByPlatform
+    ? (platformSettings.theme_mode === "light" ? "light" : "dark")
+    : settings.appearance;
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -1219,10 +1243,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Tema</span>
-                    <span className="text-xs text-muted-foreground">Selecciona el aspecto visual de la aplicación</span>
+                    <span className="text-xs text-muted-foreground">
+                      {themeManagedByPlatform
+                        ? "Gestionado por administrador"
+                        : "Selecciona el aspecto visual de la aplicacion"}
+                    </span>
                   </div>
                   <Select
-                    value={settings.appearance}
+                    value={effectiveAppearance}
+                    disabled={themeManagedByPlatform}
                     onValueChange={(value) => updateSetting("appearance", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-appearance">
@@ -1239,10 +1268,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Color de acento</span>
-                    <span className="text-xs text-muted-foreground">Color principal de la interfaz</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
                   </div>
                   <Select
-                    value={settings.accentColor}
+                    value="default"
+                    disabled
                     onValueChange={(value) => updateSetting("accentColor", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-accent-color">
@@ -1399,11 +1429,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
 
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Formato de fecha</span>
-                  <Select
-                    value={settings.dateFormat}
-                    onValueChange={(value) => updateSetting("dateFormat", value as any)}
-                  >
+                  <div>
+                    <span className="text-sm block">Formato de fecha</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                  </div>
+                  <Select value={platformUserDateFormat} disabled>
                     <SelectTrigger className="w-40" data-testid="select-date-format">
                       <SelectValue />
                     </SelectTrigger>
@@ -1413,6 +1443,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       <SelectItem value="yyyy-mm-dd">AAAA-MM-DD</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Zona horaria</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                  </div>
+                  <Input
+                    className="w-40"
+                    value={platformSettings.timezone_default || "UTC"}
+                    disabled
+                    data-testid="input-timezone"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between py-2">
@@ -1509,19 +1552,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Modelo predeterminado</span>
-                    <span className="text-xs text-muted-foreground">Modelo para nuevas conversaciones</span>
+                    <span className="text-xs text-muted-foreground">
+                      {settings.defaultModel ? "Modelo para nuevas conversaciones" : "Predeterminado de la plataforma"}
+                    </span>
                   </div>
                   <Select
-                    value={settings.defaultModel}
+                    value={effectiveDefaultModel}
                     onValueChange={(value) => updateSetting("defaultModel", value)}
                   >
                     <SelectTrigger className="w-48" data-testid="select-default-model">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                      <SelectItem value="grok-3-fast">Grok 3 Fast</SelectItem>
+                  <SelectContent>
+                      {availableModels.some((m) => m.modelId === platformSettings.default_model) ? null : (
+                        <SelectItem value={platformSettings.default_model}>
+                          {platformSettings.default_model}
+                        </SelectItem>
+                      )}
+                      {availableModels.length > 0 ? (
+                        availableModels.map((m) => (
+                          <SelectItem key={m.id} value={m.modelId}>
+                            {m.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <>
+                          <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                          <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                          <SelectItem value="grok-3-fast">Grok 3 Fast</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1541,10 +1601,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Transmitir respuestas</span>
-                    <span className="text-xs text-muted-foreground">Ver las respuestas mientras se generan</span>
+                    <span className="text-xs text-muted-foreground">
+                      {platformSettings.enable_streaming
+                        ? "Ver las respuestas mientras se generan"
+                        : "Deshabilitado por el administrador"}
+                    </span>
                   </div>
                   <Switch
-                    checked={settings.streamResponses}
+                    checked={platformSettings.enable_streaming && settings.streamResponses}
+                    disabled={!platformSettings.enable_streaming}
                     onCheckedChange={(checked) => updateSetting("streamResponses", checked)}
                     data-testid="switch-stream"
                   />
@@ -1803,7 +1868,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               ILIAGPT puede programarse para ejecutarse nuevamente después de completar una tarea.
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
-            <Button variant="outline" data-testid="button-manage-schedules">
+            <Button
+              variant="outline"
+              onClick={() => toast({
+                title: "Programaciones",
+                description: "Para programar ejecuciones, usa el menú ⋯ en una conversación. La vista de administración estará disponible pronto."
+              })}
+              data-testid="button-manage-schedules"
+            >
               Administrar
             </Button>
           </div>
@@ -1850,6 +1922,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <button
                 className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                onClick={() => toast({
+                  title: "Dispositivos de confianza",
+                  description: "Esta vista estará disponible pronto."
+                })}
                 data-testid="security-trusted-devices"
               >
                 <span className="text-sm">Dispositivos de confianza</span>
@@ -2037,7 +2113,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center gap-3 py-2">
                 <Mail className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm">usuario@ejemplo.com</span>
+                <span className="text-sm">{user?.email || "Sin correo"}</span>
               </div>
 
               <div className="flex items-center gap-3 py-2">

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { storage } from "../../storage";
 import { sendPaymentEmail } from "../../services/genericEmailService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import ExcelJS from "exceljs";
 
 export const financeRouter = Router();
 
@@ -75,8 +76,25 @@ financeRouter.get("/payments/stats", async (req, res) => {
 // GET /api/admin/finance/payments/export - Export payments to CSV/Excel
 financeRouter.get("/payments/export", async (req, res) => {
     try {
-        const { format = "csv" } = req.query;
-        const payments = await storage.getPayments();
+        const format = String(req.query.format || "csv").toLowerCase();
+        let payments = await storage.getPayments();
+
+        // Apply same filters as listing endpoint
+        const { status, userId, dateFrom, dateTo } = req.query as Record<string, string>;
+        if (status) {
+            payments = payments.filter(p => p.status === status);
+        }
+        if (userId) {
+            payments = payments.filter(p => p.userId === userId);
+        }
+        if (dateFrom) {
+            const fromDate = new Date(dateFrom);
+            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) >= fromDate);
+        }
+        if (dateTo) {
+            const toDate = new Date(dateTo);
+            payments = payments.filter(p => p.createdAt && new Date(p.createdAt) <= toDate);
+        }
 
         await storage.createAuditLog({
             action: "payments_export",
@@ -101,10 +119,47 @@ financeRouter.get("/payments/export", async (req, res) => {
             res.setHeader("Content-Type", "text/csv");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.csv`);
             res.send(csvRows.join("\n"));
-        } else {
+        } else if (format === "xlsx") {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet("Payments");
+
+            sheet.columns = [
+                { header: "ID", key: "id", width: 36 },
+                { header: "User ID", key: "userId", width: 28 },
+                { header: "Amount", key: "amount", width: 14 },
+                { header: "Currency", key: "currency", width: 10 },
+                { header: "Status", key: "status", width: 14 },
+                { header: "Method", key: "method", width: 18 },
+                { header: "Created At", key: "createdAt", width: 20 },
+            ];
+            sheet.getRow(1).font = { bold: true };
+            sheet.getColumn("createdAt").numFmt = "yyyy-mm-dd hh:mm";
+
+            for (const p of payments) {
+                sheet.addRow({
+                    id: p.id,
+                    userId: p.userId || "",
+                    amount: Number(p.amount || 0),
+                    currency: p.currency || "USD",
+                    status: p.status || "",
+                    method: p.method || "",
+                    createdAt: p.createdAt ? new Date(p.createdAt as any) : null,
+                });
+            }
+
+            const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.xlsx`);
+            res.send(buffer);
+        } else if (format === "json") {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.json`);
             res.json(payments);
+        } else {
+            res.status(400).json({ error: "Invalid format. Use csv, xlsx, or json." });
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -282,7 +337,7 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
 // GET /api/admin/finance/invoices/export - Export invoices
 financeRouter.get("/invoices/export", async (req, res) => {
     try {
-        const { format = "csv" } = req.query;
+        const format = String(req.query.format || "csv").toLowerCase();
         const invoices = await storage.getInvoices();
 
         await storage.createAuditLog({
@@ -309,10 +364,53 @@ financeRouter.get("/invoices/export", async (req, res) => {
             res.setHeader("Content-Type", "text/csv");
             res.setHeader("Content-Disposition", `attachment; filename=invoices_${Date.now()}.csv`);
             res.send(csvRows.join("\n"));
-        } else {
+        } else if (format === "xlsx") {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet("Invoices");
+
+            sheet.columns = [
+                { header: "ID", key: "id", width: 36 },
+                { header: "User ID", key: "userId", width: 28 },
+                { header: "Invoice #", key: "invoiceNumber", width: 18 },
+                { header: "Amount", key: "amount", width: 14 },
+                { header: "Currency", key: "currency", width: 10 },
+                { header: "Status", key: "status", width: 14 },
+                { header: "Due Date", key: "dueDate", width: 14 },
+                { header: "Created At", key: "createdAt", width: 20 },
+                { header: "Paid At", key: "paidAt", width: 20 },
+            ];
+            sheet.getRow(1).font = { bold: true };
+            sheet.getColumn("createdAt").numFmt = "yyyy-mm-dd hh:mm";
+            sheet.getColumn("paidAt").numFmt = "yyyy-mm-dd hh:mm";
+            sheet.getColumn("dueDate").numFmt = "yyyy-mm-dd";
+
+            for (const i of invoices) {
+                sheet.addRow({
+                    id: i.id,
+                    userId: i.userId || "",
+                    invoiceNumber: (i as any).invoiceNumber || "",
+                    amount: Number(i.amount || 0),
+                    currency: i.currency || "USD",
+                    status: i.status || "",
+                    dueDate: i.dueDate ? new Date(i.dueDate as any) : null,
+                    createdAt: i.createdAt ? new Date(i.createdAt as any) : null,
+                    paidAt: i.paidAt ? new Date(i.paidAt as any) : null,
+                });
+            }
+
+            const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+            res.setHeader(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            );
+            res.setHeader("Content-Disposition", `attachment; filename=invoices_${Date.now()}.xlsx`);
+            res.send(buffer);
+        } else if (format === "json") {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=invoices_${Date.now()}.json`);
             res.json(invoices);
+        } else {
+            res.status(400).json({ error: "Invalid format. Use csv, xlsx, or json." });
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });

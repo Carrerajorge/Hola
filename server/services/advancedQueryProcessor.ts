@@ -332,103 +332,121 @@ function classifyTopic(query: string): string[] {
 // 131-145: CORRECTION & SUGGESTIONS
 // ============================================
 
-// Extended spell checker dictionary
-const ACADEMIC_CORRECTIONS: Record<string, string> = {
+// Extended spell checker dictionaries (language-aware)
+const EN_CORRECTIONS: Record<string, string> = {
   // English typos
-  "machne": "machine",
-  "learing": "learning",
-  "artifical": "artificial",
-  "inteligence": "intelligence",
-  "neurla": "neural",
-  "netowrk": "network",
-  "algoritm": "algorithm",
-  "reserach": "research",
-  "anlaysis": "analysis",
-  "studie": "study",
-  "developement": "development",
-  "managment": "management",
-  "enviroment": "environment",
-  "goverment": "government",
-  "occured": "occurred",
-  "recieve": "receive",
-  "seperate": "separate",
-  "untill": "until",
-  "wich": "which",
-  "becuase": "because",
-  "definately": "definitely",
-  "occurence": "occurrence",
-  "accomodate": "accommodate",
-  "apparant": "apparent",
-  "begining": "beginning",
-  "beleive": "believe",
-  "colum": "column",
-  "commitee": "committee",
-  "concious": "conscious",
-  "existance": "existence",
-  "foriegn": "foreign",
-  "happend": "happened",
-  "imediately": "immediately",
-  "independant": "independent",
-  "knowlege": "knowledge",
-  "liason": "liaison",
-  "millenium": "millennium",
-  "noticable": "noticeable",
-  "ocasionally": "occasionally",
-  "paralel": "parallel",
-  "persistant": "persistent",
-  "posession": "possession",
-  "publically": "publicly",
-  "reccomend": "recommend",
-  "refered": "referred",
-  "relevent": "relevant",
-  "rythm": "rhythm",
-  "similer": "similar",
-  "suprise": "surprise",
-  "tendancy": "tendency",
-  "therefor": "therefore",
-  "tommorow": "tomorrow",
-  "truely": "truly",
-  "untill": "until",
-  "wierd": "weird",
-  
-  // Spanish typos
-  "educacion": "educación",
-  "investigacion": "investigación",
-  "metodologia": "metodología",
-  "analisis": "análisis",
-  "tecnologia": "tecnología",
-  "informacion": "información",
-  "comunicacion": "comunicación",
-  "evaluacion": "evaluación",
-  "aplicacion": "aplicación",
-  "organizacion": "organización",
-  "administracion": "administración",
-  "inteligencia": "inteligencia",
-  "cientifico": "científico",
-  "academico": "académico",
-  "matematicas": "matemáticas",
-  "estadistica": "estadística",
-  
-  // Portuguese typos
-  "pesquisa": "pesquisa",
-  "desenvolvimento": "desenvolvimento",
-  "tecnologia": "tecnologia",
-  "educacao": "educação",
-  "comunicacao": "comunicação",
-  "informacao": "informação"
+  machne: "machine",
+  learing: "learning",
+  artifical: "artificial",
+  inteligence: "intelligence",
+  neurla: "neural",
+  netowrk: "network",
+  algoritm: "algorithm",
+  reserach: "research",
+  anlaysis: "analysis",
+  studie: "study",
+  developement: "development",
+  managment: "management",
+  enviroment: "environment",
+  goverment: "government",
+  occured: "occurred",
+  recieve: "receive",
+  seperate: "separate",
+  untill: "until",
+  wich: "which",
+  becuase: "because",
+  definately: "definitely",
+  occurence: "occurrence",
+  accomodate: "accommodate",
+  apparant: "apparent",
+  begining: "beginning",
+  beleive: "believe",
+  colum: "column",
+  commitee: "committee",
+  concious: "conscious",
+  existance: "existence",
+  foriegn: "foreign",
+  happend: "happened",
+  imediately: "immediately",
+  independant: "independent",
+  knowlege: "knowledge",
+  liason: "liaison",
+  millenium: "millennium",
+  noticable: "noticeable",
+  ocasionally: "occasionally",
+  paralel: "parallel",
+  persistant: "persistent",
+  posession: "possession",
+  publically: "publicly",
+  reccomend: "recommend",
+  refered: "referred",
+  relevent: "relevant",
+  rythm: "rhythm",
+  similer: "similar",
+  suprise: "surprise",
+  tendancy: "tendency",
+  therefor: "therefore",
+  tommorow: "tomorrow",
+  truely: "truly",
+  wierd: "weird",
 };
 
+const ES_CORRECTIONS: Record<string, string> = {
+  // Spanish typos / missing accents
+  educacion: "educación",
+  investigacion: "investigación",
+  metodologia: "metodología",
+  analisis: "análisis",
+  tecnologia: "tecnología",
+  informacion: "información",
+  comunicacion: "comunicación",
+  evaluacion: "evaluación",
+  aplicacion: "aplicación",
+  organizacion: "organización",
+  administracion: "administración",
+  cientifico: "científico",
+  academico: "académico",
+  matematicas: "matemáticas",
+  estadistica: "estadística",
+};
+
+const PT_CORRECTIONS: Record<string, string> = {
+  // Portuguese typos / missing accents
+  educacao: "educação",
+  comunicacao: "comunicação",
+  informacao: "informação",
+};
+
+const ALL_CORRECTIONS: Record<string, string> = {
+  ...EN_CORRECTIONS,
+  ...ES_CORRECTIONS,
+  ...PT_CORRECTIONS,
+};
+
+function getSpellingCorrections(language: string): Record<string, string> {
+  switch (language) {
+    case "es":
+      // Spanish queries often contain English terms; keep EN corrections too.
+      return { ...EN_CORRECTIONS, ...ES_CORRECTIONS };
+    case "pt":
+      return { ...EN_CORRECTIONS, ...PT_CORRECTIONS };
+    default:
+      return EN_CORRECTIONS;
+  }
+}
+
 // 131. Spell checker con diccionario académico
-function correctSpelling(query: string): { corrected: string; corrections: string[] } {
+function correctSpelling(query: string, language?: string): { corrected: string; corrections: string[] } {
   let corrected = query;
   const corrections: string[] = [];
+  const map = language ? getSpellingCorrections(language) : ALL_CORRECTIONS;
   
   const words = query.split(/\s+/);
   for (const word of words) {
     const lower = word.toLowerCase();
-    if (ACADEMIC_CORRECTIONS[lower]) {
-      corrected = corrected.replace(new RegExp(`\\b${word}\\b`, "gi"), ACADEMIC_CORRECTIONS[lower]);
-      corrections.push(`${word} → ${ACADEMIC_CORRECTIONS[lower]}`);
+    if (map[lower]) {
+      corrected = corrected.replace(new RegExp(`\\b${word}\\b`, "gi"), map[lower]);
+      corrections.push(`${word} → ${map[lower]}`);
     }
   }
   
@@ -594,7 +612,9 @@ function translateTerms(query: string, fromLang: string, toLang: string): string
 const STOPWORDS: Record<string, Set<string>> = {
   "en": new Set(["a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "shall", "can", "this", "that", "these", "those", "it", "its"]),
   "es": new Set(["el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "en", "con", "por", "para", "es", "son", "fue", "ser", "estar", "como", "que", "y", "o", "pero", "si", "no", "más", "muy", "su", "sus", "este", "esta", "estos", "estas"]),
-  "pt": new Set(["o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "com", "por", "para", "é", "são", "foi", "ser", "estar", "como", "que", "e", "ou", "mas", "se", "não", "mais", "muito", "seu", "sua"])
+  "pt": new Set(["o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas", "com", "por", "para", "é", "são", "foi", "ser", "estar", "como", "que", "e", "ou", "mas", "se", "não", "mais", "muito", "seu", "sua"]),
+  "fr": new Set(["le", "la", "les", "un", "une", "des", "de", "du", "dans", "sur", "par", "pour", "avec", "et", "ou", "mais", "que", "qui", "est", "sont", "était", "etre", "être", "avoir", "fait", "très", "plus", "moins", "aussi", "donc", "ainsi", "parce", "lorsque", "pendant", "depuis", "jusqu", "entre"]),
+  "de": new Set(["der", "die", "das", "ein", "eine", "und", "oder", "aber", "für", "mit", "in", "auf", "von", "zu", "ist", "sind", "war", "haben", "hat", "sehr", "mehr", "weniger", "auch", "also", "damit", "weil", "obwohl", "während", "seit", "zwischen"])
 };
 
 function removeStopwords(query: string, language: string): string {
@@ -942,7 +962,7 @@ export function parseQuery(query: string): ParsedQuery {
   const langResult = detectLanguagePrecise(original);
   
   // 7. Correct spelling
-  const { corrected, corrections } = correctSpelling(afterRanges);
+  const { corrected, corrections } = correctSpelling(afterRanges, langResult.language);
   
   // 8. Normalize
   const normalized = corrected

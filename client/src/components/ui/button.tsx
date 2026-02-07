@@ -29,10 +29,10 @@ const buttonVariants = cva(
       },
       size: {
         // @replit changed sizes
-        default: "min-h-9 px-4 py-2",
-        sm: "min-h-8 rounded-md px-3 text-xs",
-        lg: "min-h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "min-h-[var(--ui-control-h)] px-[var(--ui-control-px)] py-[var(--ui-control-py)]",
+        sm: "min-h-[var(--ui-control-h-sm)] rounded-md px-[var(--ui-control-px-sm)] py-[var(--ui-control-py-sm)] text-xs",
+        lg: "min-h-[var(--ui-control-h-lg)] rounded-md px-[var(--ui-control-px-lg)] py-[var(--ui-control-py-lg)]",
+        icon: "h-[var(--ui-control-icon)] w-[var(--ui-control-icon)]",
       },
     },
     defaultVariants: {

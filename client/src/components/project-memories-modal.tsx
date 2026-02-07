@@ -17,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Project } from "@/hooks/use-projects";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
 
 interface Memory {
     id: string;
@@ -42,6 +44,9 @@ export function ProjectMemoriesModal({
     const [memories, setMemories] = useState<Memory[]>([]);
     const [editingPrompt, setEditingPrompt] = useState(false);
     const [promptDraft, setPromptDraft] = useState("");
+    const { settings: platformSettings } = usePlatformSettings();
+    const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+    const platformDateFormat = platformSettings.date_format;
 
     if (!project) return null;
 
@@ -171,7 +176,7 @@ export function ProjectMemoriesModal({
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-sm">{memory.content}</p>
                                                     <p className="text-xs text-muted-foreground mt-1">
-                                                        {memory.createdAt.toLocaleDateString()}
+                                                        {formatZonedDate(memory.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
                                                     </p>
                                                 </div>
                                                 <Badge variant="outline" className="text-xs">{memory.type}</Badge>

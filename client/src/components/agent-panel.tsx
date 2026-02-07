@@ -7,6 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import "@/components/ui/glass-effects.css";
 
 interface AgentStep {
@@ -225,6 +227,9 @@ function ArtifactItem({ artifact }: { artifact: AgentArtifact }) {
 }
 
 function EventStreamItem({ event }: { event: AgentEvent }) {
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+
   const getEventIcon = () => {
     switch (event.type) {
       case 'action': return <Activity className="h-3 w-3 text-blue-500" />;
@@ -238,8 +243,7 @@ function EventStreamItem({ event }: { event: AgentEvent }) {
   };
   
   const formatTime = (ts: number) => {
-    const date = new Date(ts);
-    return date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return formatZonedTime(ts, { timeZone: platformTimeZone, includeSeconds: true });
   };
   
   const getEventContent = () => {

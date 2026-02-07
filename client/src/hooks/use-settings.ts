@@ -1,9 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface UserSettings {
   // Display
   appearance: "system" | "light" | "dark";
-  accentColor: "default" | "blue" | "green" | "purple" | "orange" | "pink";
+  accentColor:
+    | "default"
+    | "blue"
+    | "green"
+    | "purple"
+    | "orange"
+    | "pink"
+    | "red"
+    | "teal"
+    | "yellow"
+    | "indigo";
   fontSize: "small" | "medium" | "large";
   density: "compact" | "comfortable" | "spacious";
   
@@ -114,7 +125,8 @@ const defaultSettings: UserSettings = {
   
   // AI Models
   showAdditionalModels: true,
-  defaultModel: "gemini-2.5-flash",
+  // Platform-level default model is applied via PlatformSettings.
+  defaultModel: "",
   streamResponses: true,
   
   // Keyboard & Accessibility
@@ -228,7 +240,6 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
 
 async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`);
     if (!response.ok) {
       if (response.status === 401) {
@@ -246,7 +257,6 @@ async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null
 
 async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 'userId'>): Promise<boolean> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`, {
       method: 'PUT',
       headers: {
@@ -408,6 +418,10 @@ export function applyAccentColor(color: UserSettings["accentColor"]) {
     purple: { light: "271 81% 56%", dark: "271 81% 66%" },
     orange: { light: "25 95% 53%", dark: "25 95% 63%" },
     pink: { light: "330 81% 60%", dark: "330 81% 70%" },
+    red: { light: "0 84% 60%", dark: "0 84% 70%" },
+    teal: { light: "173 80% 40%", dark: "173 80% 50%" },
+    yellow: { light: "48 96% 53%", dark: "48 96% 63%" },
+    indigo: { light: "239 84% 67%", dark: "239 84% 77%" },
   };
   
   const isDark = root.classList.contains("dark");

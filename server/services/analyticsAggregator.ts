@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { apiLogs, providerMetrics, costBudgets, kpiSnapshots, users, chatMessages } from "@shared/schema";
-import { sql, gte, and, desc, count, isNotNull } from "drizzle-orm";
+import { apiLogs } from "@shared/schema";
+import { sql, gte, and, count, isNotNull } from "drizzle-orm";
 import { storage } from "../storage";
 
 const AGGREGATION_INTERVAL_MS = 60 * 1000;
@@ -195,11 +195,16 @@ export async function calculateKpis(): Promise<void> {
   const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
   try {
+    // "Active users now" should reflect distinct accounts, not message volume.
+    // We use api_logs (LLM calls) as the most reliable cross-feature activity signal.
     const [activeUsersResult] = await db
-      .select({ count: count() })
-      .from(chatMessages)
-      .where(gte(chatMessages.createdAt, tenMinutesAgo));
-    const activeUsersNow = activeUsersResult?.count || 0;
+      .select({ count: sql<number>`COUNT(DISTINCT ${apiLogs.userId})` })
+      .from(apiLogs)
+      .where(and(
+        gte(apiLogs.createdAt, tenMinutesAgo),
+        isNotNull(apiLogs.userId)
+      ));
+    const activeUsersNow = Number(activeUsersResult?.count || 0);
 
     const [queriesResult] = await db
       .select({ count: count() })

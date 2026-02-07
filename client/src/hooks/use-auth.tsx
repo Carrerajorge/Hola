@@ -101,29 +101,13 @@ async function fetchUser(): Promise<User | null> {
     headers['X-Anonymous-User-Id'] = storedAnonId;
   }
 
-  console.log("[Auth] fetchUser start", {
-    hasStoredAnonId: !!storedAnonId,
-    path: window.location.pathname,
-    search: window.location.search,
-  });
-
   const response = await fetch("/api/auth/user", {
     credentials: "include",
     headers,
   });
 
-  console.log("[Auth] /api/auth/user response", {
-    status: response.status,
-    ok: response.ok,
-  });
-
   if (response.ok) {
     const user = await response.json();
-    console.log("[Auth] /api/auth/user success", {
-      id: user?.id,
-      email: user?.email,
-      role: user?.role,
-    });
     setStoredUser(user);
     clearAnonUserId();
     return user;
@@ -135,13 +119,8 @@ async function fetchUser(): Promise<User | null> {
         credentials: "include",
         headers,
       });
-      console.log("[Auth] /api/session/identity response", {
-        status: identityRes.status,
-        ok: identityRes.ok,
-      });
       if (identityRes.ok) {
         const identity = await identityRes.json();
-        console.log("[Auth] /api/session/identity payload", identity);
         if (identity.userId) {
           setStoredAnonUserId(identity.userId);
           if (identity.token) {
@@ -216,20 +195,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Handle OAuth Callback Logic
   useEffect(() => {
-    console.log("[Auth] AuthProvider mounted", {
-      cachedUser: getStoredUser()?.id ?? null,
-      path: window.location.pathname,
-      search: window.location.search,
-    });
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "success") {
-      console.log('[Auth] OAuth callback detected, forcing auth refresh...');
       // Invalidate cache to force fresh fetch
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       // Trigger a refetch to get the new user session
       refetch().then((result) => {
         if (result.data) {
-          console.log('[Auth] User authenticated after OAuth:', result.data.email || result.data.id);
           setStoredUser(result.data);
         } else {
           console.warn('[Auth] OAuth callback but no user data received');
@@ -239,15 +211,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [refetch, queryClient]);
-
-  useEffect(() => {
-    console.log("[Auth] AuthProvider state", {
-      isLoading,
-      hasUser: !!user,
-      userId: user?.id ?? null,
-      userEmail: user?.email ?? null,
-    });
-  }, [isLoading, user]);
 
   return (
     <AuthContext.Provider value={{

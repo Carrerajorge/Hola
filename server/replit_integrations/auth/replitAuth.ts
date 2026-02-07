@@ -10,6 +10,8 @@ import { authStorage } from "./storage";
 import { storage } from "../../storage";
 import { withRetry } from "../../utils/retry";
 import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter";
+import { recordLoginAttempt } from "../../services/twoFactorAuth";
+import { getSettingValue } from "../../services/settingsConfigService";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {
@@ -141,13 +143,46 @@ function updateUserSession(
 }
 
 async function upsertUser(claims: any) {
-  await authStorage.upsertUser({
-    id: claims["sub"],
-    email: claims["email"],
-    firstName: claims["first_name"],
-    lastName: claims["last_name"],
+  const providerSub = claims["sub"];
+  const email = claims["email"];
+
+  // Block new registrations if disabled (existing users can still log in).
+  try {
+    const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
+    if (!allowRegistration) {
+      const existing =
+        (providerSub ? await authStorage.getUser(providerSub) : undefined) ||
+        (email ? await authStorage.getUserByEmail(email) : undefined);
+      if (!existing) {
+        throw new Error("Registration is disabled");
+      }
+    }
+  } catch {
+    // If settings are unavailable, default to allowing login.
+  }
+
+  const firstName = claims["first_name"];
+  const lastName = claims["last_name"];
+  const fullName = [firstName, lastName].filter(Boolean).join(" ") || claims["full_name"] || null;
+
+  const dbUser = await authStorage.upsertUser({
+    id: providerSub,
+    email,
+    fullName,
+    firstName,
+    lastName,
     profileImageUrl: claims["profile_image_url"],
+    authProvider: "replit",
+    emailVerified: "true",
   });
+
+  // Bind the session identity to the DB primary key (stable across the app).
+  // If a user already exists with the same unique email, `upsertUser()` will merge by email
+  // without changing users.id; in that case we must override the session's sub to match DB id.
+  if (claims && dbUser?.id && providerSub && providerSub !== dbUser.id) {
+    claims["provider_sub"] = providerSub;
+    claims["sub"] = dbUser.id;
+  }
 }
 
 export async function setupAuth(app: Express) {
@@ -268,6 +303,18 @@ export async function setupAuth(app: Express) {
               ipAddress: req.ip || req.socket.remoteAddress || null,
               userAgent: req.headers["user-agent"] || null
             });
+
+            try {
+              await recordLoginAttempt(
+                mockUser.claims.email,
+                mockUser.claims.sub,
+                String(req.ip || req.socket.remoteAddress || "unknown"),
+                String(req.headers["user-agent"] || "unknown"),
+                true
+              );
+            } catch (e) {
+              console.warn("[Auth] Failed to record login_attempts (local dev):", (e as any)?.message || e);
+            }
           } catch (e) { console.warn("Failed to log local auth audit", e) }
 
           return res.redirect("/?auth=success");
@@ -324,6 +371,18 @@ export async function setupAuth(app: Express) {
               ipAddress: req.ip || req.socket.remoteAddress || null,
               userAgent: req.headers["user-agent"] || null
             });
+
+            try {
+              await recordLoginAttempt(
+                String(user.claims?.email || "unknown"),
+                userId,
+                String(req.ip || req.socket.remoteAddress || "unknown"),
+                String(req.headers["user-agent"] || "unknown"),
+                true
+              );
+            } catch (e) {
+              console.warn(`[Auth] [${requestId}] Failed to record login_attempts:`, (e as any)?.message || e);
+            }
 
             await storage.createAuditLog({
               userId,

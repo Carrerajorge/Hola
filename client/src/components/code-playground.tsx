@@ -6,6 +6,8 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
 // ============== Types ==============
 
@@ -174,6 +176,9 @@ export function CodePlayground({
     onCodeChange,
     onRunComplete,
 }: PlaygroundConfig) {
+    const { settings: platformSettings } = usePlatformSettings();
+    const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+
     const [state, setState] = useState<PlaygroundState>({
         code: initialCode || LANGUAGE_CONFIG[initialLanguage].template,
         language: initialLanguage,
@@ -376,7 +381,7 @@ export function CodePlayground({
                         {state.language === "html" ? "Preview" : "Output"}
                         {state.lastRun && (
                             <span className="ml-2 text-gray-500">
-                                Last run: {state.lastRun.toLocaleTimeString()}
+                                Last run: {formatZonedTime(state.lastRun, { timeZone: platformTimeZone, includeSeconds: true })}
                             </span>
                         )}
                     </div>

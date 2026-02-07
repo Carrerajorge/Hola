@@ -10,8 +10,17 @@ export const sessions = pgTable(
         sid: varchar("sid").primaryKey(),
         sess: jsonb("sess").notNull(),
         expire: timestamp("expire").notNull(),
+        // Optional: derived from sess JSON by a DB trigger (see migrations/0005_session_user_tracking.sql)
+        userId: varchar("user_id"),
+        createdAt: timestamp("created_at").defaultNow().notNull(),
+        updatedAt: timestamp("updated_at").defaultNow().notNull(),
+        lastSeenAt: timestamp("last_seen_at"),
     },
-    (table) => [index("IDX_session_expire").on(table.expire)]
+    (table) => [
+        index("IDX_session_expire").on(table.expire),
+        index("sessions_user_idx").on(table.userId),
+        index("sessions_user_expire_idx").on(table.userId, table.expire),
+    ]
 );
 
 // Magic Links table for passwordless email authentication

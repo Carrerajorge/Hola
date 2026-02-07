@@ -22,6 +22,8 @@ import { exportDeckToPptx, downloadBlob } from '@/lib/pptExport';
 import { cn } from '@/lib/utils';
 import { createPptStreamParser } from '@/lib/pptStreaming';
 import { PPT_STREAMING_SYSTEM_PROMPT } from '@/lib/pptPrompts';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedDate, normalizeTimeZone } from '@/lib/platformDateTime';
 import type { Deck } from './store/types';
 
 interface PPTEditorShellProps {
@@ -69,6 +71,9 @@ export function PPTEditorShell({ onClose, onInsertContent, initialShowInstructio
   const [showNotes, setShowNotes] = useState(true);
   const [showInstructions, setShowInstructions] = useState(initialShowInstructions);
   const [isGenerating, setIsGenerating] = useState(false);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +88,7 @@ export function PPTEditorShell({ onClose, onInsertContent, initialShowInstructio
     } catch (error) {
       console.error('Export failed:', error);
     }
-  }, []);
+  }, [platformTimeZone, platformDateFormat]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setTitle(e.target.value);
@@ -177,15 +182,15 @@ Usa el formato de marcado especificado para generar el contenido.`;
       // Rule 11-12: Validate and Normalize the generated deck
       try {
         const { runPostProcessor } = await import('@/lib/pptPostProcessor');
-        const result = runPostProcessor({
-          normalize: true,
-          validate: true,
-          injectFooter: true,
-          footerConfig: {
-            showSlideNumber: true,
-            date: new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'short' }),
-          },
-        });
+	        const result = runPostProcessor({
+	          normalize: true,
+	          validate: true,
+	          injectFooter: true,
+	          footerConfig: {
+	            showSlideNumber: true,
+	            date: formatZonedDate(new Date(), { timeZone: platformTimeZone, dateFormat: platformDateFormat }),
+	          },
+	        });
 
         // Log validation issues (could display in UI)
         if (result.validation.some(v => !v.isValid)) {
