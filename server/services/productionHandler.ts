@@ -375,6 +375,28 @@ export async function handleProductionRequest(
                 exportResult.plan.region.spain ? 'Espana' : null,
             ].filter(Boolean).join(' + ') || 'n/a';
 
+            const coverage = exportResult.stats.coverage;
+            const fmtCoverage = (label: string, c: { present: number; missing: number }) => {
+                const total = c.present + c.missing;
+                const pct = total ? Math.round((c.present / total) * 100) : 0;
+                return `${label} ${c.present}/${total} (${pct}%)`;
+            };
+
+            const coverageLine = [
+                fmtCoverage('DOI', coverage.doi),
+                fmtCoverage('Abstract', coverage.abstract),
+                fmtCoverage('Keywords', coverage.keywords),
+                fmtCoverage('Journal', coverage.journal),
+                fmtCoverage('Language', coverage.language),
+                fmtCoverage('Document Type', coverage.documentType),
+                fmtCoverage('City', coverage.city),
+                fmtCoverage('Country', coverage.country),
+            ].join(' | ');
+
+            const notesBlock = exportResult.stats.notes?.length
+                ? ['', '**Notas:**', ...exportResult.stats.notes.map(n => `- ${n}`)].join('\n')
+                : '';
+
             const artifactLinks = artifactsWithUrls.map(a => {
                 const icon = getArtifactIcon(a.type);
                 return `- ${icon} [${a.filename}](${a.downloadUrl}) (${formatSize(a.size)})`;
@@ -390,6 +412,8 @@ export async function handleProductionRequest(
                 `**Region:** ${regionLine}`,
                 `**Articulos:** ${exportResult.stats.totalReturned}/${exportResult.stats.totalRequested}`,
                 `**Fuentes:** ${sourcesLine}`,
+                `**Cobertura:** ${coverageLine}`,
+                notesBlock,
             ].join('\n');
 
             writeSse(res, 'production_complete', {

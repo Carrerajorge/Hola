@@ -42,6 +42,9 @@ export interface CrossRefWork {
   }>;
   "container-title"?: string[];
   abstract?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
   published?: { "date-parts": number[][] };
   "published-print"?: { "date-parts": number[][] };
   "published-online"?: { "date-parts": number[][] };
@@ -60,6 +63,9 @@ export interface CrossRefMetadata {
   authors: string[];
   year: number;
   journal: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
   abstract: string;
   documentType: string;
   language: string;
@@ -249,6 +255,9 @@ export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
       authors,
       year: extractYear(work),
       journal: work["container-title"]?.[0] || "Unknown",
+      volume: work.volume || "",
+      issue: work.issue || "",
+      pages: work.page || "",
       abstract: cleanAbstract(work.abstract),
       documentType: work.type || "article",
       language: work.language || "en",
@@ -362,6 +371,9 @@ export interface VerifyDOIResult {
   authors?: string[];
   journal?: string;
   abstract?: string;
+  volume?: string;
+  issue?: string;
+  pages?: string;
   keywords?: string[];
 }
 
@@ -379,6 +391,9 @@ export async function verifyDOI(doi: string): Promise<VerifyDOIResult> {
     city: metadata.city,
     country: metadata.country,
     year: metadata.year,
+    volume: metadata.volume,
+    issue: metadata.issue,
+    pages: metadata.pages,
     authors: metadata.authors,
     journal: metadata.journal,
     abstract: metadata.abstract,

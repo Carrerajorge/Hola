@@ -21,6 +21,25 @@ describe("academicArticlesExport", () => {
     expect(plan.affilCountries || []).toContain("Mexico");
   });
 
+  it("supports free-only prompts by disabling paid sources (Scopus) and adding DuckDuckGo", () => {
+    const prompt =
+      "buscarme 100 articulos cientificos solo de latinoamerica y españa sobre economía circular del 2021 al 2025, 100% gratis para siempre, en un excel";
+
+    const plan = planAcademicArticlesExport(prompt);
+
+    expect(plan.sources).toEqual(["openalex", "scielo", "redalyc", "duckduckgo"]);
+    expect(plan.sources).not.toContain("scopus");
+  });
+
+  it("supports opt-out prompts like 'sin scopus'", () => {
+    const prompt =
+      "buscarme 25 articulos cientificos solo de latinoamerica y españa sobre economía circular del 2021 al 2025 sin scopus en un excel";
+
+    const plan = planAcademicArticlesExport(prompt);
+
+    expect(plan.sources).toEqual(["openalex", "scielo", "redalyc"]);
+  });
+
   it("generates Excel with the required header order", () => {
     const articles: UnifiedArticle[] = [
       {

@@ -162,3 +162,7 @@ export function formatWosForExcel(articles: WosArticle[]): any[] {
     "Source": "Web of Science",
   }));
 }
+
+export function isWosConfigured(): boolean {
+  return !!process.env.WOS_API_KEY;
+}

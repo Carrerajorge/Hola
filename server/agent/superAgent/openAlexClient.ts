@@ -57,6 +57,8 @@ export interface AcademicCandidate {
 
 const OPENALEX_BASE = "https://api.openalex.org/works";
 const RATE_LIMIT_MS = 100;
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 500;
 
 let lastRequestTime = 0;
 
@@ -67,6 +69,43 @@ async function rateLimit(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
   }
   lastRequestTime = Date.now();
+}
+
+async function fetchWithRetry(url: string, retries: number = MAX_RETRIES): Promise<Response | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await rateLimit();
+
+      const response = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "IliaGPT/1.0 (mailto:research@iliagpt.com)",
+        },
+      });
+
+      if (response.ok) return response;
+
+      // OpenAlex rate limit / transient server errors
+      if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+        const jitter = Math.floor(Math.random() * 200);
+        const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt) + jitter;
+        await new Promise(resolve => setTimeout(resolve, backoff));
+        continue;
+      }
+
+      return response;
+    } catch (error: any) {
+      if (attempt < retries) {
+        const jitter = Math.floor(Math.random() * 200);
+        const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt) + jitter;
+        await new Promise(resolve => setTimeout(resolve, backoff));
+        continue;
+      }
+      return null;
+    }
+  }
+
+  return null;
 }
 
 function invertedIndexToText(inverted: Record<string, number[]> | null): string {
@@ -217,81 +256,137 @@ function extractCityFromAffiliations(authorships: OpenAlexWork["authorships"]): 
   return "Unknown";
 }
 
+function mapWorkToCandidate(work: OpenAlexWork): AcademicCandidate {
+  const doi = work.doi?.replace("https://doi.org/", "") || "";
+  const abstract = invertedIndexToText(work.abstract_inverted_index);
+
+  return {
+    source: "openalex" as const,
+    sourceId: work.id,
+    doi,
+    title: work.title || "",
+    year: work.publication_year || 0,
+    journal: work.primary_location?.source?.display_name || "Unknown",
+    abstract,
+    authors: work.authorships.map(a => a.author.display_name).filter(Boolean),
+    keywords: work.keywords?.map(k => k.keyword) || work.concepts?.slice(0, 5).map(c => c.display_name) || [],
+    language: work.language || "en",
+    documentType: work.type || "article",
+    citationCount: work.cited_by_count || 0,
+    affiliations: work.authorships.flatMap(a => a.institutions.map(i => i.display_name)).filter(Boolean),
+    city: extractCityFromAffiliations(work.authorships),
+    country: extractCountryFromAffiliations(work.authorships),
+    landingUrl: work.primary_location?.landing_page_url || work.open_access?.oa_url || "",
+    doiUrl: doi ? `https://doi.org/${doi}` : "",
+    verified: false,
+    relevanceScore: 0,
+    verificationStatus: "pending" as const,
+  };
+}
+
 export async function searchOpenAlex(
   query: string,
   options: {
     yearStart?: number;
     yearEnd?: number;
     maxResults?: number;
+    countryCodes?: string[];
   } = {}
 ): Promise<AcademicCandidate[]> {
-  const { yearStart = 2020, yearEnd = 2025, maxResults = 100 } = options;
-  
-  await rateLimit();
+  const { yearStart = 2020, yearEnd = 2025, maxResults = 100, countryCodes } = options;
 
   const searchTerms = query.split(/\s+AND\s+|\s+/).filter(t => t.length > 2);
   const searchQuery = searchTerms.join(" ");
-  
-  const params = new URLSearchParams({
-    search: searchQuery,
-    filter: `from_publication_date:${yearStart}-01-01,to_publication_date:${yearEnd}-12-31`,
-    "per-page": String(Math.min(maxResults, 200)),
-    sort: "cited_by_count:desc",
-  });
-
-  const url = `${OPENALEX_BASE}?${params}`;
-  console.log(`[OpenAlex] Searching: ${url}`);
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "IliaGPT/1.0 (mailto:research@iliagpt.com)",
-      },
-    });
+    const candidates: AcademicCandidate[] = [];
+    let cursor = "*";
 
-    if (!response.ok) {
-      console.error(`[OpenAlex] API error: ${response.status}`);
-      return [];
+    while (candidates.length < maxResults && cursor) {
+      const remaining = maxResults - candidates.length;
+
+      const filters: string[] = [
+        `from_publication_date:${yearStart}-01-01`,
+        `to_publication_date:${yearEnd}-12-31`,
+      ];
+
+      const codes = (countryCodes || []).map(c => c.trim().toUpperCase()).filter(Boolean);
+      if (codes.length > 0) {
+        // Geographic filtering at query-time (strict)
+        filters.push(`authorships.institutions.country_code:${Array.from(new Set(codes)).join("|")}`);
+      }
+
+      const params = new URLSearchParams({
+        search: searchQuery,
+        filter: filters.join(","),
+        cursor,
+        "per-page": String(Math.min(200, remaining)),
+        sort: "cited_by_count:desc",
+        select: [
+          "id",
+          "doi",
+          "title",
+          "publication_year",
+          "publication_date",
+          "primary_location",
+          "authorships",
+          "abstract_inverted_index",
+          "keywords",
+          "concepts",
+          "cited_by_count",
+          "type",
+          "language",
+          "open_access",
+        ].join(","),
+      });
+
+      const url = `${OPENALEX_BASE}?${params}`;
+      const response = await fetchWithRetry(url);
+
+      if (!response) {
+        console.error("[OpenAlex] Network error (no response)");
+        break;
+      }
+
+      if (!response.ok) {
+        console.error(`[OpenAlex] API error: ${response.status}`);
+        break;
+      }
+
+      const data = await response.json();
+      const results = data.results || [];
+
+      for (const work of results as OpenAlexWork[]) {
+        candidates.push(mapWorkToCandidate(work));
+        if (candidates.length >= maxResults) break;
+      }
+
+      cursor = data.meta?.next_cursor || "";
+      if (!cursor || results.length === 0) break;
     }
-
-    const data = await response.json();
-    const results = data.results || [];
-    
-    console.log(`[OpenAlex] Found ${results.length} results from ${data.meta?.count || 0} total`);
-
-    const candidates: AcademicCandidate[] = results.map((work: OpenAlexWork) => {
-      const doi = work.doi?.replace("https://doi.org/", "") || "";
-      const abstract = invertedIndexToText(work.abstract_inverted_index);
-      
-      return {
-        source: "openalex" as const,
-        sourceId: work.id,
-        doi,
-        title: work.title || "",
-        year: work.publication_year || 0,
-        journal: work.primary_location?.source?.display_name || "Unknown",
-        abstract,
-        authors: work.authorships.map(a => a.author.display_name).filter(Boolean),
-        keywords: work.keywords?.map(k => k.keyword) || work.concepts?.slice(0, 5).map(c => c.display_name) || [],
-        language: work.language || "en",
-        documentType: work.type || "article",
-        citationCount: work.cited_by_count || 0,
-        affiliations: work.authorships.flatMap(a => a.institutions.map(i => i.display_name)).filter(Boolean),
-        city: extractCityFromAffiliations(work.authorships),
-        country: extractCountryFromAffiliations(work.authorships),
-        landingUrl: work.primary_location?.landing_page_url || work.open_access?.oa_url || "",
-        doiUrl: doi ? `https://doi.org/${doi}` : "",
-        verified: false,
-        relevanceScore: 0,
-        verificationStatus: "pending" as const,
-      };
-    });
 
     return candidates;
   } catch (error: any) {
     console.error(`[OpenAlex] Search error: ${error.message}`);
     return [];
+  }
+}
+
+export async function lookupOpenAlexWorkByDoi(doi: string): Promise<AcademicCandidate | null> {
+  const cleanDoi = (doi || "").replace(/^https?:\/\/doi\.org\//i, "").trim();
+  if (!cleanDoi) return null;
+
+  const url = `${OPENALEX_BASE}/doi:${encodeURIComponent(cleanDoi)}`;
+  const response = await fetchWithRetry(url);
+
+  if (!response || !response.ok) return null;
+
+  try {
+    const data = await response.json();
+    if (!data?.id) return null;
+    return mapWorkToCandidate(data as OpenAlexWork);
+  } catch {
+    return null;
   }
 }
 
