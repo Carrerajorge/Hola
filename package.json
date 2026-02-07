@@ -104,7 +104,7 @@
     "@types/cookie": "^0.6.0",
     "@types/cookie-signature": "^1.1.2",
     "@types/d3": "^7.4.3",
-    "@types/dompurify": "^3.0.5",
+    "@types/dompurify": "^3.2.0",
     "@types/file-saver": "^2.0.7",
     "@types/ioredis": "^4.28.10",
     "@types/jsdom": "^27.0.0",
