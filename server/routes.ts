@@ -61,6 +61,7 @@ import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
 import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
+import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -491,6 +492,7 @@ export async function registerRoutes(
   app.use("/api/rag", ragRouter);
   app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
+  app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
 
