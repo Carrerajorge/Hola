@@ -20,13 +20,35 @@ export function isModelProviderSupported(provider: string): boolean {
 export function hasApiKeyForRuntimeProvider(runtime: ChatRuntimeProvider): boolean {
   if (runtime === "xai") {
     // Legacy: some deployments still use GROK_API_KEY.
-    return !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY);
+    // Legacy: ILIAGPT_API_KEY is also accepted by llmGateway deployments.
+    return !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY);
   }
   if (runtime === "gemini") {
     // Legacy/alternate: GOOGLE_API_KEY.
     return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
   }
   return false;
+}
+
+export function isChatModelType(modelType?: string | null): boolean {
+  // Keep permissive defaults: legacy rows may have null modelType.
+  const t = String(modelType || "TEXT").toUpperCase();
+  return t === "TEXT" || t === "MULTIMODAL";
+}
+
+export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId?: string | null): boolean {
+  const id = String(modelId || "").toLowerCase().trim();
+  if (!id) return false;
+  if (runtime === "gemini") return id.includes("gemini");
+  if (runtime === "xai") return id.includes("grok");
+  return false;
+}
+
+export function isModelChatCapable(model: { provider: string; modelId?: string | null; modelType?: string | null }): boolean {
+  const runtime = normalizeModelProviderToRuntime(model.provider);
+  if (!runtime) return false;
+  if (!isChatModelType(model.modelType)) return false;
+  return isChatModelIdCompatible(runtime, model.modelId);
 }
 
 export function isModelProviderIntegrated(provider: string): boolean {
@@ -37,6 +59,8 @@ export function isModelProviderIntegrated(provider: string): boolean {
 
 // Provider ids as stored in ai_models.provider (plus known aliases).
 export function getSupportedModelProviderIds(): string[] {
+  // Provider ids as stored in `ai_models.provider` plus known legacy aliases.
+  // NOTE: the runtime supports only xAI + Gemini today.
   return ["xai", "google", "grok", "gemini"];
 }
 
@@ -48,9 +72,15 @@ export function getIntegratedModelProviderIds(): string[] {
   return Array.from(out);
 }
 
-export function isModelEligibleForPublic(model: { provider: string; status?: string | null; isEnabled?: string | null }): boolean {
+export function isModelEligibleForPublic(model: {
+  provider: string;
+  modelId?: string | null;
+  modelType?: string | null;
+  status?: string | null;
+  isEnabled?: string | null;
+}): boolean {
   if (model.isEnabled !== "true") return false;
   if (model.status !== "active") return false;
-  return isModelProviderIntegrated(model.provider);
+  if (!isModelProviderIntegrated(model.provider)) return false;
+  return isModelChatCapable(model);
 }
-

@@ -35,15 +35,11 @@ import { Message, WebSource } from "@/hooks/use-chats";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
+import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
-export const formatMessageTime = (timestamp: Date | number | undefined): string => {
+export const formatMessageTime = (timestamp: Date | number | undefined, timeZone: string): string => {
     if (!timestamp) return "";
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
+    return formatZonedTime(timestamp, { timeZone: normalizeTimeZone(timeZone), includeSeconds: false });
 };
 
 export interface DocumentBlock {

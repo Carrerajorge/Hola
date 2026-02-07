@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAdmin } from "./utils";
-// import { require2FA } from "../../middleware/auth"; // Temporarily disabled - users don't have 2FA yet
+import { require2FA } from "../../middleware/auth";
 import { adminActivityTracker } from "../../middleware/adminActivityTracker";
 import { dashboardRouter } from "./dashboard";
 import { usersRouter } from "./users";
@@ -20,8 +20,13 @@ export const adminRouter = Router();
 
 // Apply admin middleware to all routes
 adminRouter.use(requireAdmin);
-// adminRouter.use(require2FA); // Temporarily disabled until 2FA is set up
+adminRouter.use(require2FA);
 adminRouter.use(adminActivityTracker); // Auto-log all admin actions
+
+// Probe endpoint (useful for admin UI gates).
+adminRouter.get("/probe", (_req, res) => {
+  res.json({ ok: true });
+});
 
 adminRouter.use("/dashboard", dashboardRouter);
 adminRouter.use("/users", usersRouter);

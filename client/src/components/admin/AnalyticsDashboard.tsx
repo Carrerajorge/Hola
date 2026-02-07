@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, useSpring, useTransform } from "framer-motion";
-import {
+import { 
   AreaChart,
   Area,
   LineChart,
@@ -52,7 +52,8 @@ import {
   Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 type TimeGranularity = "1h" | "24h" | "7d" | "30d" | "90d" | "1y";
@@ -703,6 +704,9 @@ function APILogsExplorer() {
   });
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const itemsPerPage = 20;
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/admin/analytics/logs", page, filters],
@@ -824,9 +828,9 @@ function APILogsExplorer() {
                 </TableHeader>
                 <TableBody>
                   {logs.map((log: any, idx: number) => (
-                    <TableRow key={log.id || idx} data-testid={`row-log-${log.id || idx}`}>
+                      <TableRow key={log.id || idx} data-testid={`row-log-${log.id || idx}`}>
                       <TableCell className="font-mono text-xs">
-                        {log.timestamp ? format(new Date(log.timestamp), "MM/dd HH:mm:ss") : "-"}
+                        {log.timestamp ? formatZonedDateTime(log.timestamp, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false, includeSeconds: true }) : "-"}
                       </TableCell>
                       <TableCell className="text-sm truncate max-w-[100px]">{log.user || "Anonymous"}</TableCell>
                       <TableCell className="font-mono text-xs truncate max-w-[150px]">{log.endpoint}</TableCell>
@@ -994,6 +998,9 @@ function UsageHeatmap({ data }: { data: number[][] }) {
 
 export default function AnalyticsDashboard() {
   const [granularity, setGranularity] = useState<TimeGranularity>("24h");
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const { data: kpiData, isLoading: kpiLoading, refetch: refetchKpi } = useQuery({
     queryKey: ["/api/admin/analytics/kpi"],

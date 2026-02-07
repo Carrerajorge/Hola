@@ -44,9 +44,11 @@ import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { apiFetch } from "@/lib/apiClient";
-import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
+import { formatPeriodEnd, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -90,20 +92,6 @@ const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[
   { id: "identity", label: "Identidad y acceso", icon: <ShieldCheck className="h-4 w-4" /> },
 ];
 
-function formatDateEsShort(value: string | Date | null | undefined): string {
-  if (!value) return "—";
-  const date = typeof value === "string" ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return "—";
-  // Example: "28 ago 2025"
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })
-    .format(date)
-    .replace(/\./g, "");
-}
-
 function getMemberDisplayName(member: WorkspaceMember): string {
   const full =
     member.fullName ||
@@ -130,6 +118,9 @@ export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const { user } = useAuth();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const [workspaceName, setWorkspaceName] = useState("");
   const [orgId, setOrgId] = useState<string>("");
@@ -163,9 +154,19 @@ export default function WorkspaceSettingsPage() {
   const [isInviting, setIsInviting] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
 
+  const formatDateShort = useMemo(() => {
+    return (value: string | Date | null | undefined): string => {
+      if (!value) return "—";
+      return formatZonedDate(value, { timeZone: platformTimeZone, dateFormat: platformDateFormat });
+    };
+  }, [platformTimeZone, platformDateFormat]);
+
   const deactivationDateLabel = useMemo(() => {
-    return formatPeriodEndEs(billingStatus?.subscriptionPeriodEnd ?? null);
-  }, [billingStatus?.subscriptionPeriodEnd]);
+    return formatPeriodEnd(billingStatus?.subscriptionPeriodEnd ?? null, {
+      timeZone: platformTimeZone,
+      dateFormat: platformDateFormat,
+    });
+  }, [billingStatus?.subscriptionPeriodEnd, platformTimeZone, platformDateFormat]);
 
   const showDeactivationBanner = useMemo(() => {
     return shouldShowWorkspaceDeactivationBanner({
@@ -609,7 +610,7 @@ export default function WorkspaceSettingsPage() {
                               <span className="text-sm">{isOwnerRole(member.role) ? "Propietario" : "Miembro"}</span>
                               <ChevronDown className="h-4 w-4 text-muted-foreground" />
                             </div>
-                            <span className="text-sm">{formatDateEsShort(member.createdAt)}</span>
+                            <span className="text-sm">{formatDateShort(member.createdAt)}</span>
                           </div>
                         );
                       })}
@@ -641,7 +642,7 @@ export default function WorkspaceSettingsPage() {
                             {inv.role === "team_admin" ? "Administrador" : "Miembro"}
                           </span>
                           <span className="text-sm text-muted-foreground">
-                            {formatDateEsShort(inv.lastSentAt || inv.createdAt)}
+                            {formatDateShort(inv.lastSentAt || inv.createdAt)}
                           </span>
                           <div className="flex items-center justify-end">
                             <Button

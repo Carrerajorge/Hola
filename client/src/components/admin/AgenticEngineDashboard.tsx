@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useSearch } from "wouter";
 import {
   Activity,
   AlertTriangle,
@@ -32,8 +32,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, formatZonedTime, normalizeTimeZone, type PlatformDateFormat } from "@/lib/platformDateTime";
 
-function formatRelativeTime(date: Date | string | null): string {
+function formatRelativeTime(date: Date | string | null, opts: { timeZone: string; dateFormat: PlatformDateFormat }): string {
   if (!date) return "-";
   const d = new Date(date);
   const now = new Date();
@@ -46,7 +48,7 @@ function formatRelativeTime(date: Date | string | null): string {
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
-  return format(d, "dd/MM/yy");
+  return formatZonedDate(d, { timeZone: opts.timeZone, dateFormat: opts.dateFormat });
 }
 
 type TimeRangeUnit = "hours" | "days";
@@ -101,8 +103,35 @@ function downloadTextFile(filename: string, text: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadBlobFile(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename\\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i.exec(header);
+  const raw = match?.[1] || match?.[2];
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export default function AgenticEngineDashboard() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+  const search = useSearch();
   const [activeTab, setActiveTab] = useState("overview");
   const [rangeId, setRangeId] = useState<string>("30d");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
@@ -110,6 +139,7 @@ export default function AgenticEngineDashboard() {
   const [gapsStatus, setGapsStatus] = useState<string>("pending");
   const [toolCallsStatusFilter, setToolCallsStatusFilter] = useState<string>("all");
   const [toolCallsToolFilter, setToolCallsToolFilter] = useState<string>("");
+  const [toolCallsRunFilter, setToolCallsRunFilter] = useState<string>("");
   const [exportingToolCalls, setExportingToolCalls] = useState(false);
 
   const range = getTimeRangeOption(rangeId);
@@ -145,6 +175,87 @@ export default function AgenticEngineDashboard() {
     const qs = params.toString();
     return qs ? `${path}?${qs}` : path;
   };
+
+  // Deep-link state via query params (minimal, bookmarkable).
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    if (params.get("ae") !== "1") return;
+
+    const tabRaw = params.get("ae_tab");
+    const allowedTabs = new Set(["overview", "tools", "analyzer", "orchestration", "gaps", "memory", "circuits"]);
+    const nextTab = tabRaw && allowedTabs.has(tabRaw) ? tabRaw : "overview";
+    if (nextTab !== activeTab) setActiveTab(nextTab);
+
+    const rangeRaw = params.get("ae_range");
+    const allowedRangeIds = new Set(TIME_RANGE_OPTIONS.map((o) => o.id));
+    const nextRangeId = rangeRaw && allowedRangeIds.has(rangeRaw) ? rangeRaw : "30d";
+    if (nextRangeId !== rangeId) setRangeId(nextRangeId);
+
+    const userRaw = params.get("ae_user");
+    const nextUser = userRaw && userRaw.trim() ? userRaw.trim() : "all";
+    if (nextUser !== selectedUserId) setSelectedUserId(nextUser);
+
+    const gapsRaw = params.get("ae_gaps");
+    const allowedGaps = new Set(["pending", "resolved", "ignored", "all"]);
+    const nextGaps = gapsRaw && allowedGaps.has(gapsRaw) ? gapsRaw : "pending";
+    if (nextGaps !== gapsStatus) setGapsStatus(nextGaps);
+
+    const callsStatusRaw = params.get("ae_calls_status");
+    const nextCallsStatus = callsStatusRaw && callsStatusRaw.trim() ? callsStatusRaw.trim() : "all";
+    if (nextCallsStatus !== toolCallsStatusFilter) setToolCallsStatusFilter(nextCallsStatus);
+
+    const callsToolRaw = params.get("ae_calls_tool") || "";
+    if (callsToolRaw !== toolCallsToolFilter) setToolCallsToolFilter(callsToolRaw);
+
+    const callsRunRaw = params.get("ae_calls_run") || "";
+    if (callsRunRaw !== toolCallsRunFilter) setToolCallsRunFilter(callsRunRaw);
+  }, [activeTab, gapsStatus, rangeId, search, selectedUserId, toolCallsRunFilter, toolCallsStatusFilter, toolCallsToolFilter]);
+
+  useEffect(() => {
+    const defaults = {
+      tab: "overview",
+      range: "30d",
+      user: "all",
+      gaps: "pending",
+      callsStatus: "all",
+      callsTool: "",
+      callsRun: "",
+    };
+
+    const isDefault =
+      activeTab === defaults.tab &&
+      rangeId === defaults.range &&
+      selectedUserId === defaults.user &&
+      gapsStatus === defaults.gaps &&
+      toolCallsStatusFilter === defaults.callsStatus &&
+      toolCallsToolFilter === defaults.callsTool &&
+      toolCallsRunFilter === defaults.callsRun;
+
+    const url = new URL(window.location.href);
+    const hasAgentic = url.searchParams.get("ae") === "1";
+    if (!hasAgentic && isDefault) return;
+
+    url.searchParams.set("ae", "1");
+    url.searchParams.set("ae_tab", activeTab);
+    url.searchParams.set("ae_range", rangeId);
+    url.searchParams.set("ae_user", selectedUserId);
+
+    if (gapsStatus !== defaults.gaps) url.searchParams.set("ae_gaps", gapsStatus);
+    else url.searchParams.delete("ae_gaps");
+
+    if (toolCallsStatusFilter !== defaults.callsStatus) url.searchParams.set("ae_calls_status", toolCallsStatusFilter);
+    else url.searchParams.delete("ae_calls_status");
+
+    if (toolCallsToolFilter) url.searchParams.set("ae_calls_tool", toolCallsToolFilter);
+    else url.searchParams.delete("ae_calls_tool");
+
+    if (toolCallsRunFilter) url.searchParams.set("ae_calls_run", toolCallsRunFilter);
+    else url.searchParams.delete("ae_calls_run");
+
+    if (url.toString() !== window.location.href) {
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [activeTab, gapsStatus, rangeId, selectedUserId, toolCallsRunFilter, toolCallsStatusFilter, toolCallsToolFilter]);
 
   const { data: agentUsersData, isLoading: agentUsersLoading } = useQuery({
     queryKey: ["/api/admin/agent/users"],
@@ -213,19 +324,27 @@ export default function AgenticEngineDashboard() {
     refetchInterval: activeTab === "orchestration" ? 10000 : false,
   });
 
-  const { data: toolCallsData, isLoading: toolCallsLoading, refetch: refetchToolCalls } = useQuery({
-    queryKey: ["/api/admin/agent/tool-calls", { rangeId, userId, providerId, toolCallsStatusFilter, toolCallsToolFilter }],
-    queryFn: async () => {
+  const toolCallsQuery = useInfiniteQuery({
+    queryKey: ["/api/admin/agent/tool-calls", { rangeId, userId, providerId, toolCallsStatusFilter, toolCallsToolFilter, toolCallsRunFilter }],
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam }) => {
+      const before = typeof pageParam === "string" && pageParam.trim() ? pageParam.trim() : undefined;
       const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", {
-        limit: 12,
+        limit: 25,
+        before,
         status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : undefined,
         toolId: toolCallsToolFilter || undefined,
+        runId: toolCallsRunFilter || undefined,
       }), { credentials: "include" });
       return res.json();
     },
+    getNextPageParam: (lastPage: any) => lastPage?.nextBefore || undefined,
     enabled: activeTab === "overview",
-    refetchInterval: activeTab === "overview" ? 15000 : false,
+    refetchInterval: false,
   });
+
+  const toolCallsLoading = toolCallsQuery.isLoading;
+  const refetchToolCalls = toolCallsQuery.refetch;
 
   const [analyzerPrompt, setAnalyzerPrompt] = useState("");
   const [analysisResult, setAnalysisResult] = useState<any>(null);
@@ -263,7 +382,10 @@ export default function AgenticEngineDashboard() {
   const memory = memoryData || { totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} };
   const circuits = circuitsData || [];
   const orchestrations = orchestrationsData?.runs || [];
-  const toolCalls = toolCallsData?.logs || [];
+  const toolCallsPages = toolCallsQuery.data?.pages || [];
+  const toolCalls = toolCallsPages.flatMap((p: any) => p?.logs || []);
+  const toolCallsHasNextPage = Boolean(toolCallsQuery.hasNextPage);
+  const toolCallsIsFetchingNextPage = toolCallsQuery.isFetchingNextPage;
 
   const triggeredCircuits = circuits.length;
   const openCircuits = circuits.filter((c: any) => c?.status === "open").length;
@@ -309,7 +431,8 @@ export default function AgenticEngineDashboard() {
     return <Server className="h-4 w-4" />;
   };
 
-  const toolCallsHasFilters = toolCallsStatusFilter !== "all" || Boolean(toolCallsToolFilter);
+  const toolCallsHasFilters =
+    toolCallsStatusFilter !== "all" || Boolean(toolCallsToolFilter) || Boolean(toolCallsRunFilter);
 
   const updateGapStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: "pending" | "resolved" | "ignored" }) => {
@@ -338,69 +461,37 @@ export default function AgenticEngineDashboard() {
   const exportToolCalls = async (format: "json" | "csv") => {
     setExportingToolCalls(true);
     try {
-      const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", {
-        limit: 5000,
+      const url = makeAgentUrl("/api/admin/agent/tool-calls/export", {
+        format,
+        limit: 50000,
         status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : undefined,
         toolId: toolCallsToolFilter || undefined,
-      }), { credentials: "include" });
+        runId: toolCallsRunFilter || undefined,
+      });
 
-      const payload = await res.json().catch(() => null);
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) {
+        const payload = await res.json().catch(() => null);
         throw new Error(payload?.error || payload?.message || "Export failed");
       }
-
-      const logs = Array.isArray(payload?.logs) ? payload.logs : [];
 
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
       const parts = [
         "tool-calls",
         rangeId,
         selectedUserId === "all" ? "all-users" : sanitizeFilenamePart(selectedUserId),
+        toolCallsRunFilter ? `run-${sanitizeFilenamePart(toolCallsRunFilter)}` : null,
         toolCallsStatusFilter !== "all" ? sanitizeFilenamePart(toolCallsStatusFilter) : "all-status",
         toolCallsToolFilter ? sanitizeFilenamePart(toolCallsToolFilter) : "all-tools",
         ts,
       ];
       const base = parts.filter(Boolean).join("_");
 
-      if (format === "json") {
-        const out = {
-          exportedAt: new Date().toISOString(),
-          filters: {
-            rangeId,
-            range,
-            providerId,
-            userId: userId || null,
-            status: toolCallsStatusFilter !== "all" ? toolCallsStatusFilter : null,
-            toolId: toolCallsToolFilter || null,
-          },
-          count: logs.length,
-          logs,
-        };
-        downloadTextFile(`${base}.json`, JSON.stringify(out, null, 2), "application/json");
-      } else {
-        const columns = [
-          "id",
-          "createdAt",
-          "userEmail",
-          "userId",
-          "toolId",
-          "providerId",
-          "status",
-          "latencyMs",
-          "errorCode",
-          "errorMessage",
-          "chatId",
-          "runId",
-        ];
-
-        const lines = [columns.join(",")];
-        for (const row of logs) {
-          lines.push(columns.map((c) => escapeCsvValue((row as any)[c])).join(","));
-        }
-        downloadTextFile(`${base}.csv`, lines.join("\n"), "text/csv");
-      }
-
-      toast.success(`Exported ${logs.length} tool calls`);
+      const contentDisposition = res.headers.get("content-disposition");
+      const headerFilename = parseContentDispositionFilename(contentDisposition);
+      const blob = await res.blob();
+      downloadBlobFile(headerFilename || `${base}.${format}`, blob);
+      toast.success("Export downloaded");
     } catch (error: any) {
       toast.error(error?.message || "Export failed");
     } finally {
@@ -599,6 +690,11 @@ export default function AgenticEngineDashboard() {
                         tool: {toolCallsToolFilter}
                       </Badge>
                     ) : null}
+                    {toolCallsRunFilter ? (
+                      <Badge variant="secondary" className="text-xs font-mono" title={toolCallsRunFilter}>
+                        run: {toolCallsRunFilter.slice(0, 8)}...
+                      </Badge>
+                    ) : null}
                     {toolCallsHasFilters ? (
                       <Button
                         variant="ghost"
@@ -607,6 +703,7 @@ export default function AgenticEngineDashboard() {
                         onClick={() => {
                           setToolCallsStatusFilter("all");
                           setToolCallsToolFilter("");
+                          setToolCallsRunFilter("");
                         }}
                       >
                         Clear
@@ -649,6 +746,7 @@ export default function AgenticEngineDashboard() {
                             <th className="text-left p-3 font-medium">Time</th>
                             <th className="text-left p-3 font-medium">User</th>
                             <th className="text-left p-3 font-medium">Tool</th>
+                            <th className="text-left p-3 font-medium">Run</th>
                             <th className="text-left p-3 font-medium">Status</th>
                             <th className="text-right p-3 font-medium">Latency</th>
                           </tr>
@@ -656,7 +754,7 @@ export default function AgenticEngineDashboard() {
                         <tbody>
                           {toolCalls.map((log: any) => (
                             <tr key={log.id} className="border-b last:border-0 hover:bg-muted/30">
-                              <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{formatRelativeTime(log.createdAt)}</td>
+                              <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{formatRelativeTime(log.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}</td>
                               <td className="p-3 text-xs truncate max-w-[160px]" title={log.userEmail || log.userId || ""}>
                                 {log.userEmail || (log.userId ? `${String(log.userId).slice(0, 8)}...` : "-")}
                               </td>
@@ -669,6 +767,20 @@ export default function AgenticEngineDashboard() {
                                   {log.toolId}
                                 </button>
                                 <span className="ml-2 text-xs text-muted-foreground">{log.providerId}</span>
+                              </td>
+                              <td className="p-3">
+                                {log.runId ? (
+                                  <button
+                                    type="button"
+                                    className="font-mono text-xs hover:underline underline-offset-4"
+                                    title={String(log.runId)}
+                                    onClick={() => setToolCallsRunFilter(String(log.runId || ""))}
+                                  >
+                                    {String(log.runId).slice(0, 8)}...
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">-</span>
+                                )}
                               </td>
                               <td className="p-3">
                                 <button type="button" onClick={() => setToolCallsStatusFilter(String(log.status || "all"))}>
@@ -688,6 +800,19 @@ export default function AgenticEngineDashboard() {
                         </tbody>
                       </table>
                     </div>
+                    {toolCallsHasNextPage ? (
+                      <div className="flex justify-center p-3 border-t bg-muted/20">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toolCallsQuery.fetchNextPage()}
+                          disabled={toolCallsIsFetchingNextPage}
+                        >
+                          {toolCallsIsFetchingNextPage ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                          Load more
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </CardContent>
@@ -995,7 +1120,11 @@ export default function AgenticEngineDashboard() {
                           {String(run.status || "").toUpperCase()}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          {run.startedAt ? format(new Date(run.startedAt), "HH:mm:ss") : run.createdAt ? format(new Date(run.createdAt), "HH:mm:ss") : ""}
+                          {run.startedAt
+                            ? formatZonedTime(run.startedAt, { timeZone: platformTimeZone, includeSeconds: true })
+                            : run.createdAt
+                              ? formatZonedTime(run.createdAt, { timeZone: platformTimeZone, includeSeconds: true })
+                              : ""}
                         </span>
                       </div>
                     </div>
@@ -1062,7 +1191,7 @@ export default function AgenticEngineDashboard() {
                             </p>
                           ) : null}
                           <p className="text-xs text-muted-foreground mt-2">
-                            updated {formatRelativeTime(gap.updatedAt)}{gap.reviewedBy ? ` · by ${gap.reviewedBy}` : ""}
+                            updated {formatRelativeTime(gap.updatedAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}{gap.reviewedBy ? ` · by ${gap.reviewedBy}` : ""}
                           </p>
                         </div>
                         <div className="shrink-0 flex flex-col items-end gap-2">
@@ -1211,7 +1340,7 @@ export default function AgenticEngineDashboard() {
                         <div className="text-sm text-muted-foreground space-y-1">
                           <p>Failures: {circuit.failures}</p>
                           {circuit.lastFailure && (
-                            <p>Last failure: {format(new Date(circuit.lastFailure), "HH:mm:ss")}</p>
+                            <p>Last failure: {formatZonedTime(circuit.lastFailure, { timeZone: platformTimeZone, includeSeconds: true })}</p>
                           )}
                         </div>
                       </CardContent>

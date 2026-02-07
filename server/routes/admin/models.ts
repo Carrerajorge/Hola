@@ -7,8 +7,10 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 import {
     getIntegratedModelProviderIds,
     getSupportedModelProviderIds,
+    isModelChatCapable,
     isModelProviderIntegrated,
     isModelProviderSupported,
+    normalizeModelProviderToRuntime,
 } from "../../services/modelIntegration";
 
 export const modelsRouter = Router();
@@ -33,7 +35,7 @@ modelsRouter.post("/", async (req, res) => {
         });
         
         await auditLog(req, {
-            action: "model.created",
+            action: AuditActions.MODEL_CREATED,
             resource: "ai_models",
             resourceId: model.id,
             details: { name, provider, modelId, status, createdBy: (req as any).user?.email },
@@ -84,6 +86,7 @@ modelsRouter.get("/filtered", async (req, res) => {
                 hasApiKey: checkApiKeyExists(m.provider),
                 isSupported: isModelProviderSupported(m.provider),
                 isIntegrated: isModelProviderIntegrated(m.provider),
+                isChatCapable: isModelChatCapable(m),
             })),
             total: result.total,
             page: parseInt(page as string),
@@ -144,7 +147,20 @@ modelsRouter.patch("/:id", async (req, res) => {
     try {
         // Get model before update for audit
         const previousModel = await storage.getAiModelById(req.params.id);
-        const model = await storage.updateAiModel(req.params.id, req.body);
+
+        const incoming = req.body || {};
+        const updates = { ...incoming } as any;
+        let forcedDisable = false;
+
+        // Data integrity: an Inactive model must not remain enabled.
+        if (typeof incoming.status === "string" && incoming.status !== "active") {
+            if (previousModel?.isEnabled === "true") forcedDisable = true;
+            updates.isEnabled = "false";
+            updates.enabledAt = null;
+            updates.enabledByAdminId = null;
+        }
+
+        const model = await storage.updateAiModel(req.params.id, updates);
         if (!model) {
             return res.status(404).json({ error: "Model not found" });
         }
@@ -153,9 +169,11 @@ modelsRouter.patch("/:id", async (req, res) => {
             resource: "ai_models",
             resourceId: req.params.id,
             details: {
-                changes: req.body,
+                changes: incoming,
+                applied: updates,
+                forcedDisable,
                 previousStatus: previousModel?.status,
-                newStatus: req.body.status,
+                newStatus: incoming.status,
                 updatedBy: (req as any).user?.email
             },
             category: "admin",
@@ -191,7 +209,7 @@ modelsRouter.delete("/:id", async (req, res) => {
 
 modelsRouter.patch("/:id/toggle", async (req, res) => {
     try {
-        const { isEnabled } = req.body;
+        const requestedEnabled = req.body?.isEnabled === true || req.body?.isEnabled === "true";
         const userId = (req as AuthenticatedRequest).user?.id || null;
 
         const existing = await storage.getAiModelById(req.params.id);
@@ -199,20 +217,23 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
             return res.status(404).json({ error: "Model not found" });
         }
 
-        if (isEnabled) {
+        if (requestedEnabled) {
             if (existing.status !== "active") {
                 return res.status(409).json({ error: "Model must be Active (Status) before enabling" });
             }
             if (!isModelProviderIntegrated(existing.provider)) {
                 return res.status(409).json({ error: "Provider not integrated (missing API key or unsupported)" });
             }
+            if (!isModelChatCapable(existing)) {
+                return res.status(409).json({ error: "Model is not chat-capable (only TEXT/MULTIMODAL gemini*/grok* are supported)" });
+            }
         }
 
         const updateData: any = {
-            isEnabled: isEnabled ? "true" : "false",
+            isEnabled: requestedEnabled ? "true" : "false",
         };
 
-        if (isEnabled) {
+        if (requestedEnabled) {
             updateData.enabledAt = new Date();
             updateData.enabledByAdminId = userId;
         } else {
@@ -223,12 +244,18 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
         const model = await storage.updateAiModel(req.params.id, updateData);
         if (!model) return res.status(404).json({ error: "Model not found" });
 
-        await storage.createAuditLog({
-            userId,
-            action: isEnabled ? "model_enable" : "model_disable",
+        await auditLog(req, {
+            action: requestedEnabled ? AuditActions.MODEL_ENABLED : AuditActions.MODEL_DISABLED,
             resource: "ai_models",
             resourceId: req.params.id,
-            details: { isEnabled, modelName: model.name }
+            details: {
+                isEnabled: requestedEnabled,
+                modelName: model.name,
+                provider: model.provider,
+                modelId: model.modelId,
+            },
+            category: "admin",
+            severity: "info",
         });
 
         res.json(model);
@@ -243,10 +270,12 @@ modelsRouter.post("/sync/:provider", async (req, res) => {
         const { provider } = req.params;
         const result = await syncModelsForProvider(provider);
 
-        await storage.createAuditLog({
-            action: "models_sync",
+        await auditLog(req, {
+            action: AuditActions.MODELS_SYNC,
             resource: "ai_models",
             details: { provider, ...result },
+            category: "admin",
+            severity: "info",
         });
 
         res.json({
@@ -281,10 +310,12 @@ modelsRouter.post("/sync", async (req, res) => {
             totalUpdated += r.updated;
         }
 
-        await storage.createAuditLog({
-            action: "models_sync_all",
+        await auditLog(req, {
+            action: AuditActions.MODELS_SYNC_ALL,
             resource: "ai_models",
             details: { scope, providers: providersToSync, results, totalAdded, totalUpdated },
+            category: "admin",
+            severity: "info",
         });
 
         res.json({
@@ -301,18 +332,36 @@ modelsRouter.post("/sync", async (req, res) => {
 // providers route
 modelsRouter.get("/providers/list", async (req, res) => { // Renamed from /providers to avoid conflict if mounted on /models
     try {
-        const providers = getAvailableProviders();
+        const { scope = "all" } = req.query as any;
+        const allProviders = getAvailableProviders();
+        const providersToList =
+            scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
+
         const allModels = await storage.getAiModels();
 
-        const providerStats = providers.map(provider => {
+        const providerNames: Record<string, string> = {
+            google: "Google (Gemini)",
+            xai: "xAI (Grok)",
+            openai: "OpenAI",
+            anthropic: "Anthropic",
+            openrouter: "OpenRouter",
+            perplexity: "Perplexity",
+        };
+
+        const providerStats = providersToList.map(provider => {
             const models = allModels.filter(m => m.provider.toLowerCase() === provider.toLowerCase());
             const activeCount = models.filter(m => m.status === "active").length;
             return {
                 id: provider,
-                name: provider.charAt(0).toUpperCase() + provider.slice(1),
+                name: providerNames[provider.toLowerCase()] || (provider.charAt(0).toUpperCase() + provider.slice(1)),
                 modelCount: models.length,
                 activeCount,
                 hasApiKey: checkApiKeyExists(provider),
+                isSupported: isModelProviderSupported(provider),
+                isIntegrated: isModelProviderIntegrated(provider),
+                runtimeProvider: normalizeModelProviderToRuntime(provider),
             };
         });
 
@@ -332,25 +381,32 @@ modelsRouter.get("/health", async (req, res) => {
             xai: {
                 name: "xAI (Grok)",
                 available: healthStatus?.xai?.available ?? false,
-                latency: healthStatus?.xai?.latency ?? null,
+                latencyMs: healthStatus?.xai?.latencyMs ?? null,
                 error: healthStatus?.xai?.error ?? null,
-                hasApiKey: !!process.env.XAI_API_KEY || !!process.env.GROK_API_KEY
+                hasApiKey: checkApiKeyExists("xai"),
+                isSupported: isModelProviderSupported("xai"),
+                isIntegrated: isModelProviderIntegrated("xai"),
+                runtimeProvider: "xai",
             },
-            gemini: {
-                name: "Google Gemini",
+            google: {
+                name: "Google (Gemini)",
                 available: healthStatus?.gemini?.available ?? false,
-                latency: healthStatus?.gemini?.latency ?? null,
+                latencyMs: healthStatus?.gemini?.latencyMs ?? null,
                 error: healthStatus?.gemini?.error ?? null,
-                hasApiKey: !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY
+                hasApiKey: checkApiKeyExists("google"),
+                isSupported: isModelProviderSupported("google"),
+                isIntegrated: isModelProviderIntegrated("google"),
+                runtimeProvider: "gemini",
             }
         };
 
-        const allHealthy = Object.values(providers).every(p => p.available || !p.hasApiKey);
-        const anyAvailable = Object.values(providers).some(p => p.available);
+        const tracked = Object.values(providers).filter((p) => p.hasApiKey);
+        const anyAvailable = tracked.some(p => p.available);
+        const allAvailable = tracked.length > 0 && tracked.every(p => p.available);
 
         res.json({
-            status: anyAvailable ? "healthy" : "degraded",
-            allProvidersHealthy: allHealthy,
+            status: tracked.length === 0 ? "unconfigured" : allAvailable ? "healthy" : anyAvailable ? "degraded" : "down",
+            allProvidersHealthy: allAvailable,
             providers,
             checkedAt: new Date().toISOString()
         });
@@ -371,6 +427,17 @@ modelsRouter.post("/:id/test", async (req, res) => {
             return res.status(404).json({ error: "Model not found" });
         }
 
+        const runtimeProvider = normalizeModelProviderToRuntime(model.provider);
+        if (!runtimeProvider) {
+            return res.status(409).json({ error: "Provider not supported by runtime" });
+        }
+        if (!isModelProviderIntegrated(model.provider)) {
+            return res.status(409).json({ error: "Provider not integrated (missing API key)" });
+        }
+        if (!isModelChatCapable(model)) {
+            return res.status(409).json({ error: "Model is not chat-capable (only TEXT/MULTIMODAL gemini*/grok*)" });
+        }
+
         const { llmGateway } = await import("../../lib/llmGateway");
         const testPrompt = "Say 'OK' if you can read this.";
         
@@ -380,17 +447,22 @@ modelsRouter.post("/:id/test", async (req, res) => {
                 [{ role: "user", content: testPrompt }],
                 { 
                     model: model.modelId,
+                    provider: runtimeProvider,
+                    enableFallback: false,
+                    skipCache: true,
                     maxTokens: 10,
                     timeout: 10000
                 }
             );
             const latency = Date.now() - startTime;
 
-            await storage.createAuditLog({
-                action: "model_test",
+            await auditLog(req, {
+                action: AuditActions.MODEL_TESTED,
                 resource: "ai_models",
                 resourceId: req.params.id,
-                details: { success: true, latency, modelId: model.modelId }
+                details: { success: true, latencyMs: latency, modelId: model.modelId, provider: model.provider, runtimeProvider },
+                category: "admin",
+                severity: "info",
             });
 
             res.json({
@@ -403,11 +475,13 @@ modelsRouter.post("/:id/test", async (req, res) => {
         } catch (testError: any) {
             const latency = Date.now() - startTime;
             
-            await storage.createAuditLog({
-                action: "model_test",
+            await auditLog(req, {
+                action: AuditActions.MODEL_TESTED,
                 resource: "ai_models",
                 resourceId: req.params.id,
-                details: { success: false, error: testError.message, modelId: model.modelId }
+                details: { success: false, error: testError.message, latencyMs: latency, modelId: model.modelId, provider: model.provider, runtimeProvider },
+                category: "admin",
+                severity: "warning",
             });
 
             res.json({

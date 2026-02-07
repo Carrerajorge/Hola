@@ -86,6 +86,16 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
             });
             return res.status(403).json({ error: "Admin access restricted" });
         }
+
+        // Propagate role for downstream middleware (e.g. 2FA enforcement).
+        if (userReq.user && typeof userReq.user === "object") {
+            (userReq.user as any).role = "admin";
+        } else {
+            const existingUser = (req as any).user;
+            (req as any).user = { ...(existingUser || {}), role: "admin" };
+        }
+        (req as any).isAdmin = true;
+
         next();
     } catch (error) {
         console.error("[Admin] Authorization check failed:", error);
@@ -249,8 +259,8 @@ export function checkApiKeyExists(provider: string): boolean {
         'google': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
         'gemini': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
         // Legacy/alias support: some deployments use GROK_API_KEY, some use XAI_API_KEY.
-        'xai': process.env.XAI_API_KEY || process.env.GROK_API_KEY,
-        'grok': process.env.GROK_API_KEY || process.env.XAI_API_KEY,
+        'xai': process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY,
+        'grok': process.env.GROK_API_KEY || process.env.XAI_API_KEY || process.env.ILIAGPT_API_KEY,
         'openrouter': process.env.OPENROUTER_API_KEY,
         'perplexity': process.env.PERPLEXITY_API_KEY,
         'deepseek': process.env.DEEPSEEK_API_KEY,

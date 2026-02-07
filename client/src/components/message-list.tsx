@@ -94,15 +94,12 @@ import { PhaseNarrator } from "@/components/thinking-indicator";
 import { PlanViewer } from "@/components/agent/PlanViewer";
 import { detectClientIntent } from "@/lib/clientIntentDetector";
 import { RetrievalVis } from "@/components/retrieval-vis";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
-const formatMessageTime = (timestamp: Date | undefined): string => {
+const formatMessageTime = (timestamp: Date | undefined, timeZone: string): string => {
   if (!timestamp) return "";
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('es-ES', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
+  return formatZonedTime(timestamp, { timeZone: normalizeTimeZone(timeZone), includeSeconds: false });
 };
 
 interface DocumentBlock {
@@ -911,6 +908,8 @@ const UserMessage = memo(function UserMessage({
   onOpenPreview,
   onReopenDocument
 }: UserMessageProps) {
+  const { settings: platformSettings } = usePlatformSettings();
+
   if (variant === "compact") {
     return (
       <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
@@ -969,7 +968,7 @@ const UserMessage = memo(function UserMessage({
           <div className="flex items-center justify-end gap-1.5 mt-2">
             {message.timestamp && (
               <span className="text-[10px] text-muted-foreground/60 mr-1">
-                {formatMessageTime(message.timestamp)}
+                {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
               </span>
             )}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1674,6 +1673,7 @@ const AssistantMessage = memo(function AssistantMessage({
 }: AssistantMessageProps) {
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
   const superAgentState = useSuperAgentRun(message.id);
+  const { settings: platformSettings } = usePlatformSettings();
 
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
@@ -2076,7 +2076,7 @@ const AssistantMessage = memo(function AssistantMessage({
         <div className="flex items-center gap-3 mt-4">
           {message.timestamp && (
             <span className="text-[10px] text-muted-foreground/60">
-              {formatMessageTime(message.timestamp)}
+              {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
             </span>
           )}
           <ActionToolbar

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { diffZonedDays, formatZonedDate, getZonedDateParts, normalizeTimeZone } from "@/lib/platformDateTime";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -603,6 +604,9 @@ export function useChats() {
   const [isLoading, setIsLoading] = useState(true);
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
@@ -1449,12 +1453,24 @@ export function useChats() {
   });
 
   const getChatDateLabel = (timestamp: number) => {
-    const date = new Date(timestamp);
-    if (isToday(date)) return "Today";
-    if (isYesterday(date)) return "Yesterday";
-    if (isThisWeek(date)) return "Previous 7 Days";
-    if (isThisYear(date)) return format(date, "MMM d");
-    return format(date, "yyyy");
+    const now = Date.now();
+    const diff = diffZonedDays(timestamp, now, platformTimeZone);
+
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    if (diff !== null && diff > 1 && diff < 7) return "Previous 7 Days";
+
+    const parts = getZonedDateParts(timestamp, platformTimeZone);
+    const nowParts = getZonedDateParts(now, platformTimeZone);
+    if (parts && nowParts && parts.year === nowParts.year) {
+      return formatZonedDate(timestamp, {
+        timeZone: platformTimeZone,
+        dateFormat: platformDateFormat,
+        includeYear: false,
+      });
+    }
+
+    return parts ? String(parts.year) : "";
   };
 
   return {

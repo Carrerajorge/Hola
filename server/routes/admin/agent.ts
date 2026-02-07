@@ -7,7 +7,7 @@ import { getAllServiceHealth } from "../../services/selfHealing";
 import { storage } from "../../storage";
 import { dbRead } from "../../db";
 import { agentMemoryStore, agentModeRuns, toolCallLogs, users } from "@shared/schema";
-import { and, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm";
 
 export const agentRouter = Router();
 
@@ -267,6 +267,96 @@ agentRouter.get("/tool-calls", async (req, res) => {
     const limit = Math.min(5000, Math.max(1, Number(req.query.limit) || 25));
     const userId = (req.query.userId as string | undefined) || undefined;
     const toolId = (req.query.toolId as string | undefined) || undefined;
+    const chatId = typeof req.query.chatId === "string" && req.query.chatId.trim() ? req.query.chatId.trim().slice(0, 200) : undefined;
+    const runId = typeof req.query.runId === "string" && req.query.runId.trim() ? req.query.runId.trim().slice(0, 200) : undefined;
+    const status = typeof req.query.status === "string" && req.query.status.trim() && req.query.status.trim() !== "all"
+        ? req.query.status.trim().slice(0, 40)
+        : undefined;
+    const providerIds = parseProviderIds(req.query.providerId);
+    const beforeRaw = typeof req.query.before === "string" ? req.query.before.trim() : "";
+    const before = beforeRaw
+        ? (() => {
+            const maybeMs = Number(beforeRaw);
+            const d = Number.isFinite(maybeMs) ? new Date(maybeMs) : new Date(beforeRaw);
+            return Number.isFinite(d.getTime()) ? d : null;
+        })()
+        : null;
+
+    try {
+        const conditions = [
+            runId ? undefined : gte(toolCallLogs.createdAt, since),
+            userId ? eq(toolCallLogs.userId, userId) : undefined,
+            toolId ? eq(toolCallLogs.toolId, toolId) : undefined,
+            chatId ? eq(toolCallLogs.chatId, chatId) : undefined,
+            runId ? eq(toolCallLogs.runId, runId) : undefined,
+            status ? eq(toolCallLogs.status, status) : undefined,
+            providerIds ? inArray(toolCallLogs.providerId, providerIds) : undefined,
+            before ? lt(toolCallLogs.createdAt, before) : undefined,
+        ].filter(Boolean) as any[];
+
+        const where = conditions.length > 1 ? and(...conditions) : conditions[0];
+
+        const logs = await dbRead.select({
+            id: toolCallLogs.id,
+            userId: toolCallLogs.userId,
+            userEmail: users.email,
+            toolId: toolCallLogs.toolId,
+            providerId: toolCallLogs.providerId,
+            status: toolCallLogs.status,
+            latencyMs: toolCallLogs.latencyMs,
+            errorCode: toolCallLogs.errorCode,
+            errorMessage: toolCallLogs.errorMessage,
+            chatId: toolCallLogs.chatId,
+            runId: toolCallLogs.runId,
+            createdAt: toolCallLogs.createdAt,
+        })
+            .from(toolCallLogs)
+            .leftJoin(users, eq(toolCallLogs.userId, users.id))
+            .where(where)
+            .orderBy(desc(toolCallLogs.createdAt))
+            .limit(limit);
+
+        const nextBefore = logs.length === limit ? logs[logs.length - 1]?.createdAt : null;
+        res.json({
+            rangeDays,
+            rangeHours,
+            userId: userId || null,
+            providerId: providerIds ? providerIds.join(",") : "all",
+            before: before ? before.toISOString() : null,
+            nextBefore: nextBefore ? new Date(nextBefore as any).toISOString() : null,
+            logs
+        });
+    } catch (error: any) {
+        console.error("[AdminAgent] /tool-calls failed:", error);
+        res.json({
+            rangeDays,
+            rangeHours,
+            userId: userId || null,
+            providerId: providerIds ? providerIds.join(",") : "all",
+            before: before ? before.toISOString() : null,
+            nextBefore: null,
+            logs: []
+        });
+    }
+});
+
+function escapeCsvValue(value: unknown): string {
+    const s = value === null || value === undefined ? "" : String(value);
+    if (/[,"\n\r]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
+
+// GET /api/admin/agent/tool-calls/export - Export tool calls (CSV/JSON) with current filters
+agentRouter.get("/tool-calls/export", async (req, res) => {
+    const { since, rangeDays, rangeHours } = parseTimeRange(req.query);
+    const format = (typeof req.query.format === "string" ? req.query.format : "json").toLowerCase();
+    const limit = Math.min(50000, Math.max(1, Number(req.query.limit) || 5000));
+    const userId = (req.query.userId as string | undefined) || undefined;
+    const toolId = (req.query.toolId as string | undefined) || undefined;
+    const chatId = typeof req.query.chatId === "string" && req.query.chatId.trim() ? req.query.chatId.trim().slice(0, 200) : undefined;
+    const runId = typeof req.query.runId === "string" && req.query.runId.trim() ? req.query.runId.trim().slice(0, 200) : undefined;
     const status = typeof req.query.status === "string" && req.query.status.trim() && req.query.status.trim() !== "all"
         ? req.query.status.trim().slice(0, 40)
         : undefined;
@@ -274,9 +364,11 @@ agentRouter.get("/tool-calls", async (req, res) => {
 
     try {
         const conditions = [
-            gte(toolCallLogs.createdAt, since),
+            runId ? undefined : gte(toolCallLogs.createdAt, since),
             userId ? eq(toolCallLogs.userId, userId) : undefined,
             toolId ? eq(toolCallLogs.toolId, toolId) : undefined,
+            chatId ? eq(toolCallLogs.chatId, chatId) : undefined,
+            runId ? eq(toolCallLogs.runId, runId) : undefined,
             status ? eq(toolCallLogs.status, status) : undefined,
             providerIds ? inArray(toolCallLogs.providerId, providerIds) : undefined,
         ].filter(Boolean) as any[];
@@ -303,10 +395,59 @@ agentRouter.get("/tool-calls", async (req, res) => {
             .orderBy(desc(toolCallLogs.createdAt))
             .limit(limit);
 
-        res.json({ rangeDays, rangeHours, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs });
+        const exportedAt = new Date().toISOString();
+        const providerIdOut = providerIds ? providerIds.join(",") : "all";
+
+        res.setHeader("Cache-Control", "no-store");
+
+        if (format === "csv") {
+            const filename = `tool-calls_${rangeHours ? `${rangeHours}h` : `${rangeDays}d`}_${exportedAt.replace(/[:.]/g, "-")}.csv`;
+            res.setHeader("Content-Type", "text/csv; charset=utf-8");
+            res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+
+            const columns = [
+                "id",
+                "createdAt",
+                "userEmail",
+                "userId",
+                "toolId",
+                "providerId",
+                "status",
+                "latencyMs",
+                "errorCode",
+                "errorMessage",
+                "chatId",
+                "runId",
+            ];
+            const lines = [columns.join(",")];
+            for (const row of logs as any[]) {
+                lines.push(columns.map((c) => escapeCsvValue(row[c])).join(","));
+            }
+            return res.send(lines.join("\n"));
+        }
+
+        const filename = `tool-calls_${rangeHours ? `${rangeHours}h` : `${rangeDays}d`}_${exportedAt.replace(/[:.]/g, "-")}.json`;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+
+        return res.send(JSON.stringify({
+            exportedAt,
+            filters: {
+                rangeDays,
+                rangeHours,
+                userId: userId || null,
+                providerId: providerIdOut,
+                status: status || null,
+                toolId: toolId || null,
+                chatId: chatId || null,
+                runId: runId || null,
+            },
+            count: logs.length,
+            logs,
+        }, null, 2));
     } catch (error: any) {
-        console.error("[AdminAgent] /tool-calls failed:", error);
-        res.json({ rangeDays, rangeHours, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs: [] });
+        console.error("[AdminAgent] /tool-calls/export failed:", error);
+        return res.status(500).json({ error: "Export failed" });
     }
 });
 

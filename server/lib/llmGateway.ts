@@ -194,9 +194,10 @@ class LLMGateway {
   };
 
   constructor() {
+    const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
     this.xaiClient = new OpenAI({
       baseURL: "https://api.x.ai/v1",
-      apiKey: process.env.XAI_API_KEY,
+      apiKey: xaiApiKey,
     });
 
     this.metrics = {
@@ -534,10 +535,10 @@ class LLMGateway {
     const xaiAvailable = getCircuitBreaker("system", "xai").getState() !== CircuitState.OPEN;
     const geminiAvailable = getCircuitBreaker("system", "gemini").getState() !== CircuitState.OPEN;
 
-    if (xaiAvailable && process.env.XAI_API_KEY) {
+    if (xaiAvailable && (process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY)) {
       return "xai";
     }
-    if (geminiAvailable && process.env.GEMINI_API_KEY) {
+    if (geminiAvailable && (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)) {
       return "gemini";
     }
 
@@ -1376,12 +1377,13 @@ class LLMGateway {
     const results: any = { xai: { available: false }, gemini: { available: false } };
 
     // Test xAI with quick timeout
-    if (process.env.XAI_API_KEY) {
+    const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
+    if (xaiApiKey) {
       try {
         const start = Date.now();
         const client = new OpenAI({
           baseURL: "https://api.x.ai/v1",
-          apiKey: process.env.XAI_API_KEY,
+          apiKey: xaiApiKey,
           timeout: 5000,
         });
         await client.chat.completions.create({
@@ -1396,11 +1398,12 @@ class LLMGateway {
     }
 
     // Test Gemini with quick timeout
-    if (process.env.GEMINI_API_KEY) {
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (geminiApiKey) {
       try {
         const start = Date.now();
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },

@@ -79,7 +79,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { isAdminUser } from "@/lib/admin";
-import { format } from "date-fns";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, formatZonedDateTime, formatZonedTime, normalizeTimeZone, type PlatformDateFormat } from "@/lib/platformDateTime";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
@@ -88,6 +89,7 @@ import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
 import AgenticEngineDashboard from "@/components/admin/AgenticEngineDashboard";
+import { Admin2FAGate } from "@/components/admin/Admin2FAGate";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -108,6 +110,10 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
 ];
 
 function DashboardSection() {
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/dashboard"],
     queryFn: async () => {
@@ -308,7 +314,7 @@ function DashboardSection() {
                     <span className="truncate max-w-[200px]">{item.action}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {item.createdAt ? format(new Date(item.createdAt), "dd/MM HH:mm") : ""}
+                    {item.createdAt ? formatZonedDateTime(item.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false }) : ""}
                   </span>
                 </div>
               ))
@@ -330,6 +336,9 @@ function DashboardSection() {
 
 function UsersSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState<any>(null);
   const [viewingUser, setViewingUser] = useState<any>(null);
@@ -609,7 +618,7 @@ function UsersSection() {
                       {user.is2faEnabled === "true" && <Shield className="h-3 w-3 text-blue-500" />}
                     </div>
                   </td>
-                  <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? format(new Date(user.createdAt), "dd/MM/yy") : "-"}</td>
+                  <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? formatZonedDate(user.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "-"}</td>
                   <td className="p-3">
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setViewingUser(user)} data-testid={`button-view-user-${user.id}`}>
@@ -662,8 +671,8 @@ function UsersSection() {
                 <div><span className="text-muted-foreground">2FA Enabled:</span> {viewingUser.is2faEnabled === "true" ? "Yes" : "No"}</div>
                 <div><span className="text-muted-foreground">Last IP:</span> {viewingUser.lastIp || "-"}</div>
                 <div><span className="text-muted-foreground">Country:</span> {viewingUser.countryCode || "-"}</div>
-                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? format(new Date(viewingUser.lastLoginAt), "dd/MM/yyyy HH:mm") : "-"}</div>
-                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? format(new Date(viewingUser.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? formatZonedDateTime(viewingUser.lastLoginAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeSeconds: false }) : "-"}</div>
+                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? formatZonedDateTime(viewingUser.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeSeconds: false }) : "-"}</div>
                 <div><span className="text-muted-foreground">Referral Code:</span> {viewingUser.referralCode || "-"}</div>
                 <div><span className="text-muted-foreground">Referred By:</span> {viewingUser.referredBy || "-"}</div>
                 <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewingUser.tags?.length ? viewingUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
@@ -740,20 +749,34 @@ function formatConvId(id: string): string {
   return `CONV-${hash}`;
 }
 
-function formatRelativeTime(date: Date | string | null): string {
+function formatRelativeTime(
+  date: Date | string | null,
+  opts?: { timeZone: string; dateFormat: PlatformDateFormat }
+): string {
   if (!date) return "-";
   const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "-";
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMs < 0) {
+    return formatZonedDate(d, {
+      timeZone: opts?.timeZone || "UTC",
+      dateFormat: opts?.dateFormat || "YYYY-MM-DD",
+    });
+  }
   
   if (diffMins < 1) return "just now";
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
-  return format(d, "dd/MM/yy");
+  return formatZonedDate(d, {
+    timeZone: opts?.timeZone || "UTC",
+    dateFormat: opts?.dateFormat || "YYYY-MM-DD",
+  });
 }
 
 function formatDuration(start: Date | string | null, end: Date | string | null): string {
@@ -769,6 +792,9 @@ function formatDuration(start: Date | string | null, end: Date | string | null):
 
 function ConversationsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -1235,7 +1261,9 @@ function ConversationsSection() {
                         {conv.user?.email || "Anonymous"}
                       </span>
                     </td>
-                    <td className="p-3 text-xs text-muted-foreground">{formatRelativeTime(conv.createdAt)}</td>
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {formatRelativeTime(conv.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+                    </td>
                     <td className="p-3 text-muted-foreground tabular-nums">{conv.messageCount || 0}</td>
                     <td className="p-3 text-muted-foreground tabular-nums">{(conv.tokensUsed || 0).toLocaleString()}</td>
                     <td className="p-3"><span className="text-xs font-mono">{conv.aiModelUsed || "-"}</span></td>
@@ -1405,7 +1433,7 @@ function ConversationsSection() {
                       </Badge>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         {msg.tokens && <span className="tabular-nums">{msg.tokens} tokens</span>}
-                        <span>{msg.createdAt ? format(new Date(msg.createdAt), "HH:mm:ss") : ""}</span>
+                        <span>{msg.createdAt ? formatZonedTime(msg.createdAt, { timeZone: platformTimeZone, includeSeconds: true }) : ""}</span>
                       </div>
                     </div>
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
@@ -1510,15 +1538,21 @@ function ConversationsSection() {
 
 function AIModelsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [health, setHealth] = useState<any>(null);
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const modelsScope: "supported" | "integrated" | "all" = "supported";
+  const [modelsScope, setModelsScope] = useState<"supported" | "integrated" | "all">("integrated");
 
   const readApiError = async (res: Response): Promise<string> => {
     const raw = await res.text().catch(() => "");
@@ -1557,6 +1591,18 @@ function AIModelsSection() {
     retry: false,
   });
 
+  const { data: providersData } = useQuery({
+    queryKey: ["/api/admin/models/providers/list", modelsScope],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/models/providers/list?scope=${modelsScope}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const providers = Array.isArray(providersData) ? providersData : [];
+
   const handleSearch = (value: string) => {
     setSearch(value);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -1593,6 +1639,24 @@ function AIModelsSection() {
     }
   };
 
+  const checkHealth = async () => {
+    setIsCheckingHealth(true);
+    try {
+      const res = await fetch(`/api/admin/models/health`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      const payload = await res.json();
+      setHealth(payload);
+      const status = payload?.status || "unknown";
+      toast.success(`Health check: ${status}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Health check fallido: ${error.message}` : "Health check fallido");
+    } finally {
+      setIsCheckingHealth(false);
+    }
+  };
+
   const updateMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
       const res = await fetch(`/api/admin/models/${id}`, {
@@ -1613,9 +1677,15 @@ function AIModelsSection() {
       // Optimistic: update model row so switches feel instant.
       queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
         if (!old?.models || !Array.isArray(old.models)) return old;
+        const applied = { ...updates };
+        if (typeof updates?.status === "string" && updates.status !== "active") {
+          applied.isEnabled = "false";
+          applied.enabledAt = null;
+          applied.enabledByAdminId = null;
+        }
         return {
           ...old,
-          models: old.models.map((m: any) => (m.id === id ? { ...m, ...updates } : m)),
+          models: old.models.map((m: any) => (m.id === id ? { ...m, ...applied } : m)),
         };
       });
 
@@ -1678,6 +1748,34 @@ function AIModelsSection() {
       }
       toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
     }
+  });
+
+  const testModelMutation = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const res = await fetch(`/api/admin/models/${id}/test`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    onMutate: ({ id }: { id: string }) => {
+      setTestingModelId(id);
+    },
+    onSettled: () => {
+      setTestingModelId(null);
+    },
+    onSuccess: (payload: any) => {
+      if (payload?.success) {
+        const latency = typeof payload.latency === "number" ? `${payload.latency}ms` : "";
+        toast.success(`Test OK: ${payload.model || "modelo"} ${latency}`.trim());
+      } else {
+        toast.error(payload?.error ? `Test fallido: ${payload.error}` : "Test fallido");
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `Test fallido: ${error.message}` : "Test fallido");
+    },
   });
 
   const deleteMutation = useMutation({
@@ -1751,25 +1849,38 @@ function AIModelsSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium" data-testid="text-ai-models-title">AI Models</h2>
-        <Button
-          size="sm"
-          onClick={syncAll}
-          disabled={isSyncing}
-          className="gap-2"
-          data-testid="button-sync-all"
-        >
-          {isSyncing ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Sincronizando...
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-4 w-4" />
-              Sincronizar Todo
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={checkHealth}
+            disabled={isCheckingHealth}
+            className="gap-2"
+            data-testid="button-models-health"
+          >
+            {isCheckingHealth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+            Salud
+          </Button>
+          <Button
+            size="sm"
+            onClick={syncAll}
+            disabled={isSyncing}
+            className="gap-2"
+            data-testid="button-sync-all"
+          >
+            {isSyncing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Sincronizar Todo
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {(statsIsError || modelsIsError) && (
@@ -1839,6 +1950,30 @@ function AIModelsSection() {
         </div>
       )}
 
+      {health && (
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border bg-muted/30 text-xs" data-testid="card-models-health">
+          <Badge variant="outline" className="text-xs">{String(health.status || "unknown")}</Badge>
+          {Object.entries(health.providers || {}).map(([id, p]: any) => (
+            <div key={id} className="flex items-center gap-2">
+              <span className="font-medium">{id}</span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs border",
+                  p?.available ? "bg-green-500/10 text-green-600 border-green-500/30" : p?.hasApiKey ? "bg-red-500/10 text-red-600 border-red-500/30" : "bg-gray-500/10 text-gray-600 border-gray-500/30"
+                )}
+              >
+                {p?.available ? `OK${typeof p?.latencyMs === "number" ? ` ${p.latencyMs}ms` : ""}` : p?.hasApiKey ? "DOWN" : "NO KEY"}
+              </Badge>
+              {p?.error && <span className="text-muted-foreground truncate max-w-[240px]" title={p.error}>{p.error}</span>}
+            </div>
+          ))}
+          <span className="ml-auto text-muted-foreground">
+            {health.checkedAt ? formatZonedDateTime(health.checkedAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : ""}
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1851,14 +1986,34 @@ function AIModelsSection() {
           />
         </div>
 
+        <Select
+          value={modelsScope}
+          onValueChange={(v) => {
+            const scope = v as "supported" | "integrated" | "all";
+            setModelsScope(scope);
+            setProviderFilter("all");
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[160px] h-9" data-testid="select-models-scope">
+            <SelectValue placeholder="Scope" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="integrated">Integrados</SelectItem>
+            <SelectItem value="supported">Soportados</SelectItem>
+            <SelectItem value="all">Todos</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select value={providerFilter} onValueChange={(v) => { setProviderFilter(v); setPage(1); }}>
           <SelectTrigger className="w-[140px] h-9" data-testid="select-provider-filter">
             <SelectValue placeholder="Proveedor" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="google">Google</SelectItem>
-            <SelectItem value="xai">xAI</SelectItem>
+            {providers.map((p: any) => (
+              <SelectItem key={p.id} value={p.id}>{p.name || p.id}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -1923,13 +2078,22 @@ function AIModelsSection() {
               ) : models.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                    <div className="flex flex-col items-center gap-2">
-                      <Bot className="h-8 w-8 text-muted-foreground/50" />
-                      <p>No hay modelos {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all" ? "que coincidan con los filtros" : "configurados"}</p>
-                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
-                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Sincronizar modelos
+	                      <div className="flex flex-col items-center gap-2">
+	                      <Bot className="h-8 w-8 text-muted-foreground/50" />
+	                      <p>
+	                        No hay modelos{" "}
+	                        {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all"
+	                          ? "que coincidan con los filtros"
+	                          : modelsScope === "integrated"
+	                            ? "integrados (configura API keys)"
+	                            : modelsScope === "supported"
+	                              ? "soportados"
+	                              : "configurados"}
+	                      </p>
+	                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
+	                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
+	                          <RefreshCw className="h-4 w-4 mr-2" />
+	                          Sincronizar modelos
                         </Button>
                       )}
                     </div>
@@ -1945,13 +2109,33 @@ function AIModelsSection() {
                       </div>
                     </td>
                     <td className="p-3">
-                      <Badge
-                        variant="outline"
-                        className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
-                        data-testid={`badge-provider-${model.id}`}
-                      >
-                        {model.provider}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
+                          data-testid={`badge-provider-${model.id}`}
+                        >
+                          {model.provider}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-xs border",
+                            model.isSupported === false ? "bg-red-500/10 text-red-600 border-red-500/30" :
+                            model.isIntegrated === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            model.isChatCapable === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            "bg-green-500/10 text-green-600 border-green-500/30"
+                          )}
+                          title={
+                            model.isSupported === false ? "Proveedor no soportado por el runtime" :
+                            model.isIntegrated === false ? "API key no configurada para este proveedor" :
+                            model.isChatCapable === false ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                            "Integrado"
+                          }
+                        >
+                          {model.isSupported === false ? "UNSUPPORTED" : model.isIntegrated === false ? "NO KEY" : model.isChatCapable === false ? "NO CHAT" : "OK"}
+                        </Badge>
+                      </div>
                     </td>
                     <td className="p-3">
                       <Badge
@@ -1982,22 +2166,38 @@ function AIModelsSection() {
                         onCheckedChange={(checked) => toggleEnabledMutation.mutate({ id: model.id, enabled: checked })}
                         disabled={
                           toggleEnabledMutation.isPending ||
-                          (model.isEnabled !== "true" && (model.hasApiKey === false || model.status !== "active"))
+                          (model.isEnabled !== "true" && (model.isIntegrated !== true || model.isChatCapable === false || model.status !== "active"))
                         }
                         className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
                         data-testid={`switch-enabled-${model.id}`}
                         title={
                           model.isEnabled !== "true" && model.status !== "active" ? "Activa el modelo primero (Status)" :
-                          model.hasApiKey === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                          model.isIntegrated === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                          model.isChatCapable === false && model.isEnabled !== "true" ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
                           undefined
                         }
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">
-                      {model.lastSyncAt ? format(new Date(model.lastSyncAt), "dd/MM/yyyy HH:mm") : "Never"}
+                      {model.lastSyncAt ? formatZonedDateTime(model.lastSyncAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "Never"}
                     </td>
                     <td className="p-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => testModelMutation.mutate({ id: model.id })}
+                          disabled={testModelMutation.isPending || model.isIntegrated !== true || model.isChatCapable !== true}
+                          data-testid={`button-test-model-${model.id}`}
+                          title={
+                            model.isIntegrated !== true ? "Configura API key para testear" :
+                            model.isChatCapable !== true ? "Modelo no compatible con chat" :
+                            "Testear modelo"
+                          }
+                        >
+                          {testModelMutation.isPending && testingModelId === model.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -2055,6 +2255,9 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const exportPayments = (format: "csv" | "xlsx") => {
     window.open(`/api/admin/finance/payments/export?format=${format}`, "_blank", "noopener,noreferrer");
   };
@@ -2127,7 +2330,7 @@ function PaymentsSection() {
               <span>{payment.userId || "N/A"}</span>
               <span className="font-medium">€{payment.amount}</span>
               <span className="text-muted-foreground">
-                {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
+                {payment.createdAt ? formatZonedDate(payment.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "-"}
               </span>
               <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
                 {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
@@ -2142,6 +2345,9 @@ function PaymentsSection() {
 
 function InvoicesSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
   const exportInvoices = (format: "csv" | "xlsx") => {
@@ -2248,7 +2454,7 @@ function InvoicesSection() {
               <span>{invoice.userId || "N/A"}</span>
               <span className="font-medium">€{invoice.amount}</span>
               <span className="text-muted-foreground">
-                {invoice.createdAt ? format(new Date(invoice.createdAt), "dd MMM yyyy") : "-"}
+                {invoice.createdAt ? formatZonedDate(invoice.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "-"}
               </span>
               <div className="flex items-center gap-2">
                 <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
@@ -2805,6 +3011,11 @@ function SecuritySection() {
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
   const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
+  const [settingsAuditPage, setSettingsAuditPage] = useState(1);
+  const [settingsAuditActor, setSettingsAuditActor] = useState("");
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2844,6 +3055,22 @@ function SecuritySection() {
       const res = await fetch(`/api/admin/security/audit-logs?${params}`, { credentials: "include" });
       return res.json();
     }
+  });
+
+  const { data: settingsAuditLogsData } = useQuery({
+    queryKey: ["/api/admin/security/audit-logs/settings", settingsAuditPage, settingsAuditActor],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: settingsAuditPage.toString(),
+        limit: "20",
+        action: "admin.settings_changed",
+        resource: "settings_config",
+        ...(settingsAuditActor && { actor: settingsAuditActor }),
+      });
+      const res = await fetch(`/api/admin/security/audit-logs?${params}`, { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeTab === "settings-audit",
   });
 
   const { data: recentLogs = [] } = useQuery({
@@ -3008,6 +3235,23 @@ function SecuritySection() {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
+  };
+
+  const previewValue = (value: any, maxLen = 70): string => {
+    if (value === null || value === undefined) return "-";
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (!s) return "-";
+      return s.length > maxLen ? `${s.slice(0, Math.max(0, maxLen - 3))}...` : s;
+    }
+    try {
+      const s = JSON.stringify(value);
+      if (!s) return "-";
+      return s.length > maxLen ? `${s.slice(0, Math.max(0, maxLen - 3))}...` : s;
+    } catch {
+      const s = String(value);
+      return s.length > maxLen ? `${s.slice(0, Math.max(0, maxLen - 3))}...` : s;
+    }
   };
 
   const renderPolicyRulesForm = () => {
@@ -3244,6 +3488,7 @@ function SecuritySection() {
           <TabsTrigger value="policies" data-testid="tab-policies">Policies</TabsTrigger>
           <TabsTrigger value="alerts" data-testid="tab-alerts">Alertas</TabsTrigger>
           <TabsTrigger value="audit-logs" data-testid="tab-audit-logs">Audit Logs</TabsTrigger>
+          <TabsTrigger value="settings-audit" data-testid="tab-settings-audit">Settings Audit</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -3305,7 +3550,7 @@ function SecuritySection() {
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
-                      {log.createdAt ? format(new Date(log.createdAt), "dd/MM HH:mm") : ""}
+                      {log.createdAt ? formatZonedDateTime(log.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false }) : ""}
                     </span>
                   </div>
                 ))
@@ -3568,7 +3813,7 @@ function SecuritySection() {
                   auditLogsData?.data?.map((log: any) => (
                     <tr key={log.id} className="border-t" data-testid={`row-audit-${log.id}`}>
                       <td className="p-3 text-sm">
-                        {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
+                        {log.createdAt ? formatZonedDateTime(log.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeSeconds: true }) : "-"}
                       </td>
                       <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
@@ -3610,6 +3855,163 @@ function SecuritySection() {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="settings-audit" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Actor:</Label>
+              <Input
+                data-testid="filter-settings-audit-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-56"
+                value={settingsAuditActor}
+                onChange={(e) => {
+                  setSettingsAuditActor(e.target.value);
+                  setSettingsAuditPage(1);
+                }}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSettingsAuditActor("");
+                setSettingsAuditPage(1);
+              }}
+              data-testid="button-clear-settings-audit-filters"
+            >
+              Clear
+            </Button>
+          </div>
+
+          <div className="rounded-lg border">
+            <table className="w-full">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Setting</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Change</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
+                  <th className="text-center p-3 text-xs font-medium text-muted-foreground">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settingsAuditLogsData?.data?.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
+                      No settings audit logs found matching your filters.
+                    </td>
+                  </tr>
+                ) : (
+                  settingsAuditLogsData?.data?.map((log: any) => {
+                    const details = (log?.details || {}) as any;
+
+                    const keys = Array.isArray(details.keys)
+                      ? details.keys
+                      : Array.isArray(details.changes)
+                        ? details.changes.map((c: any) => c?.key).filter(Boolean)
+                        : [];
+
+                    const settingLabel =
+                      typeof details.key === "string"
+                        ? details.key
+                        : keys.length > 0
+                          ? `bulk (${keys.length})`
+                          : (log.resourceId || "-");
+
+                    const changeSummary = Array.isArray(details.changes)
+                      ? `${Number(details.count || details.changes.length || keys.length || 0)} changes${keys.length ? ` (${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", ..." : ""})` : ""}`
+                      : `${previewValue(details.previousValue ?? details.oldValue)} -> ${previewValue(details.newValue)}`;
+
+                    return (
+                      <tr key={log.id} className="border-t" data-testid={`row-settings-audit-${log.id}`}>
+                        <td className="p-3 text-sm whitespace-nowrap">
+                          {log.createdAt
+                            ? formatZonedDateTime(log.createdAt, {
+                                timeZone: platformTimeZone,
+                                dateFormat: platformDateFormat,
+                                includeSeconds: true,
+                              })
+                            : "-"}
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
+                        <td className="p-3 text-sm font-mono max-w-[220px] truncate" title={settingLabel}>
+                          {settingLabel}
+                        </td>
+                        <td className="p-3 text-sm text-muted-foreground max-w-[360px] truncate" title={changeSummary}>
+                          {changeSummary}
+                        </td>
+                        <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
+                        <td className="p-3 text-center">
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                data-testid={`button-view-settings-audit-${log.id}`}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-2xl">
+                              <DialogHeader>
+                                <DialogTitle>Settings Change</DialogTitle>
+                              </DialogHeader>
+                              <pre className="bg-muted p-3 rounded-md text-xs overflow-auto max-h-[400px]">
+                                {JSON.stringify(
+                                  {
+                                    id: log.id,
+                                    createdAt: log.createdAt,
+                                    actor: getActorLabel(log),
+                                    ipAddress: log.ipAddress,
+                                    resourceId: log.resourceId,
+                                    details: log.details || {},
+                                  },
+                                  null,
+                                  2
+                                )}
+                              </pre>
+                            </DialogContent>
+                          </Dialog>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {settingsAuditLogsData?.pagination && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                Page {settingsAuditLogsData.pagination.page} of {settingsAuditLogsData.pagination.totalPages} ({settingsAuditLogsData.pagination.total} total)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={settingsAuditPage <= 1}
+                  onClick={() => setSettingsAuditPage(p => p - 1)}
+                  data-testid="button-prev-settings-audit-page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={settingsAuditPage >= settingsAuditLogsData.pagination.totalPages}
+                  onClick={() => setSettingsAuditPage(p => p + 1)}
+                  data-testid="button-next-settings-audit-page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
   );
@@ -3617,6 +4019,9 @@ function SecuritySection() {
 
 function ReportsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [activeTab, setActiveTab] = useState("templates");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [reportFormat, setReportFormat] = useState<string>("json");
@@ -3903,7 +4308,7 @@ function ReportsSection() {
                           <td className="px-4 py-3 text-sm">{getStatusBadge(report.status)}</td>
                           <td className="px-4 py-3 text-sm uppercase">{report.format}</td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
-                            {report.createdAt ? format(new Date(report.createdAt), "MMM dd, yyyy HH:mm") : "-"}
+                            {report.createdAt ? formatZonedDateTime(report.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "-"}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -4485,6 +4890,9 @@ function AgenticEngineSection() {
   const [rangeDays, setRangeDays] = useState(30);
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
   const [toolSearch, setToolSearch] = useState("");
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const userId = selectedUserId === "all" ? undefined : selectedUserId;
   const providerId = "agentic_engine,sandbox";
@@ -4862,7 +5270,9 @@ function AgenticEngineSection() {
                         <tbody>
                           {toolCalls.map((log: any) => (
                             <tr key={log.id} className="border-b last:border-0 hover:bg-muted/30">
-                              <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{formatRelativeTime(log.createdAt)}</td>
+                              <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                                {formatRelativeTime(log.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+                              </td>
                               <td className="p-3 text-xs truncate max-w-[160px]" title={log.userEmail || log.userId || ""}>
                                 {log.userEmail || (log.userId ? `${String(log.userId).slice(0, 8)}…` : "—")}
                               </td>
@@ -5175,12 +5585,16 @@ function AgenticEngineSection() {
                         <Badge variant={run.status === "running" ? "default" : run.status === "failed" ? "destructive" : "secondary"}>
                           {String(run.status || "").toUpperCase()}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {run.startedAt ? format(new Date(run.startedAt), "HH:mm:ss") : run.createdAt ? format(new Date(run.createdAt), "HH:mm:ss") : ""}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+	                        <span className="text-xs text-muted-foreground">
+	                          {run.startedAt
+	                            ? formatZonedTime(run.startedAt, { timeZone: platformTimeZone, includeSeconds: true })
+	                            : run.createdAt
+	                              ? formatZonedTime(run.createdAt, { timeZone: platformTimeZone, includeSeconds: true })
+	                              : ""}
+	                        </span>
+	                      </div>
+	                    </div>
+	                  ))}
                 </div>
               )}
             </CardContent>
@@ -5329,13 +5743,13 @@ function AgenticEngineSection() {
                           </Badge>
                         </div>
                         <div className="text-sm text-muted-foreground space-y-1">
-                          <p>Failures: {circuit.failures}</p>
-                          {circuit.lastFailure && (
-                            <p>Last failure: {format(new Date(circuit.lastFailure), 'HH:mm:ss')}</p>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
+	                          <p>Failures: {circuit.failures}</p>
+	                          {circuit.lastFailure && (
+	                            <p>Last failure: {formatZonedTime(circuit.lastFailure, { timeZone: platformTimeZone, includeSeconds: true })}</p>
+	                          )}
+	                        </div>
+	                      </CardContent>
+	                    </Card>
                   ))}
                 </div>
               )}
@@ -5362,6 +5776,9 @@ function ExcelManagerSection() {
   const [view, setView] = useState<'list' | 'editor'>('list');
   const [currentDoc, setCurrentDoc] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const { data: documents = [], isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/excel/list"],
@@ -5412,9 +5829,8 @@ function ExcelManagerSection() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('es-ES', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+  const formatDate = (date: string) =>
+    formatZonedDateTime(date, { timeZone: platformTimeZone, dateFormat: platformDateFormat });
 
   const filtered = documents.filter((d: ExcelDocument) => 
     d.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -5647,6 +6063,7 @@ function ExcelManagerSection() {
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
+  const queryClient = useQueryClient();
   
   // Security: Verify admin role
   const { data: currentUser, isLoading: isLoadingUser } = useQuery({
@@ -5659,6 +6076,29 @@ export default function AdminPage() {
   });
 
   const isAdmin = isAdminUser(currentUser as any);
+
+  const {
+    isLoading: isLoadingProbe,
+    error: probeError,
+  } = useQuery({
+    queryKey: ["/api/admin/probe"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/probe", { credentials: "include" });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        const err: any = new Error(payload?.message || payload?.error || "Admin probe failed");
+        err.status = res.status;
+        err.code = payload?.code;
+        err.payload = payload;
+        throw err;
+      }
+      return payload;
+    },
+    enabled: Boolean(currentUser && isAdmin),
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+  });
 
   // Redirect non-admin users
   useEffect(() => {
@@ -5686,6 +6126,26 @@ export default function AdminPage() {
         <p className="text-muted-foreground">No tienes permisos de administrador.</p>
         <Button onClick={() => setLocation("/")}>Volver al inicio</Button>
       </div>
+    );
+  }
+
+  if (isLoadingProbe) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const probeCode = (probeError as any)?.code as string | undefined;
+  if (probeCode === "2FA_SETUP_REQUIRED" || probeCode === "2FA_REQUIRED") {
+    return (
+      <Admin2FAGate
+        mode={probeCode === "2FA_SETUP_REQUIRED" ? "setup_required" : "verify_required"}
+        onVerified={() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/admin/probe"] });
+        }}
+      />
     );
   }
 

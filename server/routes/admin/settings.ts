@@ -2,6 +2,7 @@ import { Router } from "express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import { getActorEmailFromRequest, getActorIdFromRequest, invalidateSettingsCache } from "../../services/settingsConfigService";
+import { is2FAEnabled } from "../../services/twoFactorAuth";
 
 export const settingsRouter = Router();
 
@@ -54,6 +55,19 @@ settingsRouter.put("/:key", async (req, res) => {
         }
         const actorId = getActorIdFromRequest(req);
         const actorEmail = getActorEmailFromRequest(req);
+
+        // Prevent admins from accidentally locking themselves out by enforcing 2FA
+        // without having 2FA set up on their own account first.
+        if (req.params.key === "require_2fa_admins" && req.body?.value === true) {
+            if (!actorId) {
+                return res.status(400).json({ error: "Enable 2FA on your account before enforcing it for admins.", code: "2FA_SETUP_REQUIRED" });
+            }
+            const enabled = await is2FAEnabled(actorId);
+            if (!enabled) {
+                return res.status(400).json({ error: "Enable 2FA on your account before enforcing it for admins.", code: "2FA_SETUP_REQUIRED" });
+            }
+        }
+
         const previousValue = existing.value;
         const updated = await storage.upsertSettingsConfig({
             ...existing,
@@ -93,6 +107,17 @@ settingsRouter.post("/bulk", async (req, res) => {
         }
         const actorId = getActorIdFromRequest(req);
         const actorEmail = getActorEmailFromRequest(req);
+
+        const enable2FAAdmins = settings.some((s: any) => s?.key === "require_2fa_admins" && s?.value === true);
+        if (enable2FAAdmins) {
+            if (!actorId) {
+                return res.status(400).json({ error: "Enable 2FA on your account before enforcing it for admins.", code: "2FA_SETUP_REQUIRED" });
+            }
+            const enabled = await is2FAEnabled(actorId);
+            if (!enabled) {
+                return res.status(400).json({ error: "Enable 2FA on your account before enforcing it for admins.", code: "2FA_SETUP_REQUIRED" });
+            }
+        }
 
         const results = [];
         const changes: Array<{ key: string; previousValue: any; newValue: any; category?: string }> = [];

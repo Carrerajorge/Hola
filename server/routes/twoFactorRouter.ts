@@ -12,19 +12,26 @@ import {
   regenerateBackupCodes 
 } from "../services/twoFactorAuth";
 import { auditLog } from "../services/auditLogger";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 export const twoFactorRouter = Router();
+
+function getAuthenticatedUserId(req: any): string | null {
+  const userId = getSecureUserId(req);
+  if (!userId || String(userId).startsWith("anon_")) return null;
+  return userId;
+}
 
 // GET /api/2fa/status - Check if 2FA is enabled
 twoFactorRouter.get("/status", async (req, res) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }
     
     const enabled = await is2FAEnabled(userId);
-    res.json({ enabled });
+    res.json({ enabled, verified: Boolean((req.session as any)?.is2FAVerified) });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -33,7 +40,7 @@ twoFactorRouter.get("/status", async (req, res) => {
 // POST /api/2fa/setup - Initialize 2FA setup
 twoFactorRouter.post("/setup", async (req, res) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -66,7 +73,7 @@ twoFactorRouter.post("/setup", async (req, res) => {
 // POST /api/2fa/verify-setup - Verify and enable 2FA
 twoFactorRouter.post("/verify-setup", async (req, res) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -79,6 +86,7 @@ twoFactorRouter.post("/verify-setup", async (req, res) => {
     const success = await verify2FASetup(userId, code);
     
     if (success) {
+      (req.session as any).is2FAVerified = true;
       await auditLog(req, {
         action: "2fa.enabled",
         resource: "security",
@@ -96,21 +104,60 @@ twoFactorRouter.post("/verify-setup", async (req, res) => {
   }
 });
 
-// POST /api/2fa/verify - Verify 2FA code during login
+// POST /api/2fa/verify-session - Verify 2FA code and mark this session as verified
+twoFactorRouter.post("/verify-session", async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const { code } = req.body;
+    if (!code || String(code).length !== 6) {
+      return res.status(400).json({ error: "Invalid code format" });
+    }
+
+    const success = await verify2FALogin(userId, String(code));
+    if (!success) {
+      return res.status(400).json({ error: "Invalid code" });
+    }
+
+    (req.session as any).is2FAVerified = true;
+
+    await auditLog(req, {
+      action: "2fa.session_verified",
+      resource: "security",
+      details: { userId },
+      category: "security",
+      severity: "info"
+    });
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/2fa/verify - Backwards compatibility (same as verify-session)
 twoFactorRouter.post("/verify", async (req, res) => {
   try {
-    const { userId, code } = req.body;
-    if (!userId || !code) {
-      return res.status(400).json({ error: "userId and code are required" });
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Not authenticated" });
     }
-    
-    const success = await verify2FALogin(userId, code);
-    
-    if (success) {
-      res.json({ success: true });
-    } else {
-      res.status(400).json({ error: "Invalid code" });
+
+    const { code } = req.body;
+    if (!code || String(code).length !== 6) {
+      return res.status(400).json({ error: "Invalid code format" });
     }
+
+    const success = await verify2FALogin(userId, String(code));
+    if (!success) {
+      return res.status(400).json({ error: "Invalid code" });
+    }
+
+    (req.session as any).is2FAVerified = true;
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -119,7 +166,7 @@ twoFactorRouter.post("/verify", async (req, res) => {
 // POST /api/2fa/disable - Disable 2FA
 twoFactorRouter.post("/disable", async (req, res) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -133,6 +180,7 @@ twoFactorRouter.post("/disable", async (req, res) => {
     }
     
     await disable2FA(userId);
+    (req.session as any).is2FAVerified = false;
     
     await auditLog(req, {
       action: "2fa.disabled",
@@ -151,7 +199,7 @@ twoFactorRouter.post("/disable", async (req, res) => {
 // POST /api/2fa/regenerate-backup - Generate new backup codes
 twoFactorRouter.post("/regenerate-backup", async (req, res) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
       return res.status(401).json({ error: "Not authenticated" });
     }

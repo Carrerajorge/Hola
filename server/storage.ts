@@ -1250,26 +1250,45 @@ export class MemStorage implements IStorage {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const allModels = await dbRead.select().from(aiModels).where(whereClause);
-    const total = allModels.length;
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    const offset = (safePage - 1) * safeLimit;
 
-    let sortedModels = [...allModels];
-    sortedModels.sort((a, b) => {
-      let aVal: any, bVal: any;
-      switch (sortBy) {
-        case "name": aVal = a.name; bVal = b.name; break;
-        case "provider": aVal = a.provider; bVal = b.provider; break;
-        case "modelType": aVal = a.modelType; bVal = b.modelType; break;
-        case "contextWindow": aVal = a.contextWindow || 0; bVal = b.contextWindow || 0; break;
-        case "createdAt": aVal = a.createdAt; bVal = b.createdAt; break;
-        default: aVal = a.name; bVal = b.name;
-      }
-      const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-      return sortOrder === "desc" ? -cmp : cmp;
-    });
+    const normalizedSortOrder = sortOrder === "desc" ? "desc" : "asc";
+    const normalizedSortBy = new Set(["name", "provider", "modelType", "contextWindow", "createdAt", "lastSyncAt"]).has(sortBy)
+      ? sortBy
+      : "name";
 
-    const offset = (page - 1) * limit;
-    const models = sortedModels.slice(offset, offset + limit);
+    let sortCol: any = aiModels.name;
+    switch (normalizedSortBy) {
+      case "provider": sortCol = aiModels.provider; break;
+      case "modelType": sortCol = aiModels.modelType; break;
+      case "contextWindow": sortCol = aiModels.contextWindow; break;
+      case "createdAt": sortCol = aiModels.createdAt; break;
+      case "lastSyncAt": sortCol = aiModels.lastSyncAt; break;
+      case "name":
+      default:
+        sortCol = aiModels.name;
+        break;
+    }
+
+    const orderExpr = normalizedSortOrder === "desc" ? desc(sortCol) : sortCol;
+
+    const countQuery = dbRead
+      .select({ count: sql<number>`count(*)::int` })
+      .from(aiModels);
+    if (whereClause) countQuery.where(whereClause);
+
+    const [countRow] = await countQuery;
+    const total = countRow?.count || 0;
+
+    const modelsQuery = dbRead.select().from(aiModels);
+    if (whereClause) modelsQuery.where(whereClause);
+
+    const models = await modelsQuery
+      .orderBy(orderExpr, aiModels.id)
+      .limit(safeLimit)
+      .offset(offset);
 
     return { models, total };
   }

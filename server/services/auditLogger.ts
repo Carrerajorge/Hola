@@ -135,7 +135,10 @@ export const AuditActions = {
   MODEL_DELETED: "model.deleted",
   MODEL_ENABLED: "model.enabled",
   MODEL_DISABLED: "model.disabled",
+  MODEL_TESTED: "model.tested",
   MODEL_CONFIG_CHANGED: "model.config_changed",
+  MODELS_SYNC: "models.sync",
+  MODELS_SYNC_ALL: "models.sync_all",
   
   // Conversations
   CHAT_CREATED: "chat.created",

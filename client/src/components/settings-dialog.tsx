@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -423,6 +424,8 @@ function AppsSection() {
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const { data: integrationsData, isLoading: isLoadingIntegrations, refetch } = useQuery<IntegrationsData>({
@@ -789,7 +792,7 @@ function AppsSection() {
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   {log.latencyMs && <span>{log.latencyMs}ms</span>}
-                  <span>{new Date(log.createdAt).toLocaleTimeString()}</span>
+                  <span>{formatZonedTime(log.createdAt, { timeZone: platformTimeZone, includeSeconds: true })}</span>
                 </div>
               </div>
             ))}
@@ -810,6 +813,9 @@ function DataControlsSection() {
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [showArchivedDialog, setShowArchivedDialog] = useState(false);
   const [showSharedLinksDialog, setShowSharedLinksDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1053,12 +1059,12 @@ function DataControlsSection() {
               <div className="space-y-2">
                 {archivedChats.map((chat) => (
                   <div key={chat.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`archived-chat-${chat.id}`}>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{chat.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(chat.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
+	                      <div className="flex-1 min-w-0">
+	                        <p className="text-sm font-medium truncate">{chat.title}</p>
+	                        <p className="text-xs text-muted-foreground">
+	                          {formatZonedDate(chat.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+	                        </p>
+	                      </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1108,11 +1114,11 @@ function DataControlsSection() {
                           )}>
                             {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
                           </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Creado: {new Date(link.createdAt).toLocaleDateString()} · {link.accessCount} accesos
-                        </p>
-                      </div>
+	                        </div>
+	                        <p className="text-xs text-muted-foreground mt-1">
+	                          Creado: {formatZonedDate(link.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })} · {link.accessCount} accesos
+	                        </p>
+	                      </div>
                       {link.isRevoked === 'false' && (
                         <Button
                           variant="ghost"
@@ -1185,7 +1191,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { toast } = useToast();
   const { user, logout } = useAuth();
   const { availableModels } = useModelAvailability();
-  const platformDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
+  const platformUserDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
   const effectiveDefaultModel = settings.defaultModel || platformSettings.default_model;
   const themeManagedByPlatform = platformSettings.theme_mode !== "auto";
   const effectiveAppearance = themeManagedByPlatform
@@ -1427,7 +1433,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Formato de fecha</span>
                     <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
                   </div>
-                  <Select value={platformDateFormat} disabled>
+                  <Select value={platformUserDateFormat} disabled>
                     <SelectTrigger className="w-40" data-testid="select-date-format">
                       <SelectValue />
                     </SelectTrigger>

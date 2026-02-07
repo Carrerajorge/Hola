@@ -55,7 +55,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { Chat } from "@/hooks/use-chats";
 import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
-import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
+import { diffZonedDays, formatZonedDate, getZonedDateParts, normalizeTimeZone } from "@/lib/platformDateTime";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { NewChatButton } from "@/components/chat/NewChatButton";
@@ -238,6 +238,8 @@ export function Sidebar({
   const { user, logout } = useAuth();
   const isAdmin = isAdminUser(user as any);
   const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const appName = platformSettings.app_name || "ILIAGPT";
   const appDescription = platformSettings.app_description || "AI Platform";
   const { pinnedGpts, unpinGpt } = usePinnedGpts();
@@ -308,12 +310,24 @@ export function Sidebar({
   };
 
   const getChatDateLabel = (timestamp: number) => {
-    const date = new Date(timestamp);
-    if (isToday(date)) return "Today";
-    if (isYesterday(date)) return "Yesterday";
-    if (isThisWeek(date)) return "Previous 7 Days";
-    if (isThisYear(date)) return format(date, "MMM d");
-    return format(date, "yyyy");
+    const now = Date.now();
+    const diff = diffZonedDays(timestamp, now, platformTimeZone);
+
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    if (diff !== null && diff > 1 && diff < 7) return "Previous 7 Days";
+
+    const parts = getZonedDateParts(timestamp, platformTimeZone);
+    const nowParts = getZonedDateParts(now, platformTimeZone);
+    if (parts && nowParts && parts.year === nowParts.year) {
+      return formatZonedDate(timestamp, {
+        timeZone: platformTimeZone,
+        dateFormat: platformDateFormat,
+        includeYear: false,
+      });
+    }
+
+    return parts ? String(parts.year) : "";
   };
 
   // Group unfoldered chats

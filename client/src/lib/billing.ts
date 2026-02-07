@@ -1,3 +1,5 @@
+import { formatZonedDate, normalizeTimeZone, type PlatformDateFormat } from "@/lib/platformDateTime";
+
 export type BillingStatusPayload = {
   subscriptionStatus: string | null;
   subscriptionPeriodEnd: string | null;
@@ -19,9 +21,12 @@ export function shouldShowWorkspaceDeactivationBanner(input: {
   return t > now;
 }
 
-export function formatPeriodEndEs(periodEnd: string | null | undefined): string | null {
+export function formatPeriodEnd(
+  periodEnd: string | null | undefined,
+  opts: { timeZone: string; dateFormat: PlatformDateFormat }
+): string | null {
   if (!periodEnd) return null;
-  const d = new Date(periodEnd);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" });
+  const tz = normalizeTimeZone(opts.timeZone);
+  const out = formatZonedDate(periodEnd, { timeZone: tz, dateFormat: opts.dateFormat });
+  return out || null;
 }
