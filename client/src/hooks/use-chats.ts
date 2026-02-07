@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { trackWorkspaceEvent } from "@/lib/analytics";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -650,6 +651,21 @@ export function useChats() {
     setActiveChatId(id);
   }, []);
 
+  const trackChatMessageSent = useCallback((chatId: string, message: any, deduplicated?: boolean) => {
+    if (message?.role !== "user") return;
+    if (deduplicated) return;
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "chat_message_sent",
+      metadata: {
+        chatId,
+        contentLength: typeof message?.content === "string" ? message.content.length : 0,
+        attachmentsCount: Array.isArray(message?.attachments) ? message.attachments.length : 0,
+        hasAttachments: Array.isArray(message?.attachments) ? message.attachments.length > 0 : false,
+      },
+    });
+  }, []);
+
   const loadChatsFromServer = useCallback(async () => {
     try {
       const res = await fetch("/api/chats", {
@@ -1045,6 +1061,7 @@ export function useChats() {
           // If response includes a run, track it for AI streaming
           if (res.ok) {
             const data = await res.json();
+            trackChatMessageSent(realChatId, msg, data?.deduplicated);
             if (data.run) {
               const run: ChatRun = {
                 id: data.run.id,
@@ -1261,6 +1278,7 @@ export function useChats() {
         // Handle run-based response for user messages
         if (res.ok) {
           const data = await res.json();
+          trackChatMessageSent(resolvedChatId, message, data?.deduplicated);
 
           // If response includes a run, track it for AI streaming
           if (data.run) {

@@ -43,7 +43,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/lib/apiClient";
-import { isAdminUser, isBillingManagerUser } from "@/lib/admin";
+import { trackWorkspaceEvent as trackAnalyticsEvent } from "@/lib/analytics";
+import { isAdminUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
@@ -78,6 +79,9 @@ type AnalyticsOverview = {
   days: number;
   startDate: string;
   endDate: string;
+  sessionsCount: number;
+  topPages: Array<{ page: string; count: number }>;
+  topActions: Array<{ action: string; count: number }>;
   totals: {
     members: number;
     activeMembers: number;
@@ -135,44 +139,15 @@ const analyticsMetricOptions: { value: AnalyticsMetricKey; label: string; color:
   { value: "actions", label: "Acciones", color: "#dc2626" },
 ];
 
-function getAnalyticsSessionId(): string {
-  if (typeof window === "undefined") {
-    return `session_${Date.now()}`;
-  }
-
-  const key = "ilia_workspace_analytics_session";
-  try {
-    const existing = sessionStorage.getItem(key);
-    if (existing) return existing;
-  } catch {
-    // ignore storage failures
-  }
-
-  let id = "";
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    id = crypto.randomUUID();
-  } else {
-    id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  }
-
-  try {
-    sessionStorage.setItem(key, id);
-  } catch {
-    // ignore storage failures
-  }
-
-  return id;
-}
-
 export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const { user } = useAuth();
   const isAdmin = isAdminUser(user as any);
-  const canManageBilling = isBillingManagerUser(user as any);
   const [canManageWorkspace, setCanManageWorkspace] = useState(false);
   const [canManageRoles, setCanManageRoles] = useState(false);
+  const [canManageBilling, setCanManageBilling] = useState(false);
   const { toast } = useToast();
   const userDisplayName = user?.fullName || user?.username || "Tu cuenta";
   const userEmail = user?.email || "";
@@ -190,12 +165,13 @@ export default function WorkspaceSettingsPage() {
   const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
   const [membersFilter, setMembersFilter] = useState("");
-  const [analyticsSessionId, setAnalyticsSessionId] = useState<string | null>(null);
   const [analyticsDays, setAnalyticsDays] = useState<7 | 30 | 90>(30);
   const [analyticsMetric, setAnalyticsMetric] = useState<AnalyticsMetricKey>("userMessages");
   const [analyticsData, setAnalyticsData] = useState<AnalyticsOverview | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [analyticsMemberFilter, setAnalyticsMemberFilter] = useState("");
+  const [analyticsMemberSort, setAnalyticsMemberSort] = useState<"activity" | "messages" | "tokens" | "recent">("activity");
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -315,8 +291,72 @@ export default function WorkspaceSettingsPage() {
   }, [searchString]);
 
   useEffect(() => {
-    setAnalyticsSessionId(getAnalyticsSessionId());
-  }, []);
+    const params = new URLSearchParams(searchString);
+    const subscription = params.get("subscription");
+    const credits = params.get("credits");
+
+    if (!subscription && !credits) return;
+
+    // Clear one-time Stripe return params to avoid duplicate toasts on refresh.
+    params.delete("subscription");
+    params.delete("credits");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+
+    const refreshBilling = async () => {
+      try {
+        const res = await apiFetch("/api/billing/status");
+        if (res.ok) {
+          const data = await res.json();
+          setBillingStatus(data);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const refreshCredits = async () => {
+      try {
+        setCreditsOffset(0);
+        setCreditsLoading(true);
+        const res = await apiFetch(`/api/billing/credits/usage?offset=0`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || "No se pudo cargar el uso de créditos");
+        setCreditsUsage(data);
+      } catch (e: any) {
+        toast({
+          title: "Error",
+          description: e?.message || "No se pudo cargar el uso de créditos.",
+          variant: "destructive",
+        });
+      } finally {
+        setCreditsLoading(false);
+      }
+    };
+
+    if (subscription === "success") {
+      toast({ title: "Suscripción activada", description: "Tu plan fue actualizado correctamente." });
+      setActiveSection("billing");
+      setBillingTab("plan");
+      void refreshBilling();
+      void refreshCredits();
+      setInvoicesLoaded(false);
+    } else if (subscription === "cancelled") {
+      toast({ title: "Suscripción cancelada", description: "No se realizó ningún cargo." });
+    }
+
+    if (credits === "success") {
+      toast({ title: "Créditos agregados", description: "La compra se registró correctamente." });
+      setActiveSection("billing");
+      setBillingTab("plan");
+      void refreshBilling();
+      void refreshCredits();
+      setInvoicesLoaded(false);
+    } else if (credits === "cancelled") {
+      toast({ title: "Compra cancelada", description: "No se realizó ningún cargo." });
+    }
+  }, [searchString, toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -344,9 +384,10 @@ export default function WorkspaceSettingsPage() {
         setWorkspaceName(data.name || "");
         setLogoFileUuid(data.logoFileUuid || null);
         setMemberCount(typeof data.memberCount === "number" ? data.memberCount : null);
-        setCanManageWorkspace(!!data.canManageWorkspace || canManageBilling);
-        setCanManageMembers(!!data.canManageMembers || canManageBilling);
-        setCanManageRoles(!!data.canManageRoles || canManageBilling);
+        setCanManageWorkspace(!!data.canManageWorkspace);
+        setCanManageMembers(!!data.canManageMembers);
+        setCanManageRoles(!!data.canManageRoles);
+        setCanManageBilling(!!data.canManageBilling);
       } catch {
         // ignore
       }
@@ -394,29 +435,16 @@ export default function WorkspaceSettingsPage() {
     action?: string;
     metadata?: Record<string, any>;
   }) => {
-    if (!analyticsSessionId) return;
-    try {
-      await apiFetch("/api/workspace/analytics/track", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: analyticsSessionId,
-          ...payload,
-        }),
-      });
-    } catch {
-      // Avoid blocking UI on tracking failures
-    }
-  }, [analyticsSessionId]);
+    await trackAnalyticsEvent(payload);
+  }, []);
 
   useEffect(() => {
-    if (!analyticsSessionId) return;
     void trackWorkspaceEvent({
       eventType: "page_view",
       page: `workspace-settings/${activeSection}`,
       metadata: { section: activeSection },
     });
-  }, [activeSection, analyticsSessionId, trackWorkspaceEvent]);
+  }, [activeSection, trackWorkspaceEvent]);
 
   const loadAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
@@ -604,6 +632,39 @@ export default function WorkspaceSettingsPage() {
     [analyticsMetric]
   );
   const currentUserId = user?.id ? String(user.id) : null;
+  const analyticsMembers = useMemo(() => {
+    const members = analyticsData?.byMember ?? [];
+    const filterValue = analyticsMemberFilter.trim().toLowerCase();
+    const filtered = filterValue
+      ? members.filter((member) => {
+          const name = String(member.displayName || "").toLowerCase();
+          const email = String(member.email || "").toLowerCase();
+          return name.includes(filterValue) || email.includes(filterValue);
+        })
+      : members;
+
+    const scored = filtered.map((member) => ({
+      member,
+      activityScore: member.chatsCreated + member.userMessages + member.pageViews + member.actions,
+      lastActiveAt: member.lastActiveAt || member.lastLoginAt || "",
+    }));
+
+    scored.sort((a, b) => {
+      switch (analyticsMemberSort) {
+        case "messages":
+          return b.member.userMessages - a.member.userMessages;
+        case "tokens":
+          return b.member.tokensUsed - a.member.tokensUsed;
+        case "recent":
+          return new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime();
+        case "activity":
+        default:
+          return b.activityScore - a.activityScore;
+      }
+    });
+
+    return scored.map((entry) => entry.member);
+  }, [analyticsData?.byMember, analyticsMemberFilter, analyticsMemberSort]);
   const rolesByKey = useMemo(() => {
     return new Map(roles.map((role) => [role.roleKey, role]));
   }, [roles]);
@@ -2499,7 +2560,11 @@ export default function WorkspaceSettingsPage() {
       case "analytics": {
         const totals = analyticsData?.totals;
         const activityData = analyticsData?.activityByDay ?? [];
-        const members = analyticsData?.byMember ?? [];
+        const members = analyticsMembers;
+        const hasRawMembers = (analyticsData?.byMember ?? []).length > 0;
+        const sessionsCount = analyticsData?.sessionsCount ?? 0;
+        const topPages = analyticsData?.topPages ?? [];
+        const topActions = analyticsData?.topActions ?? [];
         const periodLabel = analyticsData
           ? `${formatDateShort(analyticsData.startDate)} - ${formatDateShort(analyticsData.endDate)}`
           : `Últimos ${analyticsDays} días`;
@@ -2562,7 +2627,7 @@ export default function WorkspaceSettingsPage() {
               </div>
             )}
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardDescription>Miembros totales</CardDescription>
@@ -2574,6 +2639,13 @@ export default function WorkspaceSettingsPage() {
                 <CardHeader className="pb-2">
                   <CardDescription>Miembros activos</CardDescription>
                   <CardTitle className="text-2xl">{formatNumber(totals?.activeMembers)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Sesiones únicas</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(sessionsCount)}</CardTitle>
                 </CardHeader>
                 <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
               </Card>
@@ -2602,6 +2674,13 @@ export default function WorkspaceSettingsPage() {
                 <CardHeader className="pb-2">
                   <CardDescription>Vistas de página</CardDescription>
                   <CardTitle className="text-2xl">{formatNumber(totals?.pageViews)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Acciones registradas</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.actions)}</CardTitle>
                 </CardHeader>
                 <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
               </Card>
@@ -2681,10 +2760,109 @@ export default function WorkspaceSettingsPage() {
               </CardContent>
             </Card>
 
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Top páginas</CardTitle>
+                  <CardDescription>Las rutas más visitadas en el periodo.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {analyticsLoading && !analyticsData ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-4 w-52" />
+                      <Skeleton className="h-4 w-44" />
+                    </div>
+                  ) : topPages.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Sin datos de páginas visitadas.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {topPages.map((page) => (
+                        <div key={page.page} className="flex items-center justify-between text-sm">
+                          <span className="truncate max-w-[70%]">{page.page}</span>
+                          <span className="text-muted-foreground">{formatNumber(page.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Top acciones</CardTitle>
+                  <CardDescription>Acciones más comunes del equipo.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {analyticsLoading && !analyticsData ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-4 w-52" />
+                      <Skeleton className="h-4 w-44" />
+                    </div>
+                  ) : topActions.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Sin acciones registradas.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {topActions.map((action) => (
+                        <div key={action.action} className="flex items-center justify-between text-sm">
+                          <span className="truncate max-w-[70%]">{action.action}</span>
+                          <span className="text-muted-foreground">{formatNumber(action.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
             <Card>
-              <CardHeader>
-                <CardTitle>Miembros</CardTitle>
-                <CardDescription>Detalle de uso por miembro en el periodo seleccionado.</CardDescription>
+              <CardHeader className="space-y-3">
+                <div>
+                  <CardTitle>Miembros</CardTitle>
+                  <CardDescription>Detalle de uso por miembro en el periodo seleccionado.</CardDescription>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar miembro"
+                      className="pl-9 w-64"
+                      value={analyticsMemberFilter}
+                      onChange={(e) => setAnalyticsMemberFilter(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = analyticsMemberFilter.trim();
+                        if (!trimmed) return;
+                        void trackWorkspaceEvent({
+                          eventType: "action",
+                          action: "analytics_member_filter",
+                          metadata: { queryLength: trimmed.length },
+                        });
+                      }}
+                      data-testid="input-analytics-member-filter"
+                    />
+                  </div>
+                  <Select
+                    value={analyticsMemberSort}
+                    onValueChange={(value) => {
+                      setAnalyticsMemberSort(value as "activity" | "messages" | "tokens" | "recent");
+                      void trackWorkspaceEvent({
+                        eventType: "action",
+                        action: "analytics_member_sort",
+                        metadata: { sort: value },
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-48" data-testid="select-analytics-member-sort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="activity">Ordenar por actividad</SelectItem>
+                      <SelectItem value="messages">Ordenar por mensajes</SelectItem>
+                      <SelectItem value="tokens">Ordenar por tokens</SelectItem>
+                      <SelectItem value="recent">Ordenar por reciente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 {analyticsLoading && !analyticsData ? (
@@ -2694,7 +2872,9 @@ export default function WorkspaceSettingsPage() {
                   </div>
                 ) : members.length === 0 ? (
                   <div className="text-sm text-muted-foreground py-6 text-center">
-                    No hay miembros con actividad registrada.
+                    {hasRawMembers
+                      ? "No se encontraron miembros con ese filtro."
+                      : "No hay miembros con actividad registrada."}
                   </div>
                 ) : (
                   <Table>
@@ -2707,6 +2887,7 @@ export default function WorkspaceSettingsPage() {
                         <TableHead>Mensajes</TableHead>
                         <TableHead>Tokens</TableHead>
                         <TableHead>Vistas</TableHead>
+                        <TableHead>Acciones</TableHead>
                         <TableHead>Última actividad</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2743,6 +2924,7 @@ export default function WorkspaceSettingsPage() {
                             <TableCell>{formatNumber(member.userMessages)}</TableCell>
                             <TableCell>{formatNumber(member.tokensUsed)}</TableCell>
                             <TableCell>{formatNumber(member.pageViews)}</TableCell>
+                            <TableCell>{formatNumber(member.actions)}</TableCell>
                             <TableCell>{formatDateLong(lastActive)}</TableCell>
                           </TableRow>
                         );

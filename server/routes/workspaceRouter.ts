@@ -97,6 +97,11 @@ async function canManageRoles(actor: { orgId: string; roleKey: string; email: st
   return hasOrgPermission(actor.orgId, actor.roleKey, "admin:users");
 }
 
+async function canManageBilling(actor: { orgId: string; roleKey: string; email: string }): Promise<boolean> {
+  if (isWorkspaceAdminRole(actor.roleKey) || isAdminEmail(actor.email)) return true;
+  return hasOrgPermission(actor.orgId, actor.roleKey, "admin:billing");
+}
+
 async function canViewAnalytics(actor: { orgId: string; roleKey: string; email: string }): Promise<boolean> {
   if (isWorkspaceAdminRole(actor.roleKey) || isAdminEmail(actor.email)) return true;
   if (await hasOrgPermission(actor.orgId, actor.roleKey, "admin:analytics")) return true;
@@ -132,10 +137,11 @@ export function createWorkspaceRouter() {
         .where(and(eq(users.orgId, orgId), isNull(users.deletedAt)));
       const memberCount = typeof memberCountRaw === "number" ? memberCountRaw : Number(memberCountRaw || 0);
 
-      const [canManageWorkspaceFlag, canManageMembersFlag, canManageRolesFlag] = await Promise.all([
+      const [canManageWorkspaceFlag, canManageMembersFlag, canManageRolesFlag, canManageBillingFlag] = await Promise.all([
         canManageWorkspace(actor),
         canManageMembers(actor),
         canManageRoles(actor),
+        canManageBilling(actor),
       ]);
 
       res.json({
@@ -147,6 +153,7 @@ export function createWorkspaceRouter() {
         canManageWorkspace: canManageWorkspaceFlag,
         canManageMembers: canManageMembersFlag,
         canManageRoles: canManageRolesFlag,
+        canManageBilling: canManageBillingFlag,
       });
     } catch (e: any) {
       console.error("[Workspace] GET /me error:", e);
@@ -284,6 +291,9 @@ export function createWorkspaceRouter() {
         }
 
         const targetUserId = String(req.params.id || "");
+        if (targetUserId === actor.userId) {
+          return res.status(400).json({ error: "No puedes cambiar tu propio rol", code: "CANNOT_EDIT_SELF" });
+        }
         const [target] = await db
           .select()
           .from(users)
@@ -292,6 +302,10 @@ export function createWorkspaceRouter() {
 
         if (!target) {
           return res.status(404).json({ error: "Usuario no encontrado" });
+        }
+
+        if (isSystemAdminRole((target as any)?.role) && !isSystemAdminRole(actor.roleKey) && !isAdminEmail(actor.email)) {
+          return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
         }
 
         const validation = await validateAssignableRole(actor, req.body.role);
@@ -321,6 +335,9 @@ export function createWorkspaceRouter() {
     try {
       const actor = await getActorContext(req);
       if (!actor) return res.status(401).json({ error: "Debes iniciar sesión" });
+      if (!(await canManageMembers(actor))) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
 
       const status = typeof req.query.status === "string" ? req.query.status : "pending";
 
@@ -776,6 +793,30 @@ export function createWorkspaceRouter() {
   // WORKSPACE GROUPS
   // ============================================================================
 
+  // Lightweight list of groups for general workspace features (e.g. sharing to groups).
+  router.get("/api/workspace/groups/lookup", async (req, res) => {
+    try {
+      const actor = await getActorContext(req);
+      if (!actor) return res.status(401).json({ error: "Debes iniciar sesión" });
+
+      const groups = await db
+        .select({
+          id: workspaceGroups.id,
+          name: workspaceGroups.name,
+          description: workspaceGroups.description,
+          updatedAt: workspaceGroups.updatedAt,
+        })
+        .from(workspaceGroups)
+        .where(eq(workspaceGroups.orgId, actor.orgId))
+        .orderBy(asc(workspaceGroups.name));
+
+      res.json({ orgId: actor.orgId, groups });
+    } catch (e: any) {
+      console.error("[Workspace] GET /groups/lookup error:", e);
+      res.status(500).json({ error: "Failed to load groups" });
+    }
+  });
+
   router.get("/api/workspace/groups", async (req, res) => {
     try {
       const actor = await getActorContext(req);
@@ -798,7 +839,7 @@ export function createWorkspaceRouter() {
             FROM workspace_group_members m
             WHERE m.group_id = ${workspaceGroups.id}
           )`.mapWith(toNumber),
-          sharedChatsCount: sql<number>`(
+          directSharedChatsCount: sql<number>`(
             SELECT COUNT(DISTINCT s.chat_id)::int
             FROM chat_shares s
             INNER JOIN chats c ON c.id = s.chat_id
@@ -814,6 +855,39 @@ export function createWorkspaceRouter() {
                     OR LOWER(s.email) = LOWER(u.email)
                   )
               )
+          )`.mapWith(toNumber),
+          groupSharedChatsCount: sql<number>`(
+            SELECT COUNT(DISTINCT gs.chat_id)::int
+            FROM chat_group_shares gs
+            INNER JOIN chats c ON c.id = gs.chat_id
+            WHERE gs.group_id = ${workspaceGroups.id}
+              AND c.deleted_at IS NULL
+          )`.mapWith(toNumber),
+          sharedChatsCount: sql<number>`(
+            SELECT COUNT(DISTINCT t.chat_id)::int
+            FROM (
+              SELECT gs.chat_id
+              FROM chat_group_shares gs
+              WHERE gs.group_id = ${workspaceGroups.id}
+              UNION
+              SELECT s.chat_id
+              FROM chat_shares s
+              INNER JOIN chats c ON c.id = s.chat_id
+              WHERE c.deleted_at IS NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM workspace_group_members gm
+                  INNER JOIN users u ON u.id = gm.user_id
+                  WHERE gm.group_id = ${workspaceGroups.id}
+                    AND u.deleted_at IS NULL
+                    AND (
+                      (s.recipient_user_id IS NOT NULL AND s.recipient_user_id = u.id)
+                      OR LOWER(s.email) = LOWER(u.email)
+                    )
+                )
+            ) t
+            INNER JOIN chats c2 ON c2.id = t.chat_id
+            WHERE c2.deleted_at IS NULL
           )`.mapWith(toNumber),
         })
         .from(workspaceGroups)
@@ -1255,7 +1329,7 @@ export function createWorkspaceRouter() {
         ? sql`u.org_id = ${orgId} AND u.deleted_at IS NULL`
         : sql`u.id = ${userId} AND u.deleted_at IS NULL`;
 
-      const [chatsByDayResult, messagesByDayResult, pageViewsByDayResult, actionsByDayResult] = await Promise.all([
+      const [chatsByDayResult, messagesByDayResult, pageViewsByDayResult, actionsByDayResult, sessionsResult, topPagesResult, topActionsResult] = await Promise.all([
         db.execute(sql`
           SELECT
             DATE(c.created_at) as date,
@@ -1305,6 +1379,43 @@ export function createWorkspaceRouter() {
           GROUP BY 1
           ORDER BY 1 ASC
         `),
+        db.execute(sql`
+          SELECT
+            COUNT(DISTINCT NULLIF(l.details->>'sessionId', ''))::int as sessions
+          FROM audit_logs l
+          JOIN users u ON u.id = l.user_id
+          WHERE ${whereOrgUsersSql}
+            AND l.created_at >= ${startDate}
+            AND l.action IN ('page_view', 'user_action')
+        `),
+        db.execute(sql`
+          SELECT
+            l.resource as page,
+            COUNT(*)::int as count
+          FROM audit_logs l
+          JOIN users u ON u.id = l.user_id
+          WHERE ${whereOrgUsersSql}
+            AND l.action = 'page_view'
+            AND l.created_at >= ${startDate}
+            AND l.resource IS NOT NULL
+          GROUP BY l.resource
+          ORDER BY count DESC
+          LIMIT 5
+        `),
+        db.execute(sql`
+          SELECT
+            l.resource as action,
+            COUNT(*)::int as count
+          FROM audit_logs l
+          JOIN users u ON u.id = l.user_id
+          WHERE ${whereOrgUsersSql}
+            AND l.action = 'user_action'
+            AND l.created_at >= ${startDate}
+            AND l.resource IS NOT NULL
+          GROUP BY l.resource
+          ORDER BY count DESC
+          LIMIT 5
+        `),
       ]);
 
       const toIsoDate = (value: unknown): string | null => {
@@ -1345,6 +1456,22 @@ export function createWorkspaceRouter() {
         actionsByDay.set(date, toNumber(row.actions));
       }
 
+      const sessionsCount = toNumber((sessionsResult.rows as any[])?.[0]?.sessions);
+
+      const topPages = (topPagesResult.rows as any[])
+        .map((row) => ({
+          page: String(row.page || ""),
+          count: toNumber(row.count),
+        }))
+        .filter((row) => row.page);
+
+      const topActions = (topActionsResult.rows as any[])
+        .map((row) => ({
+          action: String(row.action || ""),
+          count: toNumber(row.count),
+        }))
+        .filter((row) => row.action);
+
       const activityByDay: Array<{
         date: string;
         chatsCreated: number;
@@ -1374,6 +1501,9 @@ export function createWorkspaceRouter() {
         days,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
+        sessionsCount,
+        topPages,
+        topActions,
         totals,
         byMember,
         activityByDay,
