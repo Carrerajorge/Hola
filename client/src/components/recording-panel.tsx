@@ -167,8 +167,11 @@ export function RecordingPanel({
             variant="ghost"
             onClick={onToggleRecording}
             size="icon"
-            disabled={!isDictationSupported}
-            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-disabled={!isDictationSupported}
+            className={cn(
+              "h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50",
+              !isDictationSupported && "opacity-50"
+            )}
             aria-label={isDictationSupported ? "Iniciar dictado por voz" : "Dictado no disponible"}
             data-testid="button-voice-dictation"
           >
