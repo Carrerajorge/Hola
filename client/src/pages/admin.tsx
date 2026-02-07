@@ -1569,7 +1569,7 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
+      const res = await fetch(`/api/admin/models/sync?scope=${modelsScope}`, { method: "POST", credentials: "include" });
       if (!res.ok) {
         throw new Error(await readApiError(res));
       }

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { checkApiKeyExists } from "./utils";
-import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
+import { syncModelsForProvider, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import {
     getIntegratedModelProviderIds,
@@ -261,7 +261,18 @@ modelsRouter.post("/sync/:provider", async (req, res) => {
 
 modelsRouter.post("/sync", async (req, res) => {
     try {
-        const results = await syncAllProviders();
+        const { scope = "all" } = (req.query || {}) as any;
+
+        const allProviders = getAvailableProviders();
+        const providersToSync =
+            scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
+
+        const results: Record<string, { added: number; updated: number; errors: string[] }> = {};
+        for (const provider of providersToSync) {
+            results[provider] = await syncModelsForProvider(provider);
+        }
 
         let totalAdded = 0;
         let totalUpdated = 0;
@@ -273,11 +284,12 @@ modelsRouter.post("/sync", async (req, res) => {
         await storage.createAuditLog({
             action: "models_sync_all",
             resource: "ai_models",
-            details: { results, totalAdded, totalUpdated },
+            details: { scope, providers: providersToSync, results, totalAdded, totalUpdated },
         });
 
         res.json({
             success: true,
+            scope,
             results,
             summary: { totalAdded, totalUpdated },
         });
