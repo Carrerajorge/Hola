@@ -14,6 +14,62 @@ const messageBodyLimit = express.json({ limit: '5mb' });
 export function createChatsRouter() {
   const router = Router();
 
+  const normalizeAttachments = async (attachments: any): Promise<any[] | null> => {
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) return null;
+
+    const fileIds = Array.from(new Set(
+      attachments
+        .map((a: any) => a?.fileId)
+        .filter((id: any) => typeof id === "string" && id.length > 0)
+    ));
+
+    const filesById = new Map<string, { storagePath: string }>();
+    if (fileIds.length > 0) {
+      const records = await Promise.all(fileIds.map(async (id) => {
+        try {
+          const file = await storage.getFile(id);
+          return file?.storagePath ? { id, storagePath: file.storagePath } : null;
+        } catch {
+          return null;
+        }
+      }));
+      for (const rec of records) {
+        if (rec) filesById.set(rec.id, { storagePath: rec.storagePath });
+      }
+    }
+
+    return attachments
+      .filter((a: any) => a && typeof a === "object")
+      .map((att: any) => {
+        const out: any = { ...att };
+
+        // Strip base64 data URLs (defense-in-depth). Keep only stable server-backed URLs.
+        if (typeof out.imageUrl === "string" && out.imageUrl.startsWith("data:")) {
+          delete out.imageUrl;
+        }
+
+        // Validate storagePath format
+        if (typeof out.storagePath === "string" && out.storagePath && !out.storagePath.startsWith("/objects/")) {
+          console.warn(`[Attachment] Invalid storagePath stripped: ${out.storagePath}`);
+          delete out.storagePath;
+        }
+
+        // Best-effort hydration: if storagePath is missing but fileId exists, resolve from DB.
+        if (!out.storagePath && typeof out.fileId === "string") {
+          const file = filesById.get(out.fileId);
+          if (file?.storagePath) out.storagePath = file.storagePath;
+        }
+
+        // For images, persist a renderable URL when possible.
+        if (out.type === "image" && !out.imageUrl && out.storagePath) {
+          out.imageUrl = out.storagePath;
+        }
+
+        return out;
+      })
+      .filter((att: any) => att.name && att.type);
+  };
+
   router.get("/chats", async (req, res) => {
     try {
       const userId = getSecureUserId(req);
@@ -129,10 +185,17 @@ export function createChatsRouter() {
           }
         }
 
+        const normalizedMessages = await Promise.all(
+          messages.map(async (msg: any) => ({
+            ...msg,
+            attachments: await normalizeAttachments(msg.attachments),
+          }))
+        );
+
         // Create chat with messages atomically using transaction
         const result = await storage.createChatWithMessages(
           { title: title || "New Chat", userId },
-          messages.map((msg: any) => ({
+          normalizedMessages.map((msg: any) => ({
             role: msg.role,
             content: msg.content,
             requestId: msg.requestId,
@@ -441,20 +504,7 @@ export function createChatsRouter() {
       // SANITIZATION: Prevent XSS
       const sanitizedContent = sanitizeMessageContent(content);
 
-      // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
-      // Strip any base64 imageUrl that might have leaked through client sanitization.
-      // Validate storagePaths. This is a safety net for data integrity.
-      const sanitizedAttachments = attachments && Array.isArray(attachments)
-        ? attachments.map((att: any) => {
-            const { imageUrl, ...rest } = att; // Always strip imageUrl (base64)
-            // Validate storagePath format
-            if (rest.storagePath && typeof rest.storagePath === 'string' && !rest.storagePath.startsWith('/objects/')) {
-              console.warn(`[Attachment] Invalid storagePath stripped: ${rest.storagePath}`);
-              delete rest.storagePath;
-            }
-            return rest;
-          }).filter((att: any) => att.name && att.type) // Must have at least name and type
-        : null;
+      const normalizedAttachments = await normalizeAttachments(attachments);
 
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
@@ -482,7 +532,7 @@ export function createChatsRouter() {
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
-            attachments: sanitizedAttachments,
+            attachments: normalizedAttachments,
             sources: sources || null,
             figmaDiagram: figmaDiagram || null,
             googleFormPreview: googleFormPreview || null,
@@ -516,7 +566,7 @@ export function createChatsRouter() {
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
-        attachments: sanitizedAttachments,
+        attachments: normalizedAttachments,
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
         googleFormPreview: googleFormPreview || null,

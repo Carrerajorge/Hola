@@ -436,7 +436,18 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, _setUploadedFiles] = useState<UploadedFile[]>([]);
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  // Keep `uploadedFilesRef` in sync synchronously at call time (not when React later flushes state).
+  // This avoids races where submit/analysis reads stale attachment metadata right after an upload finishes.
+  const setUploadedFiles = useCallback((updater: React.SetStateAction<UploadedFile[]>) => {
+    const base = uploadedFilesRef.current;
+    const next = typeof updater === "function"
+      ? (updater as (p: UploadedFile[]) => UploadedFile[])(base)
+      : updater;
+    uploadedFilesRef.current = next;
+    _setUploadedFiles(next);
+  }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -2674,8 +2685,11 @@ export function ChatInterface({
       console.log("[handleSubmit] All uploads complete");
     }
 
+    // Read the latest uploadedFiles from the ref to avoid stale closures after awaiting uploads.
+    const latestUploadedFiles = uploadedFilesRef.current;
+
     // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
+    const filesStillLoading = latestUploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
@@ -2683,7 +2697,7 @@ export function ChatInterface({
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFiles.length > 0;
+    const hasFiles = latestUploadedFiles.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
@@ -3612,7 +3626,7 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately
     const userInput = input;
-    const currentUploadedFiles = [...uploadedFiles];
+    const currentUploadedFiles = [...latestUploadedFiles];
     const userMsgId = Date.now().toString();
 
     // Reset UI state immediately
@@ -3634,30 +3648,12 @@ export function ChatInterface({
           return "word"; // default to word for text/docs
         })() as "word" | "excel" | "ppt" | "pdf",
         mimeType: f.type,
-        imageUrl: f.dataUrl,
+        // Persist only a stable server-backed URL; avoid base64 blobs in chat history.
+        imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
         storagePath: f.storagePath,
         fileId: f.id,
         spreadsheetData: f.spreadsheetData,
       }));
-
-    // Cache image attachments in IndexedDB for persistent cross-session display.
-    // This runs async (fire-and-forget) so it doesn't block the message send.
-    if (attachments.length > 0) {
-      import("@/lib/attachment-db").then(({ storeImage }) => {
-        for (const att of attachments) {
-          if (att.type === "image" && att.imageUrl && (att.storagePath || att.fileId)) {
-            const cacheKey = att.fileId || att.storagePath || '';
-            storeImage({
-              id: `att_${cacheKey}`,
-              messageId: userMsgId,
-              chatId: chatId || '',
-              base64: att.imageUrl,
-              mimeType: att.mimeType || 'image/jpeg',
-            }).catch(() => {}); // best-effort
-          }
-        }
-      }).catch(() => {});
-    }
 
     // Construct the User Message object
     const userMsg: Message = {
