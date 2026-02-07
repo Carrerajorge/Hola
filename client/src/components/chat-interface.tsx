@@ -3640,6 +3640,25 @@ export function ChatInterface({
         spreadsheetData: f.spreadsheetData,
       }));
 
+    // Cache image attachments in IndexedDB for persistent cross-session display.
+    // This runs async (fire-and-forget) so it doesn't block the message send.
+    if (attachments.length > 0) {
+      import("@/lib/attachment-db").then(({ storeImage }) => {
+        for (const att of attachments) {
+          if (att.type === "image" && att.imageUrl && (att.storagePath || att.fileId)) {
+            const cacheKey = att.fileId || att.storagePath || '';
+            storeImage({
+              id: `att_${cacheKey}`,
+              messageId: userMsgId,
+              chatId: chatId || '',
+              base64: att.imageUrl,
+              mimeType: att.mimeType || 'image/jpeg',
+            }).catch(() => {}); // best-effort
+          }
+        }
+      }).catch(() => {});
+    }
+
     // Construct the User Message object
     const userMsg: Message = {
       id: userMsgId,
@@ -4623,7 +4642,20 @@ IMPORTANTE:
             abortControllerRef.current = null;
 
           } else {
-            // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
+            // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info.
+            // CRITICAL: If we're here without runInfo, the initial onSendMessage likely failed.
+            // Retry saving the user message so attachments aren't lost.
+            if (!runInfo && chatId && !chatId.startsWith('pending-') && userMsg.attachments?.length) {
+              try {
+                console.log("[handleSubmit] Legacy fallback: retrying user message save for attachment persistence");
+                const retryResult = await onSendMessage(userMsg);
+                if (retryResult?.run) {
+                  console.log("[handleSubmit] Legacy fallback: user message saved successfully on retry");
+                }
+              } catch (retryErr) {
+                console.warn("[handleSubmit] Legacy fallback: user message retry failed:", retryErr);
+              }
+            }
             // DATA_MODE: Robust detection using mimeType and file extension (reuse same logic)
             const isDocumentFileLegacy = (mimeType: string, fileName: string, type?: string): boolean => {
               const lowerMime = (mimeType || "").toLowerCase();

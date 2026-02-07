@@ -1,8 +1,15 @@
 import { Router } from "express";
+import express from "express";
 import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { sanitizeMessageContent } from "../lib/markdownSanitizer";
+
+// Higher body limit middleware for message creation endpoints.
+// The global limit is 1MB, but messages with attachment metadata can be larger.
+// Actual file data is uploaded separately via presigned URLs, so this only
+// covers JSON metadata (storagePath, fileId, etc.) — typically well under 5MB.
+const messageBodyLimit = express.json({ limit: '5mb' });
 
 export function createChatsRouter() {
   const router = Router();
@@ -414,7 +421,7 @@ export function createChatsRouter() {
     }
   });
 
-  router.post("/chats/:id/messages", async (req, res) => {
+  router.post("/chats/:id/messages", messageBodyLimit, async (req, res) => {
     try {
       const userId = getSecureUserId(req);
 
@@ -431,8 +438,23 @@ export function createChatsRouter() {
         return res.status(400).json({ error: "role and content are required" });
       }
 
-      // SAINITIZATION: Prevent XSS
+      // SANITIZATION: Prevent XSS
       const sanitizedContent = sanitizeMessageContent(content);
+
+      // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
+      // Strip any base64 imageUrl that might have leaked through client sanitization.
+      // Validate storagePaths. This is a safety net for data integrity.
+      const sanitizedAttachments = attachments && Array.isArray(attachments)
+        ? attachments.map((att: any) => {
+            const { imageUrl, ...rest } = att; // Always strip imageUrl (base64)
+            // Validate storagePath format
+            if (rest.storagePath && typeof rest.storagePath === 'string' && !rest.storagePath.startsWith('/objects/')) {
+              console.warn(`[Attachment] Invalid storagePath stripped: ${rest.storagePath}`);
+              delete rest.storagePath;
+            }
+            return rest;
+          }).filter((att: any) => att.name && att.type) // Must have at least name and type
+        : null;
 
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
@@ -460,7 +482,7 @@ export function createChatsRouter() {
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
-            attachments: attachments || null,
+            attachments: sanitizedAttachments,
             sources: sources || null,
             figmaDiagram: figmaDiagram || null,
             googleFormPreview: googleFormPreview || null,
@@ -494,7 +516,7 @@ export function createChatsRouter() {
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
-        attachments: attachments || null,
+        attachments: sanitizedAttachments,
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
         googleFormPreview: googleFormPreview || null,
