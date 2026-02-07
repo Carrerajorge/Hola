@@ -1256,28 +1256,37 @@ ${attachmentContext}`;
         console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
       }
 
-      // Persist the latest user message (best-effort). Without this, server-side memory is empty.
-      let persistedUserMessageId: string | null = null;
+      // Persist the latest user message (best-effort) ONLY when we don't have a claimed run.
+      // When a run is claimed, the user message already exists (created atomically with the run)
+      // and includes attachments. Creating another message here would drop attachments and create duplicates.
+      let persistedUserMessageId: string | null = claimedRun?.userMessageId || null;
       try {
         if (userMessageText && effectiveChatIdForPersistence) {
-          const userMsg = await storage.createChatMessage({
-            chatId: effectiveChatIdForPersistence,
-            role: 'user',
-            content: userMessageText,
-            status: 'done',
-            requestId,
-          });
-          persistedUserMessageId = userMsg.id;
+          if (!persistedUserMessageId) {
+            const userMsg = await storage.createChatMessage({
+              chatId: effectiveChatIdForPersistence,
+              role: 'user',
+              content: userMessageText,
+              status: 'done',
+              requestId,
+              attachments: attachments || null,
+            });
+            persistedUserMessageId = userMsg.id;
+          }
 
           // Also persist into Conversation State (separate store used by /api/memory/chats/:id/state)
-          // Best-effort + idempotent (per-request) to avoid UI retry loops duplicating messages.
+          // Use runId-based idempotency when available to prevent duplicates on stream retries.
+          const stateRequestId = claimedRun?.id
+            ? `run:${claimedRun.id}:state:user`
+            : `${requestId}:state:user`;
+
           await conversationStateService.appendMessage(
             effectiveChatIdForPersistence,
             'user',
             userMessageText,
             {
-              chatMessageId: userMsg.id,
-              requestId: `${requestId}:state:user`,
+              chatMessageId: persistedUserMessageId || undefined,
+              requestId: stateRequestId,
             }
           );
         }
@@ -1444,13 +1453,17 @@ ${attachmentContext}`;
 
           // Also persist assistant into Conversation State so /api/memory/chats/:id/state reflects reality.
           // Best-effort + idempotent.
+          const stateRequestId = claimedRun?.id
+            ? `run:${claimedRun.id}:state:assistant`
+            : `${requestId}:state:assistant`;
+
           await conversationStateService.appendMessage(
             effectiveChatIdForPersistence,
             'assistant',
             fullContent,
             {
               chatMessageId: assistantMessageId,
-              requestId: `${requestId}:state:assistant`,
+              requestId: stateRequestId,
               metadata: metadata || undefined,
             }
           );
