@@ -18,12 +18,50 @@ import * as XLSX from "xlsx";
 // Types
 // =============================================================================
 
+export type ArticleField =
+    | "authors"
+    | "title"
+    | "year"
+    | "publicationDate"
+    | "journal"
+    | "abstract"
+    | "keywords"
+    | "language"
+    | "documentType"
+    | "doi"
+    | "url"
+    | "volume"
+    | "issue"
+    | "pages"
+    | "city"
+    | "country";
+
+export type FieldProvenanceSource =
+    | "scopus"
+    | "wos"
+    | "openalex"
+    | "duckduckgo"
+    | "pubmed"
+    | "scielo"
+    | "redalyc"
+    | "crossref"
+    | "generated"
+    | "inferred"
+    | "unknown";
+
+export interface FieldProvenance {
+    source: FieldProvenanceSource;
+    confidence: number; // 0..1
+    note?: string;
+}
+
 export interface UnifiedArticle {
     id: string;
     source: "scopus" | "wos" | "openalex" | "duckduckgo" | "pubmed" | "scielo" | "redalyc";
     title: string;
     authors: string[];
     year: string;
+    publicationDate?: string;
     journal: string;
     abstract: string;
     keywords: string[];
@@ -36,8 +74,11 @@ export interface UnifiedArticle {
     documentType?: string;
     city?: string;
     country?: string;
+    institutionCountryCodes?: string[];
+    primaryInstitutionCountryCode?: string;
     citationCount?: number;
     apaCitation: string;
+    fieldProvenance?: Partial<Record<ArticleField, FieldProvenance>>;
 }
 
 export interface UnifiedSearchResult {
@@ -199,6 +240,7 @@ function convertCrossRefMetadataToUnified(meta: CrossRefMetadata, source: Unifie
         title: meta.title || "n.d.",
         authors: meta.authors || [],
         year,
+        publicationDate: meta.publicationDate || undefined,
         journal: meta.journal || "n.d.",
         abstract: meta.abstract || "",
         keywords: meta.keywords || [],
@@ -562,6 +604,7 @@ function convertOpenAlexToUnified(candidate: AcademicCandidate): UnifiedArticle 
         title: candidate.title || "n.d.",
         authors: candidate.authors || [],
         year,
+        publicationDate: candidate.publicationDate || undefined,
         journal: candidate.journal || "n.d.",
         abstract: candidate.abstract || "",
         keywords: candidate.keywords || [],
@@ -571,6 +614,8 @@ function convertOpenAlexToUnified(candidate: AcademicCandidate): UnifiedArticle 
         documentType: candidate.documentType || "Article",
         country: candidate.country || "Unknown",
         city: candidate.city || "Unknown",
+        institutionCountryCodes: candidate.institutionCountryCodes || [],
+        primaryInstitutionCountryCode: candidate.primaryInstitutionCountryCode,
         citationCount: candidate.citationCount || 0,
         apaCitation: generateOpenAlexAPA7Citation(candidate),
     };
@@ -653,9 +698,15 @@ function generateGenericAPA7Citation(article: UnifiedArticle): string {
         journalPart += `${journalPart ? "," : ""} ${article.pages}`;
     }
 
-    const doiPart = article.doi ? ` https://doi.org/${article.doi}` : "";
+    const cleanDoi = (article.doi || "").trim().replace(/^https?:\/\/doi\\.org\\//i, "");
+    const doiUrl = cleanDoi ? `https://doi.org/${cleanDoi}` : "";
+    const rawUrl = (article.url || "").trim();
+    const linkUrl = doiUrl || ((rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) ? rawUrl : "");
 
-    return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
+    const journalSegment = journalPart ? ` ${journalPart}.` : "";
+    const linkSegment = linkUrl ? ` ${linkUrl}` : "";
+
+    return `${authorsStr} ${year}. ${title}${journalSegment}${linkSegment}`.trim();
 }
 
 function generateScopusAPA7Citation(article: ScopusArticle): string {

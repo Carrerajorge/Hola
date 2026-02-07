@@ -15,6 +15,8 @@ describe("academicArticlesExport", () => {
     expect(plan.yearTo).toBe(2025);
     expect(plan.region.latam).toBe(true);
     expect(plan.region.spain).toBe(true);
+    expect(plan.geoStrict).toBe(true);
+    expect(plan.geoStrictMode).toBe("all");
     expect(plan.topicQuery.toLowerCase()).toContain("economía circular");
     expect(plan.sources).toEqual(["scopus", "openalex", "scielo", "redalyc"]);
     expect(plan.affilCountries || []).toContain("Spain");

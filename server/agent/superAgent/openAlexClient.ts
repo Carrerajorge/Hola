@@ -1,3 +1,5 @@
+import { persistentJsonCacheGet, persistentJsonCacheSet } from "../../lib/persistentJsonCache";
+
 export interface OpenAlexWork {
   id: string;
   doi: string;
@@ -38,6 +40,7 @@ export interface AcademicCandidate {
   doi: string;
   title: string;
   year: number;
+  publicationDate: string;
   journal: string;
   abstract: string;
   authors: string[];
@@ -48,6 +51,8 @@ export interface AcademicCandidate {
   affiliations: string[];
   city: string;
   country: string;
+  institutionCountryCodes: string[];
+  primaryInstitutionCountryCode?: string;
   landingUrl: string;
   doiUrl: string;
   verified: boolean;
@@ -56,6 +61,8 @@ export interface AcademicCandidate {
 }
 
 const OPENALEX_BASE = "https://api.openalex.org/works";
+const OPENALEX_MAILTO = (process.env.OPENALEX_MAILTO || process.env.ACADEMIC_MAILTO || "").trim();
+const BASE_USER_AGENT = (process.env.HTTP_USER_AGENT || "IliaGPT/1.0").trim();
 const RATE_LIMIT_MS = 100;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 500;
@@ -76,10 +83,14 @@ async function fetchWithRetry(url: string, retries: number = MAX_RETRIES): Promi
     try {
       await rateLimit();
 
+      const ua = OPENALEX_MAILTO && !/mailto:/i.test(BASE_USER_AGENT)
+        ? `${BASE_USER_AGENT} (mailto:${OPENALEX_MAILTO})`
+        : BASE_USER_AGENT;
+
       const response = await fetch(url, {
         headers: {
           "Accept": "application/json",
-          "User-Agent": "IliaGPT/1.0 (mailto:research@iliagpt.com)",
+          "User-Agent": ua,
         },
       });
 
@@ -256,6 +267,26 @@ function extractCityFromAffiliations(authorships: OpenAlexWork["authorships"]): 
   return "Unknown";
 }
 
+function extractInstitutionCountryCodes(authorships: OpenAlexWork["authorships"]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const auth of authorships || []) {
+    for (const inst of auth.institutions || []) {
+      const code = (inst.country_code || "").trim().toUpperCase();
+      if (!code) continue;
+      if (seen.has(code)) continue;
+      seen.add(code);
+      out.push(code);
+    }
+  }
+  return out;
+}
+
+function extractPrimaryInstitutionCountryCode(authorships: OpenAlexWork["authorships"]): string | undefined {
+  const code = (authorships?.[0]?.institutions?.[0]?.country_code || "").trim().toUpperCase();
+  return code || undefined;
+}
+
 function mapWorkToCandidate(work: OpenAlexWork): AcademicCandidate {
   const doi = work.doi?.replace("https://doi.org/", "") || "";
   const abstract = invertedIndexToText(work.abstract_inverted_index);
@@ -266,6 +297,7 @@ function mapWorkToCandidate(work: OpenAlexWork): AcademicCandidate {
     doi,
     title: work.title || "",
     year: work.publication_year || 0,
+    publicationDate: work.publication_date || "",
     journal: work.primary_location?.source?.display_name || "Unknown",
     abstract,
     authors: work.authorships.map(a => a.author.display_name).filter(Boolean),
@@ -276,6 +308,8 @@ function mapWorkToCandidate(work: OpenAlexWork): AcademicCandidate {
     affiliations: work.authorships.flatMap(a => a.institutions.map(i => i.display_name)).filter(Boolean),
     city: extractCityFromAffiliations(work.authorships),
     country: extractCountryFromAffiliations(work.authorships),
+    institutionCountryCodes: extractInstitutionCountryCodes(work.authorships),
+    primaryInstitutionCountryCode: extractPrimaryInstitutionCountryCode(work.authorships),
     landingUrl: work.primary_location?.landing_page_url || work.open_access?.oa_url || "",
     doiUrl: doi ? `https://doi.org/${doi}` : "",
     verified: false,
@@ -339,6 +373,7 @@ export async function searchOpenAlex(
           "open_access",
         ].join(","),
       });
+      if (OPENALEX_MAILTO) params.set("mailto", OPENALEX_MAILTO);
 
       const url = `${OPENALEX_BASE}?${params}`;
       const response = await fetchWithRetry(url);
@@ -376,15 +411,22 @@ export async function lookupOpenAlexWorkByDoi(doi: string): Promise<AcademicCand
   const cleanDoi = (doi || "").replace(/^https?:\/\/doi\.org\//i, "").trim();
   if (!cleanDoi) return null;
 
-  const url = `${OPENALEX_BASE}/doi:${encodeURIComponent(cleanDoi)}`;
-  const response = await fetchWithRetry(url);
+  const cacheKey = cleanDoi.toLowerCase();
+  const cached = await persistentJsonCacheGet<AcademicCandidate>("openalex.workByDoi", cacheKey);
+  if (cached) return cached;
+
+  const u = new URL(`${OPENALEX_BASE}/doi:${encodeURIComponent(cleanDoi)}`);
+  if (OPENALEX_MAILTO) u.searchParams.set("mailto", OPENALEX_MAILTO);
+  const response = await fetchWithRetry(u.toString());
 
   if (!response || !response.ok) return null;
 
   try {
     const data = await response.json();
     if (!data?.id) return null;
-    return mapWorkToCandidate(data as OpenAlexWork);
+    const candidate = mapWorkToCandidate(data as OpenAlexWork);
+    await persistentJsonCacheSet("openalex.workByDoi", cacheKey, candidate, 1000 * 60 * 60 * 24 * 30);
+    return candidate;
   } catch {
     return null;
   }

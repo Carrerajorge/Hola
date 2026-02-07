@@ -1,17 +1,25 @@
 import {
   unifiedArticleSearch,
   type UnifiedArticle,
+  type ArticleField,
+  type FieldProvenance,
+  type FieldProvenanceSource,
   type SearchOptions as UnifiedSearchOptions,
 } from "../agent/superAgent/unifiedArticleSearch";
 import { searchCrossRef, verifyDOI, type VerifyDOIResult } from "../agent/superAgent/crossrefClient";
 import { lookupOpenAlexWorkByDoi, type AcademicCandidate } from "../agent/superAgent/openAlexClient";
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
+import { persistentJsonCacheGet, persistentJsonCacheSet } from "../lib/persistentJsonCache";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export type AcademicRegion = {
   latam: boolean;
   spain: boolean;
 };
+
+export type AcademicGeoStrictMode = "all" | "primary";
 
 export interface AcademicArticlesExportPlan {
   topicQuery: string;
@@ -19,9 +27,26 @@ export interface AcademicArticlesExportPlan {
   yearFrom?: number;
   yearTo?: number;
   region: AcademicRegion;
+  geoStrict?: boolean;
+  geoStrictMode?: AcademicGeoStrictMode;
   // Scopus-only filter: affiliation countries list
   affilCountries?: string[];
   sources: NonNullable<UnifiedSearchOptions["sources"]>;
+}
+
+export interface AcademicArticlesExportDebug {
+  queryVariants: string[];
+  candidateCounts: {
+    total: number;
+    deduped: number;
+    regionFiltered: number;
+    enrichPool: number;
+    enrichedDeduped: number;
+    enrichedRegionFiltered: number;
+    final: number;
+  };
+  errors: string[];
+  jsonReportPath?: string;
 }
 
 export interface AcademicArticlesExportResult {
@@ -29,6 +54,7 @@ export interface AcademicArticlesExportResult {
   articles: UnifiedArticle[];
   excelBuffer: Buffer;
   wordBuffer: Buffer;
+  debug?: AcademicArticlesExportDebug;
   stats: {
     totalReturned: number;
     totalRequested: number;
@@ -64,11 +90,64 @@ const LATAM_COUNTRIES_EN = [
   "Venezuela",
 ];
 
+const ISO2_BY_COUNTRY_EN: Record<string, string> = {
+  argentina: "AR",
+  bolivia: "BO",
+  brazil: "BR",
+  chile: "CL",
+  colombia: "CO",
+  "costa rica": "CR",
+  cuba: "CU",
+  "dominican republic": "DO",
+  ecuador: "EC",
+  "el salvador": "SV",
+  guatemala: "GT",
+  honduras: "HN",
+  mexico: "MX",
+  nicaragua: "NI",
+  panama: "PA",
+  paraguay: "PY",
+  peru: "PE",
+  "puerto rico": "PR",
+  uruguay: "UY",
+  venezuela: "VE",
+  spain: "ES",
+};
+
+function affilCountriesToIso2Codes(affilCountries: string[] | undefined): string[] | undefined {
+  if (!affilCountries || affilCountries.length === 0) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of affilCountries) {
+    const key = (c || "").trim().toLowerCase();
+    const code = ISO2_BY_COUNTRY_EN[key];
+    if (!code) continue;
+    if (seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function detectRegion(prompt: string): AcademicRegion {
   const p = prompt.toLowerCase();
   const latam = /\b(latinoam[eé]rica|america\s+latina|am[eé]rica\s+latina|latam)\b/i.test(p);
   const spain = /\b(espa[ñn]a)\b/i.test(p);
   return { latam, spain };
+}
+
+function detectGeoStrict(prompt: string): { geoStrict: boolean; geoStrictMode?: AcademicGeoStrictMode } {
+  const p = prompt.toLowerCase();
+
+  // "primer autor", "autor principal", etc.
+  const primary = /\b(primer\s+autor|autor\s+principal|first\s+author|primary\s+author)\b/i.test(p);
+  if (primary) return { geoStrict: true, geoStrictMode: "primary" };
+
+  // "solo", "exclusivamente", "estricto"
+  const strict = /\b(solo|s[óo]lo|[uú]nicamente|unicamente|exclusivamente|estricto|estrictamente)\b/i.test(p);
+  if (strict) return { geoStrict: true, geoStrictMode: "all" };
+
+  return { geoStrict: false };
 }
 
 function extractCount(prompt: string): number {
@@ -151,6 +230,7 @@ function buildAffilCountries(region: AcademicRegion): string[] | undefined {
 
 export function planAcademicArticlesExport(prompt: string): AcademicArticlesExportPlan {
   const region = detectRegion(prompt);
+  const geo = detectGeoStrict(prompt);
   const requestedCount = extractCount(prompt);
   const { yearFrom, yearTo } = extractYearRange(prompt);
   const topicQuery = extractTopicQuery(prompt);
@@ -183,12 +263,19 @@ export function planAcademicArticlesExport(prompt: string): AcademicArticlesExpo
     yearFrom,
     yearTo,
     region,
+    geoStrict: geo.geoStrict,
+    geoStrictMode: geo.geoStrictMode,
     affilCountries: buildAffilCountries(region),
     sources,
   };
 }
 
-function isAllowedByRegion(article: UnifiedArticle, plan: AcademicArticlesExportPlan, allowedCountries: Set<string> | null): boolean {
+function isAllowedByRegion(
+  article: UnifiedArticle,
+  plan: AcademicArticlesExportPlan,
+  allowedCountries: Set<string> | null,
+  allowedCountryCodes: Set<string> | null,
+): boolean {
   if (!allowedCountries) return true;
 
   const country = (article.country || "").trim();
@@ -199,8 +286,37 @@ function isAllowedByRegion(article: UnifiedArticle, plan: AcademicArticlesExport
     return normalized.length > 0 && allowedCountries.has(normalized);
   }
 
-  // OpenAlex: if we asked OpenAlex with a country filter, we can trust it even if our country extraction fails.
+  // OpenAlex: apply strict geo logic when requested. Query-time filter only guarantees "some" institution in-region.
   if (article.source === "openalex") {
+    const codes = (article.institutionCountryCodes || [])
+      .map((c) => (c || "").trim().toUpperCase())
+      .filter(Boolean);
+    const primary = (article.primaryInstitutionCountryCode || "").trim().toUpperCase();
+
+    if (plan.geoStrict) {
+      if (plan.geoStrictMode === "primary") {
+        if (primary && allowedCountryCodes?.has(primary)) return true;
+        // Fallback to extracted country string if we couldn't extract a code.
+        return normalized.length > 0 && normalized !== "unknown" && normalized !== "n.d."
+          ? allowedCountries.has(normalized)
+          : false;
+      }
+
+      // "all": discard works that have any institution outside the allowed set.
+      if (codes.length > 0 && allowedCountryCodes) {
+        for (const c of codes) {
+          if (!allowedCountryCodes.has(c)) return false;
+        }
+        return true;
+      }
+
+      // Strict but no codes: require an explicit country match.
+      return normalized.length > 0 && normalized !== "unknown" && normalized !== "n.d."
+        ? allowedCountries.has(normalized)
+        : false;
+    }
+
+    // Non-strict: trust query-time filter if we asked OpenAlex with a country filter.
     if (normalized.length > 0 && normalized !== "unknown" && normalized !== "n.d.") {
       return allowedCountries.has(normalized);
     }
@@ -208,13 +324,13 @@ function isAllowedByRegion(article: UnifiedArticle, plan: AcademicArticlesExport
   }
 
   // SciELO / Redalyc: many records don't expose a clean country. Treat "LatAm" as allowed only if requested.
-  if (normalized === "latam") return plan.region.latam;
+  if (normalized === "latam") return plan.region.latam && !plan.geoStrict;
 
   // If we have a real country, enforce it.
   if (normalized.length > 0 && normalized !== "n.d.") return allowedCountries.has(normalized);
 
   // Unknown country: allow only for LatAm requests and only for region-focused sources.
-  if (article.source === "scielo" || article.source === "redalyc") return plan.region.latam;
+  if (!plan.geoStrict && (article.source === "scielo" || article.source === "redalyc")) return plan.region.latam;
 
   // Otherwise drop to avoid leaking global content into a strict region filter.
   return false;
@@ -281,13 +397,15 @@ function buildApaCitationRuns(article: UnifiedArticle): TextRun[] {
 
   const doi = normalizeWhitespace(article.doi || "");
   const doiUrl = doi ? `https://doi.org/${doi}` : "";
+  const rawUrl = normalizeWhitespace(article.url || "");
+  const linkUrl = doiUrl || (/^https?:\/\//i.test(rawUrl) ? rawUrl : "");
 
   const runs: TextRun[] = [
     new TextRun({ text: `${authors} (${year}). ${title} `, font: APA_FONT, size: APA_SIZE }),
   ];
 
   if (!journal) {
-    if (doiUrl) runs.push(new TextRun({ text: doiUrl, font: APA_FONT, size: APA_SIZE }));
+    if (linkUrl) runs.push(new TextRun({ text: linkUrl, font: APA_FONT, size: APA_SIZE }));
     return runs;
   }
 
@@ -307,7 +425,7 @@ function buildApaCitationRuns(article: UnifiedArticle): TextRun[] {
     runs.push(new TextRun({ text: ".", font: APA_FONT, size: APA_SIZE }));
   }
 
-  if (doiUrl) runs.push(new TextRun({ text: ` ${doiUrl}`, font: APA_FONT, size: APA_SIZE }));
+  if (linkUrl) runs.push(new TextRun({ text: ` ${linkUrl}`, font: APA_FONT, size: APA_SIZE }));
 
   return runs;
 }
@@ -392,7 +510,14 @@ function normalizeLanguageLabel(lang: string | undefined): string {
   return map[lower] || l;
 }
 
-async function generateAcademicArticlesExcel(articles: UnifiedArticle[]): Promise<Buffer> {
+async function generateAcademicArticlesExcel(
+  articles: UnifiedArticle[],
+  options?: {
+    plan?: AcademicArticlesExportPlan;
+    stats?: AcademicArticlesExportResult["stats"];
+    debug?: AcademicArticlesExportDebug;
+  }
+): Promise<Buffer> {
   // Columns: Authors Title Year Journal Abstract Keywords Language Document Type DOI City of publication Country of study Scopus
   const sorted = [...articles].sort((a, b) => {
     const aKey = (a.authors?.[0] || "").toLowerCase();
@@ -464,12 +589,158 @@ async function generateAcademicArticlesExcel(articles: UnifiedArticle[]): Promis
     to: `${lastColLetter}1`,
   };
 
+  // ---------------------------------------------------------------------------
+  // Diagnostics sheet (coverage/errors/query variants/etc.)
+  // ---------------------------------------------------------------------------
+  const diag = workbook.addWorksheet("Diagnostics", {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  diag.columns = [
+    { header: "Category", key: "category", width: 18 },
+    { header: "Key", key: "key", width: 26 },
+    { header: "Value", key: "value", width: 120 },
+    { header: "Notes", key: "notes", width: 50 },
+  ];
+
+  const diagHeader = diag.getRow(1);
+  diagHeader.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  diagHeader.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B3D2E" } };
+  diagHeader.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  diagHeader.height = 20;
+
+  const addDiag = (category: string, key: string, value: string, notes?: string) => {
+    diag.addRow({ category, key, value, notes: notes || "" });
+  };
+
+  const plan = options?.plan;
+  const stats = options?.stats;
+  const debug = options?.debug;
+
+  if (plan) {
+    addDiag("plan", "topic", plan.topicQuery || "n.d.");
+    addDiag("plan", "requestedCount", String(plan.requestedCount));
+    addDiag("plan", "yearRange", plan.yearFrom && plan.yearTo ? `${plan.yearFrom}-${plan.yearTo}` : "n.d.");
+    addDiag("plan", "region", [
+      plan.region.latam ? "LatAm" : null,
+      plan.region.spain ? "Spain" : null,
+    ].filter(Boolean).join(" + ") || "n.d.");
+    addDiag("plan", "geoStrict", plan.geoStrict ? "true" : "false", plan.geoStrict ? (plan.geoStrictMode || "all") : "");
+    addDiag("plan", "sources", (plan.sources || []).join(", ") || "n.d.");
+  }
+
+  if (stats) {
+    addDiag("result", "returned", `${stats.totalReturned}/${stats.totalRequested}`);
+    const sourcesLine = Object.entries(stats.bySource || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k}:${v}`)
+      .join(", ");
+    addDiag("result", "bySource", sourcesLine || "n.d.");
+
+    const cov = stats.coverage;
+    if (cov) {
+      for (const field of Object.keys(cov) as Array<keyof typeof cov>) {
+        const c = cov[field];
+        const total = c.present + c.missing;
+        const pct = total ? Math.round((c.present / total) * 100) : 0;
+        addDiag("coverage", String(field), `${c.present}/${total}`, `${pct}%`);
+      }
+    }
+
+    for (const n of stats.notes || []) addDiag("notes", "", n);
+  }
+
+  if (debug) {
+    for (const q of debug.queryVariants || []) addDiag("queries", "", q);
+    addDiag(
+      "counts",
+      "pool",
+      `total=${debug.candidateCounts.total}; deduped=${debug.candidateCounts.deduped}; region=${debug.candidateCounts.regionFiltered}`,
+      `enrichPool=${debug.candidateCounts.enrichPool}; enrichedDeduped=${debug.candidateCounts.enrichedDeduped}; enrichedRegion=${debug.candidateCounts.enrichedRegionFiltered}; final=${debug.candidateCounts.final}`
+    );
+    if (debug.jsonReportPath) addDiag("result", "jsonReportPath", debug.jsonReportPath);
+    for (const e of debug.errors || []) addDiag("errors", "", e);
+  }
+
+  // Wrap text
+  for (let rowIdx = 2; rowIdx <= diag.rowCount; rowIdx++) {
+    const row = diag.getRow(rowIdx);
+    row.alignment = { vertical: "top", wrapText: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Provenance sheet (who filled which fields)
+  // ---------------------------------------------------------------------------
+  const prov = workbook.addWorksheet("Provenance", {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  prov.columns = [
+    { header: "DOI", key: "doi", width: 28 },
+    { header: "Title", key: "title", width: 60 },
+    { header: "Field", key: "field", width: 18 },
+    { header: "Value", key: "value", width: 70 },
+    { header: "Source", key: "source", width: 14 },
+    { header: "Confidence", key: "confidence", width: 12 },
+    { header: "Note", key: "note", width: 40 },
+  ];
+
+  const provHeader = prov.getRow(1);
+  provHeader.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  provHeader.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A365D" } };
+  provHeader.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  provHeader.height = 20;
+
+  const fieldValue = (a: UnifiedArticle, f: ArticleField): string => {
+    switch (f) {
+      case "authors": return (a.authors || []).join(", ");
+      case "keywords": return (a.keywords || []).join(", ");
+      case "abstract": return (a.abstract || "").slice(0, 500);
+      case "publicationDate": return a.publicationDate || "";
+      case "title": return a.title || "";
+      case "year": return a.year || "";
+      case "journal": return a.journal || "";
+      case "language": return a.language || "";
+      case "documentType": return a.documentType || "";
+      case "doi": return a.doi || "";
+      case "url": return a.url || "";
+      case "volume": return a.volume || "";
+      case "issue": return a.issue || "";
+      case "pages": return a.pages || "";
+      case "city": return a.city || "";
+      case "country": return a.country || "";
+      default: return "";
+    }
+  };
+
+  for (const a of sorted) {
+    const fp = a.fieldProvenance || {};
+    for (const [field, provInfo] of Object.entries(fp) as Array<[ArticleField, FieldProvenance]>) {
+      prov.addRow({
+        doi: a.doi || "",
+        title: a.title || "",
+        field,
+        value: fieldValue(a, field),
+        source: provInfo.source,
+        confidence: typeof provInfo.confidence === "number" ? provInfo.confidence.toFixed(2) : "",
+        note: provInfo.note || "",
+      });
+    }
+  }
+
+  for (let rowIdx = 2; rowIdx <= prov.rowCount; rowIdx++) {
+    const row = prov.getRow(rowIdx);
+    row.alignment = { vertical: "top", wrapText: true };
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<AcademicArticlesExportResult> {
   const plan = planAcademicArticlesExport(prompt);
   const allowedCountries = plan.affilCountries ? new Set(plan.affilCountries.map(normalizeCountry)) : null;
+  const allowedCountryCodesArr = affilCountriesToIso2Codes(plan.affilCountries);
+  const allowedCountryCodes = allowedCountryCodesArr ? new Set(allowedCountryCodesArr.map((c) => c.toUpperCase())) : null;
 
   const notes: string[] = [];
 
@@ -496,6 +767,8 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
 
   const internalMaxResults = Math.min(1200, Math.max(400, plan.requestedCount * 8));
   const internalMaxPerSource = Math.min(800, Math.max(120, plan.requestedCount * 4));
+  const dateFrom = Number.isFinite(plan.yearFrom as number) ? new Date(Date.UTC(plan.yearFrom as number, 0, 1, 0, 0, 0)) : null;
+  const dateTo = Number.isFinite(plan.yearTo as number) ? new Date(Date.UTC(plan.yearTo as number, 11, 31, 23, 59, 59)) : null;
 
   function normalizeTextKey(text: string): string {
     return (text || "")
@@ -527,11 +800,104 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     return !v || v === "n.d." || v === "unknown" || v === "latam";
   }
 
+  function parsePublicationDate(value: string | undefined): Date | null {
+    const v = (value || "").trim();
+    if (!v) return null;
+    // Accept YYYY or YYYY-MM or YYYY-MM-DD
+    const m = v.match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/);
+    if (!m) return null;
+    const y = parseInt(m[1], 10);
+    const mo = m[2] ? parseInt(m[2], 10) : 1;
+    const d = m[3] ? parseInt(m[3], 10) : 1;
+    if (!Number.isFinite(y)) return null;
+    return new Date(Date.UTC(y, Math.max(0, Math.min(11, mo - 1)), Math.max(1, Math.min(31, d)), 0, 0, 0));
+  }
+
+  function isAllowedByDateRange(article: UnifiedArticle): boolean {
+    if (!dateFrom && !dateTo) return true;
+
+    const pd = parsePublicationDate(article.publicationDate);
+    if (pd) {
+      if (dateFrom && pd < dateFrom) return false;
+      if (dateTo && pd > dateTo) return false;
+      return true;
+    }
+
+    const y = parseInt((article.year || "").trim(), 10);
+    if (Number.isFinite(y)) {
+      if (plan.yearFrom && y < plan.yearFrom) return false;
+      if (plan.yearTo && y > plan.yearTo) return false;
+    }
+    return true;
+  }
+
   function hasMeaningfulAbstract(value: string | undefined): boolean {
     const v = (value || "").trim();
     if (!v) return false;
     if (v.toLowerCase() === "n.d.") return false;
     return v.length >= 60;
+  }
+
+  const baseSourceConfidence: Record<FieldProvenanceSource, number> = {
+    scopus: 0.95,
+    wos: 0.9,
+    openalex: 0.85,
+    scielo: 0.8,
+    redalyc: 0.78,
+    duckduckgo: 0.65,
+    pubmed: 0.8,
+    crossref: 0.92,
+    generated: 0.3,
+    inferred: 0.55,
+    unknown: 0.1,
+  };
+
+  function ensureProvenance(article: UnifiedArticle): NonNullable<UnifiedArticle["fieldProvenance"]> {
+    if (!article.fieldProvenance) article.fieldProvenance = {};
+    return article.fieldProvenance!;
+  }
+
+  function setProv(
+    article: UnifiedArticle,
+    field: ArticleField,
+    source: FieldProvenanceSource,
+    confidence: number,
+    note?: string
+  ): void {
+    const fp = ensureProvenance(article);
+    fp[field] = { source, confidence: Math.max(0, Math.min(1, confidence)), note };
+  }
+
+  function initProvenanceFromSource(article: UnifiedArticle): UnifiedArticle {
+    const out: UnifiedArticle = { ...article };
+    const fp = ensureProvenance(out);
+    const source = (out.source || "unknown") as FieldProvenanceSource;
+    const conf = baseSourceConfidence[source] ?? 0.7;
+
+    const setIfPresent = (field: ArticleField, present: boolean, note?: string) => {
+      if (!present) return;
+      if (fp[field]) return;
+      fp[field] = { source, confidence: conf, note };
+    };
+
+    setIfPresent("title", !isMissingScalar(out.title));
+    setIfPresent("authors", (out.authors || []).length > 0);
+    setIfPresent("year", !isMissingScalar(out.year));
+    setIfPresent("publicationDate", !isMissingScalar(out.publicationDate));
+    setIfPresent("journal", !isMissingScalar(out.journal));
+    setIfPresent("abstract", hasMeaningfulAbstract(out.abstract));
+    setIfPresent("keywords", (out.keywords || []).length > 0);
+    setIfPresent("language", !isMissingScalar(out.language));
+    setIfPresent("documentType", !isMissingScalar(out.documentType));
+    setIfPresent("doi", !!normalizeDoi(out.doi));
+    setIfPresent("url", !isMissingScalar(out.url));
+    setIfPresent("volume", !isMissingScalar(out.volume));
+    setIfPresent("issue", !isMissingScalar(out.issue));
+    setIfPresent("pages", !isMissingScalar(out.pages));
+    setIfPresent("city", !isMissingScalar(out.city));
+    setIfPresent("country", !isMissingScalar(out.country));
+
+    return out;
   }
 
   function completenessScore(a: UnifiedArticle): number {
@@ -667,6 +1033,78 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     return out;
   }
 
+  const KEYWORD_STOPWORDS = new Set<string>([
+    // English
+    "a", "an", "the", "and", "or", "of", "in", "on", "for", "with", "to", "from", "by", "at",
+    "is", "are", "was", "were", "be", "been", "being", "as", "it", "its", "into", "this", "that",
+    "these", "those", "we", "our", "their", "they", "them",
+    // Spanish
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "de", "del", "al", "en",
+    "para", "por", "con", "sin", "sobre", "entre", "desde", "hacia", "que", "se", "su", "sus",
+    "es", "son", "fue", "fueron", "ser", "como", "más", "mas",
+    // Portuguese
+    "o", "a", "os", "as", "um", "uma", "uns", "umas", "e", "ou", "de", "do", "da", "dos", "das",
+    "em", "para", "por", "com", "sem", "sobre", "entre", "desde", "que", "se", "sua", "suas",
+    // Generic academic glue
+    "study", "studies", "analysis", "results", "method", "methods", "approach",
+    "articulo", "articulos", "artículo", "artículos", "estudio", "estudios",
+  ]);
+
+  function generateKeywordsFallback(title: string, abstract: string, maxKeywords: number = 10): string[] {
+    const text = normalizeTextKey(`${title || ""} ${abstract || ""}`);
+    const tokens = text
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .filter((t) => t.length >= 3)
+      .filter((t) => !KEYWORD_STOPWORDS.has(t))
+      .filter((t) => !/^\d+$/.test(t));
+
+    if (tokens.length === 0) return [];
+
+    const uni = new Map<string, number>();
+    const bi = new Map<string, number>();
+
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      uni.set(t, (uni.get(t) || 0) + 1);
+      if (i < tokens.length - 1) {
+        const b = `${tokens[i]} ${tokens[i + 1]}`;
+        bi.set(b, (bi.get(b) || 0) + 1);
+      }
+    }
+
+    const pick: string[] = [];
+    const seen = new Set<string>();
+
+    const bigrams = Array.from(bi.entries())
+      .filter(([_, c]) => c >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k]) => k);
+
+    for (const k of bigrams) {
+      if (pick.length >= Math.ceil(maxKeywords / 2)) break;
+      const key = k.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pick.push(k);
+    }
+
+    const unigrams = Array.from(uni.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([k]) => k);
+
+    for (const k of unigrams) {
+      if (pick.length >= maxKeywords) break;
+      const key = k.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pick.push(k);
+    }
+
+    return pick;
+  }
+
   function mergeAuthors(primary: string[], secondary: string[] | undefined): string[] {
     if (primary && primary.length > 0) return primary;
     return (secondary || []).filter(Boolean);
@@ -683,6 +1121,11 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     const cached = titleDoiCache.get(key);
     if (cached) return await cached;
 
+    const persisted = await persistentJsonCacheGet<{ doi: string | null; score?: number }>("academic.titleToDoi", key);
+    if (persisted) return persisted.doi || undefined;
+
+    const looksLikeDoi = (d: string): boolean => /^10\.\d{4,9}\/\S+$/i.test((d || "").trim());
+
     const p = (async () => {
       const candidates = await searchCrossRef(title, {
         yearStart: plan.yearFrom,
@@ -693,12 +1136,35 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
       let best: { doi: string; score: number } | null = null;
       for (const c of candidates) {
         if (!c.doi) continue;
-        const s = titleSimilarity(title, c.title);
+        const doi = normalizeDoi(c.doi);
+        if (!doi || !looksLikeDoi(doi)) continue;
+
+        const sim = titleSimilarity(title, c.title);
+        if (sim <= 0) continue;
+
+        let s = sim;
+        const y = Number.isFinite(c.year as any) ? (c.year as any as number) : 0;
+        if (plan.yearFrom && plan.yearTo && y) {
+          if (y < plan.yearFrom || y > plan.yearTo) s *= 0.6;
+          else s = s * 0.85 + 0.15;
+        }
+
         if (!best || s > best.score) best = { doi: c.doi, score: s };
       }
 
-      if (!best || best.score < 0.45) return undefined;
-      return normalizeDoi(best.doi);
+      if (!best || best.score < 0.55) {
+        await persistentJsonCacheSet("academic.titleToDoi", key, { doi: null }, 1000 * 60 * 60 * 24 * 2);
+        return undefined;
+      }
+
+      const resolved = normalizeDoi(best.doi);
+      if (!resolved) {
+        await persistentJsonCacheSet("academic.titleToDoi", key, { doi: null }, 1000 * 60 * 60 * 24 * 2);
+        return undefined;
+      }
+
+      await persistentJsonCacheSet("academic.titleToDoi", key, { doi: resolved, score: best.score }, 1000 * 60 * 60 * 24 * 60);
+      return resolved;
     })();
 
     titleDoiCache.set(key, p);
@@ -731,6 +1197,7 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
 
   async function enrichOne(article: UnifiedArticle): Promise<UnifiedArticle> {
     const out: UnifiedArticle = { ...article };
+    ensureProvenance(out);
 
     // Step 1: DOI resolution (if missing)
     const currentDoi = normalizeDoi(out.doi);
@@ -739,6 +1206,8 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
       if (resolved) {
         out.doi = resolved;
         if (!out.url) out.url = `https://doi.org/${resolved}`;
+        setProv(out, "doi", "crossref", 0.75, "resolved from title");
+        if (out.url) setProv(out, "url", "crossref", 0.7, "doi url");
       }
     } else {
       out.doi = currentDoi;
@@ -751,50 +1220,151 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     const [cr, oa] = await Promise.all([getCrossref(doi), getOpenAlex(doi)]);
 
     // Authors
-    out.authors = mergeAuthors(out.authors || [], cr?.authors || oa?.authors);
+    if (!out.authors || out.authors.length === 0) {
+      if (cr?.authors && cr.authors.length > 0) {
+        out.authors = cr.authors;
+        setProv(out, "authors", "crossref", 0.92);
+      } else if (oa?.authors && oa.authors.length > 0) {
+        out.authors = oa.authors;
+        setProv(out, "authors", "openalex", 0.85);
+      }
+    }
 
     // Year
-    if (isMissingScalar(out.year) && cr?.year) out.year = String(cr.year);
-    if (isMissingScalar(out.year) && oa?.year) out.year = String(oa.year);
+    if (isMissingScalar(out.year) && cr?.year) {
+      out.year = String(cr.year);
+      setProv(out, "year", "crossref", 0.92);
+    }
+    if (isMissingScalar(out.year) && oa?.year) {
+      out.year = String(oa.year);
+      setProv(out, "year", "openalex", 0.85);
+    }
+
+    // Publication date (prefer OpenAlex publication_date for early-access handling)
+    if (isMissingScalar(out.publicationDate) && oa?.publicationDate) {
+      out.publicationDate = oa.publicationDate;
+      setProv(out, "publicationDate", "openalex", 0.85);
+    }
+    if (isMissingScalar(out.publicationDate) && cr?.publicationDate) {
+      out.publicationDate = cr.publicationDate;
+      setProv(out, "publicationDate", "crossref", 0.9);
+    }
 
     // Journal
-    if (isMissingScalar(out.journal) && oa?.journal) out.journal = oa.journal;
-    if (isMissingScalar(out.journal) && cr?.journal) out.journal = cr.journal;
+    if (isMissingScalar(out.journal) && oa?.journal) {
+      out.journal = oa.journal;
+      setProv(out, "journal", "openalex", 0.85);
+    }
+    if (isMissingScalar(out.journal) && cr?.journal) {
+      out.journal = cr.journal;
+      setProv(out, "journal", "crossref", 0.92);
+    }
 
     // Volume/issue/pages (Crossref is best)
-    if (isMissingScalar(out.volume) && cr?.volume) out.volume = cr.volume;
-    if (isMissingScalar(out.issue) && cr?.issue) out.issue = cr.issue;
-    if (isMissingScalar(out.pages) && cr?.pages) out.pages = cr.pages;
+    if (isMissingScalar(out.volume) && cr?.volume) {
+      out.volume = cr.volume;
+      setProv(out, "volume", "crossref", 0.9);
+    }
+    if (isMissingScalar(out.issue) && cr?.issue) {
+      out.issue = cr.issue;
+      setProv(out, "issue", "crossref", 0.9);
+    }
+    if (isMissingScalar(out.pages) && cr?.pages) {
+      out.pages = cr.pages;
+      setProv(out, "pages", "crossref", 0.85);
+    }
 
     // Abstract
-    if (!hasMeaningfulAbstract(out.abstract) && oa?.abstract) out.abstract = oa.abstract;
-    if (!hasMeaningfulAbstract(out.abstract) && cr?.abstract) out.abstract = cr.abstract;
+    if (!hasMeaningfulAbstract(out.abstract) && oa?.abstract) {
+      out.abstract = oa.abstract;
+      setProv(out, "abstract", "openalex", 0.82);
+    }
+    if (!hasMeaningfulAbstract(out.abstract) && cr?.abstract) {
+      out.abstract = cr.abstract;
+      setProv(out, "abstract", "crossref", 0.85);
+    }
 
     // Keywords
+    const hadKeywords = (out.keywords || []).length > 0;
+    const mergedKeywords = hadKeywords
+      ? mergeKeywords(out.keywords, oa?.keywords, cr?.keywords)
+      : mergeKeywords(oa?.keywords, cr?.keywords);
+    out.keywords = mergedKeywords;
+
+    if (!hadKeywords && mergedKeywords.length > 0) {
+      if ((oa?.keywords || []).length > 0 && (cr?.keywords || []).length > 0) {
+        setProv(out, "keywords", "inferred", 0.65, "merged openalex + crossref");
+      } else if ((oa?.keywords || []).length > 0) {
+        setProv(out, "keywords", "openalex", 0.75);
+      } else if ((cr?.keywords || []).length > 0) {
+        setProv(out, "keywords", "crossref", 0.78);
+      }
+    }
+
     if ((out.keywords || []).length === 0) {
-      out.keywords = mergeKeywords(oa?.keywords, cr?.keywords);
-    } else {
-      out.keywords = mergeKeywords(out.keywords, oa?.keywords, cr?.keywords);
+      const generated = generateKeywordsFallback(out.title, out.abstract, 10);
+      if (generated.length > 0) {
+        out.keywords = generated;
+        setProv(out, "keywords", "generated", 0.3, "extracted from title/abstract");
+      }
     }
     if ((out.keywords || []).length > 15) out.keywords = (out.keywords || []).slice(0, 15);
 
     // Language
-    if (isMissingScalar(out.language) && oa?.language) out.language = oa.language;
-    if (isMissingScalar(out.language) && cr?.url) {
-      // Crossref doesn't always provide a clean language code; keep current if unknown.
+    if (isMissingScalar(out.language) && oa?.language) {
+      out.language = oa.language;
+      setProv(out, "language", "openalex", 0.8);
+    }
+    if (isMissingScalar(out.language) && cr?.language) {
+      out.language = cr.language;
+      setProv(out, "language", "crossref", 0.82);
     }
 
     // Document type
-    if (isMissingScalar(out.documentType) && oa?.documentType) out.documentType = oa.documentType;
+    if (isMissingScalar(out.documentType) && oa?.documentType) {
+      out.documentType = oa.documentType;
+      setProv(out, "documentType", "openalex", 0.75);
+    }
+    if (isMissingScalar(out.documentType) && cr?.documentType) {
+      out.documentType = cr.documentType;
+      setProv(out, "documentType", "crossref", 0.78);
+    }
 
     // City / Country
-    if (isMissingScalar(out.country) && oa?.country) out.country = oa.country;
-    if (isMissingScalar(out.country) && cr?.country) out.country = cr.country;
-    if (isMissingScalar(out.city) && oa?.city) out.city = oa.city;
-    if (isMissingScalar(out.city) && cr?.city) out.city = cr.city;
+    if (isMissingScalar(out.country) && oa?.country) {
+      out.country = oa.country;
+      setProv(out, "country", "openalex", 0.7, "from affiliations");
+    }
+    if (isMissingScalar(out.country) && cr?.country) {
+      out.country = cr.country;
+      setProv(out, "country", "crossref", 0.75, "from affiliations");
+    }
+    if (isMissingScalar(out.city) && oa?.city) {
+      out.city = oa.city;
+      setProv(out, "city", "openalex", 0.65, "from affiliations");
+    }
+    if (isMissingScalar(out.city) && cr?.city) {
+      out.city = cr.city;
+      setProv(out, "city", "crossref", 0.7, "from affiliations");
+    }
+
+    // Geo helpers for strict mode
+    if ((!out.institutionCountryCodes || out.institutionCountryCodes.length === 0) && oa?.institutionCountryCodes?.length) {
+      out.institutionCountryCodes = oa.institutionCountryCodes;
+    }
+    if (!out.primaryInstitutionCountryCode && oa?.primaryInstitutionCountryCode) {
+      out.primaryInstitutionCountryCode = oa.primaryInstitutionCountryCode;
+    }
 
     // URL
-    if (!out.url && oa?.landingUrl) out.url = oa.landingUrl;
+    if (!out.url && oa?.doiUrl) {
+      out.url = oa.doiUrl;
+      setProv(out, "url", "openalex", 0.8, "doi url");
+    }
+    if (!out.url && oa?.landingUrl) {
+      out.url = oa.landingUrl;
+      setProv(out, "url", "openalex", 0.7, "landing page");
+    }
 
     return out;
   }
@@ -838,11 +1408,13 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
       affilCountries: plan.affilCountries,
     });
 
-    allCandidates.push(...searchResult.articles);
+    allCandidates.push(...searchResult.articles.map(initProvenanceFromSource));
     allErrors.push(...(searchResult.errors || []));
 
     const deduped = dedupeUnifiedArticles(allCandidates);
-    const filtered = deduped.filter((a) => isAllowedByRegion(a, plan, allowedCountries));
+    const filtered = deduped.filter((a) =>
+      isAllowedByRegion(a, plan, allowedCountries, allowedCountryCodes) && isAllowedByDateRange(a)
+    );
 
     // Once we have enough pool, stop searching to keep latency bounded.
     if (filtered.length >= Math.max(plan.requestedCount * 2, plan.requestedCount + 30)) {
@@ -851,7 +1423,9 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
   }
 
   const dedupedPool = dedupeUnifiedArticles(allCandidates);
-  const regionFilteredPool = dedupedPool.filter((a) => isAllowedByRegion(a, plan, allowedCountries));
+  const regionFilteredPool = dedupedPool.filter((a) =>
+    isAllowedByRegion(a, plan, allowedCountries, allowedCountryCodes) && isAllowedByDateRange(a)
+  );
 
   // 2) Enrich the top pool to maximize completeness
   const enrichPool = regionFilteredPool
@@ -859,7 +1433,9 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
 
   const enrichedPool = await mapLimit(enrichPool, 6, async (a) => enrichOne(a));
   const enrichedDeduped = dedupeUnifiedArticles(enrichedPool);
-  const enrichedRegionFiltered = enrichedDeduped.filter((a) => isAllowedByRegion(a, plan, allowedCountries));
+  const enrichedRegionFiltered = enrichedDeduped.filter((a) =>
+    isAllowedByRegion(a, plan, allowedCountries, allowedCountryCodes) && isAllowedByDateRange(a)
+  );
 
   // 3) Rank by completeness, then source preference, then year desc
   const sourceRank: Record<string, number> = { scopus: 5, wos: 4, openalex: 3, scielo: 2, redalyc: 2, duckduckgo: 1, pubmed: 1 };
@@ -888,25 +1464,58 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
   const uniqueErrors = Array.from(new Set(allErrors.map((e) => (e || "").trim()).filter(Boolean)));
   for (const e of uniqueErrors.slice(0, 5)) notes.push(e);
 
-  const excelBuffer = await generateAcademicArticlesExcel(finalArticles);
-  const wordBuffer = await generateApaReferencesDocx(plan.topicQuery, finalArticles);
-
   const bySource: Record<string, number> = {};
   for (const a of finalArticles) bySource[a.source] = (bySource[a.source] || 0) + 1;
 
   const coverage = computeCoverage(finalArticles);
+
+  const stats: AcademicArticlesExportResult["stats"] = {
+    totalReturned: finalArticles.length,
+    totalRequested: plan.requestedCount,
+    bySource,
+    coverage,
+    notes,
+  };
+
+  const debug: AcademicArticlesExportDebug = {
+    queryVariants: queries,
+    candidateCounts: {
+      total: allCandidates.length,
+      deduped: dedupedPool.length,
+      regionFiltered: regionFilteredPool.length,
+      enrichPool: enrichPool.length,
+      enrichedDeduped: enrichedDeduped.length,
+      enrichedRegionFiltered: enrichedRegionFiltered.length,
+      final: finalArticles.length,
+    },
+    errors: uniqueErrors,
+  };
+
+  // Optional: persist a JSON report for audit/debugging (stored under .local/, ignored by git)
+  if (!/^(1|true|yes)$/i.test(process.env.ACADEMIC_JSON_REPORT_DISABLED || "")) {
+    try {
+      const reportDir = path.join(process.cwd(), ".local", "academic-export");
+      await fs.mkdir(reportDir, { recursive: true });
+      const reportPath = path.join(reportDir, `academic_export_${Date.now()}.json`);
+      debug.jsonReportPath = reportPath;
+      const payload = JSON.stringify({ plan, stats, debug, articles: finalArticles }, null, 2);
+      await fs.writeFile(reportPath, payload, "utf8");
+    } catch (err: any) {
+      notes.push(`No se pudo guardar el reporte JSON de diagnostico: ${err?.message || String(err)}`);
+    }
+  }
+
+  const excelBuffer = await generateAcademicArticlesExcel(finalArticles, { plan, stats, debug });
+  const wordBuffer = await generateApaReferencesDocx(plan.topicQuery, finalArticles);
 
   return {
     plan,
     articles: finalArticles,
     excelBuffer,
     wordBuffer,
+    debug,
     stats: {
-      totalReturned: finalArticles.length,
-      totalRequested: plan.requestedCount,
-      bySource,
-      coverage,
-      notes,
+      ...stats,
     },
   };
 }
