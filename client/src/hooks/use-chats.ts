@@ -922,6 +922,20 @@ export function useChats() {
     if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
 
+      // Optimistically add the message to the pending chat so the UI doesn't look stuck
+      setChats(prev => prev.map(chat => {
+        if (chat.id !== chatId) return chat;
+        const messageExists = chat.messages.some(m => m.id === message.id);
+        if (messageExists) return chat;
+        const isFirstMessage = chat.messages.length === 0;
+        return {
+          ...chat,
+          messages: [...chat.messages, message],
+          title: isFirstMessage && message.role === "user" ? title : chat.title,
+          timestamp: Date.now()
+        };
+      }));
+
       const queue = pendingMessageQueue.get(chatId) || [];
       queue.push(message);
       pendingMessageQueue.set(chatId, queue);
