@@ -87,7 +87,7 @@ export default function LandingPage() {
 
 
           <IliaGPTLogo size={32} className="shadow-sm" />
-          <span className="font-semibold tracking-wide text-luxe text-luxe-sm" data-text="ILIAGPT">ILIAGPT</span>
+          <span className="font-semibold tracking-wide text-zinc-900">ILIAGPT</span>
           <ChevronDown className="h-4 w-4 text-zinc-500" />
         </div>
 
@@ -103,7 +103,7 @@ export default function LandingPage() {
         <div className="flex items-center gap-3">
           {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
-            className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="rounded-full bg-black text-white border border-black/10 hover:bg-zinc-900 transition-colors duration-200 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -187,7 +187,7 @@ export default function LandingPage() {
           {/* Hero Title */}
           <div className="text-center fade-in-up">
             <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
+              <span className="text-zinc-950">¿Con qué puedo ayudarte?</span>
             </h1>
             <p className="text-lg text-zinc-600 max-w-xl mx-auto">
               El asistente de IA más inteligente para crear, investigar y aprender
@@ -256,7 +256,7 @@ export default function LandingPage() {
                     ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
                   </p>
                   <Button
-                    className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300"
+                    className="rounded-full bg-black text-white border border-black/10 hover:bg-zinc-900 transition-colors duration-200"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >

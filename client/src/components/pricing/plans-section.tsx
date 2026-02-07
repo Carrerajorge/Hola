@@ -68,7 +68,7 @@ const PERSONAL_PLANS: PlanCard[] = [
     description: "Logra más con una IA más avanzada",
     buttonText: "Mejorar el plan a Go",
     buttonVariant: "default",
-    buttonColor: "bg-purple-600 hover:bg-purple-700",
+    buttonColor: "bg-black hover:bg-zinc-900",
     highlight: true,
     features: [
       { icon: Target, text: "Explora a fondo preguntas más complejas" },
@@ -230,10 +230,8 @@ export function PricingPlansSection(props: {
               <div
                 key={`${activeTab}:${plan.name}`}
                 className={cn(
-                  // Pricing page uses a dark/gradient background even when the browser/theme is light.
-                  // Keep a subtle glass surface but force readable (light) text without making the card bright.
-                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/5 text-white border-white/10",
-                  plan.highlight && "border-primary/50 shadow-lg",
+                  "rounded-2xl border border-black/10 bg-white p-6 flex flex-col shadow-sm",
+                  plan.highlight && "border-black/25 shadow-md",
                 )}
                 data-testid={`plan-card-${plan.name.toLowerCase()}`}
               >
@@ -243,9 +241,9 @@ export function PricingPlansSection(props: {
                     <Badge
                       variant="secondary"
                       className={cn(
-                        "text-xs",
-                        plan.badge === "NUEVO" && "bg-green-500/15 text-green-300",
-                        plan.badge === "RECOMENDADO" && "bg-primary/20 text-primary",
+                        "text-xs border",
+                        plan.badge === "NUEVO" && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                        plan.badge === "RECOMENDADO" && "bg-zinc-900 text-white border-zinc-900",
                       )}
                       data-testid="badge-secondary"
                     >
@@ -257,10 +255,10 @@ export function PricingPlansSection(props: {
                 <div className="flex items-baseline gap-0.5 mb-2">
                   <span className="text-sm">$</span>
                   <span className="text-4xl font-bold">{plan.price}</span>
-                  <span className="text-sm text-white/70">USD / mes</span>
+                  <span className="text-sm text-zinc-600">USD / mes</span>
                 </div>
 
-                <p className="text-sm text-white/70 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                <p className="text-sm text-zinc-600 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
                   {plan.description}
                 </p>
 
@@ -268,6 +266,7 @@ export function PricingPlansSection(props: {
                   variant={plan.buttonVariant}
                   className={cn(
                     "w-full mb-6",
+                    plan.buttonVariant === "outline" && "border-black/20 text-zinc-900 hover:bg-black/5",
                     plan.buttonColor ? plan.buttonColor : plan.highlight && "bg-primary hover:bg-primary/90",
                   )}
                   disabled={isCurrent || isLoading}
@@ -289,14 +288,14 @@ export function PricingPlansSection(props: {
                 <div className="space-y-3 flex-1">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start gap-2 text-sm">
-                      <feature.icon className="h-4 w-4 mt-0.5 text-white/60 flex-shrink-0" />
-                      <span className="text-white/85">{feature.text}</span>
+                      <feature.icon className="h-4 w-4 mt-0.5 text-zinc-500 flex-shrink-0" />
+                      <span className="text-zinc-800">{feature.text}</span>
                     </div>
                   ))}
                 </div>
 
                 {plan.footerNote && (
-                  <p className="text-xs text-white/60 mt-4 pt-4 border-t border-white/10">
+                  <p className="text-xs text-zinc-500 mt-4 pt-4 border-t border-black/10">
                     {plan.footerNote.includes("Obtener más información") ? (
                       <>
                         {plan.footerNote.replace("Obtener más información", "")}

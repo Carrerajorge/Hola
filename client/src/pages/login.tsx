@@ -216,12 +216,12 @@ export default function LoginPage() {
           <div className="relative fade-in-up fade-in-up-delay-3">
             <Button
               variant="outline"
-              className="w-full h-12 justify-start gap-3 text-base font-normal bg-white/5 border-white/10 cursor-default hover:bg-white/5"
+              className="w-full h-12 justify-start gap-3 text-base font-normal bg-zinc-50 border-black/10 text-zinc-800 cursor-default hover:bg-zinc-50"
               disabled
             >
-              <Icon className="h-5 w-5 text-zinc-400" />
-              <span className="text-zinc-400">{label}</span>
-              <span className="ml-auto text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">
+              <Icon className="h-5 w-5 text-zinc-700" />
+              <span className="text-zinc-800">{label}</span>
+              <span className="ml-auto text-xs bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
                 Próximamente
               </span>
             </Button>
@@ -235,19 +235,13 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="min-h-screen gradient-animated flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Floating Orbs */}
-      <div className="floating-orb floating-orb-1" />
-      <div className="floating-orb floating-orb-2" />
-      <div className="floating-orb floating-orb-3" />
-
-      {/* Glass Card Container */}
-      <div className="w-full max-w-md relative z-10">
-        <div className="glass-premium rounded-3xl p-8 shadow-2xl">
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="w-full max-w-md relative">
+        <div className="rounded-3xl border border-black/10 bg-white p-8 shadow-sm">
           <Button
             variant="ghost"
             size="icon"
-            className="absolute top-4 right-4 text-white/60 hover:text-white hover:bg-white/10 rounded-full transition-all duration-200"
+            className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full transition-all duration-200"
             onClick={() => setLocation("/welcome")}
             data-testid="button-close-login"
           >
@@ -255,10 +249,13 @@ export default function LoginPage() {
           </Button>
 
           <div className="text-center mb-8 fade-in-up">
-            <h1 className="text-3xl font-bold mb-3 text-white">
-              Bienvenido a <span className="text-gradient-premium">ILIAGPT</span>
+            <h1 className="text-3xl font-extrabold tracking-tight mb-3 text-zinc-950">
+              Bienvenido a{" "}
+              <span className="inline-flex items-center px-2 py-1 rounded-xl bg-zinc-100 text-zinc-950">
+                ILIAGPT
+              </span>
             </h1>
-            <p className="text-zinc-400">
+            <p className="text-zinc-600">
               Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
             </p>
           </div>
@@ -268,11 +265,7 @@ export default function LoginPage() {
             {/* Google - Working */}
             <Button
               variant="outline"
-              className="w-full h-14 justify-center gap-3 text-base font-medium border-2 border-white/20 
-                bg-white/10 hover:bg-white/20 text-white
-                hover:border-white/40 transition-all duration-300 rounded-xl 
-                shadow-lg hover:shadow-xl hover:shadow-purple-500/10
-                scale-hover fade-in-up fade-in-up-delay-1"
+              className="w-full h-12 justify-center gap-3 text-base font-semibold border-black/10 bg-white text-zinc-900 hover:bg-zinc-50 transition-colors rounded-xl fade-in-up fade-in-up-delay-1"
               onClick={handleGoogleLogin}
               disabled={isGoogleLoading}
               data-testid="button-login-google"
@@ -300,7 +293,7 @@ export default function LoginPage() {
                   <div className="relative fade-in-up fade-in-up-delay-3">
                     <Button
                       variant="outline"
-                      className="w-full h-12 justify-start gap-3 text-base font-normal bg-white/5 border-white/10 cursor-default hover:bg-white/5"
+                      className="w-full h-12 justify-start gap-3 text-base font-normal bg-zinc-50 border-black/10 text-zinc-800 cursor-default hover:bg-zinc-50"
                       disabled
                     >
                       <svg className="h-5 w-5" viewBox="0 0 23 23">
@@ -309,8 +302,8 @@ export default function LoginPage() {
                         <path fill="#05a6f0" d="M1 12h10v10H1z" />
                         <path fill="#ffba08" d="M12 12h10v10H12z" />
                       </svg>
-                      <span className="text-zinc-400">Continuar con Microsoft</span>
-                      <span className="ml-auto text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-zinc-800">Continuar con Microsoft</span>
+                      <span className="ml-auto text-xs bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
                         Próximamente
                       </span>
                     </Button>
@@ -325,11 +318,7 @@ export default function LoginPage() {
             {/* Phone Authentication */}
             <Button
               variant="outline"
-              className="w-full h-14 justify-center gap-3 text-base font-medium border-2 border-white/20 
-                bg-white/10 hover:bg-white/20 text-white
-                hover:border-white/40 transition-all duration-300 rounded-xl 
-                shadow-lg hover:shadow-xl hover:shadow-green-500/10
-                scale-hover fade-in-up fade-in-up-delay-3"
+              className="w-full h-12 justify-center gap-3 text-base font-semibold border-black/10 bg-white text-zinc-900 hover:bg-zinc-50 transition-colors rounded-xl fade-in-up fade-in-up-delay-3"
               onClick={handlePhoneLogin}
               data-testid="button-login-phone"
             >
@@ -341,42 +330,42 @@ export default function LoginPage() {
 
           {!showPhoneAuth && (
           <div className="flex items-center gap-4 my-6 fade-in-up fade-in-up-delay-3">
-            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-200 to-transparent" />
             <span className="text-zinc-500 text-sm">o</span>
-            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className="flex-1 h-px bg-gradient-to-r from-transparent via-zinc-200 to-transparent" />
           </div>
           )}
 
           {!showPhoneAuth && (
-          /* Magic Link Success State */
-          magicLinkSent ? (
-            <div className="space-y-4 fade-in-up">
-              <div className="bg-emerald-500/20 border border-emerald-500/30 rounded-xl p-4 text-center">
-                <Sparkles className="h-8 w-8 text-emerald-400 mx-auto mb-2" />
-                <h3 className="font-medium text-emerald-300 mb-1">¡Enlace mágico enviado!</h3>
-                <p className="text-sm text-emerald-400/80">{successMessage}</p>
-              </div>
+	          /* Magic Link Success State */
+	          magicLinkSent ? (
+	            <div className="space-y-4 fade-in-up">
+	              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+	                <Sparkles className="h-8 w-8 text-emerald-600 mx-auto mb-2" />
+	                <h3 className="font-semibold text-emerald-800 mb-1">¡Enlace mágico enviado!</h3>
+	                <p className="text-sm text-emerald-700">{successMessage}</p>
+	              </div>
 
-              {/* Development mode: show link directly */}
-              {magicLinkUrl && (
-                <div className="bg-blue-500/20 border border-blue-500/30 rounded-xl p-4">
-                  <p className="text-xs text-blue-300 mb-2 font-medium">Modo desarrollo - Click para iniciar sesión:</p>
-                  <a
-                    href={magicLinkUrl}
-                    className="text-sm text-blue-200 underline break-all hover:text-blue-100"
-                  >
-                    {magicLinkUrl}
-                  </a>
-                </div>
-              )}
+	              {/* Development mode: show link directly */}
+	              {magicLinkUrl && (
+	                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+	                  <p className="text-xs text-blue-800 mb-2 font-semibold">Modo desarrollo - Click para iniciar sesión:</p>
+	                  <a
+	                    href={magicLinkUrl}
+	                    className="text-sm text-blue-700 underline break-all hover:text-blue-900"
+	                  >
+	                    {magicLinkUrl}
+	                  </a>
+	                </div>
+	              )}
 
-              <Button
-                variant="outline"
-                className="w-full border-white/20 text-white hover:bg-white/10"
-                onClick={() => {
-                  setMagicLinkSent(false);
-                  setMagicLinkUrl(null);
-                  setSuccessMessage("");
+	              <Button
+	                variant="outline"
+	                className="w-full border-black/20 text-zinc-900 hover:bg-black/5"
+	                onClick={() => {
+	                  setMagicLinkSent(false);
+	                  setMagicLinkUrl(null);
+	                  setSuccessMessage("");
                 }}
               >
                 Enviar otro enlace
@@ -384,58 +373,52 @@ export default function LoginPage() {
             </div>
           ) : (
             <div className="space-y-4 fade-in-up fade-in-up-delay-4">
-              <Input
-                type="email"
-                placeholder="Dirección de correo electrónico"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="h-12 text-base bg-white/5 border-white/20 text-white placeholder:text-zinc-500
-                  focus:border-purple-500/50 focus:ring-purple-500/20 rounded-xl input-glow"
-                data-testid="input-login-email"
-              />
-              <Input
-                type="password"
-                placeholder="Contraseña"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-12 text-base bg-white/5 border-white/20 text-white placeholder:text-zinc-500
-                  focus:border-purple-500/50 focus:ring-purple-500/20 rounded-xl input-glow"
-                data-testid="input-login-password"
-                onKeyDown={(e) => e.key === 'Enter' && handleContinue()}
-              />
-              {error && (
-                <p className="text-sm text-red-400 text-center bg-red-500/10 py-2 px-3 rounded-lg" data-testid="text-login-error">{error}</p>
-              )}
-              <div className="flex gap-2">
-                <Button
-                  className="flex-1 h-12 text-base bg-gradient-to-r from-purple-600 to-pink-600 
-                    hover:from-purple-500 hover:to-pink-500 border-0 text-white font-medium
-                    shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40
-                    transition-all duration-300 rounded-xl btn-premium"
-                  onClick={handleContinue}
-                  disabled={isLoading}
-                  data-testid="button-login-continue"
-                >
-                  {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Continuar"}
-                </Button>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="h-12 px-4 border-amber-500/30 hover:border-amber-500/50 
-                          bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition-all duration-300"
-                        onClick={handleMagicLink}
-                        disabled={isMagicLinkLoading}
-                        data-testid="button-magic-link"
-                      >
-                        {isMagicLinkLoading ? (
-                          <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
-                        ) : (
-                          <Mail className="h-5 w-5 text-amber-400" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
+	              <Input
+	                type="email"
+	                placeholder="Dirección de correo electrónico"
+	                value={email}
+	                onChange={(e) => setEmail(e.target.value)}
+	                className="h-12 text-base rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
+	                data-testid="input-login-email"
+	              />
+	              <Input
+	                type="password"
+	                placeholder="Contraseña"
+	                value={password}
+	                onChange={(e) => setPassword(e.target.value)}
+	                className="h-12 text-base rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
+	                data-testid="input-login-password"
+	                onKeyDown={(e) => e.key === 'Enter' && handleContinue()}
+	              />
+	              {error && (
+	                <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg" data-testid="text-login-error">{error}</p>
+	              )}
+	              <div className="flex gap-2">
+	                <Button
+	                  className="flex-1 h-12 text-base bg-black hover:bg-zinc-900 border border-black/10 text-white font-semibold transition-colors rounded-xl"
+	                  onClick={handleContinue}
+	                  disabled={isLoading}
+	                  data-testid="button-login-continue"
+	                >
+	                  {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Continuar"}
+	                </Button>
+	                <TooltipProvider>
+	                  <Tooltip>
+	                    <TooltipTrigger asChild>
+	                      <Button
+	                        variant="outline"
+	                        className="h-12 px-4 border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-xl transition-colors"
+	                        onClick={handleMagicLink}
+	                        disabled={isMagicLinkLoading}
+	                        data-testid="button-magic-link"
+	                      >
+	                        {isMagicLinkLoading ? (
+	                          <Loader2 className="h-5 w-5 animate-spin text-amber-700" />
+	                        ) : (
+	                          <Mail className="h-5 w-5 text-amber-700" />
+	                        )}
+	                      </Button>
+	                    </TooltipTrigger>
                     <TooltipContent>
                       <p>Iniciar sesión con enlace mágico (sin contraseña)</p>
                     </TooltipContent>
@@ -446,97 +429,89 @@ export default function LoginPage() {
           )
           )}
 
-          {/* Phone Authentication View */}
-          {showPhoneAuth && (
-            <div className="space-y-4 fade-in-up">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-zinc-400 hover:text-white -ml-2"
-                onClick={handleBackFromPhone}
-              >
-                <ArrowLeft className="h-4 w-4 mr-1" />
-                Volver
-              </Button>
+	          {/* Phone Authentication View */}
+	          {showPhoneAuth && (
+	            <div className="space-y-4 fade-in-up">
+	              <Button
+	                variant="ghost"
+	                size="sm"
+	                className="text-zinc-700 hover:text-zinc-900 hover:bg-black/5 -ml-2"
+	                onClick={handleBackFromPhone}
+	              >
+	                <ArrowLeft className="h-4 w-4 mr-1" />
+	                Volver
+	              </Button>
 
-              <div className="text-center mb-4">
-                <Phone className="h-10 w-10 text-green-400 mx-auto mb-2" />
-                <h3 className="text-lg font-medium text-white">
-                  {otpSent ? "Ingresa el código" : "Ingresa tu número"}
-                </h3>
-                <p className="text-sm text-zinc-400">
-                  {otpSent 
-                    ? "Te enviamos un código de 6 dígitos" 
-                    : "Te enviaremos un código de verificación"}
-                </p>
-              </div>
+	              <div className="text-center mb-4">
+	                <Phone className="h-10 w-10 text-zinc-900 mx-auto mb-2" />
+	                <h3 className="text-lg font-semibold text-zinc-950">
+	                  {otpSent ? "Ingresa el código" : "Ingresa tu número"}
+	                </h3>
+	                <p className="text-sm text-zinc-600">
+	                  {otpSent 
+	                    ? "Te enviamos un código de 6 dígitos" 
+	                    : "Te enviaremos un código de verificación"}
+	                </p>
+	              </div>
 
               {!otpSent ? (
                 <>
-                  <Input
-                    type="tel"
-                    placeholder="+51 918 714 054"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    className="h-12 text-base bg-white/5 border-white/20 text-white placeholder:text-zinc-500
-                      focus:border-green-500/50 focus:ring-green-500/20 rounded-xl"
-                    data-testid="input-phone-number"
-                  />
-                  {error && (
-                    <p className="text-sm text-red-400 text-center bg-red-500/10 py-2 px-3 rounded-lg">{error}</p>
-                  )}
-                  <Button
-                    className="w-full h-12 text-base bg-gradient-to-r from-green-600 to-emerald-600 
-                      hover:from-green-500 hover:to-emerald-500 border-0 text-white font-medium
-                      shadow-lg shadow-green-500/25 hover:shadow-green-500/40
-                      transition-all duration-300 rounded-xl"
-                    onClick={handleSendOtp}
-                    disabled={isPhoneLoading}
-                    data-testid="button-send-otp"
-                  >
-                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Enviar código"}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {devCode && (
-                    <div className="bg-blue-500/20 border border-blue-500/30 rounded-xl p-3 text-center">
-                      <p className="text-xs text-blue-300 font-medium">Modo desarrollo - Tu código es:</p>
-                      <p className="text-2xl font-mono text-blue-200 tracking-widest">{devCode}</p>
-                    </div>
-                  )}
-                  <Input
-                    type="text"
-                    placeholder="000000"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="h-14 text-2xl text-center tracking-widest font-mono bg-white/5 border-white/20 text-white placeholder:text-zinc-500
-                      focus:border-green-500/50 focus:ring-green-500/20 rounded-xl"
-                    maxLength={6}
-                    data-testid="input-otp-code"
-                    onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
-                  />
-                  {error && (
-                    <p className="text-sm text-red-400 text-center bg-red-500/10 py-2 px-3 rounded-lg">{error}</p>
-                  )}
-                  <Button
-                    className="w-full h-12 text-base bg-gradient-to-r from-green-600 to-emerald-600 
-                      hover:from-green-500 hover:to-emerald-500 border-0 text-white font-medium
-                      shadow-lg shadow-green-500/25 hover:shadow-green-500/40
-                      transition-all duration-300 rounded-xl"
-                    onClick={handleVerifyOtp}
-                    disabled={isPhoneLoading || otpCode.length !== 6}
-                    data-testid="button-verify-otp"
-                  >
-                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Verificar"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full text-zinc-400 hover:text-white"
-                    onClick={() => {
-                      setOtpSent(false);
-                      setOtpCode("");
-                      setDevCode(null);
+	                  <Input
+	                    type="tel"
+	                    placeholder="+51 918 714 054"
+	                    value={phoneNumber}
+	                    onChange={(e) => setPhoneNumber(e.target.value)}
+	                    className="h-12 text-base rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
+	                    data-testid="input-phone-number"
+	                  />
+	                  {error && (
+	                    <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg">{error}</p>
+	                  )}
+	                  <Button
+	                    className="w-full h-12 text-base bg-black hover:bg-zinc-900 border border-black/10 text-white font-semibold transition-colors rounded-xl"
+	                    onClick={handleSendOtp}
+	                    disabled={isPhoneLoading}
+	                    data-testid="button-send-otp"
+	                  >
+	                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Enviar código"}
+	                  </Button>
+	                </>
+	              ) : (
+	                <>
+	                  {devCode && (
+	                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+	                      <p className="text-xs text-blue-800 font-semibold">Modo desarrollo - Tu código es:</p>
+	                      <p className="text-2xl font-mono text-blue-700 tracking-widest">{devCode}</p>
+	                    </div>
+	                  )}
+	                  <Input
+	                    type="text"
+	                    placeholder="000000"
+	                    value={otpCode}
+	                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+	                    className="h-14 text-2xl text-center tracking-widest font-mono rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
+	                    maxLength={6}
+	                    data-testid="input-otp-code"
+	                    onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
+	                  />
+	                  {error && (
+	                    <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg">{error}</p>
+	                  )}
+	                  <Button
+	                    className="w-full h-12 text-base bg-black hover:bg-zinc-900 border border-black/10 text-white font-semibold transition-colors rounded-xl"
+	                    onClick={handleVerifyOtp}
+	                    disabled={isPhoneLoading || otpCode.length !== 6}
+	                    data-testid="button-verify-otp"
+	                  >
+	                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Verificar"}
+	                  </Button>
+	                  <Button
+	                    variant="ghost"
+	                    className="w-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5"
+	                    onClick={() => {
+	                      setOtpSent(false);
+	                      setOtpCode("");
+	                      setDevCode(null);
                       setError("");
                     }}
                   >
@@ -552,7 +527,7 @@ export default function LoginPage() {
               ¿No tienes una cuenta?{" "}
               <button
                 onClick={() => setLocation("/signup")}
-                className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                className="text-zinc-900 font-semibold hover:underline transition-colors"
                 data-testid="link-goto-signup"
               >
                 Suscríbete gratis
@@ -564,4 +539,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
