@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { payments, users } from "@shared/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 // Stripe reports amounts in the smallest currency unit. Most are 2-decimal (cents),
 // but some are 0-decimal (JPY) or 3-decimal (BHD). Keep conversion logic centralized.
@@ -108,24 +108,30 @@ export async function upsertPaymentFromStripeInvoice(args: {
   };
 
   const updateSet: Partial<typeof payments.$inferInsert> = {
-    // If userId can't be resolved for this event, don't overwrite an existing userId.
-    userId: sql`coalesce(${userId}, ${payments.userId})`,
     amount,
     currency,
     status,
     method: "stripe",
     description,
     createdAt: occurredAt,
-  } as any;
+  };
 
-  await db
+  const inserted = await db
     .insert(payments)
     .values(insertValues)
-    .onConflictDoUpdate({
-      target: payments.stripePaymentId,
-      set: updateSet,
-    });
+    .onConflictDoNothing({ target: payments.stripePaymentId })
+    .returning({ id: payments.id });
 
-  return { created: true };
+  if (inserted.length > 0) {
+    return { created: true };
+  }
+
+  // If we couldn't resolve userId for this event, don't overwrite an existing userId.
+  if (userId) {
+    updateSet.userId = userId;
+  }
+
+  await db.update(payments).set(updateSet).where(eq(payments.stripePaymentId, stripePaymentId));
+
+  return { created: false };
 }
-
