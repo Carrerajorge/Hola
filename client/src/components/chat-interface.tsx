@@ -3879,6 +3879,9 @@ export function ChatInterface({
       
       console.log("[handleSubmit] messageResult:", messageResult);
       const runInfo = messageResult?.run;
+      // When creating a brand-new chat, `chatId` can be null/"pending-*" in this component
+      // even though the server returns the real chatId in the run.
+      const effectiveChatId = (chatId && !chatId.startsWith("pending-")) ? chatId : (runInfo?.chatId || null);
 
       // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
       const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -4263,7 +4266,7 @@ IMPORTANTE:
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
           // Use SSE streaming if we have run info, otherwise fall back to legacy fetch
-          if (runInfo && chatId) {
+          if (runInfo && effectiveChatId) {
             // SSE streaming mode - real-time streaming from server
             setAiState("responding");
 
@@ -4387,9 +4390,9 @@ IMPORTANTE:
               credentials: "include",
               body: JSON.stringify({
                 messages: finalChatHistory,
-                conversationId: chatId,
+                conversationId: effectiveChatId,
                 runId: runInfo.id,
-                chatId: chatId,
+                chatId: effectiveChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null
