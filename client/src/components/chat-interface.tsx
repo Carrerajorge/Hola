@@ -119,7 +119,22 @@ import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
+import {
+  dataImageUrlToFile,
+  extractBareUrlsFromText,
+  extractFilesFromDataTransfer,
+  extractImageUrlsFromHtml,
+  extractLinkUrlsFromHtml,
+  extractUrlsFromUriList,
+  isDataImageUrl,
+  looksLikeDirectFileUrl,
+  normalizeFileForUpload,
+  normalizeHttpUrl,
+  uniq,
+} from "@/lib/attachmentIngest";
 import { useChats } from "@/hooks/use-chats";
 import { useUserSkills } from "@/hooks/use-user-skills";
 import { findEnabledSkillByName, parseSkillCreateCommand, parseSkillInvocation } from "@/lib/skillCommands";
@@ -360,6 +375,10 @@ export function ChatInterface({
   setActiveRunId: setActiveRunIdProp,
   selectedProjectId
 }: ChatInterfaceProps) {
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const {
     projects,
@@ -557,6 +576,11 @@ export function ChatInterface({
   // always read the latest state even after awaiting promises.
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const ingestQueueRef = useRef<{
+    active: number;
+    queue: Array<() => void>;
+  }>({ active: 0, queue: [] });
+  const MAX_INGEST_CONCURRENCY = 3;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
@@ -605,6 +629,58 @@ export function ChatInterface({
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
   }, [uploadedFiles]);
+
+  const drainIngestQueue = () => {
+    const q = ingestQueueRef.current;
+    while (q.active < MAX_INGEST_CONCURRENCY && q.queue.length > 0) {
+      const next = q.queue.shift();
+      if (!next) break;
+      q.active += 1;
+      next();
+    }
+  };
+
+  const enqueueIngestTask = (trackingId: string, task: () => Promise<void>) => {
+    let resolveOuter!: () => void;
+    let rejectOuter!: (err: any) => void;
+
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveOuter = resolve;
+      rejectOuter = reject;
+    });
+
+    ingestQueueRef.current.queue.push(() => {
+      const run = async () => {
+        try {
+          // If the user removed the attachment while queued, skip work.
+          const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === trackingId);
+          if (!stillTracked) {
+            resolveOuter();
+            return;
+          }
+
+          await task();
+          resolveOuter();
+        } catch (err: any) {
+          rejectOuter(err);
+        } finally {
+          ingestQueueRef.current.active = Math.max(0, ingestQueueRef.current.active - 1);
+          drainIngestQueue();
+        }
+      };
+
+      void run();
+    });
+
+    drainIngestQueue();
+
+    pendingUploadsRef.current.set(trackingId, promise);
+    promise.finally(() => {
+      pendingUploadsRef.current.delete(trackingId);
+    });
+
+    return promise;
+  };
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -1570,60 +1646,285 @@ export function ChatInterface({
     }
   }, []);
 
-  const startVoiceRecording = () => {
+  type DictationRuntime = {
+    shouldBeActive: boolean;
+    stopRequested: boolean;
+    baseText: string;
+    interimText: string;
+    lastAppliedText: string;
+    lastInterimApplyAt: number;
+    interimApplyTimer: ReturnType<typeof setTimeout> | null;
+    restartTimer: ReturnType<typeof setTimeout> | null;
+    restartAttempts: number;
+    lastErrorToastAt: number;
+  };
+
+  const dictationRef = useRef<DictationRuntime>({
+    shouldBeActive: false,
+    stopRequested: false,
+    baseText: "",
+    interimText: "",
+    lastAppliedText: "",
+    lastInterimApplyAt: 0,
+    interimApplyTimer: null,
+    restartTimer: null,
+    restartAttempts: 0,
+    lastErrorToastAt: 0,
+  });
+
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    return () => {
+      const d = dictationRef.current;
+      d.shouldBeActive = false;
+      d.stopRequested = true;
+      if (d.interimApplyTimer) clearTimeout(d.interimApplyTimer);
+      if (d.restartTimer) clearTimeout(d.restartTimer);
+      d.interimApplyTimer = null;
+      d.restartTimer = null;
+    };
+  }, []);
+
+  const buildDictationText = (base: string, interim: string) => {
+    const b = base || "";
+    const i = (interim || "").trim();
+    if (!i) return b;
+    if (!b) return i;
+    if (/[\s\n]$/.test(b)) return b + i;
+    if (/^[¿¡,.;:!?]/.test(i)) return b + i;
+    return b + " " + i;
+  };
+
+  const appendDictationSegment = (base: string, segment: string) => {
+    const seg = (segment || "").trim();
+    if (!seg) return base || "";
+    const b = base || "";
+    if (!b) return seg;
+    if (/[\s\n]$/.test(b)) return b + seg;
+    if (/^[¿¡,.;:!?]/.test(seg)) return b + seg;
+    return b + " " + seg;
+  };
+
+  const clearDictationTimers = () => {
+    const d = dictationRef.current;
+    if (d.interimApplyTimer) {
+      clearTimeout(d.interimApplyTimer);
+      d.interimApplyTimer = null;
+    }
+    if (d.restartTimer) {
+      clearTimeout(d.restartTimer);
+      d.restartTimer = null;
+    }
+  };
+
+  const applyDictationToInput = (force = false) => {
+    const d = dictationRef.current;
+    const next = buildDictationText(d.baseText, d.interimText);
+    if (!force && next === d.lastAppliedText) return;
+    d.lastAppliedText = next;
+    setInput(next);
+  };
+
+  const scheduleInterimApply = () => {
+    const d = dictationRef.current;
+    const now = performance.now();
+    const minIntervalMs = 90;
+    const elapsed = now - d.lastInterimApplyAt;
+
+    if (elapsed >= minIntervalMs) {
+      d.lastInterimApplyAt = now;
+      applyDictationToInput(false);
+      return;
+    }
+
+    if (d.interimApplyTimer) return;
+
+    d.interimApplyTimer = setTimeout(() => {
+      d.interimApplyTimer = null;
+      d.lastInterimApplyAt = performance.now();
+      applyDictationToInput(false);
+    }, Math.max(0, minIntervalMs - elapsed));
+  };
+
+  const commitInterimToBase = () => {
+    const d = dictationRef.current;
+    d.baseText = buildDictationText(d.baseText, d.interimText);
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+  };
+
+  const maybeToastSpeechError = (title: string, description: string) => {
+    const d = dictationRef.current;
+    const now = Date.now();
+    const minIntervalMs = 3000;
+    if (now - d.lastErrorToastAt < minIntervalMs) return;
+    d.lastErrorToastAt = now;
+    toast({ title, description, variant: "destructive" });
+  };
+
+  const scheduleRecognitionRestart = (reason: string, baseDelayMs = 250) => {
+    const d = dictationRef.current;
+    if (!d.shouldBeActive || d.stopRequested || isPausedRef.current) return;
+    if (d.restartTimer) return;
+
+    const delay = Math.min(2000, baseDelayMs * Math.pow(1.6, d.restartAttempts));
+
+    d.restartTimer = setTimeout(() => {
+      d.restartTimer = null;
+      if (!d.shouldBeActive || d.stopRequested || isPausedRef.current) return;
+
+      d.restartAttempts = Math.min(d.restartAttempts + 1, 20);
+      startRecognition(`restart:${reason}`);
+    }, delay);
+  };
+
+  const startRecognition = (reason: string = "user") => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
+      maybeToastSpeechError(
+        "Dictado no disponible",
+        "Tu navegador no soporta reconocimiento de voz. Usa Chrome, Edge o Safari."
+      );
       return;
+    }
+
+    // Stop previous instance to avoid multiple listeners running simultaneously.
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.onresult = null;
+        speechRecognitionRef.current.onerror = null;
+        speechRecognitionRef.current.onend = null;
+        speechRecognitionRef.current.onstart = null;
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      speechRecognitionRef.current = null;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
     recognition.lang = speechLocale;
 
-    let finalTranscript = '';
-    let interimTranscript = '';
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setRecordingTime(0);
-      setIsPaused(false);
-      finalTranscript = input;
-    };
-
     recognition.onresult = (event: any) => {
-      interimTranscript = '';
+      const d = dictationRef.current;
+      let newFinal = "";
+      let newInterim = "";
+
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+        const result = event.results[i];
+        const part = result?.[0]?.transcript ?? "";
+        if (result.isFinal) {
+          newFinal = appendDictationSegment(newFinal, part);
         } else {
-          interimTranscript = transcript;
+          newInterim = appendDictationSegment(newInterim, part);
         }
       }
-      setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+
+      if (newFinal) {
+        d.baseText = appendDictationSegment(d.baseText, newFinal);
+        d.interimText = (newInterim || "").trim();
+        d.restartAttempts = 0;
+        applyDictationToInput(true);
+      } else {
+        d.interimText = (newInterim || "").trim();
+        scheduleInterimApply();
+      }
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsRecording(false);
-      setRecordingTime(0);
-      setIsPaused(false);
-      speechRecognitionRef.current = null;
+      const error = String(event?.error || "");
+      const d = dictationRef.current;
+
+      // User-initiated stops can surface as "aborted" - ignore them.
+      if (error === "aborted" && (d.stopRequested || isPausedRef.current)) return;
+
+      // Recoverable errors: keep dictation active and restart.
+      if (error === "no-speech" || error === "network") {
+        scheduleRecognitionRestart(error, error === "network" ? 600 : 300);
+        return;
+      }
+
+      if (error === "not-allowed" || error === "service-not-allowed") {
+        maybeToastSpeechError(
+          "Permiso de micrófono",
+          "Permite el acceso al micrófono para usar Dictar texto."
+        );
+        stopVoiceRecording();
+        return;
+      }
+
+      if (error === "audio-capture") {
+        maybeToastSpeechError(
+          "Micrófono no disponible",
+          "No se detectó un micrófono. Revisa permisos o conecta uno e inténtalo de nuevo."
+        );
+        stopVoiceRecording();
+        return;
+      }
+
+      maybeToastSpeechError("Error de dictado", `Reconocimiento de voz: ${error || "error"}`);
+      stopVoiceRecording();
     };
 
     recognition.onend = () => {
-      // Don't auto-reset if paused - user might resume
-      if (!isPaused) {
-        setIsRecording(false);
-        speechRecognitionRef.current = null;
-      }
+      const d = dictationRef.current;
+
+      // If paused or explicitly stopped, don't restart.
+      if (isPausedRef.current || d.stopRequested || !d.shouldBeActive) return;
+
+      // Commit anything shown on screen so we don't lose it.
+      commitInterimToBase();
+      applyDictationToInput(true);
+
+      // Chrome can end sessions even in continuous mode; keep it alive.
+      scheduleRecognitionRestart(reason || "end", 250);
     };
 
     speechRecognitionRef.current = recognition;
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch {
+      // start() can throw if called too quickly after stop(); retry with backoff.
+      scheduleRecognitionRestart("start-failed", 300);
+    }
+  };
+
+  const startVoiceRecording = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      maybeToastSpeechError(
+        "Dictado no disponible",
+        "Tu navegador no soporta reconocimiento de voz. Usa Chrome, Edge o Safari."
+      );
+      return;
+    }
+
+    const d = dictationRef.current;
+    d.shouldBeActive = true;
+    d.stopRequested = false;
+    d.restartAttempts = 0;
+    clearDictationTimers();
+
+    d.baseText = currentTextRef.current || "";
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+    d.lastInterimApplyAt = 0;
+
+    isPausedRef.current = false;
+    setIsPaused(false);
+    setIsRecording(true);
+    setRecordingTime(0);
+
+    startRecognition("user");
   };
 
   const toggleVoiceRecording = () => {
@@ -1635,66 +1936,64 @@ export function ChatInterface({
   };
 
   const pauseVoiceRecording = () => {
-    if (speechRecognitionRef.current && isRecording) {
-      speechRecognitionRef.current.stop();
-      setIsPaused(true);
+    if (!isRecording || isPausedRef.current) return;
+
+    commitInterimToBase();
+    applyDictationToInput(true);
+    clearDictationTimers();
+
+    isPausedRef.current = true;
+    setIsPaused(true);
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
     }
   };
 
   const resumeVoiceRecording = () => {
-    if (isPaused) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) return;
+    if (!isRecording || !isPausedRef.current) return;
 
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'es-ES';
+    const d = dictationRef.current;
+    d.shouldBeActive = true;
+    d.stopRequested = false;
+    d.restartAttempts = 0;
+    clearDictationTimers();
 
-      let currentInput = input;
+    d.baseText = currentTextRef.current || "";
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+    d.lastInterimApplyAt = 0;
 
-      recognition.onstart = () => {
-        setIsPaused(false);
-      };
+    isPausedRef.current = false;
+    setIsPaused(false);
 
-      recognition.onresult = (event: any) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            currentInput += (currentInput ? ' ' : '') + transcript;
-          } else {
-            interimTranscript = transcript;
-          }
-        }
-        setInput(currentInput + (interimTranscript ? ' ' + interimTranscript : ''));
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsRecording(false);
-        setRecordingTime(0);
-        setIsPaused(false);
-        speechRecognitionRef.current = null;
-      };
-
-      recognition.onend = () => {
-        if (!isPaused) {
-          setIsRecording(false);
-          speechRecognitionRef.current = null;
-        }
-      };
-
-      speechRecognitionRef.current = recognition;
-      recognition.start();
-    }
+    startRecognition("resume");
   };
 
   const stopVoiceRecording = () => {
+    const d = dictationRef.current;
+    d.baseText = currentTextRef.current || buildDictationText(d.baseText, d.interimText);
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+
+    d.shouldBeActive = false;
+    d.stopRequested = true;
+    clearDictationTimers();
+
     if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
       speechRecognitionRef.current = null;
     }
+
+    isPausedRef.current = false;
     setIsRecording(false);
     setRecordingTime(0);
     setIsPaused(false);
@@ -1706,8 +2005,14 @@ export function ChatInterface({
   };
 
   const sendVoiceRecording = () => {
+    commitInterimToBase();
+    const finalText = dictationRef.current.baseText;
+    currentTextRef.current = finalText;
+    setInput(finalText);
+
     stopVoiceRecording();
-    if (input.trim() || uploadedFiles.length > 0) {
+
+    if (finalText.trim() || uploadedFiles.length > 0) {
       handleSubmit();
     }
   };
@@ -2375,12 +2680,33 @@ export function ChatInterface({
 
   const MAX_FILE_SIZE_MB = 100;
   const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+  const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
 
   const processFilesForUpload = async (files: File[]) => {
-    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
-    const invalidTypeFiles = files.filter(file =>
-      !ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")
-    );
+    const normalizedFiles = files.map(normalizeFileForUpload);
+
+    // De-dupe within the same ingest action to avoid accidental duplicates.
+    const seen = new Set<string>();
+    const dedupedFiles: File[] = [];
+    for (const f of normalizedFiles) {
+      const key = `${f.name}::${f.size}::${f.type || ""}::${(f as any).lastModified || 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedFiles.push(f);
+    }
+    if (dedupedFiles.length < normalizedFiles.length) {
+      toast({
+        title: "Archivos duplicados ignorados",
+        description: `Se omitieron ${normalizedFiles.length - dedupedFiles.length} duplicados.`,
+      });
+    }
+
+    const oversizedFiles = dedupedFiles.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+    const invalidTypeFiles = dedupedFiles.filter((file) => {
+      const t = file.type || "";
+      if (t.startsWith("image/")) return false;
+      return !ALLOWED_TYPES.includes(t);
+    });
 
     if (oversizedFiles.length > 0) {
       const names = oversizedFiles.map(f => f.name).join(", ");
@@ -2401,10 +2727,11 @@ export function ChatInterface({
       });
     }
 
-    const validFiles = files.filter(file =>
-      (ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")) &&
-      file.size <= MAX_FILE_SIZE_BYTES
-    );
+    const validFiles = dedupedFiles.filter((file) => {
+      const t = file.type || "";
+      const typeOk = t.startsWith("image/") || ALLOWED_TYPES.includes(t);
+      return typeOk && file.size <= MAX_FILE_SIZE_BYTES;
+    });
 
     if (validFiles.length === 0) return;
 
@@ -2418,7 +2745,7 @@ export function ChatInterface({
       ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
 
       let dataUrl: string | undefined;
-      if (isImage) {
+      if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
         dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -2542,11 +2869,7 @@ export function ChatInterface({
         }
       };
 
-      const uploadPromise = doUpload();
-      pendingUploadsRef.current.set(tempId, uploadPromise);
-      uploadPromise.finally(() => {
-        pendingUploadsRef.current.delete(tempId);
-      });
+      enqueueIngestTask(tempId, doUpload);
     }
   };
 
@@ -2612,45 +2935,219 @@ export function ChatInterface({
     checkStatus();
   };
 
+  const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (blob.size > maxBytes) return null;
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Failed to read blob"));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const importUrlsForUpload = (urls: string[]) => {
+    const normalized = uniq(
+      urls
+        .map((u) => normalizeHttpUrl(u) || null)
+        .filter((u): u is string => !!u)
+    );
+    if (normalized.length === 0) return;
+    const bounded = normalized.slice(0, 10);
+
+    for (const u of bounded) {
+      const trackingId = `temp-url-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const tempFile: UploadedFile = {
+        id: trackingId,
+        name: u,
+        type: "application/octet-stream",
+        mimeType: "application/octet-stream",
+        size: 0,
+        status: "uploading",
+      };
+
+      setUploadedFiles((prev: UploadedFile[]) => [...prev, tempFile]);
+
+      const doImport = async (): Promise<void> => {
+        try {
+          const response = await fetch("/api/files/import-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: u }),
+          });
+
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.error || `No se pudo importar (${response.status})`);
+          }
+
+          const importedType: string = data.type || data.mimeType || "application/octet-stream";
+          const importedId: string | undefined = data.id;
+          const importedName: string = data.name || u;
+          const importedSize: number = typeof data.size === "number" ? data.size : 0;
+          const importedStoragePath: string | undefined = data.storagePath;
+          const importedStatus: string = data.status || (importedType.startsWith("image/") ? "ready" : "processing");
+
+          // For images, generate a data URL from same-origin storage so vision works reliably.
+          let dataUrl: string | undefined;
+          if (importedType.startsWith("image/")) {
+            if (typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:")) {
+              dataUrl = data.dataUrl;
+            } else if (importedStoragePath) {
+              const preview = await fetchUrlAsDataUrl(importedStoragePath, 15 * 1024 * 1024);
+              if (preview) dataUrl = preview;
+            }
+          }
+
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => {
+              if (f.id !== trackingId) return f;
+              return {
+                ...f,
+                id: importedId || f.id,
+                name: importedName,
+                type: importedType,
+                mimeType: importedType,
+                size: importedSize || f.size,
+                storagePath: importedStoragePath,
+                status: importedStatus,
+                dataUrl: dataUrl || f.dataUrl,
+              };
+            })
+          );
+
+          if (!importedType.startsWith("image/") && importedId && importedStatus === "processing") {
+            pollFileStatusFast(importedId, trackingId);
+          }
+        } catch (error: any) {
+          console.error("URL import error:", error);
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === trackingId ? { ...f, status: "error" } : f))
+          );
+          toast({
+            title: "No se pudo importar el enlace",
+            description: error?.message || "Error desconocido",
+            variant: "destructive",
+          });
+        }
+      };
+
+      enqueueIngestTask(trackingId, doImport);
+    }
+  };
+
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
-    if (!items) return;
+    const clipboard = e.clipboardData;
+    if (!clipboard) return;
 
     const filesToUpload: File[] = [];
 
-    for (const item of Array.from(items) as any[]) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) {
-          const mimeType = file.type || item.type || "image/png";
-          const ext = mimeType.split("/")[1] || "png";
-          const fileName = file.name && file.name !== "image.png" && file.name !== ""
-            ? file.name
-            : `pasted-${Date.now()}.${ext}`;
-          const renamedFile = new File([file], fileName, { type: mimeType });
-          filesToUpload.push(renamedFile);
-        }
+    const itemsArray = items ? (Array.from(items) as any[]) : [];
+    for (const item of itemsArray) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile?.();
+      if (!file) continue;
+
+      const originalName = (file.name || "").trim();
+      const declaredType = (file.type || item.type || "").trim();
+
+      const isGenericImageName = !originalName || originalName === "image.png" || originalName === "image.jpg";
+      const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+      const cleanedSubtype = subtype.split("+")[0].split(".")[0];
+      const safeExt = declaredType.startsWith("image/") ? (cleanedSubtype || "png") : "bin";
+      const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+
+      const normalized = normalizeFileForUpload(new File([file], fileName, { type: declaredType || file.type }));
+      filesToUpload.push(normalized);
+    }
+
+    // Some browsers expose pasted files via clipboardData.files instead of items.
+    if (clipboard.files && clipboard.files.length > 0) {
+      for (const f of Array.from(clipboard.files)) {
+        filesToUpload.push(normalizeFileForUpload(f));
       }
     }
 
     if (filesToUpload.length > 0) {
       e.preventDefault();
       await processFilesForUpload(filesToUpload);
+      return;
+    }
+
+    // Smart paste: if the clipboard content is one or more bare URLs, import them as attachments.
+    const uriList = clipboard.getData("text/uri-list");
+    const html = clipboard.getData("text/html");
+    const text = clipboard.getData("text/plain");
+
+    // Support pasting base64-encoded images (data URLs).
+    if (isDataImageUrl(text)) {
+      const mimeMatch = text.match(/^data:([^;]+);base64,/i);
+      const mime = (mimeMatch?.[1] || "image/png").toLowerCase();
+      const ext =
+        mime === "image/jpeg" || mime === "image/jpg" ? "jpg" :
+          mime === "image/webp" ? "webp" :
+            mime === "image/gif" ? "gif" :
+              mime === "image/bmp" ? "bmp" :
+                mime === "image/tiff" ? "tiff" :
+                  mime === "image/svg+xml" ? "svg" :
+                    "png";
+      const f = dataImageUrlToFile(text, `pasted-${Date.now()}.${ext}`);
+      if (f) {
+        e.preventDefault();
+        await processFilesForUpload([normalizeFileForUpload(f)]);
+        return;
+      }
+    }
+
+    const urlsFromUriList = extractUrlsFromUriList(uriList);
+    const urlsFromBareText = extractBareUrlsFromText(text);
+
+    // Only auto-import when it's clearly a direct file download (PDF/image/etc).
+    const directUrls = uniq([...urlsFromUriList, ...urlsFromBareText]);
+    if (directUrls.length > 0) {
+      if (directUrls.every(looksLikeDirectFileUrl)) {
+        e.preventDefault();
+        importUrlsForUpload(directUrls);
+      }
+      return;
+    }
+
+    // HTML-only: allow importing a single copied image (common in browsers), but avoid mass-importing links
+    // when pasting rich text.
+    const htmlImageUrls = extractImageUrlsFromHtml(html);
+    if (htmlImageUrls.length === 1) {
+      const normalizedText = normalizeHttpUrl(text);
+      if (!text.trim() || normalizedText === htmlImageUrls[0]) {
+        e.preventDefault();
+        importUrlsForUpload([htmlImageUrls[0]]);
+      }
     }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    const isFileOrUrlDrag = types.includes("Files") || types.includes("text/uri-list") || types.includes("text/html");
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
     e.stopPropagation();
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    const isFileOrUrlDrag = types.includes("Files") || types.includes("text/uri-list") || types.includes("text/html");
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current++;
-    if (e.dataTransfer?.types?.includes("Files")) {
-      setIsDraggingOver(true);
-    }
+    setIsDraggingOver(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -2663,15 +3160,57 @@ export function ChatInterface({
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     dragCounterRef.current = 0;
     setIsDraggingOver(false);
 
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
+    const dt = e.dataTransfer;
 
-    await processFilesForUpload(Array.from(files));
+    const droppedFiles = await extractFilesFromDataTransfer(dt, { maxFiles: 200 });
+    if (droppedFiles.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      await processFilesForUpload(droppedFiles);
+      return;
+    }
+
+    // Drop-to-import for links/images dragged from the browser.
+    const uriList = dt?.getData?.("text/uri-list") || "";
+    const html = dt?.getData?.("text/html") || "";
+    const text = dt?.getData?.("text/plain") || "";
+
+    // Try a single URL from plain text first (common for dragging links).
+    const candidateTextUrl = normalizeHttpUrl(text);
+    const imageUrls = extractImageUrlsFromHtml(html);
+    const otherUrls = uniq([
+      ...(candidateTextUrl ? [candidateTextUrl] : []),
+      ...extractUrlsFromUriList(uriList),
+      ...extractLinkUrlsFromHtml(html),
+    ]);
+
+    const eligible = uniq([
+      ...imageUrls,
+      ...otherUrls.filter(looksLikeDirectFileUrl),
+    ]).slice(0, 10);
+
+    if (eligible.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      importUrlsForUpload(eligible);
+      return;
+    }
+
+    // If it's not a direct file URL, just insert the link(s) into the input.
+    if (otherUrls.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      setInput((prev: string) => {
+        const suffix = otherUrls.join("\n");
+        if (!prev) return suffix;
+        if (prev.endsWith("\n")) return prev + suffix;
+        return prev + "\n" + suffix;
+      });
+      textareaRef.current?.focus();
+    }
   };
 
   const getFileIcon = (type: string, fileName?: string) => {
@@ -2704,10 +3243,12 @@ export function ChatInterface({
     adjustTextareaHeight();
   }, [input]);
 
-	  const handleSubmit = async () => {
-    if (import.meta.env.DEV) {
-      console.debug("[handleSubmit] called at", new Date().toISOString());
-    }
+		  const handleSubmit = async () => {
+	    // Read from ref so dictation (and other async input updates) can't race the state closure.
+	    const input = currentTextRef.current;
+	    if (import.meta.env.DEV) {
+	      console.debug("[handleSubmit] called at", new Date().toISOString());
+	    }
 
     // Development-only fallback for debugging streaming.
     if (import.meta.env.DEV && input.trim().startsWith("!")) {
@@ -4546,13 +5087,13 @@ export function ChatInterface({
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   credentials: "include",
-                  body: JSON.stringify({
-                    mediaType: "image",
-                    title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
-                    description: userInput.slice(0, 200),
-                    storagePath: imageData.imageData,
-                    mimeType: "image/png",
-                    sourceChatId: chatId || null,
+	                  body: JSON.stringify({
+	                    mediaType: "image",
+	                    title: `Imagen generada - ${formatZonedDate(new Date(), { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`,
+	                    description: userInput.slice(0, 200),
+	                    storagePath: imageData.imageData,
+	                    mimeType: "image/png",
+	                    sourceChatId: chatId || null,
                     metadata: { prompt: userInput }
                   })
                 }).catch(err => console.error("Failed to save image to library:", err));
