@@ -248,6 +248,7 @@ interface ChatInterfaceProps {
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
+  chatTitle?: string | null;
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
@@ -341,6 +342,7 @@ export function ChatInterface({
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
+  chatTitle,
   onOpenApps,
   onUpdateMessageAttachments,
   onEditMessageAndTruncate,
@@ -911,7 +913,7 @@ export function ChatInterface({
     if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
       streamingChatIdRef.current = currentChatId;
       if (currentChatId) {
-        startRun(currentChatId);
+        startRun(currentChatId, undefined, undefined, chatTitle || undefined);
       }
     }
 
@@ -931,7 +933,7 @@ export function ChatInterface({
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId, startRun, updateStatus, completeRun]);
+  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
