@@ -10,8 +10,8 @@ RUN apk add --no-cache docker-cli bash
 
 # Copy package + install prod deps (we reuse repo build artifacts)
 COPY package.json package-lock.json ./
-# Use --only=production for compatibility across npm versions
-RUN npm ci --only=production
+# npm ci can be brittle in minimal Alpine environments; use install with lockfile instead
+RUN npm install --production --no-audit --no-fund
 
 # Copy compiled dist + minimal assets
 COPY dist ./dist
