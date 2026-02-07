@@ -2,15 +2,12 @@ import { Router } from "express";
 import { storage } from "../../storage";
 import { getInvoiceEmailEventId, sendInvoiceEmailIdempotent } from "../../services/invoiceAutomationService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
-import { dbRead } from "../../db";
+import { db, dbRead } from "../../db";
 import { invoices, notificationLogs, payments, users } from "@shared/schema";
-import { getStripeClient } from "../../stripeClient";
-import {
-    getStripeCustomerIdFromInvoice,
-    resolveUserIdFromStripeCustomerId,
-    upsertPaymentFromStripeInvoice,
-} from "../../services/paymentIngestionService";
-import { and, asc, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { createQueue, QUEUE_NAMES } from "../../lib/queueFactory";
+import { syncStripePaidInvoicesToPayments } from "../../services/stripePaymentsSyncService";
+import ExcelJS from "exceljs";
+import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const financeRouter = Router();
 
@@ -39,9 +36,9 @@ function parseNumberInput(value: string | undefined): number | null {
 }
 
 function amountAsNumeric(): SQL<number> {
-    // Make amount filtering/sorting resilient to minor formatting (currency symbols, commas).
-    // We keep this server-side to avoid blowing up on bad data.
-    return sql<number>`
+    // Prefer persisted numeric amounts, fall back to resilient parsing of legacy `amount` strings.
+    // Keep this server-side to avoid blowing up on bad/locale-formatted data.
+    const legacy = sql<number>`
         nullif(
             case
                 when position('.' in ${payments.amount}) > 0 and position(',' in ${payments.amount}) > 0
@@ -51,6 +48,8 @@ function amountAsNumeric(): SQL<number> {
             ''
         )::numeric
     `;
+
+    return sql<number>`coalesce(${payments.amountValue}::numeric, ${legacy})`;
 }
 
 function buildPaymentsWhereClause(params: {
@@ -93,8 +92,12 @@ function buildPaymentsWhereClause(params: {
                 ilike(payments.id, like),
                 ilike(payments.userId, like),
                 ilike(payments.stripePaymentId, like),
+                ilike(payments.stripeCustomerId, like),
+                ilike(payments.stripePaymentIntentId, like),
+                ilike(payments.stripeChargeId, like),
                 ilike(payments.description, like),
                 ilike(users.email, like),
+                ilike(users.fullName, like),
             )!,
         );
     }
@@ -148,11 +151,16 @@ financeRouter.get("/payments", async (req, res) => {
                 userEmail: users.email,
                 userName: users.fullName,
                 amount: payments.amount,
+                amountValue: payments.amountValue,
+                amountMinor: payments.amountMinor,
                 currency: payments.currency,
                 status: payments.status,
                 method: payments.method,
                 description: payments.description,
                 stripePaymentId: payments.stripePaymentId,
+                stripeCustomerId: payments.stripeCustomerId,
+                stripePaymentIntentId: payments.stripePaymentIntentId,
+                stripeChargeId: payments.stripeChargeId,
                 createdAt: payments.createdAt,
             })
             .from(payments)
@@ -184,8 +192,151 @@ financeRouter.get("/payments", async (req, res) => {
 
 financeRouter.get("/payments/stats", async (req, res) => {
     try {
-        const stats = await storage.getPaymentStats();
-        res.json(stats);
+        const { status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount } = req.query as Record<string, string>;
+        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount });
+
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const amountExpr = amountAsNumeric();
+
+        let currencyQuery = dbRead
+            .select({
+                currency: payments.currency,
+                total: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'completed' THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                thisMonth: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'completed' AND ${payments.createdAt} >= ${monthStart} THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                count: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'completed' THEN 1 ELSE 0 END), 0)::int`,
+
+                pendingTotal: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'pending' THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                pendingCount: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'pending' THEN 1 ELSE 0 END), 0)::int`,
+
+                failedTotal: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'failed' THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                failedCount: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'failed' THEN 1 ELSE 0 END), 0)::int`,
+
+                refundedTotal: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'refunded' THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                refundedCount: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'refunded' THEN 1 ELSE 0 END), 0)::int`,
+
+                disputedTotal: sql<string>`COALESCE(SUM(CASE WHEN ${payments.status} = 'disputed' THEN ${amountExpr} ELSE 0 END), 0)::text`,
+                disputedCount: sql<number>`COALESCE(SUM(CASE WHEN ${payments.status} = 'disputed' THEN 1 ELSE 0 END), 0)::int`,
+            })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id))
+            .groupBy(payments.currency);
+        if (whereClause) currencyQuery = currencyQuery.where(whereClause);
+
+        const currencyRows = await currencyQuery;
+
+        const parseAmount = (v: unknown): number => {
+            const n = Number.parseFloat(String(v ?? "0"));
+            return Number.isFinite(n) ? n : 0;
+        };
+
+        type CurrencyStats = {
+            total: number;
+            thisMonth: number;
+            count: number;
+            pendingTotal: number;
+            pendingCount: number;
+            failedTotal: number;
+            failedCount: number;
+            refundedTotal: number;
+            refundedCount: number;
+            disputedTotal: number;
+            disputedCount: number;
+        };
+
+        const byCurrency: Record<string, CurrencyStats> = {};
+        for (const row of currencyRows) {
+            const cur = String(row.currency || "EUR").toUpperCase();
+            byCurrency[cur] = {
+                total: parseAmount((row as any).total),
+                thisMonth: parseAmount((row as any).thisMonth),
+                count: Number((row as any).count || 0),
+                pendingTotal: parseAmount((row as any).pendingTotal),
+                pendingCount: Number((row as any).pendingCount || 0),
+                failedTotal: parseAmount((row as any).failedTotal),
+                failedCount: Number((row as any).failedCount || 0),
+                refundedTotal: parseAmount((row as any).refundedTotal),
+                refundedCount: Number((row as any).refundedCount || 0),
+                disputedTotal: parseAmount((row as any).disputedTotal),
+                disputedCount: Number((row as any).disputedCount || 0),
+            };
+        }
+
+        const currencies = Object.keys(byCurrency).sort();
+        const primaryCurrency = currencies.length === 1 ? currencies[0] : null;
+
+        const totals = currencies.reduce(
+            (acc, cur) => {
+                const s = byCurrency[cur]!;
+                acc.total += s.total;
+                acc.thisMonth += s.thisMonth;
+                acc.count += s.count;
+                acc.pendingTotal += s.pendingTotal;
+                acc.pendingCount += s.pendingCount;
+                acc.failedTotal += s.failedTotal;
+                acc.failedCount += s.failedCount;
+                acc.refundedTotal += s.refundedTotal;
+                acc.refundedCount += s.refundedCount;
+                acc.disputedTotal += s.disputedTotal;
+                acc.disputedCount += s.disputedCount;
+                return acc;
+            },
+            {
+                total: 0,
+                thisMonth: 0,
+                count: 0,
+                pendingTotal: 0,
+                pendingCount: 0,
+                failedTotal: 0,
+                failedCount: 0,
+                refundedTotal: 0,
+                refundedCount: 0,
+                disputedTotal: 0,
+                disputedCount: 0,
+            },
+        );
+
+        const denom = totals.count + totals.failedCount;
+        const successRate = denom > 0 ? (totals.count / denom) * 100 : 0;
+
+        res.json({
+            total: totals.total.toFixed(2),
+            thisMonth: totals.thisMonth.toFixed(2),
+            count: totals.count,
+            pendingTotal: totals.pendingTotal.toFixed(2),
+            pendingCount: totals.pendingCount,
+            failedTotal: totals.failedTotal.toFixed(2),
+            failedCount: totals.failedCount,
+            refundedTotal: totals.refundedTotal.toFixed(2),
+            refundedCount: totals.refundedCount,
+            disputedTotal: totals.disputedTotal.toFixed(2),
+            disputedCount: totals.disputedCount,
+            successRate: Number(successRate.toFixed(1)),
+            currencies,
+            primaryCurrency,
+            byCurrency: Object.fromEntries(
+                currencies.map((cur) => {
+                    const s = byCurrency[cur]!;
+                    return [
+                        cur,
+                        {
+                            total: s.total.toFixed(2),
+                            thisMonth: s.thisMonth.toFixed(2),
+                            count: s.count,
+                            pendingTotal: s.pendingTotal.toFixed(2),
+                            pendingCount: s.pendingCount,
+                            failedTotal: s.failedTotal.toFixed(2),
+                            failedCount: s.failedCount,
+                            refundedTotal: s.refundedTotal.toFixed(2),
+                            refundedCount: s.refundedCount,
+                            disputedTotal: s.disputedTotal.toFixed(2),
+                            disputedCount: s.disputedCount,
+                        },
+                    ] as const;
+                }),
+            ),
+        });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -199,9 +350,11 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
         const startingAfterRaw = (req.body?.startingAfter ?? req.query?.startingAfter) as any;
         const dateFromRaw = (req.body?.dateFrom ?? req.query?.dateFrom) as any;
         const dateToRaw = (req.body?.dateTo ?? req.query?.dateTo) as any;
+        const asyncRaw = (req.body?.async ?? req.query?.async) as any;
 
         const maxInvoices = Math.min(2000, Math.max(1, Number(maxInvoicesRaw) || 200));
         const startingAfter = typeof startingAfterRaw === "string" && startingAfterRaw.trim() ? startingAfterRaw.trim() : undefined;
+        const asyncRequested = asyncRaw === true || String(asyncRaw || "").trim().toLowerCase() === "true";
 
         const defaultFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30 days
         const fromDate = parseDateInput(typeof dateFromRaw === "string" ? dateFromRaw : undefined, "start") || defaultFrom;
@@ -210,128 +363,44 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
             return res.status(400).json({ error: "`dateFrom` must be before `dateTo`" });
         }
 
-        const createdFilter = {
-            gte: Math.floor(fromDate.getTime() / 1000),
-            lte: Math.floor(toDate.getTime() / 1000),
-        };
+        if (asyncRequested) {
+            const queue = createQueue<{ maxInvoices: number; startingAfter?: string; fromDate: string; toDate: string }>(QUEUE_NAMES.PAYMENTS_SYNC);
+            if (queue) {
+                const job = await queue.add("sync-stripe-paid-invoices", {
+                    maxInvoices,
+                    startingAfter,
+                    fromDate: fromDate.toISOString(),
+                    toDate: toDate.toISOString(),
+                }, {
+                    attempts: 3,
+                });
 
-        let stripe;
-        try {
-            stripe = getStripeClient();
-        } catch (e: any) {
-            return res.status(400).json({ error: e?.message || "Stripe is not configured" });
+                await auditLog(req as any, {
+                    action: AuditActions.ADMIN_IMPORT_DATA,
+                    resource: "payments",
+                    resourceId: String(job.id || ""),
+                    details: {
+                        source: "stripe",
+                        async: true,
+                        window: { dateFrom: fromDate.toISOString(), dateTo: toDate.toISOString() },
+                        maxInvoices,
+                        startingAfter: startingAfter || null,
+                    },
+                    category: "admin",
+                    severity: "info",
+                });
+
+                return res.json({ success: true, async: true, jobId: String(job.id) });
+            }
+            // Fall back to synchronous execution if Redis isn't configured.
         }
 
-        const userCache = new Map<string, string | null>();
-
-        let fetched = 0;
-        let paid = 0;
-        let synced = 0;
-        let created = 0;
-        let updated = 0;
-        let matchedUsers = 0;
-        let unmatchedUsers = 0;
-        let errors = 0;
-        const unmatchedInvoiceIds: string[] = [];
-
-        let cursor: string | undefined = startingAfter;
-        let stripeHasMore = false;
-        let brokeEarly = false;
-
-        while (synced < maxInvoices) {
-            const pageLimit = Math.min(100, maxInvoices - synced);
-
-            let result: any;
-            try {
-                result = await stripe.invoices.list({
-                    limit: pageLimit,
-                    ...(cursor ? { starting_after: cursor } : {}),
-                    created: createdFilter,
-                    status: "paid",
-                } as any);
-            } catch (e) {
-                // Fallback for API versions that don't accept `status` as list param.
-                result = await stripe.invoices.list({
-                    limit: pageLimit,
-                    ...(cursor ? { starting_after: cursor } : {}),
-                    created: createdFilter,
-                } as any);
-            }
-
-            const invoices = (result?.data || []) as any[];
-            fetched += invoices.length;
-            stripeHasMore = !!result?.has_more;
-
-            if (invoices.length === 0) {
-                stripeHasMore = false;
-                break;
-            }
-
-            let lastInvoiceId: string | undefined;
-
-            for (let i = 0; i < invoices.length; i += 1) {
-                const invoice = invoices[i];
-                if (typeof invoice?.id === "string") lastInvoiceId = invoice.id;
-
-                const isPaid = invoice?.status === "paid" || invoice?.paid === true;
-                if (!isPaid) continue;
-
-                paid += 1;
-
-                const metadataUserId = typeof invoice?.metadata?.userId === "string" ? invoice.metadata.userId : null;
-                const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
-
-                let userId: string | null = metadataUserId;
-                if (!userId) {
-                    if (stripeCustomerId && userCache.has(stripeCustomerId)) {
-                        userId = userCache.get(stripeCustomerId)!;
-                    } else {
-                        userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
-                        if (stripeCustomerId) userCache.set(stripeCustomerId, userId);
-                    }
-                }
-
-                if (userId) {
-                    matchedUsers += 1;
-                } else {
-                    unmatchedUsers += 1;
-                    if (typeof invoice?.id === "string" && unmatchedInvoiceIds.length < 25) {
-                        unmatchedInvoiceIds.push(invoice.id);
-                    }
-                }
-
-                try {
-                    const r = await upsertPaymentFromStripeInvoice({
-                        invoice,
-                        status: "completed",
-                        userId,
-                        plan: null,
-                    });
-                    synced += 1;
-                    if (r.created) created += 1;
-                    else updated += 1;
-                } catch {
-                    errors += 1;
-                }
-
-                if (synced >= maxInvoices) {
-                    if (i < invoices.length - 1) {
-                        brokeEarly = true;
-                    }
-                    break;
-                }
-            }
-
-            if (lastInvoiceId) cursor = lastInvoiceId;
-
-            if (synced >= maxInvoices) {
-                break;
-            }
-
-            if (!stripeHasMore || !cursor) {
-                break;
-            }
-        }
+        const result = await syncStripePaidInvoicesToPayments({
+            maxInvoices,
+            startingAfter,
+            fromDate,
+            toDate,
+        });
 
         await auditLog(req as any, {
             action: AuditActions.ADMIN_IMPORT_DATA,
@@ -339,18 +408,8 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
             resourceId: null,
             details: {
                 source: "stripe",
-                window: {
-                    dateFrom: fromDate.toISOString(),
-                    dateTo: toDate.toISOString(),
-                },
-                fetched,
-                paid,
-                synced,
-                created,
-                updated,
-                matchedUsers,
-                unmatchedUsers,
-                errors,
+                async: false,
+                ...result,
                 maxInvoices,
                 startingAfter: startingAfter || null,
             },
@@ -358,33 +417,45 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
             severity: "info",
         });
 
+        res.json(result);
+    } catch (error: any) {
+        const message = error?.message || "Failed to sync payments from Stripe";
+        const isConfig = String(message).includes("STRIPE_SECRET_KEY");
+        res.status(isConfig ? 400 : 500).json({ error: message });
+    }
+});
+
+financeRouter.get("/payments/sync-stripe/jobs/:jobId", async (req, res) => {
+    try {
+        const queue = createQueue(QUEUE_NAMES.PAYMENTS_SYNC);
+        if (!queue) {
+            return res.status(400).json({ error: "Redis is not configured" });
+        }
+
+        const job = await queue.getJob(String(req.params.jobId || ""));
+        if (!job) return res.status(404).json({ error: "Job not found" });
+
+        const state = await job.getState();
         res.json({
-            success: true,
-            window: {
-                dateFrom: fromDate.toISOString(),
-                dateTo: toDate.toISOString(),
-            },
-            fetched,
-            paid,
-            synced,
-            created,
-            updated,
-            matchedUsers,
-            unmatchedUsers,
-            errors,
-            unmatchedInvoiceIds,
-            hasMore: (stripeHasMore || brokeEarly) && !!cursor,
-            nextCursor: ((stripeHasMore || brokeEarly) && cursor) ? cursor : null,
+            id: String(job.id),
+            name: job.name,
+            state,
+            progress: job.progress,
+            returnvalue: (job as any).returnvalue ?? null,
+            failedReason: (job as any).failedReason ?? null,
+            timestamp: job.timestamp,
+            finishedOn: (job as any).finishedOn ?? null,
+            processedOn: (job as any).processedOn ?? null,
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message || "Failed to sync payments from Stripe" });
+        res.status(500).json({ error: error.message || "Failed to fetch job status" });
     }
 });
 
 // GET /api/admin/finance/payments/export - Export payments to CSV/Excel
 financeRouter.get("/payments/export", async (req, res) => {
     try {
-        const { format = "csv" } = req.query;
+        const format = String((req.query as any)?.format || "csv").toLowerCase();
         const { status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount, sortBy = "createdAt", sortOrder = "desc" } = req.query as Record<string, string>;
         const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount });
 
@@ -400,12 +471,32 @@ financeRouter.get("/payments/export", async (req, res) => {
                 id: payments.id,
                 userId: payments.userId,
                 userEmail: users.email,
+                userName: users.fullName,
                 amount: payments.amount,
+                amountValue: payments.amountValue,
+                amountMinor: payments.amountMinor,
                 currency: payments.currency,
                 status: payments.status,
                 method: payments.method,
                 description: payments.description,
                 stripePaymentId: payments.stripePaymentId,
+                stripeCustomerId: payments.stripeCustomerId,
+                stripePaymentIntentId: payments.stripePaymentIntentId,
+                stripeChargeId: payments.stripeChargeId,
+                invoiceNumber: sql<string | null>`(
+                    select ${invoices.invoiceNumber}
+                    from ${invoices}
+                    where ${invoices.paymentId} = ${payments.id}
+                    order by ${invoices.createdAt} desc
+                    limit 1
+                )`,
+                invoiceStatus: sql<string | null>`(
+                    select ${invoices.status}
+                    from ${invoices}
+                    where ${invoices.paymentId} = ${payments.id}
+                    order by ${invoices.createdAt} desc
+                    limit 1
+                )`,
                 createdAt: payments.createdAt,
             })
             .from(payments)
@@ -422,19 +513,46 @@ financeRouter.get("/payments/export", async (req, res) => {
         });
 
         if (format === "csv") {
-            const headers = ["id", "userId", "userEmail", "amount", "currency", "status", "method", "description", "stripePaymentId", "createdAt"];
+            const headers = [
+                "id",
+                "userId",
+                "userEmail",
+                "userName",
+                "amount",
+                "amountValue",
+                "amountMinor",
+                "currency",
+                "status",
+                "method",
+                "description",
+                "stripePaymentId",
+                "stripeCustomerId",
+                "stripePaymentIntentId",
+                "stripeChargeId",
+                "invoiceNumber",
+                "invoiceStatus",
+                "createdAt",
+            ];
             const csvRows = [headers.join(",")];
             paymentRows.forEach(p => {
                 csvRows.push([
                     p.id,
                     p.userId || "",
                     p.userEmail || "",
+                    (p as any).userName || "",
                     p.amount || 0,
+                    (p as any).amountValue || "",
+                    (p as any).amountMinor ?? "",
                     p.currency || "EUR",
                     p.status || "",
                     p.method || "",
                     p.description || "",
                     p.stripePaymentId || "",
+                    (p as any).stripeCustomerId || "",
+                    (p as any).stripePaymentIntentId || "",
+                    (p as any).stripeChargeId || "",
+                    (p as any).invoiceNumber || "",
+                    (p as any).invoiceStatus || "",
                     p.createdAt?.toISOString?.() || p.createdAt || ""
                 ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
             });
@@ -442,6 +560,41 @@ financeRouter.get("/payments/export", async (req, res) => {
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.csv`);
             // Add UTF-8 BOM for Excel compatibility.
             res.send("\uFEFF" + csvRows.join("\r\n"));
+        } else if (format === "xlsx") {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet("Payments");
+            sheet.columns = [
+                { header: "id", key: "id", width: 36 },
+                { header: "userId", key: "userId", width: 36 },
+                { header: "userEmail", key: "userEmail", width: 28 },
+                { header: "userName", key: "userName", width: 22 },
+                { header: "amount", key: "amount", width: 14 },
+                { header: "amountValue", key: "amountValue", width: 14 },
+                { header: "amountMinor", key: "amountMinor", width: 14 },
+                { header: "currency", key: "currency", width: 10 },
+                { header: "status", key: "status", width: 12 },
+                { header: "method", key: "method", width: 12 },
+                { header: "description", key: "description", width: 32 },
+                { header: "stripePaymentId", key: "stripePaymentId", width: 24 },
+                { header: "stripeCustomerId", key: "stripeCustomerId", width: 24 },
+                { header: "stripePaymentIntentId", key: "stripePaymentIntentId", width: 24 },
+                { header: "stripeChargeId", key: "stripeChargeId", width: 24 },
+                { header: "invoiceNumber", key: "invoiceNumber", width: 22 },
+                { header: "invoiceStatus", key: "invoiceStatus", width: 12 },
+                { header: "createdAt", key: "createdAt", width: 22 },
+            ];
+
+            sheet.addRows(
+                paymentRows.map((p: any) => ({
+                    ...p,
+                    createdAt: p.createdAt?.toISOString?.() || p.createdAt || "",
+                })),
+            );
+
+            res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.xlsx`);
+            const buffer = await workbook.xlsx.writeBuffer();
+            res.send(Buffer.from(buffer as any));
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.json`);
@@ -449,6 +602,244 @@ financeRouter.get("/payments/export", async (req, res) => {
         }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/finance/payments/unmatched - List payments that aren't linked to a user yet
+financeRouter.get("/payments/unmatched", async (req, res) => {
+    try {
+        const {
+            page = "1",
+            limit = "20",
+            status,
+            search,
+            dateFrom,
+            dateTo,
+            currency,
+            minAmount,
+            maxAmount,
+            sortBy = "createdAt",
+            sortOrder = "desc",
+        } = req.query as Record<string, string>;
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+        const offset = (pageNum - 1) * limitNum;
+
+        const sortBySafe = sortBy === "amount" ? "amount" : "createdAt";
+        const sortOrderSafe = sortOrder === "asc" ? "asc" : "desc";
+
+        const orderByClause =
+            sortBySafe === "amount"
+                ? (sortOrderSafe === "asc" ? asc(amountAsNumeric()) : desc(amountAsNumeric()))
+                : (sortOrderSafe === "asc" ? asc(payments.createdAt) : desc(payments.createdAt));
+
+        const baseWhere = buildPaymentsWhereClause({ status, search, dateFrom, dateTo, currency, minAmount, maxAmount });
+        const whereClause = baseWhere ? and(isNull(payments.userId), baseWhere) : isNull(payments.userId);
+
+        const [{ count: total = 0 } = {} as any] = await dbRead
+            .select({ count: sql<number>`count(*)::int` })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id))
+            .where(whereClause);
+
+        const paginatedPayments = await dbRead
+            .select({
+                id: payments.id,
+                userId: payments.userId,
+                userEmail: users.email,
+                userName: users.fullName,
+                amount: payments.amount,
+                amountValue: payments.amountValue,
+                amountMinor: payments.amountMinor,
+                currency: payments.currency,
+                status: payments.status,
+                method: payments.method,
+                description: payments.description,
+                stripePaymentId: payments.stripePaymentId,
+                stripeCustomerId: payments.stripeCustomerId,
+                stripePaymentIntentId: payments.stripePaymentIntentId,
+                stripeChargeId: payments.stripeChargeId,
+                createdAt: payments.createdAt,
+            })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id))
+            .where(whereClause)
+            .orderBy(orderByClause, desc(payments.createdAt))
+            .limit(limitNum)
+            .offset(offset);
+
+        res.json({
+            payments: paginatedPayments,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages: Math.ceil(total / limitNum),
+            },
+            sort: {
+                sortBy: sortBySafe,
+                sortOrder: sortOrderSafe,
+            },
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/finance/payments/:id - Payment details + related invoices
+financeRouter.get("/payments/:id", async (req, res) => {
+    try {
+        const id = String(req.params.id || "").trim();
+        if (!id) return res.status(400).json({ error: "Missing payment id" });
+
+        const [payment] = await dbRead
+            .select({
+                id: payments.id,
+                userId: payments.userId,
+                userEmail: users.email,
+                userName: users.fullName,
+                amount: payments.amount,
+                amountValue: payments.amountValue,
+                amountMinor: payments.amountMinor,
+                currency: payments.currency,
+                status: payments.status,
+                method: payments.method,
+                description: payments.description,
+                stripePaymentId: payments.stripePaymentId,
+                stripeCustomerId: payments.stripeCustomerId,
+                stripePaymentIntentId: payments.stripePaymentIntentId,
+                stripeChargeId: payments.stripeChargeId,
+                createdAt: payments.createdAt,
+            })
+            .from(payments)
+            .leftJoin(users, eq(payments.userId, users.id))
+            .where(eq(payments.id, id))
+            .limit(1);
+
+        if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+        const relatedInvoices = await dbRead
+            .select({
+                id: invoices.id,
+                userId: invoices.userId,
+                paymentId: invoices.paymentId,
+                source: invoices.source,
+                invoiceNumber: invoices.invoiceNumber,
+                amount: invoices.amount,
+                amountValue: invoices.amountValue,
+                amountMinor: invoices.amountMinor,
+                currency: invoices.currency,
+                status: invoices.status,
+                dueDate: invoices.dueDate,
+                paidAt: invoices.paidAt,
+                pdfPath: invoices.pdfPath,
+                stripeInvoiceId: invoices.stripeInvoiceId,
+                stripeHostedInvoiceUrl: invoices.stripeHostedInvoiceUrl,
+                stripeInvoicePdfUrl: invoices.stripeInvoicePdfUrl,
+                createdAt: invoices.createdAt,
+            })
+            .from(invoices)
+            .where(eq(invoices.paymentId, id))
+            .orderBy(desc(invoices.createdAt));
+
+        res.json({ payment, invoices: relatedInvoices });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to fetch payment" });
+    }
+});
+
+// POST /api/admin/finance/payments/:id/assign-user - reconcile payment to a user
+financeRouter.post("/payments/:id/assign-user", async (req, res) => {
+    try {
+        const paymentId = String(req.params.id || "").trim();
+        if (!paymentId) return res.status(400).json({ error: "Missing payment id" });
+
+        const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+        const userId = typeof req.body?.userId === "string" ? req.body.userId.trim() : "";
+
+        if (!email && !userId) {
+            return res.status(400).json({ error: "Provide `email` or `userId`" });
+        }
+
+        const [targetUser] = await dbRead
+            .select({ id: users.id, email: users.email, fullName: users.fullName })
+            .from(users)
+            .where(
+                userId
+                    ? eq(users.id, userId)
+                    : sql<boolean>`lower(${users.email}) = ${email}`,
+            )
+            .limit(1);
+
+        if (!targetUser) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const updated = await db.transaction(async (tx) => {
+            const [payment] = await tx
+                .select({ id: payments.id, userId: payments.userId })
+                .from(payments)
+                .where(eq(payments.id, paymentId))
+                .limit(1);
+
+            if (!payment) {
+                return { ok: false as const, reason: "not_found" as const };
+            }
+
+            if (payment.userId) {
+                return { ok: false as const, reason: "already_assigned" as const, existingUserId: payment.userId };
+            }
+
+            await tx.update(payments).set({ userId: targetUser.id }).where(eq(payments.id, paymentId));
+            await tx.update(invoices).set({ userId: targetUser.id }).where(eq(invoices.paymentId, paymentId));
+
+            const [paymentAfter] = await tx
+                .select({
+                    id: payments.id,
+                    userId: payments.userId,
+                    amount: payments.amount,
+                    amountValue: payments.amountValue,
+                    amountMinor: payments.amountMinor,
+                    currency: payments.currency,
+                    status: payments.status,
+                    method: payments.method,
+                    description: payments.description,
+                    stripePaymentId: payments.stripePaymentId,
+                    stripeCustomerId: payments.stripeCustomerId,
+                    stripePaymentIntentId: payments.stripePaymentIntentId,
+                    stripeChargeId: payments.stripeChargeId,
+                    createdAt: payments.createdAt,
+                })
+                .from(payments)
+                .where(eq(payments.id, paymentId))
+                .limit(1);
+
+            return { ok: true as const, payment: paymentAfter };
+        });
+
+        if (!updated.ok) {
+            if (updated.reason === "not_found") return res.status(404).json({ error: "Payment not found" });
+            if (updated.reason === "already_assigned") return res.status(409).json({ error: "Payment already assigned", existingUserId: updated.existingUserId });
+            return res.status(400).json({ error: "Cannot assign payment" });
+        }
+
+        await auditLog(req as any, {
+            action: AuditActions.PAYMENT_RECONCILED,
+            resource: "payments",
+            resourceId: paymentId,
+            details: {
+                assignedUserId: targetUser.id,
+                assignedUserEmail: targetUser.email,
+                input: { email: email || null, userId: userId || null },
+            },
+            category: "admin",
+            severity: "info",
+        });
+
+        res.json({ success: true, payment: updated.payment, user: targetUser });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to assign payment" });
     }
 });
 

@@ -34,6 +34,7 @@ function getConnection(): IORedis | null {
 export const QUEUE_NAMES = {
     UPLOAD: 'upload-queue',
     PROCESSING: 'processing-queue',
+    PAYMENTS_SYNC: 'payments-sync-queue',
 };
 
 // Registry for BullBoard

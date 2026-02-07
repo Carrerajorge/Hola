@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./auth";
@@ -47,17 +47,29 @@ export const payments = pgTable("payments", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     userId: varchar("user_id").references(() => users.id),
     amount: text("amount").notNull(),
+    // Derived numeric amounts for robust filtering/sorting. Keep legacy `amount` string for compatibility.
+    amountValue: numeric("amount_value", { precision: 18, scale: 6 }),
+    // Stripe amounts in the smallest currency unit (cents). Useful for reconciliation and charge/refund events.
+    amountMinor: bigint("amount_minor", { mode: "number" }),
     currency: text("currency").default("EUR"),
     status: text("status").default("pending"),
     method: text("method"),
     description: text("description"),
     stripePaymentId: text("stripe_payment_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    stripeChargeId: text("stripe_charge_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("payments_user_idx").on(table.userId),
     index("payments_status_idx").on(table.status),
     index("payments_currency_idx").on(table.currency),
     index("payments_created_at_idx").on(table.createdAt),
+    index("payments_status_created_at_idx").on(table.status, table.createdAt),
+    index("payments_currency_created_at_idx").on(table.currency, table.createdAt),
+    index("payments_stripe_customer_id_idx").on(table.stripeCustomerId),
+    index("payments_stripe_payment_intent_id_idx").on(table.stripePaymentIntentId),
+    index("payments_stripe_charge_id_idx").on(table.stripeChargeId),
     uniqueIndex("payments_stripe_payment_id_unique_idx").on(table.stripePaymentId),
 ]);
 
@@ -71,17 +83,25 @@ export const invoices = pgTable("invoices", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     userId: varchar("user_id").references(() => users.id),
     paymentId: varchar("payment_id").references(() => payments.id),
+    source: text("source").default("internal"),
     invoiceNumber: text("invoice_number").notNull(),
     amount: text("amount").notNull(),
+    amountValue: numeric("amount_value", { precision: 18, scale: 6 }),
+    amountMinor: bigint("amount_minor", { mode: "number" }),
     currency: text("currency").default("EUR"),
     status: text("status").default("pending"),
     dueDate: timestamp("due_date"),
     paidAt: timestamp("paid_at"),
     pdfPath: text("pdf_path"),
+    stripeInvoiceId: text("stripe_invoice_id"),
+    stripeHostedInvoiceUrl: text("stripe_hosted_invoice_url"),
+    stripeInvoicePdfUrl: text("stripe_invoice_pdf_url"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("invoices_user_idx").on(table.userId),
+    index("invoices_payment_idx").on(table.paymentId),
     uniqueIndex("invoices_user_invoice_number_unique_idx").on(table.userId, table.invoiceNumber),
+    uniqueIndex("invoices_stripe_invoice_id_unique_idx").on(table.stripeInvoiceId),
 ]);
 
 export const insertInvoiceSchema = createInsertSchema(invoices);

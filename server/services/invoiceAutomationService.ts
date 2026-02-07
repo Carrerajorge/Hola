@@ -64,10 +64,14 @@ export async function recordStripeInvoicePaymentSucceeded(params: {
     paymentId,
     invoiceNumber,
     amount,
+    amountMinor,
     currency,
     paidAt,
     dueDate,
     pdfPath,
+    stripeInvoiceId: stripeInvoice.id,
+    stripeHostedInvoiceUrl: stripeInvoice.hosted_invoice_url || null,
+    stripeInvoicePdfUrl: stripeInvoice.invoice_pdf || null,
     createdAt,
   });
 
@@ -249,24 +253,34 @@ async function upsertInvoiceFromStripeInvoice(params: {
   paymentId: string | null;
   invoiceNumber: string;
   amount: string;
+  amountMinor: number;
   currency: string;
   paidAt: Date;
   dueDate: Date | null;
   pdfPath: string | null;
+  stripeInvoiceId: string;
+  stripeHostedInvoiceUrl: string | null;
+  stripeInvoicePdfUrl: string | null;
   createdAt: Date;
 }): Promise<void> {
-  const { userId, paymentId, invoiceNumber, amount, currency, paidAt, dueDate, pdfPath, createdAt } = params;
+  const { userId, paymentId, invoiceNumber, amount, amountMinor, currency, paidAt, dueDate, pdfPath, stripeInvoiceId, stripeHostedInvoiceUrl, stripeInvoicePdfUrl, createdAt } = params;
 
   const values = {
     userId,
     paymentId,
+    source: "stripe",
     invoiceNumber,
     amount,
+    amountValue: amount,
+    amountMinor,
     currency,
     status: "paid",
     dueDate,
     paidAt,
     pdfPath,
+    stripeInvoiceId,
+    stripeHostedInvoiceUrl,
+    stripeInvoicePdfUrl,
     createdAt,
   } as const;
 
@@ -279,11 +293,16 @@ async function upsertInvoiceFromStripeInvoice(params: {
         set: {
           paymentId,
           amount,
+          amountValue: amount,
+          amountMinor,
           currency,
           status: "paid",
           dueDate,
           paidAt,
           pdfPath,
+          stripeInvoiceId,
+          stripeHostedInvoiceUrl,
+          stripeInvoicePdfUrl,
         },
       });
     return;
@@ -301,11 +320,16 @@ async function upsertInvoiceFromStripeInvoice(params: {
         .set({
           paymentId,
           amount,
+          amountValue: amount,
+          amountMinor,
           currency,
           status: "paid",
           dueDate,
           paidAt,
           pdfPath,
+          stripeInvoiceId,
+          stripeHostedInvoiceUrl,
+          stripeInvoicePdfUrl,
         })
         .where(eq(invoices.id, existing.id));
       return;

@@ -17,6 +17,7 @@ import { UploadJobData } from "./services/uploadQueue";
 import { Logger } from "./lib/logger";
 import { Job } from "bullmq";
 import { retryInvoiceEmailNotifications } from "./services/invoiceEmailRetryService";
+import { syncStripePaidInvoicesToPayments } from "./services/stripePaymentsSyncService";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5");
 
@@ -204,6 +205,53 @@ if (processingWorker) {
     processingWorker.on("error", (e:any) => Logger.error("Processing Worker error", e));
 } else {
     Logger.error("❌ processingWorker could not be initialized. Check REDIS_URL.");
+}
+
+// ==========================================
+// 3. Payments Sync Worker (Stripe -> DB)
+// ==========================================
+
+type PaymentsSyncJobData = {
+    maxInvoices: number;
+    startingAfter?: string;
+    fromDate: string;
+    toDate: string;
+};
+
+const paymentsSyncWorker = createWorker<PaymentsSyncJobData, any>(QUEUE_NAMES.PAYMENTS_SYNC, async (job: Job) => {
+    Logger.info(`[PaymentsSyncJob:${job.id}] Starting Stripe sync...`);
+
+    const fromDate = new Date(job.data?.fromDate);
+    const toDate = new Date(job.data?.toDate);
+
+    const result = await syncStripePaidInvoicesToPayments({
+        maxInvoices: job.data?.maxInvoices ?? 200,
+        startingAfter: job.data?.startingAfter,
+        fromDate,
+        toDate,
+        onProgress: async (p) => {
+            await job.updateProgress({
+                fetched: p.fetched,
+                paid: p.paid,
+                synced: p.synced,
+                created: p.created,
+                updated: p.updated,
+                matchedUsers: p.matchedUsers,
+                unmatchedUsers: p.unmatchedUsers,
+                errors: p.errors,
+                cursor: p.cursor,
+                maxInvoices: p.maxInvoices,
+            });
+        },
+    });
+
+    Logger.info(`[PaymentsSyncJob:${job.id}] Finished Stripe sync: synced=${result.synced} created=${result.created} updated=${result.updated} errors=${result.errors}`);
+    return result;
+});
+
+if (paymentsSyncWorker) {
+    paymentsSyncWorker.on("ready", () => Logger.info("Payments Sync Worker ready"));
+    paymentsSyncWorker.on("error", (e: any) => Logger.error("Payments Sync Worker error", e));
 }
 // ==========================================
 // Lifecycle

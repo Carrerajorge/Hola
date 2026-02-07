@@ -54,6 +54,29 @@ export function getStripeCustomerIdFromInvoice(invoice: any): string | null {
   return null;
 }
 
+export function getStripePaymentIntentIdFromInvoice(invoice: any): string | null {
+  const pi = invoice?.payment_intent;
+  if (!pi) return null;
+  if (typeof pi === "string") return pi;
+  if (typeof pi === "object" && typeof pi.id === "string") return pi.id;
+  return null;
+}
+
+export function getStripeChargeIdFromInvoice(invoice: any): string | null {
+  const charge = invoice?.charge;
+  if (typeof charge === "string") return charge;
+  if (typeof charge === "object" && typeof charge.id === "string") return charge.id;
+
+  const pi = invoice?.payment_intent;
+  const latestCharge = typeof pi === "object" ? (pi as any)?.latest_charge : null;
+  if (typeof latestCharge === "string") return latestCharge;
+  if (latestCharge && typeof latestCharge === "object" && typeof (latestCharge as any).id === "string") {
+    return (latestCharge as any).id;
+  }
+
+  return null;
+}
+
 export async function resolveUserIdFromStripeCustomerId(stripeCustomerId: string | null): Promise<string | null> {
   if (!stripeCustomerId) return null;
   const [result] = await db
@@ -89,6 +112,10 @@ export async function upsertPaymentFromStripeInvoice(args: {
     unixSecondsToDate(invoice?.created) ||
     new Date();
 
+  const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+  const stripePaymentIntentId = getStripePaymentIntentIdFromInvoice(invoice);
+  const stripeChargeId = getStripeChargeIdFromInvoice(invoice);
+
   const billingReason = typeof invoice?.billing_reason === "string" ? invoice.billing_reason : "";
   const descriptionParts = ["stripe"];
   if (plan) descriptionParts.push(String(plan));
@@ -99,22 +126,33 @@ export async function upsertPaymentFromStripeInvoice(args: {
   const insertValues: typeof payments.$inferInsert = {
     userId: userId || null,
     amount,
+    amountValue: amount,
+    amountMinor,
     currency,
     status,
     method: "stripe",
     description,
     stripePaymentId,
+    stripeCustomerId,
+    stripePaymentIntentId,
+    stripeChargeId,
     createdAt: occurredAt,
   };
 
   const updateSet: Partial<typeof payments.$inferInsert> = {
     amount,
+    amountValue: amount,
+    amountMinor,
     currency,
     status,
     method: "stripe",
     description,
     createdAt: occurredAt,
   };
+
+  if (stripeCustomerId) updateSet.stripeCustomerId = stripeCustomerId;
+  if (stripePaymentIntentId) updateSet.stripePaymentIntentId = stripePaymentIntentId;
+  if (stripeChargeId) updateSet.stripeChargeId = stripeChargeId;
 
   // `onConflictDoUpdate` doesn't expose whether we inserted or updated. We do two
   // steps so the sync endpoint can report created vs updated.
