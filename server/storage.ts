@@ -130,10 +130,11 @@ export interface IStorage {
   createChat(chat: InsertChat): Promise<Chat>;
   getChat(id: string): Promise<Chat | undefined>;
   getChats(userId?: string): Promise<Chat[]>;
+  getActiveChats(userId: string): Promise<Chat[]>;
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
-  getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
+  getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string, metadata?: Record<string, any>): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
   searchMessages(userId: string, query: string): Promise<ChatMessage[]>;
@@ -639,6 +640,24 @@ export class MemStorage implements IStorage {
     return dbRead.select().from(chats).orderBy(desc(chats.updatedAt));
   }
 
+  async getActiveChats(userId: string): Promise<Chat[]> {
+    return dbRead
+      .select()
+      .from(chats)
+      .where(
+        and(
+          eq(chats.userId, userId),
+          // Handle legacy boolean vs string text column
+          or(
+            eq(chats.archived, "false"),
+            isNull(chats.archived)
+          ),
+          isNull(chats.deletedAt)
+        )
+      )
+      .orderBy(desc(chats.updatedAt));
+  }
+
   async updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined> {
     const [result] = await db.update(chats).set({ ...updates, updatedAt: new Date() }).where(eq(chats.id, id)).returning();
     return result;
@@ -666,14 +685,18 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
-    const { limit, offset, orderBy = 'asc' } = options || {};
-    // Cache key includes pagination params to avoid mixing pages
-    const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${orderBy}`;
+  async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
+    const { limit, offset, before, orderBy = 'asc' } = options || {};
+    // Cache key includes pagination params
+    const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${before?.getTime() || 'now'}:${orderBy}`;
 
-    // Cache for 10 seconds (short TTL because messages are added frequently)
     return cache.remember(cacheKey, 10, async () => {
       let query = dbRead.select().from(chatMessages).where(eq(chatMessages.chatId, chatId));
+
+      if (before) {
+        // Cursor pagination
+        query.where(and(eq(chatMessages.chatId, chatId), sql`${chatMessages.createdAt} < ${before.toISOString()}`));
+      }
 
       if (orderBy === 'desc') {
         query.orderBy(desc(chatMessages.createdAt));
@@ -689,8 +712,9 @@ export class MemStorage implements IStorage {
         query.offset(offset);
       }
 
-      return query;
+      return await query;
     });
+  }
   }
 
   async searchMessages(userId: string, query: string): Promise<ChatMessage[]> {

@@ -22,8 +22,8 @@ export function createChatsRouter() {
       }
 
       // Hide archived and deleted chats from the main list; they are managed via dedicated endpoints.
-      const chatList = await storage.getChats(userId);
-      const visibleChats = chatList.filter((chat) => chat.archived !== "true" && !chat.deletedAt);
+      // OPTIMIZATION: Use DB-side filtering instead of fetching all chats
+      const visibleChats = await storage.getActiveChats(userId);
       res.json(visibleChats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -202,7 +202,11 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const messages = await storage.getChatMessages(req.params.id);
+      // Pagination support
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      const before = req.query.before ? new Date(req.query.before as string) : undefined;
+
+      const messages = await storage.getChatMessages(req.params.id, { limit, before });
       // Also include conversationDocuments so the frontend can hydrate attachment display data
       const conversationDocs = await storage.getConversationDocuments(req.params.id);
       res.json({ ...chat, messages, conversationDocuments: conversationDocs, shareRole, isOwner });
