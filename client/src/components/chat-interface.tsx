@@ -2861,7 +2861,7 @@ export function ChatInterface({
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const readyFiles = latestUploadedFiles.filter((f: any) => f.status === "ready");
+        const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
 
         // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
         const attachments = readyFiles
