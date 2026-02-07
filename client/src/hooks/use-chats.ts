@@ -87,6 +87,7 @@ export interface Message {
   timestamp: Date;
   requestId?: string; // Unique ID for idempotency - prevents duplicate processing
   clientRequestId?: string; // For run-based idempotency - creates atomic user message + run
+  skipRun?: boolean; // Persist message without creating a chat run (used by Agent mode)
   userMessageId?: string; // For assistant messages: links to the user message it responds to
   runId?: string; // ID of the run this message belongs to
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
@@ -912,7 +913,9 @@ export function useChats() {
 
       for (const msg of queuedMessages) {
         try {
-          const clientRequestId = msg.role === 'user' ? (msg as any).clientRequestId || generateClientRequestId() : undefined;
+          const clientRequestId = msg.role === 'user' && !(msg as any).skipRun
+            ? (msg as any).clientRequestId || generateClientRequestId()
+            : undefined;
           
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
@@ -1126,7 +1129,9 @@ export function useChats() {
     } else {
       try {
         // For user messages, use run-based idempotency with clientRequestId
-        const clientRequestId = message.role === 'user' ? (message as any).clientRequestId || generateClientRequestId() : undefined;
+        const clientRequestId = message.role === 'user' && !(message as any).skipRun
+          ? (message as any).clientRequestId || generateClientRequestId()
+          : undefined;
 
         // Retry message saves with exponential backoff for reliability.
         // Uses idempotent clientRequestId to prevent duplicates on retry.

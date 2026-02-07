@@ -2835,12 +2835,43 @@ export function ChatInterface({
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const attachments = uploadedFiles.map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type,
-          spreadsheetData: f.spreadsheetData
-        }));
+        const readyFiles = latestUploadedFiles.filter((f: any) => f.status === "ready");
+
+        // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+        const attachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.type,
+            type: f.type,
+            storagePath: f.storagePath,
+            path: f.storagePath,
+            size: f.size,
+            metadata: {
+              spreadsheetData: f.spreadsheetData,
+              analysisId: f.analysisId,
+            },
+          }));
+
+        const messageAttachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            name: f.name,
+            documentType: (() => {
+              if (f.type.startsWith("image/")) return undefined;
+              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              return "word";
+            })() as "word" | "excel" | "ppt" | "pdf",
+            mimeType: f.type,
+            imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
+            storagePath: f.storagePath,
+            fileId: f.id,
+            spreadsheetData: f.spreadsheetData,
+          }));
 
         // Generate a unique message ID for tracking in the store
         const agentMessageId = `agent-${Date.now()}`;
@@ -2852,6 +2883,9 @@ export function ChatInterface({
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
+          requestId: generateRequestId(),
+          skipRun: true, // Agent mode: persist message but don't create a normal chat run
+          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
         };
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
@@ -3688,12 +3722,21 @@ export function ChatInterface({
 
 
       const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
-      const agentAttachments = readyFiles.map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        type: f.type,
-        spreadsheetData: f.spreadsheetData
-      }));
+      const agentAttachments = readyFiles
+        .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+        .map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.type,
+          type: f.type,
+          storagePath: f.storagePath,
+          path: f.storagePath,
+          size: f.size,
+          metadata: {
+            spreadsheetData: f.spreadsheetData,
+            analysisId: f.analysisId,
+          },
+        }));
 
       const agentMessageId = `agent-${Date.now()}`;
       setCurrentAgentMessageId(agentMessageId);
@@ -3714,7 +3757,7 @@ export function ChatInterface({
           });
 
           // Optimistic message already added above! just notify parent/server if needed
-          onSendMessage(userMsg);
+          onSendMessage({ ...userMsg, skipRun: true });
 
           setSelectedTool(null);
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
@@ -3905,9 +3948,9 @@ export function ChatInterface({
       // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
       if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
         // Create file context from uploaded files
-        if (uploadedFiles.length > 0) {
+        if (currentUploadedFiles.length > 0) {
           // Add file context if files are present
-          const fileContext = uploadedFiles
+          const fileContext = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => ({
               name: f.name,
@@ -4082,7 +4125,7 @@ export function ChatInterface({
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
-          console.log(`[ChatInterface] Files attached (${uploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+          console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
         }
 
         // Generate image if needed
@@ -4174,7 +4217,7 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
-          const fileContents = uploadedFiles
+          const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
             .join("\n\n");
@@ -4189,7 +4232,7 @@ export function ChatInterface({
           }));
 
           // Extract image data URLs from current files
-          const imageDataUrls = uploadedFiles
+          const imageDataUrls = currentUploadedFiles
             .filter(f => f.type.startsWith("image/") && f.dataUrl)
             .map(f => f.dataUrl as string);
 
@@ -4331,7 +4374,7 @@ IMPORTANTE:
             };
 
             // Build attachments array for streaming endpoint
-            const streamAttachments = uploadedFiles
+            const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
                 type: f.type.startsWith("image/") ? "image" as const :
@@ -4348,7 +4391,7 @@ IMPORTANTE:
               }));
 
             // Robust document detection using both mimeType AND file extension
-            const hasDocumentAttachments = uploadedFiles
+            const hasDocumentAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .some(f => isDocumentFile(f.type, f.name));
 
