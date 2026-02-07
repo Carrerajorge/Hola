@@ -100,14 +100,24 @@ export default function SignupPage() {
   if (step === "email") {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Subtle background accents */}
+        {/* Futuristic background */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute -top-40 -right-40 w-96 h-96 bg-fuchsia-200/15 rounded-full blur-3xl" />
-          <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-purple-200/15 rounded-full blur-3xl" />
+          <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-fuchsia-300/15 rounded-full blur-3xl animate-[float_14s_ease-in-out_infinite]" />
+          <div className="absolute -bottom-40 -left-40 w-[450px] h-[450px] bg-purple-300/12 rounded-full blur-3xl animate-[float_18s_ease-in-out_infinite_-6s]" />
         </div>
 
+        <div className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: 'radial-gradient(circle, rgba(192,38,211,0.04) 1px, transparent 1px)',
+            backgroundSize: '28px 28px',
+            maskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+          }}
+        />
+
         <div className="w-full max-w-md relative z-10">
-          <div className="bg-white/80 backdrop-blur-xl rounded-3xl p-8 shadow-xl shadow-fuchsia-100/30 border border-fuchsia-200/25">
+          <div className="gradient-border-animated">
+          <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-8 shadow-xl shadow-fuchsia-100/30">
           <Button
             variant="ghost"
             size="icon"
@@ -267,6 +277,7 @@ export default function SignupPage() {
             <a href="#" className="text-fuchsia-600 hover:text-fuchsia-500 hover:underline">Política de privacidad</a>
           </p>
           </div>
+          </div>
         </div>
       </div>
     );
@@ -274,14 +285,25 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Subtle background accents */}
+      {/* Futuristic background mesh */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-fuchsia-200/15 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-purple-200/15 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-fuchsia-300/15 rounded-full blur-3xl animate-[float_14s_ease-in-out_infinite]" />
+        <div className="absolute -bottom-40 -left-40 w-[450px] h-[450px] bg-purple-300/12 rounded-full blur-3xl animate-[float_18s_ease-in-out_infinite_-6s]" />
       </div>
 
+      {/* Dot grid */}
+      <div className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: 'radial-gradient(circle, rgba(192,38,211,0.04) 1px, transparent 1px)',
+          backgroundSize: '28px 28px',
+          maskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+          WebkitMaskImage: 'radial-gradient(ellipse at center, black 20%, transparent 70%)',
+        }}
+      />
+
       <div className="w-full max-w-md relative z-10">
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl p-8 shadow-xl shadow-fuchsia-100/30 border border-fuchsia-200/25">
+        <div className="gradient-border-animated">
+        <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-8 shadow-xl shadow-fuchsia-100/30">
           <Button
             variant="ghost"
             size="icon"
@@ -386,6 +408,7 @@ export default function SignupPage() {
               Inicia sesión
             </button>
           </p>
+        </div>
         </div>
       </div>
     </div>

@@ -60,15 +60,27 @@ export default function LandingPage() {
   };
 
   const features = [
-    { icon: Sparkles, label: "Adjuntar", color: "from-purple-500 to-pink-500" },
-    { icon: Search, label: "Buscar", color: "from-blue-500 to-cyan-500" },
-    { icon: BookOpen, label: "Estudiemos", color: "from-emerald-500 to-teal-500" },
-    { icon: Image, label: "Crear imagen", color: "from-orange-500 to-amber-500" },
-    { icon: Mic, label: "Voz", color: "from-rose-500 to-pink-500" },
+    { icon: Sparkles, label: "Adjuntar", iconColor: "text-fuchsia-500" },
+    { icon: Search, label: "Buscar", iconColor: "text-purple-500" },
+    { icon: BookOpen, label: "Estudiemos", iconColor: "text-violet-500" },
+    { icon: Image, label: "Crear imagen", iconColor: "text-fuchsia-600" },
+    { icon: Mic, label: "Voz", iconColor: "text-purple-600" },
   ];
 
   return (
     <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
+      {/* Floating Particles */}
+      <div className="landing-particles">
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+        <div className="particle" />
+      </div>
+
       {/* Header */}
       <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-fuchsia-200/40 bg-white/80 backdrop-blur-md">
         <div className="flex items-center gap-2">
@@ -90,12 +102,12 @@ export default function LandingPage() {
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-fuchsia-600 hover:text-fuchsia-500 font-medium transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Descargar</span>
+          <span onClick={() => setLocation("/about")} className="nav-neon-hover text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="nav-neon-hover text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Aprender</span>
+          <span onClick={() => setLocation("/business")} className="nav-neon-hover text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="nav-neon-hover text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="nav-neon-hover text-fuchsia-600 hover:text-fuchsia-500 font-medium transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="nav-neon-hover text-zinc-600 hover:text-fuchsia-700 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -183,18 +195,20 @@ export default function LandingPage() {
         <div className="w-full max-w-3xl space-y-10">
           {/* Hero Title */}
           <div className="text-center fade-in-up">
-            <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
+            <h1 className="text-4xl md:text-7xl font-extrabold mb-5 tracking-tight">
+              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo">¿Con qué puedo</span>
+              <br />
+              <span className="text-luxe text-luxe-lg" data-text="ayudarte?">ayudarte?</span>
             </h1>
-            <p className="text-lg text-zinc-600 max-w-xl mx-auto">
+            <p className="text-lg subtitle-shimmer max-w-xl mx-auto font-medium">
               El asistente de IA más inteligente para crear, investigar y aprender
             </p>
           </div>
 
           {/* Search Input */}
           <div className="space-y-6 fade-in-up fade-in-up-delay-1">
-            <div className="relative">
-              <div className="glass-luxe rounded-2xl p-1">
+            <div className="relative search-glow-ring">
+              <div className="glass-luxe-glow rounded-2xl p-1">
                 <Input
                   placeholder="Pregunta lo que quieras..."
                   value={inputValue}
@@ -206,7 +220,7 @@ export default function LandingPage() {
                 />
               </div>
               {/* Subtle fuchsia glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-300/40 via-purple-200/30 to-fuchsia-300/40 blur-xl opacity-70" />
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-300/30 via-purple-200/20 to-fuchsia-300/30 blur-xl opacity-80" />
             </div>
 
             {/* Feature Buttons */}
@@ -222,7 +236,7 @@ export default function LandingPage() {
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
                 >
-                  <feature.icon className="h-4 w-4" />
+                  <feature.icon className={`h-4 w-4 ${feature.iconColor}`} />
                   {feature.label}
                 </Button>
               ))}
@@ -231,7 +245,7 @@ export default function LandingPage() {
 
           {/* Promo Card with Premium Design */}
           {showPromo && (
-            <div className="glass-luxe rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
+            <div className="glass-luxe-glow rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-hover-glow">
               <Button
                 variant="ghost"
                 size="icon"
