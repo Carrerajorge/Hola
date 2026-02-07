@@ -10,15 +10,47 @@ import {
     resolveUserIdFromStripeCustomerId,
     upsertPaymentFromStripeInvoice,
 } from "../../services/paymentIngestionService";
-import { and, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
 
 export const financeRouter = Router();
 
-function parseDateInput(value: string | undefined): Date | null {
+function parseDateInput(value: string | undefined, mode: "start" | "end" = "start"): Date | null {
     if (!value) return null;
+
+    // <input type="date" /> values come in as YYYY-MM-DD. Treat them as local dates.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [y, m, d] = value.split("-").map((n) => Number(n));
+        if (!y || !m || !d) return null;
+        return mode === "end"
+            ? new Date(y, m - 1, d, 23, 59, 59, 999)
+            : new Date(y, m - 1, d, 0, 0, 0, 0);
+    }
+
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return null;
     return d;
+}
+
+function parseNumberInput(value: string | undefined): number | null {
+    if (!value) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return n;
+}
+
+function amountAsNumeric(): SQL<number> {
+    // Make amount filtering/sorting resilient to minor formatting (currency symbols, commas).
+    // We keep this server-side to avoid blowing up on bad data.
+    return sql<number>`
+        nullif(
+            case
+                when position('.' in ${payments.amount}) > 0 and position(',' in ${payments.amount}) > 0
+                    then replace(regexp_replace(${payments.amount}, '[^0-9.,-]', '', 'g'), ',', '')
+                else replace(regexp_replace(${payments.amount}, '[^0-9.,-]', '', 'g'), ',', '.')
+            end,
+            ''
+        )::numeric
+    `;
 }
 
 function buildPaymentsWhereClause(params: {
@@ -27,21 +59,32 @@ function buildPaymentsWhereClause(params: {
     search?: string;
     dateFrom?: string;
     dateTo?: string;
+    currency?: string;
+    minAmount?: string;
+    maxAmount?: string;
 }): SQL | undefined {
     const conditions: SQL[] = [];
 
     const status = String(params.status || "").trim();
     const userId = String(params.userId || "").trim();
     const search = String(params.search || "").trim();
+    const currency = String(params.currency || "").trim().toUpperCase();
 
-    if (status) conditions.push(eq(payments.status, status));
+    if (status && status !== "all") conditions.push(eq(payments.status, status));
     if (userId) conditions.push(eq(payments.userId, userId));
+    if (currency && currency !== "ALL") conditions.push(eq(payments.currency, currency));
 
-    const fromDate = parseDateInput(params.dateFrom);
+    const fromDate = parseDateInput(params.dateFrom, "start");
     if (fromDate) conditions.push(gte(payments.createdAt, fromDate));
 
-    const toDate = parseDateInput(params.dateTo);
+    const toDate = parseDateInput(params.dateTo, "end");
     if (toDate) conditions.push(lte(payments.createdAt, toDate));
+
+    const minAmount = parseNumberInput(params.minAmount);
+    if (minAmount !== null) conditions.push(gte(amountAsNumeric(), minAmount));
+
+    const maxAmount = parseNumberInput(params.maxAmount);
+    if (maxAmount !== null) conditions.push(lte(amountAsNumeric(), maxAmount));
 
     if (search) {
         const like = `%${search}%`;
@@ -50,6 +93,7 @@ function buildPaymentsWhereClause(params: {
                 ilike(payments.id, like),
                 ilike(payments.userId, like),
                 ilike(payments.stripePaymentId, like),
+                ilike(payments.description, like),
                 ilike(users.email, like),
             )!,
         );
@@ -68,14 +112,27 @@ financeRouter.get("/payments", async (req, res) => {
             userId,
             search,
             dateFrom,
-            dateTo
+            dateTo,
+            currency,
+            minAmount,
+            maxAmount,
+            sortBy = "createdAt",
+            sortOrder = "desc",
         } = req.query as Record<string, string>;
 
         const pageNum = Math.max(1, parseInt(page, 10) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
         const offset = (pageNum - 1) * limitNum;
 
-        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo });
+        const sortBySafe = sortBy === "amount" ? "amount" : "createdAt";
+        const sortOrderSafe = sortOrder === "asc" ? "asc" : "desc";
+
+        const orderByClause =
+            sortBySafe === "amount"
+                ? (sortOrderSafe === "asc" ? asc(amountAsNumeric()) : desc(amountAsNumeric()))
+                : (sortOrderSafe === "asc" ? asc(payments.createdAt) : desc(payments.createdAt));
+
+        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount });
 
         let countQuery = dbRead
             .select({ count: sql<number>`count(*)::int` })
@@ -103,7 +160,7 @@ financeRouter.get("/payments", async (req, res) => {
         if (whereClause) listQuery = listQuery.where(whereClause);
 
         const paginatedPayments = await listQuery
-            .orderBy(desc(payments.createdAt))
+            .orderBy(orderByClause, desc(payments.createdAt))
             .limit(limitNum)
             .offset(offset);
 
@@ -114,7 +171,11 @@ financeRouter.get("/payments", async (req, res) => {
                 limit: limitNum,
                 total,
                 totalPages: Math.ceil(total / limitNum)
-            }
+            },
+            sort: {
+                sortBy: sortBySafe,
+                sortOrder: sortOrderSafe,
+            },
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -133,11 +194,26 @@ financeRouter.get("/payments/stats", async (req, res) => {
 // POST /api/admin/finance/payments/sync-stripe - Backfill payments from Stripe invoices (paid)
 financeRouter.post("/payments/sync-stripe", async (req, res) => {
     try {
-        const limitRaw = (req.body?.limit ?? req.query?.limit ?? 100) as any;
+        // Backwards-compatible params: accept both `maxInvoices` and legacy `limit`.
+        const maxInvoicesRaw = (req.body?.maxInvoices ?? req.query?.maxInvoices ?? req.body?.limit ?? req.query?.limit ?? 200) as any;
         const startingAfterRaw = (req.body?.startingAfter ?? req.query?.startingAfter) as any;
+        const dateFromRaw = (req.body?.dateFrom ?? req.query?.dateFrom) as any;
+        const dateToRaw = (req.body?.dateTo ?? req.query?.dateTo) as any;
 
-        const limit = Math.min(250, Math.max(1, Number(limitRaw) || 100));
+        const maxInvoices = Math.min(2000, Math.max(1, Number(maxInvoicesRaw) || 200));
         const startingAfter = typeof startingAfterRaw === "string" && startingAfterRaw.trim() ? startingAfterRaw.trim() : undefined;
+
+        const defaultFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30 days
+        const fromDate = parseDateInput(typeof dateFromRaw === "string" ? dateFromRaw : undefined, "start") || defaultFrom;
+        const toDate = parseDateInput(typeof dateToRaw === "string" ? dateToRaw : undefined, "end") || new Date();
+        if (fromDate > toDate) {
+            return res.status(400).json({ error: "`dateFrom` must be before `dateTo`" });
+        }
+
+        const createdFilter = {
+            gte: Math.floor(fromDate.getTime() / 1000),
+            lte: Math.floor(toDate.getTime() / 1000),
+        };
 
         let stripe;
         try {
@@ -146,42 +222,115 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
             return res.status(400).json({ error: e?.message || "Stripe is not configured" });
         }
 
-        let result: any;
-        try {
-            result = await stripe.invoices.list({
-                limit,
-                ...(startingAfter ? { starting_after: startingAfter } : {}),
-                status: "paid",
-            });
-        } catch (e) {
-            // Fallback for API versions that don't accept `status` as list param.
-            result = await stripe.invoices.list({
-                limit,
-                ...(startingAfter ? { starting_after: startingAfter } : {}),
-            });
-        }
+        const userCache = new Map<string, string | null>();
 
-        const invoices = (result?.data || []) as any[];
-        const paidInvoices = invoices.filter((inv) => inv?.status === "paid" || inv?.paid === true);
-
+        let fetched = 0;
+        let paid = 0;
         let synced = 0;
+        let created = 0;
+        let updated = 0;
         let matchedUsers = 0;
         let unmatchedUsers = 0;
+        let errors = 0;
+        const unmatchedInvoiceIds: string[] = [];
 
-        for (const invoice of paidInvoices) {
-            const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
-            const userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+        let cursor: string | undefined = startingAfter;
+        let stripeHasMore = false;
+        let brokeEarly = false;
 
-            if (userId) matchedUsers += 1;
-            else unmatchedUsers += 1;
+        while (synced < maxInvoices) {
+            const pageLimit = Math.min(100, maxInvoices - synced);
 
-            await upsertPaymentFromStripeInvoice({
-                invoice,
-                status: "completed",
-                userId,
-                plan: null,
-            });
-            synced += 1;
+            let result: any;
+            try {
+                result = await stripe.invoices.list({
+                    limit: pageLimit,
+                    ...(cursor ? { starting_after: cursor } : {}),
+                    created: createdFilter,
+                    status: "paid",
+                } as any);
+            } catch (e) {
+                // Fallback for API versions that don't accept `status` as list param.
+                result = await stripe.invoices.list({
+                    limit: pageLimit,
+                    ...(cursor ? { starting_after: cursor } : {}),
+                    created: createdFilter,
+                } as any);
+            }
+
+            const invoices = (result?.data || []) as any[];
+            fetched += invoices.length;
+            stripeHasMore = !!result?.has_more;
+
+            if (invoices.length === 0) {
+                stripeHasMore = false;
+                break;
+            }
+
+            let lastInvoiceId: string | undefined;
+
+            for (let i = 0; i < invoices.length; i += 1) {
+                const invoice = invoices[i];
+                if (typeof invoice?.id === "string") lastInvoiceId = invoice.id;
+
+                const isPaid = invoice?.status === "paid" || invoice?.paid === true;
+                if (!isPaid) continue;
+
+                paid += 1;
+
+                const metadataUserId = typeof invoice?.metadata?.userId === "string" ? invoice.metadata.userId : null;
+                const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+
+                let userId: string | null = metadataUserId;
+                if (!userId) {
+                    if (stripeCustomerId && userCache.has(stripeCustomerId)) {
+                        userId = userCache.get(stripeCustomerId)!;
+                    } else {
+                        userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+                        if (stripeCustomerId) userCache.set(stripeCustomerId, userId);
+                    }
+                }
+
+                if (userId) {
+                    matchedUsers += 1;
+                } else {
+                    unmatchedUsers += 1;
+                    if (typeof invoice?.id === "string" && unmatchedInvoiceIds.length < 25) {
+                        unmatchedInvoiceIds.push(invoice.id);
+                    }
+                }
+
+                try {
+                    const r = await upsertPaymentFromStripeInvoice({
+                        invoice,
+                        status: "completed",
+                        userId,
+                        plan: null,
+                    });
+                    synced += 1;
+                    if (r.created) created += 1;
+                    else updated += 1;
+                } catch {
+                    errors += 1;
+                }
+
+                if (synced >= maxInvoices) {
+                    if (i < invoices.length - 1) {
+                        brokeEarly = true;
+                    }
+                    break;
+                }
+            }
+
+            if (lastInvoiceId) cursor = lastInvoiceId;
+
+            if (synced >= maxInvoices) {
+                break;
+            }
+
+            if (!stripeHasMore || !cursor) {
+                break;
+            }
         }
 
         await auditLog(req as any, {
@@ -190,32 +339,42 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
             resourceId: null,
             details: {
                 source: "stripe",
-                fetched: invoices.length,
-                paid: paidInvoices.length,
+                window: {
+                    dateFrom: fromDate.toISOString(),
+                    dateTo: toDate.toISOString(),
+                },
+                fetched,
+                paid,
                 synced,
+                created,
+                updated,
                 matchedUsers,
                 unmatchedUsers,
-                limit,
+                errors,
+                maxInvoices,
                 startingAfter: startingAfter || null,
             },
             category: "admin",
             severity: "info",
         });
 
-        const nextCursor =
-            result?.has_more && invoices.length > 0
-                ? String(invoices[invoices.length - 1]?.id || "")
-                : null;
-
         res.json({
             success: true,
-            fetched: invoices.length,
-            paid: paidInvoices.length,
+            window: {
+                dateFrom: fromDate.toISOString(),
+                dateTo: toDate.toISOString(),
+            },
+            fetched,
+            paid,
             synced,
+            created,
+            updated,
             matchedUsers,
             unmatchedUsers,
-            hasMore: !!result?.has_more,
-            nextCursor: nextCursor || null,
+            errors,
+            unmatchedInvoiceIds,
+            hasMore: (stripeHasMore || brokeEarly) && !!cursor,
+            nextCursor: ((stripeHasMore || brokeEarly) && cursor) ? cursor : null,
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message || "Failed to sync payments from Stripe" });
@@ -226,8 +385,15 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
 financeRouter.get("/payments/export", async (req, res) => {
     try {
         const { format = "csv" } = req.query;
-        const { status, userId, search, dateFrom, dateTo } = req.query as Record<string, string>;
-        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo });
+        const { status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount, sortBy = "createdAt", sortOrder = "desc" } = req.query as Record<string, string>;
+        const whereClause = buildPaymentsWhereClause({ status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount });
+
+        const sortBySafe = sortBy === "amount" ? "amount" : "createdAt";
+        const sortOrderSafe = sortOrder === "asc" ? "asc" : "desc";
+        const orderByClause =
+            sortBySafe === "amount"
+                ? (sortOrderSafe === "asc" ? asc(amountAsNumeric()) : desc(amountAsNumeric()))
+                : (sortOrderSafe === "asc" ? asc(payments.createdAt) : desc(payments.createdAt));
 
         let exportQuery = dbRead
             .select({
@@ -244,7 +410,7 @@ financeRouter.get("/payments/export", async (req, res) => {
             })
             .from(payments)
             .leftJoin(users, eq(payments.userId, users.id))
-            .orderBy(desc(payments.createdAt));
+            .orderBy(orderByClause, desc(payments.createdAt));
         if (whereClause) exportQuery = exportQuery.where(whereClause);
 
         const paymentRows = await exportQuery;
@@ -252,7 +418,7 @@ financeRouter.get("/payments/export", async (req, res) => {
         await storage.createAuditLog({
             action: "payments_export",
             resource: "payments",
-            details: { format, count: paymentRows.length, status, userId, search, dateFrom, dateTo }
+            details: { format, count: paymentRows.length, status, userId, search, dateFrom, dateTo, currency, minAmount, maxAmount, sortBy: sortBySafe, sortOrder: sortOrderSafe }
         });
 
         if (format === "csv") {
@@ -272,9 +438,10 @@ financeRouter.get("/payments/export", async (req, res) => {
                     p.createdAt?.toISOString?.() || p.createdAt || ""
                 ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
             });
-            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Type", "text/csv; charset=utf-8");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.csv`);
-            res.send(csvRows.join("\n"));
+            // Add UTF-8 BOM for Excel compatibility.
+            res.send("\uFEFF" + csvRows.join("\r\n"));
         } else {
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Content-Disposition", `attachment; filename=payments_${Date.now()}.json`);
