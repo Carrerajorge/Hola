@@ -18,7 +18,9 @@
     "test:agentic": "vitest run tests/agentic",
     "test:all": "bash ./scripts/test-all.sh",
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list",
-    "test:e2e": "npx playwright test --reporter=html"
+    "test:e2e": "npx playwright test --reporter=html",
+    "eval:judge": "tsx scripts/eval-judge.ts",
+    "eval:judge:llm": "EVAL_MODE=llm tsx scripts/eval-judge.ts --mode llm"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",

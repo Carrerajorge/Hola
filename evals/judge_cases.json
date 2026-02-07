@@ -1,0 +1,128 @@
+[
+  {
+    "id": "clarify_previous_doc",
+    "description": "Usuario pide mejorar 'el documento anterior' sin aportar el texto ni adjuntos.",
+    "input": {
+      "text": "Mejora el documento anterior y corrige los errores.",
+      "attachments": []
+    },
+    "expectations": {
+      "should_ask_clarifying_question": true,
+      "requires_citations": false
+    }
+  },
+  {
+    "id": "doc_improve_with_attachment",
+    "description": "Mejorar un documento adjunto (reescritura + cambios) sin necesidad de citas.",
+    "input": {
+      "text": "Mejora el documento adjunto: reescribelo mas claro, manteniendo las secciones. Devuelve el documento mejorado y una lista corta de cambios.",
+      "attachments": [
+        {
+          "type": "document",
+          "name": "documento.md",
+          "extractedText": "# Introduccion\n\nEste documento tiene errores de redaccion y repeticion.\n\n## Alcance\n\n- Punto 1: redaccion pobre.\n- Punto 2: falta claridad.\n\n## Recomendaciones\n\nMejorar estructura, tono y coherencia."
+        }
+      ]
+    },
+    "expectations": {
+      "should_ask_clarifying_question": false,
+      "requires_citations": false
+    }
+  },
+  {
+    "id": "summarize_with_citations",
+    "description": "Resumen con citas por seccion (doc).",
+    "input": {
+      "text": "Resume el documento adjunto en 5 bullets y cita las secciones relevantes.",
+      "attachments": [
+        {
+          "type": "document",
+          "name": "informe.md",
+          "extractedText": "# Reporte Q4\n\n## Resultados\n\nCrecimiento interanual: 12%.\n\n## Riesgos\n\nDependencia de un proveedor.\n\n## Proximos pasos\n\n1) Diversificar.\n2) Mejorar monitoreo.\n"
+        }
+      ]
+    },
+    "expectations": {
+      "requires_citations": true,
+      "must_include_any": [
+        "12%",
+        "proveedor",
+        "Diversificar"
+      ]
+    }
+  },
+  {
+    "id": "table_question_citations",
+    "description": "Pregunta cuantitativa sobre tabla; requiere cita.",
+    "input": {
+      "text": "Segun la tabla, cual es el total de ventas de Enero y Febrero? Cita la fuente.",
+      "attachments": [
+        {
+          "type": "document",
+          "name": "ventas.md",
+          "extractedText": "## Ventas\n\n| Mes | Ventas |\n| --- | ---: |\n| Enero | 100 |\n| Febrero | 250 |\n| Marzo | 90 |\n"
+        }
+      ]
+    },
+    "expectations": {
+      "requires_citations": true,
+      "must_include_any": [
+        "350",
+        "100",
+        "250"
+      ]
+    }
+  },
+  {
+    "id": "image_ocr_summarize",
+    "description": "Adjunto tipo imagen (OCR ya extraido) con texto; requiere trazabilidad.",
+    "input": {
+      "text": "Extrae el texto de la imagen y haz un resumen corto con una cita.",
+      "attachments": [
+        {
+          "type": "image",
+          "name": "captura.png",
+          "extractedText": "ORDEN DE COMPRA\\nProveedor: ACME Corp\\nTotal: USD 1,250.00\\nFecha: 2026-01-15"
+        }
+      ]
+    },
+    "expectations": {
+      "requires_citations": true,
+      "must_include_any": [
+        "ACME",
+        "1,250",
+        "2026-01-15"
+      ]
+    }
+  },
+  {
+    "id": "rag_connected_context",
+    "description": "Recuperacion desde memoria conversacional (RAG) sin adjuntos.",
+    "input": {
+      "text": "Recordame cual era el nombre del cliente y el deadline del proyecto.",
+      "attachments": [],
+      "memory": {
+        "messages": [
+          {
+            "messageId": "m1",
+            "role": "user",
+            "content": "El cliente es ACME Corp y el deadline es 2026-03-01."
+          },
+          {
+            "messageId": "m2",
+            "role": "assistant",
+            "content": "Perfecto, cliente ACME Corp y deadline 2026-03-01. Lo guardo."
+          }
+        ]
+      }
+    },
+    "expectations": {
+      "requires_citations": false,
+      "must_include_any": [
+        "ACME",
+        "2026-03-01"
+      ]
+    }
+  }
+]
+

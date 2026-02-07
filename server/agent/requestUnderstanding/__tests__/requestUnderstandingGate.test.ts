@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { requestUnderstandingAgent, requestUnderstandingFallbackBrief } from "../requestUnderstandingAgent";
+import { requestUnderstandingFallbackBrief } from "../fallbackBrief";
+import { requestUnderstandingAgent } from "../requestUnderstandingAgent";
 import { llmGateway } from "../../../lib/llmGateway";
 
 // Mock llmGateway.chat to produce deterministic structured JSON

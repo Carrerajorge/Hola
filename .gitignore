@@ -53,3 +53,8 @@ artifacts/node_modules_backup/
 artifacts/Test_*.txt
 artifacts/*.log
 artifacts/*.tmp
+
+# Eval harness outputs (generated reports)
+test_results/eval_judge_*.json
+test_results/eval_judge_latest.json
+test_results/eval_judge_latest.md
