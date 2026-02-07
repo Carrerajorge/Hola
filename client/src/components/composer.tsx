@@ -88,10 +88,10 @@ export interface ComposerProps {
   handleSubmit: () => void;
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handlePaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
-  handleDragOver: (e: React.DragEvent) => void;
-  handleDragEnter: (e: React.DragEvent) => void;
-  handleDragLeave: (e: React.DragEvent) => void;
-  handleDrop: (e: React.DragEvent) => void;
+  handleDragOver?: (e: React.DragEvent) => void;
+  handleDragEnter?: (e: React.DragEvent) => void;
+  handleDragLeave?: (e: React.DragEvent) => void;
+  handleDrop?: (e: React.DragEvent) => void;
   isDraggingOver: boolean;
   selectedTool: "web" | "agent" | "image" | null;
   setSelectedTool: (tool: "web" | "agent" | "image" | null) => void;

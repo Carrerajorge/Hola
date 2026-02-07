@@ -5069,11 +5069,17 @@ IMPORTANTE:
         userPlanInfo={userPlanInfo}
       />
       {/* Main Content Area with Side Panel */}
-      {(previewDocument || activeDocEditor) ? (
-        <PanelGroup direction="horizontal" className="flex-1">
-          {/* Left Panel: Minimized Chat for Document Mode */}
-          <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
-            <div className="flex flex-col min-w-0 h-full bg-background/50">
+	      {(previewDocument || activeDocEditor) ? (
+	        <PanelGroup direction="horizontal" className="flex-1">
+	          {/* Left Panel: Minimized Chat for Document Mode */}
+	          <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
+	            <div
+	              className="flex flex-col min-w-0 h-full bg-background/50"
+	              onDragOver={handleDragOver}
+	              onDragEnter={handleDragEnter}
+	              onDragLeave={handleDragLeave}
+	              onDrop={handleDrop}
+	            >
               {/* Compact Header for Document Mode */}
               {activeDocEditor && (
                 <div className="p-3 border-b border-border/50 bg-muted/30">
@@ -5280,54 +5286,50 @@ IMPORTANTE:
                 </div>
               )}
 
-              <Composer
-                input={input}
-                setInput={setInput}
-                textareaRef={textareaRef}
-                composerRef={composerRef}
-                fileInputRef={fileInputRef}
-                uploadedFiles={uploadedFiles}
-                removeFile={removeFile}
-                handleSubmit={handleSubmit}
-                handleFileUpload={handleFileUpload}
-                handlePaste={handlePaste}
-                handleDragOver={handleDragOver}
-                handleDragEnter={handleDragEnter}
-                handleDragLeave={handleDragLeave}
-                handleDrop={handleDrop}
-                isDraggingOver={isDraggingOver}
-                selectedTool={selectedTool}
-                setSelectedTool={setSelectedTool}
-                selectedDocTool={selectedDocTool}
-                setSelectedDocTool={setSelectedDocTool}
-                closeDocEditor={closeDocEditor}
-                openBlankDocEditor={openBlankDocEditor}
-                aiState={aiState}
-                isRecording={isRecording}
-                isPaused={isPaused}
-                recordingTime={recordingTime}
-                toggleVoiceRecording={toggleVoiceRecording}
-                discardVoiceRecording={discardVoiceRecording}
-                pauseVoiceRecording={pauseVoiceRecording}
-                resumeVoiceRecording={resumeVoiceRecording}
-                sendVoiceRecording={sendVoiceRecording}
-                handleStopChat={handleStopChat}
-                isAgentRunning={isAgentRunning}
-                handleAgentStop={handleAgentStop}
-                setIsVoiceChatOpen={setIsVoiceChatOpen}
-                browserSession={browserSession}
-                isBrowserOpen={isBrowserOpen}
-                setIsBrowserOpen={setIsBrowserOpen}
-                isBrowserMaximized={isBrowserMaximized}
-                setIsBrowserMaximized={setIsBrowserMaximized}
-                browserUrl={browserUrl}
-                variant="document"
-                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
-                selectedDocText={selectedDocText}
-                handleDocTextDeselect={handleDocTextDeselect}
-                onTextareaFocus={handleCloseModelSelector}
-                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-              />
+	              <Composer
+	                input={input}
+	                setInput={setInput}
+	                textareaRef={textareaRef}
+	                composerRef={composerRef}
+	                fileInputRef={fileInputRef}
+	                uploadedFiles={uploadedFiles}
+	                removeFile={removeFile}
+	                handleSubmit={handleSubmit}
+	                handleFileUpload={handleFileUpload}
+	                handlePaste={handlePaste}
+	                isDraggingOver={isDraggingOver}
+	                selectedTool={selectedTool}
+	                setSelectedTool={setSelectedTool}
+	                selectedDocTool={selectedDocTool}
+	                setSelectedDocTool={setSelectedDocTool}
+	                closeDocEditor={closeDocEditor}
+	                openBlankDocEditor={openBlankDocEditor}
+	                aiState={aiState}
+	                isRecording={isRecording}
+	                isPaused={isPaused}
+	                recordingTime={recordingTime}
+	                toggleVoiceRecording={toggleVoiceRecording}
+	                discardVoiceRecording={discardVoiceRecording}
+	                pauseVoiceRecording={pauseVoiceRecording}
+	                resumeVoiceRecording={resumeVoiceRecording}
+	                sendVoiceRecording={sendVoiceRecording}
+	                handleStopChat={handleStopChat}
+	                isAgentRunning={isAgentRunning}
+	                handleAgentStop={handleAgentStop}
+	                setIsVoiceChatOpen={setIsVoiceChatOpen}
+	                browserSession={browserSession}
+	                isBrowserOpen={isBrowserOpen}
+	                setIsBrowserOpen={setIsBrowserOpen}
+	                isBrowserMaximized={isBrowserMaximized}
+	                setIsBrowserMaximized={setIsBrowserMaximized}
+	                browserUrl={browserUrl}
+	                variant="document"
+	                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+	                selectedDocText={selectedDocText}
+	                handleDocTextDeselect={handleDocTextDeselect}
+	                onTextareaFocus={handleCloseModelSelector}
+	                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+	              />
             </div>
           </Panel>
 
@@ -5502,8 +5504,14 @@ IMPORTANTE:
             </div>
           </Panel>
         </PanelGroup>
-      ) : (
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
+	      ) : (
+	        <div
+	          className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden"
+	          onDragOver={handleDragOver}
+	          onDragEnter={handleDragEnter}
+	          onDragLeave={handleDragLeave}
+	          onDrop={handleDrop}
+	        >
           {/* Content Area - conditional based on whether we have messages */}
           {isConversationStateLoading ? (
             <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
@@ -5693,62 +5701,58 @@ IMPORTANTE:
           <div className="flex justify-end px-4 py-1">
             <SyncStatusIndicator />
           </div>
-          <Composer
-            input={input}
-            setInput={setInput}
-            textareaRef={textareaRef}
-            composerRef={composerRef}
-            fileInputRef={fileInputRef}
-            uploadedFiles={uploadedFiles}
-            removeFile={removeFile}
-            handleSubmit={handleSubmit}
-            handleFileUpload={handleFileUpload}
-            handlePaste={handlePaste}
-            handleDragOver={handleDragOver}
-            handleDragEnter={handleDragEnter}
-            handleDragLeave={handleDragLeave}
-            handleDrop={handleDrop}
-            isDraggingOver={isDraggingOver}
-            selectedTool={selectedTool}
-            setSelectedTool={setSelectedTool}
-            selectedDocTool={selectedDocTool}
-            setSelectedDocTool={setSelectedDocTool}
-            closeDocEditor={closeDocEditor}
-            openBlankDocEditor={openBlankDocEditor}
-            aiState={aiState}
-            isRecording={isRecording}
-            isPaused={isPaused}
-            recordingTime={recordingTime}
-            toggleVoiceRecording={toggleVoiceRecording}
-            discardVoiceRecording={discardVoiceRecording}
-            pauseVoiceRecording={pauseVoiceRecording}
-            resumeVoiceRecording={resumeVoiceRecording}
-            sendVoiceRecording={sendVoiceRecording}
-            handleStopChat={handleStopChat}
-            isAgentRunning={isAgentRunning}
-            handleAgentStop={handleAgentStop}
-            setIsVoiceChatOpen={setIsVoiceChatOpen}
-            browserSession={browserSession}
-            isBrowserOpen={isBrowserOpen}
-            setIsBrowserOpen={setIsBrowserOpen}
-            isBrowserMaximized={isBrowserMaximized}
-            setIsBrowserMaximized={setIsBrowserMaximized}
-            browserUrl={browserUrl}
-            variant="default"
-            placeholder="Escribe tu mensaje aquí..."
-            onCloseSidebar={onCloseSidebar}
-            setPreviewUploadedImage={setPreviewUploadedImage}
-            isFigmaConnected={isFigmaConnected}
-            isFigmaConnecting={isFigmaConnecting}
-            handleFigmaConnect={handleFigmaConnect}
-            handleFigmaDisconnect={handleFigmaDisconnect}
-            onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
-            onOpenApps={onOpenApps}
-            isGoogleFormsActive={isGoogleFormsActive}
-            setIsGoogleFormsActive={setIsGoogleFormsActive}
-            onTextareaFocus={handleCloseModelSelector}
-            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-          />
+	          <Composer
+	            input={input}
+	            setInput={setInput}
+	            textareaRef={textareaRef}
+	            composerRef={composerRef}
+	            fileInputRef={fileInputRef}
+	            uploadedFiles={uploadedFiles}
+	            removeFile={removeFile}
+	            handleSubmit={handleSubmit}
+	            handleFileUpload={handleFileUpload}
+	            handlePaste={handlePaste}
+	            isDraggingOver={isDraggingOver}
+	            selectedTool={selectedTool}
+	            setSelectedTool={setSelectedTool}
+	            selectedDocTool={selectedDocTool}
+	            setSelectedDocTool={setSelectedDocTool}
+	            closeDocEditor={closeDocEditor}
+	            openBlankDocEditor={openBlankDocEditor}
+	            aiState={aiState}
+	            isRecording={isRecording}
+	            isPaused={isPaused}
+	            recordingTime={recordingTime}
+	            toggleVoiceRecording={toggleVoiceRecording}
+	            discardVoiceRecording={discardVoiceRecording}
+	            pauseVoiceRecording={pauseVoiceRecording}
+	            resumeVoiceRecording={resumeVoiceRecording}
+	            sendVoiceRecording={sendVoiceRecording}
+	            handleStopChat={handleStopChat}
+	            isAgentRunning={isAgentRunning}
+	            handleAgentStop={handleAgentStop}
+	            setIsVoiceChatOpen={setIsVoiceChatOpen}
+	            browserSession={browserSession}
+	            isBrowserOpen={isBrowserOpen}
+	            setIsBrowserOpen={setIsBrowserOpen}
+	            isBrowserMaximized={isBrowserMaximized}
+	            setIsBrowserMaximized={setIsBrowserMaximized}
+	            browserUrl={browserUrl}
+	            variant="default"
+	            placeholder="Escribe tu mensaje aquí..."
+	            onCloseSidebar={onCloseSidebar}
+	            setPreviewUploadedImage={setPreviewUploadedImage}
+	            isFigmaConnected={isFigmaConnected}
+	            isFigmaConnecting={isFigmaConnecting}
+	            handleFigmaConnect={handleFigmaConnect}
+	            handleFigmaDisconnect={handleFigmaDisconnect}
+	            onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
+	            onOpenApps={onOpenApps}
+	            isGoogleFormsActive={isGoogleFormsActive}
+	            setIsGoogleFormsActive={setIsGoogleFormsActive}
+	            onTextareaFocus={handleCloseModelSelector}
+	            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+	          />
         </div>
       )}
       <ETLDialog
