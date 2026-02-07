@@ -40,7 +40,7 @@ const FALLBACK_SETTINGS: PlatformSettings = {
 
   primary_color: "#6366f1",
   secondary_color: "#8b5cf6",
-  theme_mode: "dark",
+  theme_mode: "auto",
 
   allow_registration: true,
   require_email_verification: false,

@@ -44,8 +44,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const handleChange = () => {
       if (effectiveAppearance === "system") {
         applyTheme("system");
-        // Do not override platform branding colors.
-        applyAccentColor("default");
+        applyAccentColor(settings.accentColor);
       }
     };
 
@@ -54,8 +53,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [settings.appearance, settings.accentColor, platformSettings.theme_mode]);
 
   useEffect(() => {
-    // Platform branding controls --primary/--ring. Always clear per-user overrides.
-    applyAccentColor("default");
+    // Apply per-user accent color after platform branding. This lets users pick an accent
+    // while keeping platform primary/secondary as the default.
+    applyAccentColor(settings.accentColor);
   }, [platformSettings.primary_color, platformSettings.secondary_color, settings.accentColor, settings.appearance]);
 
   useEffect(() => {

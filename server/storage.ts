@@ -2407,7 +2407,7 @@ export class MemStorage implements IStorage {
       { category: "general", key: "maintenance_mode", value: false, defaultValue: false, valueType: "boolean", description: "Enable maintenance mode" },
       { category: "branding", key: "primary_color", value: "#6366f1", defaultValue: "#6366f1", valueType: "string", description: "Primary brand color" },
       { category: "branding", key: "secondary_color", value: "#8b5cf6", defaultValue: "#8b5cf6", valueType: "string", description: "Secondary brand color" },
-      { category: "branding", key: "theme_mode", value: "dark", defaultValue: "dark", valueType: "string", description: "Default theme mode" },
+      { category: "branding", key: "theme_mode", value: "auto", defaultValue: "auto", valueType: "string", description: "Default theme mode" },
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },

@@ -1268,11 +1268,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Color de acento</span>
-                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                    <span className="text-xs text-muted-foreground">Personaliza el color principal de la interfaz</span>
                   </div>
                   <Select
-                    value="default"
-                    disabled
+                    value={settings.accentColor}
                     onValueChange={(value) => updateSetting("accentColor", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-accent-color">
