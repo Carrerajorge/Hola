@@ -710,18 +710,32 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
         }
 
         // Get user email
+        if (!invoice.userId) {
+            return res.status(400).json({ error: "Invoice is not linked to a user" });
+        }
         const user = await storage.getUser(invoice.userId);
         if (!user?.email) {
             return res.status(400).json({ error: "User has no email address" });
         }
 
-        // Send email
-        const emailResult = await sendPaymentEmail(user.email, {
-            invoiceId: invoice.id,
-            amount: invoice.amount || 0,
-            currency: invoice.currency || "USD",
+        const baseUrl = process.env.BASE_URL || process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const invoiceUrl = invoice.pdfPath
+            ? (invoice.pdfPath.startsWith("http://") || invoice.pdfPath.startsWith("https://"))
+                ? invoice.pdfPath
+                : `${baseUrl}${invoice.pdfPath.startsWith("/") ? "" : "/"}${invoice.pdfPath}`
+            : undefined;
+
+        const eventId = getInvoiceEmailEventId({ userId: invoice.userId, invoiceNumber: invoice.invoiceNumber });
+
+        const emailOutcome = await sendInvoiceEmailIdempotent({
+            eventId,
+            userId: invoice.userId,
+            to: user.email,
+            invoiceIdForDisplay: invoice.invoiceNumber || invoice.id,
+            amount: invoice.amount || "0",
+            currency: invoice.currency || "EUR",
             status: (invoice.status as "paid" | "pending" | "failed") || "pending",
-            invoiceUrl: `${process.env.APP_URL || "https://iliagpt.com"}/billing/invoices/${invoice.id}`
+            invoiceUrl,
         });
 
         await auditLog(req, {
@@ -730,7 +744,7 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
             resourceId: req.params.id,
             details: { 
                 userId: invoice.userId, 
-                emailSent: emailResult.success,
+                emailSent: emailOutcome?.status === "sent",
                 recipientEmail: user.email,
                 sentBy: (req as any).user?.email
             },
@@ -738,14 +752,15 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
             severity: "info"
         });
 
-        if (!emailResult.success) {
-            return res.status(500).json({ error: "Failed to send email", details: emailResult.error });
+        if (emailOutcome?.status === "failed") {
+            return res.status(500).json({ error: "Failed to send email", details: emailOutcome.error });
         }
 
         res.json({ 
             success: true, 
             message: "Invoice sent successfully",
-            invoiceId: req.params.id
+            invoiceId: req.params.id,
+            email: emailOutcome,
         });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
