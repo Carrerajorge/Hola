@@ -1216,8 +1216,37 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     const doi = normalizeDoi(out.doi);
     if (!doi) return out;
 
-    // Step 2: hydrate via Crossref + OpenAlex (in parallel)
-    const [cr, oa] = await Promise.all([getCrossref(doi), getOpenAlex(doi)]);
+    // Step 2: hydrate via Crossref + OpenAlex (in parallel, but only if needed).
+    // Important: avoid hammering external APIs when the record is already complete enough.
+    const needsCrossref =
+      (!out.authors || out.authors.length === 0) ||
+      isMissingScalar(out.year) ||
+      isMissingScalar(out.publicationDate) ||
+      isMissingScalar(out.journal) ||
+      isMissingScalar(out.volume) ||
+      isMissingScalar(out.issue) ||
+      isMissingScalar(out.pages) ||
+      !hasMeaningfulAbstract(out.abstract) ||
+      (out.keywords || []).length === 0 ||
+      isMissingScalar(out.language) ||
+      isMissingScalar(out.documentType) ||
+      !out.url;
+
+    const needsOpenAlex =
+      (!out.authors || out.authors.length === 0) ||
+      isMissingScalar(out.year) ||
+      isMissingScalar(out.publicationDate) ||
+      isMissingScalar(out.journal) ||
+      !hasMeaningfulAbstract(out.abstract) ||
+      (out.keywords || []).length === 0 ||
+      isMissingScalar(out.language) ||
+      isMissingScalar(out.documentType) ||
+      !out.url;
+
+    const [cr, oa] = await Promise.all([
+      needsCrossref ? getCrossref(doi) : Promise.resolve(null),
+      needsOpenAlex ? getOpenAlex(doi) : Promise.resolve(null),
+    ]);
 
     // Authors
     if (!out.authors || out.authors.length === 0) {

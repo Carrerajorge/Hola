@@ -80,6 +80,7 @@ function validateEnv() {
   const hasAnyLlm =
     Boolean(data.XAI_API_KEY) ||
     Boolean(data.GEMINI_API_KEY) ||
+    Boolean(data.GOOGLE_API_KEY) ||
     Boolean(data.OPENAI_API_KEY) ||
     Boolean(data.ANTHROPIC_API_KEY) ||
     Boolean(data.DEEPSEEK_API_KEY);
@@ -90,7 +91,7 @@ function validateEnv() {
   } else {
     const providers = [];
     if (data.XAI_API_KEY) providers.push("xAI");
-    if (data.GEMINI_API_KEY) providers.push("Gemini");
+    if (data.GEMINI_API_KEY || data.GOOGLE_API_KEY) providers.push("Gemini");
     if (data.OPENAI_API_KEY) providers.push("OpenAI");
     if (data.ANTHROPIC_API_KEY) providers.push("Anthropic");
     if (data.DEEPSEEK_API_KEY) providers.push("DeepSeek");

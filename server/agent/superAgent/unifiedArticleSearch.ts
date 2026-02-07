@@ -622,13 +622,15 @@ function convertOpenAlexToUnified(candidate: AcademicCandidate): UnifiedArticle 
 }
 
 function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
-    const country = scieloCollectionToCountry(article.collection);
+    const country = (article.country || "").trim() || scieloCollectionToCountry(article.collection);
+    const city = (article.city || "").trim() || "n.d.";
     return {
         id: `scielo_${article.scielo_id}`,
         source: "scielo",
         title: article.title,
         authors: article.authors,
         year: article.year,
+        publicationDate: article.publicationDate || undefined,
         journal: article.journal,
         abstract: article.abstract,
         keywords: article.keywords,
@@ -639,7 +641,7 @@ function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
         language: article.language,
         documentType: "Article",
         country, // Derived from SciELO collection when possible
-        city: "n.d.",
+        city,
         apaCitation: generateSciELOAPA7Citation(article)
     };
 }

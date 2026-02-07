@@ -224,15 +224,40 @@ function instrumentXaiClient(client: OpenAI): void {
   }
 }
 
-const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY || "";
-const _openai = new OpenAI({
-  baseURL: "https://api.x.ai/v1",
-  apiKey: xaiApiKey,
+let _openai: OpenAI | null = null;
+
+function getXaiApiKey(): string | undefined {
+  const key = process.env.XAI_API_KEY || process.env.GROK_API_KEY;
+  return key?.trim() ? key.trim() : undefined;
+}
+
+function ensureXaiClient(): OpenAI {
+  if (_openai) return _openai;
+
+  const apiKey = getXaiApiKey();
+  if (!apiKey) {
+    throw new Error("XAI_API_KEY (or GROK_API_KEY) is not set");
+  }
+
+  _openai = new OpenAI({
+    baseURL: "https://api.x.ai/v1",
+    apiKey,
+  });
+
+  instrumentXaiClient(_openai);
+  return _openai;
+}
+
+export function getXaiOpenAIClient(): OpenAI {
+  return ensureXaiClient();
+}
+
+// Keep the historical `openai` export for compatibility, but avoid import-time crashes.
+export const openai: OpenAI = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    return (ensureXaiClient() as any)[prop];
+  },
 });
-
-instrumentXaiClient(_openai);
-
-export const openai = _openai;
 
 export const MODELS = {
   TEXT: "grok-3-mini",

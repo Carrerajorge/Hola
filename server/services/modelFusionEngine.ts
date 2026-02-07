@@ -6,8 +6,8 @@
  */
 
 
-import { GoogleGenAI } from "@google/genai";
 import { openai } from "../lib/openai";
+import { getGeminiClient } from "../lib/gemini";
 
 // ============== Types ==============
 
@@ -55,9 +55,7 @@ export interface ModelSpec {
 
 const grokClient = openai;
 
-const geminiAI = new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
-});
+// Gemini client is created lazily via getGeminiClient() to avoid import-time crashes when the key isn't configured.
 
 // ============== Model Specs ==============
 
@@ -143,7 +141,8 @@ async function callGemini(
 ): Promise<{ content: string; latencyMs: number }> {
     const start = Date.now();
 
-    const geminiModel = geminiAI.models.generateContent({
+    const geminiClient = getGeminiClient();
+    const geminiModel = geminiClient.models.generateContent({
         model,
         contents: prompt,
     });
@@ -379,7 +378,8 @@ export async function fuseVisionModels(
                     weight: spec.weight ?? 1,
                 };
             } else {
-                const model = geminiAI.models.generateContent({
+                const geminiClient = getGeminiClient();
+                const model = geminiClient.models.generateContent({
                     model: spec.model,
                     contents: [
                         { text: prompt },

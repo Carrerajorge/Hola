@@ -89,7 +89,7 @@ function requiresSearchFirst(message: string): boolean {
 // Specialized workflow: "buscarme N articulos cientificos ... en excel ... y citas APA en word"
 function isAcademicArticlesExportRequest(message: string): boolean {
     const wantsAcademic =
-        /\b(art[ií]cul|paper|papers|estudio|investigaci[óo]n|scopus|scielo|pubmed|wos|web\s*of\s*science)\b/i.test(message);
+        /\b(art[ií]culos?|paper(?:s)?|estudio(?:s)?|investigaci[óo]n(?:es)?|scopus|scielo|pubmed|wos|web\s*of\s*science)\b/i.test(message);
     const wantsCount =
         /\b(?:buscarme|buscame|dame|necesito|encuentra(?:me)?)\b/i.test(message) && /\b\d{2,3}\b/.test(message);
     const wantsFile =

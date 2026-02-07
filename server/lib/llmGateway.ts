@@ -210,7 +210,7 @@ function estimateTokensFromMessages(messages: ChatCompletionMessageParam[]): num
 }
 
 class LLMGateway {
-  private xaiClient: OpenAI;
+  private xaiClient: OpenAI | null = null;
 
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
@@ -237,11 +237,6 @@ class LLMGateway {
   };
 
   constructor() {
-    this.xaiClient = new OpenAI({
-      baseURL: "https://api.x.ai/v1",
-      apiKey: process.env.XAI_API_KEY,
-    });
-
     this.metrics = {
       totalRequests: 0,
       successfulRequests: 0,
@@ -264,6 +259,21 @@ class LLMGateway {
     setInterval(() => this.cleanupCache(), 60000);
     setInterval(() => this.cleanupInFlightRequests(), 30000);
     setInterval(() => this.cleanupStreamCheckpoints(), 60000);
+  }
+
+  private ensureXaiClient(): OpenAI {
+    if (this.xaiClient) return this.xaiClient;
+
+    const apiKey = process.env.XAI_API_KEY?.trim();
+    if (!apiKey) {
+      throw new Error("XAI_API_KEY is not set");
+    }
+
+    this.xaiClient = new OpenAI({
+      baseURL: "https://api.x.ai/v1",
+      apiKey,
+    });
+    return this.xaiClient;
   }
 
 
@@ -730,11 +740,12 @@ class LLMGateway {
     model: string,
     startTime: number
   ): Promise<LLMResponse> {
+    const xaiClient = this.ensureXaiClient();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), options.timeout);
 
     try {
-      const response = await this.xaiClient.chat.completions.create(
+      const response = await xaiClient.chat.completions.create(
         {
           model,
           messages,
@@ -1226,7 +1237,8 @@ class LLMGateway {
     requestId: string,
     model: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const stream = await this.xaiClient.chat.completions.create({
+    const xaiClient = this.ensureXaiClient();
+    const stream = await xaiClient.chat.completions.create({
       model,
       messages,
       temperature: options.temperature ?? 0.7,

@@ -1,8 +1,6 @@
 import { google, forms_v1 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { GoogleGenAI } from "@google/genai";
-
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { getGeminiClient } from "../lib/gemini";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
@@ -161,9 +159,10 @@ Tipos de preguntas disponibles:
 - checkbox: Selección múltiple
 - dropdown: Lista desplegable
 
-Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos de preguntas.`;
+  Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos de preguntas.`;
 
   try {
+    const genAI = getGeminiClient();
     const response = await genAI.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [

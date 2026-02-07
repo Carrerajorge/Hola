@@ -77,29 +77,41 @@ export async function persistentJsonCacheSet<T>(
 ): Promise<void> {
   if (!isCacheEnabled()) return;
 
-  const file = cacheFilePath(namespace, key);
-  const dir = path.dirname(file);
-  await ensureDir(dir);
+  // Cache writes must never break the main flow (academic export must keep working even on ENOSPC).
+  // Make this best-effort and swallow any fs errors.
+  let tmp: string | null = null;
+  try {
+    const file = cacheFilePath(namespace, key);
+    const dir = path.dirname(file);
+    await ensureDir(dir);
 
-  const now = Date.now();
-  const envelope: CacheEnvelope<T> = {
-    key,
-    createdAt: now,
-    expiresAt: now + Math.max(1000, ttlMs),
-    value,
-  };
+    const now = Date.now();
+    const envelope: CacheEnvelope<T> = {
+      key,
+      createdAt: now,
+      expiresAt: now + Math.max(1000, ttlMs),
+      value,
+    };
 
-  // Atomic write via rename.
-  const tmp = `${file}.tmp.${process.pid}.${Math.random()
-    .toString(16)
-    .slice(2)}`;
-  const payload = JSON.stringify(envelope);
+    // Atomic write via rename.
+    tmp = `${file}.tmp.${process.pid}.${Math.random().toString(16).slice(2)}`;
+    const payload = JSON.stringify(envelope);
 
-  await fs.writeFile(tmp, payload, "utf8");
-  await fs.rename(tmp, file).catch(async () => {
-    // If rename fails (e.g. cross-device), fall back to direct write.
-    await fs.writeFile(file, payload, "utf8");
-    await fs.unlink(tmp).catch(() => undefined);
-  });
+    await fs.writeFile(tmp, payload, "utf8");
+    await fs.rename(tmp, file).catch(async () => {
+      // If rename fails (e.g. cross-device), fall back to direct write.
+      await fs.writeFile(file, payload, "utf8");
+      await fs.unlink(tmp!).catch(() => undefined);
+    });
+  } catch (err: any) {
+    // Best-effort cleanup
+    if (tmp) await fs.unlink(tmp).catch(() => undefined);
+    if (/^(1|true|yes)$/i.test(process.env.ACADEMIC_CACHE_DEBUG || "")) {
+      // Avoid noisy logs by default; enable only for debugging.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[persistentJsonCache] Set failed (ignored): ${err?.code || ""} ${err?.message || String(err)}`.trim()
+      );
+    }
+  }
 }
-
