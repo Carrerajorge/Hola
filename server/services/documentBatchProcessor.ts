@@ -856,7 +856,9 @@ export class DocumentBatchProcessor {
     for (const chunk of sorted) {
       if (chunk.filename !== currentDoc) {
         currentDoc = chunk.filename;
-        parts.push(`\n=== ${this.formatCitation(chunk)} ===`);
+        const ext = this.getExtensionFromFileName(chunk.filename).toLowerCase();
+        const headerTag = /^(png|jpe?g|gif|webp|bmp|tif|tiff)$/.test(ext) ? `[img:${chunk.filename}]` : `[doc:${chunk.filename}]`;
+        parts.push(`\n=== ${headerTag} ===`);
       }
 
       const locationStr = this.formatLocationShort(chunk);
@@ -871,6 +873,8 @@ export class DocumentBatchProcessor {
         parts.push(`\n[section:${headingPath}]`);
       }
 
+      // Explicit per-chunk citation tag (so the answer model can copy/paste it).
+      parts.push(`\n${this.formatCitationTag(chunk)}`);
       parts.push(chunk.content);
     }
 
@@ -929,6 +933,33 @@ export class DocumentBatchProcessor {
       default:
         return `doc:${chunk.filename}`;
     }
+  }
+
+  private formatCitationTag(chunk: DocumentChunk): string {
+    const ext = this.getExtensionFromFileName(chunk.filename).toLowerCase();
+    const loc = chunk.location;
+
+    const parts: string[] = [`doc:${chunk.filename}`];
+
+    if (ext === 'pdf' || ext === 'docx' || ext === 'doc') {
+      if (loc.page) parts.push(`p${loc.page}`);
+    } else if (ext === 'pptx' || ext === 'ppt') {
+      if (loc.slide) parts.push(`slide:${loc.slide}`);
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      if (loc.sheet) parts.push(`sheet:${loc.sheet}`);
+      if (loc.cell) parts.push(`cell:${loc.cell}`);
+      else if (loc.row) parts.push(`row:${loc.row}`);
+    } else if (ext === 'csv') {
+      if (loc.row) parts.push(`row:${loc.row}`);
+    } else if (/^(png|jpe?g|gif|webp|bmp|tif|tiff)$/.test(ext)) {
+      // Images parsed via OCR/VLM
+      parts[0] = `img:${chunk.filename}`;
+    }
+
+    const headingPath = chunk.context?.headingPath?.length ? chunk.context.headingPath.join(" > ") : "";
+    if (headingPath) parts.push(`section:${headingPath}`);
+
+    return `[${parts.join(" ")}]`;
   }
 
   private formatLocationShort(chunk: DocumentChunk): string {

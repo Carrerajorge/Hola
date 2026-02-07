@@ -50,6 +50,8 @@ export interface HydrateOptions {
 class ConversationStateService {
   private ragRetrievers: Map<string, RAGRetriever> = new Map();
 
+  // NOTE: This service is intentionally best-effort; memory should never break chat responses.
+
   async hydrateState(
     chatId: string,
     userId?: string,
@@ -95,11 +97,40 @@ class ConversationStateService {
     content: string,
     options: AppendMessageOptions = {}
   ): Promise<HydratedConversationState> {
+    const { state } = await this.appendMessageWithId(chatId, role, content, options);
+    return state;
+  }
+
+  async appendMessageWithId(
+    chatId: string,
+    role: "user" | "assistant" | "system",
+    content: string,
+    options: AppendMessageOptions = {}
+  ): Promise<{ state: HydratedConversationState; messageId: string | null }> {
+    // Best-effort dedup: avoid duplicating identical messages on quick retries or dual endpoints.
+    try {
+      const existing = await this.hydrateState(chatId, undefined, { forceRefresh: false });
+      const last = existing?.messages?.length ? existing.messages[existing.messages.length - 1] : null;
+      if (
+        last &&
+        last.role === role &&
+        last.content === content &&
+        typeof last.createdAt === "string" &&
+        Date.now() - Date.parse(last.createdAt) < 30000
+      ) {
+        return { state: existing as HydratedConversationState, messageId: last.id || null };
+      }
+    } catch {
+      // ignore
+    }
+
     if (options.requestId) {
       const { wasProcessed, messageId } = await conversationStateRepository.checkRequestProcessed(options.requestId);
       if (wasProcessed) {
         console.log(`[ConversationStateService] Request ${options.requestId} already processed, returning cached state`);
-        return this.hydrateState(chatId, undefined, { forceRefresh: false }) as Promise<HydratedConversationState>;
+        const cached = await this.hydrateState(chatId, undefined, { forceRefresh: false });
+        const state = cached || (await this.getOrCreateState(chatId));
+        return { state, messageId: messageId || null };
       }
     }
 
@@ -133,7 +164,8 @@ class ConversationStateService {
       retriever.indexMessage({ messageId: persistedMessage.id, content, role });
     }
 
-    return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
+    const state = await this.hydrateState(chatId, undefined, { forceRefresh: true });
+    return { state: state as HydratedConversationState, messageId: persistedMessage.id };
   }
 
   async addArtifact(
@@ -345,8 +377,9 @@ class ConversationStateService {
   async searchContext(
     chatId: string,
     query: string,
-    options?: SearchOptions
+    options?: (SearchOptions & { requestId?: string; retrievalType?: string })
   ): Promise<SearchResult[]> {
+    const t0 = Date.now();
     let retriever = this.ragRetrievers.get(chatId);
     if (!retriever) {
       retriever = new RAGRetriever(chatId);
@@ -364,7 +397,32 @@ class ConversationStateService {
       }
       this.ragRetrievers.set(chatId, retriever);
     }
-    return retriever.search(query, options);
+
+    const results = retriever.search(query, options);
+
+    // Best-effort retrieval telemetry for debugging/regression analysis.
+    try {
+      const dbState = await conversationStateRepository.getOrCreate(chatId);
+      const requestId = options?.requestId || `retrieval_${Date.now()}`;
+      const totalTimeMs = Date.now() - t0;
+      await conversationStateRepository.saveTelemetry(dbState.id, {
+        requestId,
+        query,
+        chunksRetrieved: results.length,
+        totalTimeMs,
+        topScores: results.slice(0, 8).map(r => ({
+          id: r.id,
+          score: r.score,
+          type: r.type,
+          graph: (r.metadata as any)?._graph || undefined,
+        })),
+        retrievalType: options?.retrievalType || "conversation_rag",
+      });
+    } catch {
+      // No-op (telemetry must never break chat).
+    }
+
+    return results;
   }
 
   async addMemoryFact(chatId: string, fact: Omit<InsertMemoryFact, 'stateId'>): Promise<MemoryFact> {

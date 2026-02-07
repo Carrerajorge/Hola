@@ -47,6 +47,83 @@ function fallbackVerification(reason?: string): VerifierResult {
   });
 }
 
+function extractCitations(answer: string): string[] {
+  const t = (answer || "").trim();
+  if (!t) return [];
+  const hits = t.match(/\[(doc|img|image|mem):[^\]\n]+\]/gi) || [];
+  // Normalize "image" -> "img" so downstream logic treats them consistently.
+  return hits.map(h => h.trim().replace(/^\[image:/i, "[img:"));
+}
+
+function extractHighSignalTokens(answer: string): string[] {
+  const t = (answer || "").slice(0, 12000);
+  const out = new Set<string>();
+
+  // ISO dates
+  for (const m of t.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) out.add(m[0]);
+
+  // Percentages like 12% / 12.5%
+  for (const m of t.matchAll(/\b\d{1,3}(?:[.,]\d+)?%\b/g)) out.add(m[0]);
+
+  // Currency amounts (very common in docs)
+  for (const m of t.matchAll(/\b(?:USD|EUR|ARS|CLP|COP|MXN|BRL)\s*[\d,.]+/gi)) out.add(m[0]);
+
+  // Large numbers (4+ digits) or grouped thousands (1,250)
+  for (const m of t.matchAll(/\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b/g)) out.add(m[0]);
+  for (const m of t.matchAll(/\b\d{4,}\b/g)) out.add(m[0]);
+
+  return [...out].slice(0, 30);
+}
+
+function applyDeterministicChecks(verification: VerifierResult, input: VerifierInput): VerifierResult {
+  const evidence = (input.evidenceText || "").trim();
+  const answer = (input.answer || "").trim();
+
+  if (!evidence || !answer) return verification;
+
+  const citations = extractCitations(answer);
+  const hasQuestionMark = /\?\s*$|\?\s*\n/.test(answer) || /\?\s*$/.test(answer);
+  const isOnlyQuestion = hasQuestionMark && answer.length < 260;
+
+  // If evidence exists and the assistant produced a substantive answer, require at least one citation tag.
+  if (!isOnlyQuestion && citations.length === 0) {
+    verification.missing_citations = [
+      ...new Set([...(verification.missing_citations || []), "No se detectaron citas, pero se proveyó evidencia (adjuntos/RAG)."])
+    ];
+    verification.issues = [
+      ...(verification.issues || []),
+      { issue: "Faltan citas trazables ([doc:...] / [img:...] / [mem:#]) para respaldar la respuesta.", severity: "high", evidence: [] }
+    ];
+    verification.is_coherent = false;
+    verification.confidence = Math.min(verification.confidence ?? 0.5, 0.35);
+  }
+
+  // High-signal token traceability: if answer includes dates/numbers that do not appear in evidence, flag.
+  const tokens = extractHighSignalTokens(answer);
+  const lowerEvidence = evidence.toLowerCase();
+  const missing: string[] = [];
+
+  for (const tok of tokens) {
+    const needle = tok.toLowerCase();
+    if (!lowerEvidence.includes(needle)) missing.push(tok);
+  }
+
+  if (missing.length > 0) {
+    verification.issues = [
+      ...(verification.issues || []),
+      {
+        issue: "Se detectaron datos/fechas/numeros en la respuesta que no aparecen en la evidencia provista (posible alucinacion o falta de cita).",
+        severity: "medium",
+        evidence: missing.slice(0, 10),
+      }
+    ];
+    verification.is_coherent = verification.is_coherent && citations.length > 0;
+    verification.confidence = Math.min(verification.confidence ?? 0.5, citations.length > 0 ? 0.6 : 0.4);
+  }
+
+  return verification;
+}
+
 function buildPrompt(input: VerifierInput): ChatCompletionMessageParam[] {
   const evidence = (input.evidenceText || "").trim();
 
@@ -119,7 +196,7 @@ export class VerifierAgent {
             verification.clarifying_question = undefined;
           }
 
-          return verification;
+          return applyDeterministicChecks(verification, input);
         } catch (err: any) {
           lastErr = err;
           Logger.warn(
@@ -135,9 +212,11 @@ export class VerifierAgent {
       }
     }
 
-    return fallbackVerification(lastErr?.message || String(lastErr || "unknown"));
+    return applyDeterministicChecks(
+      fallbackVerification(lastErr?.message || String(lastErr || "unknown")),
+      input
+    );
   }
 }
 
 export const verifierAgent = new VerifierAgent();
-

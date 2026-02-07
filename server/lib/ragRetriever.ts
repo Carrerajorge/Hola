@@ -39,6 +39,16 @@ export interface SearchOptions {
   topK?: number;
   minScore?: number;
   hybridAlpha?: number;
+  /**
+   * Fusion strategy for hybrid retrieval.
+   * - "linear": alpha*vector + (1-alpha)*bm25 (normalized)
+   * - "rrf": Reciprocal Rank Fusion (rank-based, more robust across score scales)
+   */
+  fusion?: "linear" | "rrf";
+  /**
+   * RRF constant (higher = flatter). Typical values: 50-100.
+   */
+  rrfK?: number;
   filterTypes?: DocumentType[];
   /**
    * Optional reranking pass after hybrid retrieval.
@@ -80,6 +90,7 @@ export class RAGRetriever {
   private vectorStore: VectorStore;
   private documentRegistry: Map<string, DocumentRecord>;
   private entityIndex: Map<string, Set<string>>;
+  private entityNeighbors: Map<string, Map<string, number>>;
 
   constructor(threadId: string, vectorDimension: number = 384) {
     this.threadId = threadId;
@@ -87,6 +98,7 @@ export class RAGRetriever {
     this.vectorStore = new VectorStore(vectorDimension);
     this.documentRegistry = new Map();
     this.entityIndex = new Map();
+    this.entityNeighbors = new Map();
   }
 
   private extractEntityKeys(text: string, metadata?: Record<string, unknown>): string[] {
@@ -144,6 +156,28 @@ export class RAGRetriever {
     }
   }
 
+  private indexEntityNeighbors(entityKeys: string[]): void {
+    // Co-occurrence graph between entity keys for lightweight GraphRAG expansion.
+    // Bound the pair count to avoid O(n^2) blow-ups on noisy docs.
+    const keys = [...new Set(entityKeys)].slice(0, 20);
+    if (keys.length < 2) return;
+
+    for (let i = 0; i < keys.length; i++) {
+      const a = keys[i];
+      let adj = this.entityNeighbors.get(a);
+      if (!adj) {
+        adj = new Map();
+        this.entityNeighbors.set(a, adj);
+      }
+
+      for (let j = 0; j < keys.length; j++) {
+        if (i === j) continue;
+        const b = keys[j];
+        adj.set(b, (adj.get(b) || 0) + 1);
+      }
+    }
+  }
+
   private removeEntityKeys(docId: string, entityKeys: string[]): void {
     for (const key of entityKeys) {
       const set = this.entityIndex.get(key);
@@ -177,6 +211,7 @@ export class RAGRetriever {
     });
 
     if (entityKeys.length > 0) this.indexEntityKeys(docId, entityKeys);
+    if (entityKeys.length > 0) this.indexEntityNeighbors(entityKeys);
   }
 
   indexArtifact(artifact: IndexedArtifact): void {
@@ -212,6 +247,7 @@ export class RAGRetriever {
         });
 
         if (entityKeys.length > 0) this.indexEntityKeys(docId, entityKeys);
+        if (entityKeys.length > 0) this.indexEntityNeighbors(entityKeys);
       }
     }
 
@@ -230,6 +266,7 @@ export class RAGRetriever {
       });
 
       if (entityKeys.length > 0) this.indexEntityKeys(docId, entityKeys);
+      if (entityKeys.length > 0) this.indexEntityNeighbors(entityKeys);
     }
   }
 
@@ -259,6 +296,7 @@ export class RAGRetriever {
     });
 
     if (entityKeys.length > 0) this.indexEntityKeys(docId, entityKeys);
+    if (entityKeys.length > 0) this.indexEntityNeighbors(entityKeys);
   }
 
   indexMemoryFact(fact: IndexedMemoryFact): void {
@@ -285,6 +323,7 @@ export class RAGRetriever {
     });
 
     if (entityKeys.length > 0) this.indexEntityKeys(docId, entityKeys);
+    if (entityKeys.length > 0) this.indexEntityNeighbors(entityKeys);
   }
 
   search(query: string, options: SearchOptions = {}): SearchResult[] {
@@ -292,6 +331,8 @@ export class RAGRetriever {
       topK = 10,
       minScore = 0,
       hybridAlpha = 0.5,
+      fusion = "linear",
+      rrfK = 60,
       filterTypes,
       rerank = "none",
       graphExpand = false,
@@ -303,39 +344,49 @@ export class RAGRetriever {
     const bm25Results = this.bm25Engine.search(query, topK * 3);
     const vectorResults = this.vectorStore.searchByText(query, topK * 3, 0);
 
-    const maxBM25Score = bm25Results.length > 0 
-      ? Math.max(...bm25Results.map(r => r.score)) 
-      : 1;
+    const scoreMap = new Map<
+      string,
+      {
+        bm25Score: number;
+        vectorScore: number;
+        bm25Rank?: number;
+        vectorRank?: number;
+        document: DocumentRecord;
+      }
+    >();
 
-    const scoreMap = new Map<string, {
-      bm25Score: number;
-      vectorScore: number;
-      document: DocumentRecord;
-    }>();
+    const maxBM25Score = bm25Results.length > 0 ? Math.max(...bm25Results.map(r => r.score)) : 1;
 
-    for (const result of bm25Results) {
+    for (let i = 0; i < bm25Results.length; i++) {
+      const result = bm25Results[i];
       const doc = this.documentRegistry.get(result.id);
       if (!doc) continue;
+      if (filterTypes && filterTypes.length > 0 && !filterTypes.includes(doc.type)) continue;
 
       const normalizedBM25 = maxBM25Score > 0 ? result.score / maxBM25Score : 0;
       scoreMap.set(result.id, {
         bm25Score: normalizedBM25,
         vectorScore: 0,
+        bm25Rank: i + 1,
         document: doc
       });
     }
 
-    for (const result of vectorResults) {
+    for (let i = 0; i < vectorResults.length; i++) {
+      const result = vectorResults[i];
       const doc = this.documentRegistry.get(result.id);
       if (!doc) continue;
+      if (filterTypes && filterTypes.length > 0 && !filterTypes.includes(doc.type)) continue;
 
       const existing = scoreMap.get(result.id);
       if (existing) {
         existing.vectorScore = result.score;
+        existing.vectorRank = i + 1;
       } else {
         scoreMap.set(result.id, {
           bm25Score: 0,
           vectorScore: result.score,
+          vectorRank: i + 1,
           document: doc
         });
       }
@@ -344,13 +395,13 @@ export class RAGRetriever {
     let results: SearchResult[] = [];
 
     for (const [id, scores] of scoreMap) {
-      const finalScore = hybridAlpha * scores.vectorScore + (1 - hybridAlpha) * scores.bm25Score;
+      const finalScore =
+        fusion === "rrf"
+          ? (hybridAlpha * (scores.vectorRank ? 1 / (rrfK + scores.vectorRank) : 0)) +
+            ((1 - hybridAlpha) * (scores.bm25Rank ? 1 / (rrfK + scores.bm25Rank) : 0))
+          : hybridAlpha * scores.vectorScore + (1 - hybridAlpha) * scores.bm25Score;
 
       if (finalScore < minScore) continue;
-
-      if (filterTypes && filterTypes.length > 0) {
-        if (!filterTypes.includes(scores.document.type)) continue;
-      }
 
       results.push({
         id,
@@ -376,12 +427,18 @@ export class RAGRetriever {
         }
       }
 
-      const boostById = new Map<string, number>();
+      const boostById = new Map<string, { weight: number; keys: Set<string> }>();
 
       const accumulate = (docId: string, key: string) => {
         const weight = anchorKeyWeights.get(key) || 0;
         if (weight <= 0) return;
-        boostById.set(docId, (boostById.get(docId) || 0) + weight);
+        const existing = boostById.get(docId);
+        if (!existing) {
+          boostById.set(docId, { weight, keys: new Set([key]) });
+        } else {
+          existing.weight += weight;
+          existing.keys.add(key);
+        }
       };
 
       // Consider related docs via entity index (subgraph expansion).
@@ -395,15 +452,43 @@ export class RAGRetriever {
         }
       }
 
+      // Expand one hop further using entity co-occurrence neighbors.
+      // This helps when info is connected across docs by related entity mentions.
+      const neighborKeyWeights = new Map<string, number>();
+      for (const [key, weight] of anchorKeyWeights) {
+        const neighbors = this.entityNeighbors.get(key);
+        if (!neighbors) continue;
+        for (const [nKey, nCount] of neighbors) {
+          // De-prioritize very common neighbor edges.
+          neighborKeyWeights.set(nKey, (neighborKeyWeights.get(nKey) || 0) + Math.min(2, nCount) * weight);
+        }
+      }
+
+      const topNeighborKeys = [...neighborKeyWeights.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 25)
+        .map(([k]) => k);
+
+      for (const nKey of topNeighborKeys) {
+        const docIds = this.entityIndex.get(nKey);
+        if (!docIds) continue;
+        if (docIds.size > 30) continue;
+        // Use a small implied weight for neighbor expansion.
+        anchorKeyWeights.set(nKey, (anchorKeyWeights.get(nKey) || 0) + 1);
+        for (const docId of docIds) {
+          accumulate(docId, nKey);
+        }
+      }
+
       const existing = new Set(results.map(r => r.id));
       const expanded: SearchResult[] = [];
 
-      for (const [docId, sharedWeight] of boostById) {
+      for (const [docId, info] of boostById) {
         const doc = this.documentRegistry.get(docId);
         if (!doc) continue;
         if (filterTypes && filterTypes.length > 0 && !filterTypes.includes(doc.type)) continue;
 
-        const boost = graphBoost * Math.min(1, sharedWeight / 3);
+        const boost = graphBoost * Math.min(1, info.weight / 3);
         if (existing.has(docId)) {
           const r = results.find(x => x.id === docId);
           if (r) r.score += boost;
@@ -415,7 +500,13 @@ export class RAGRetriever {
           score: boost,
           type: doc.type,
           content: doc.content,
-          metadata: doc.metadata,
+          metadata: {
+            ...(doc.metadata || {}),
+            _graph: {
+              sharedKeys: [...info.keys].slice(0, 8),
+              weight: info.weight,
+            },
+          },
         });
       }
 
@@ -426,6 +517,7 @@ export class RAGRetriever {
 
     if (rerank === "heuristic" && results.length > 1) {
       const qTokens = new Set(Utils.tokenize(query));
+      const qEntity = new Set(this.extractEntityKeys(query));
 
       const overlap = (text: string): number => {
         if (qTokens.size === 0) return 0;
@@ -435,9 +527,18 @@ export class RAGRetriever {
         return hit / qTokens.size;
       };
 
+      const entityOverlap = (metadata?: Record<string, unknown>): number => {
+        if (qEntity.size === 0) return 0;
+        const keys = (metadata as any)?.entityKeys as string[] | undefined;
+        if (!keys || keys.length === 0) return 0;
+        let hit = 0;
+        for (const k of keys) if (qEntity.has(String(k).toLowerCase())) hit++;
+        return hit / Math.max(3, qEntity.size);
+      };
+
       results.sort((a, b) => {
-        const aScore = a.score + overlap(a.content) * 0.15;
-        const bScore = b.score + overlap(b.content) * 0.15;
+        const aScore = a.score + overlap(a.content) * 0.15 + entityOverlap(a.metadata) * 0.12;
+        const bScore = b.score + overlap(b.content) * 0.15 + entityOverlap(b.metadata) * 0.12;
         return bScore - aScore;
       });
     }
@@ -461,6 +562,7 @@ export class RAGRetriever {
     this.vectorStore.clear();
     this.documentRegistry.clear();
     this.entityIndex.clear();
+    this.entityNeighbors.clear();
   }
 
   getStats(): RAGStats {
