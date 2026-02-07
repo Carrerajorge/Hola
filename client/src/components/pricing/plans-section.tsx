@@ -164,10 +164,10 @@ function PlanBadge({
       className={cn(
         "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide",
         isRecommended
-          ? "border-foreground/10 bg-foreground text-background"
+          ? "border-black/10 bg-black text-white"
           : isNew
-            ? "border-[hsl(var(--future-b,195_95%_35%)/0.25)] bg-[hsl(var(--future-b,195_95%_35%)/0.08)] text-[hsl(var(--future-b,195_95%_35%))]"
-            : "border-border bg-background text-muted-foreground",
+            ? "border-black/10 bg-zinc-100 text-zinc-800"
+            : "border-black/10 bg-white text-zinc-600",
         className,
       )}
     >
@@ -208,13 +208,13 @@ export function PricingPlansSection(props: {
     <div>
       {showTabs && (
         <div className="flex justify-center mt-4">
-          <div className="inline-flex items-center rounded-full border border-border bg-muted/60 p-1">
+          <div className="inline-flex items-center rounded-full border border-black/10 bg-zinc-100/70 p-1">
             <button
               className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
                 activeTab === "personal"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-white shadow-sm text-zinc-900"
+                  : "text-zinc-600 hover:text-zinc-900",
               )}
               onClick={() => setActiveTab("personal")}
               data-testid="tab-personal"
@@ -225,10 +225,10 @@ export function PricingPlansSection(props: {
             </button>
             <button
               className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/20 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
                 activeTab === "empresa"
-                  ? "bg-background shadow-sm text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-white shadow-sm text-zinc-900"
+                  : "text-zinc-600 hover:text-zinc-900",
               )}
               onClick={() => setActiveTab("empresa")}
               data-testid="tab-empresa"
@@ -257,14 +257,14 @@ export function PricingPlansSection(props: {
               <div
                 key={`${activeTab}:${plan.name}`}
                 className={cn(
-                  "rounded-2xl border border-border p-6 flex flex-col bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md",
+                  "rounded-2xl border border-black/10 p-6 flex flex-col bg-white text-zinc-900 shadow-sm transition-shadow hover:shadow-md",
                   plan.highlight &&
-                    "bg-muted/20 ring-1 ring-[hsl(var(--future-b,195_95%_35%)/0.18)] shadow-md",
+                    "bg-zinc-50 border-black/25 shadow-md",
                 )}
                 data-testid={`plan-card-${plan.name.toLowerCase()}`}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <h3 className={cn("text-lg font-semibold tracking-tight", plan.highlight && "text-future-gradient")}>
+                  <h3 className="text-lg font-semibold tracking-tight text-zinc-950">
                     {plan.name}
                   </h3>
                   {plan.badge && (
@@ -274,28 +274,25 @@ export function PricingPlansSection(props: {
 
                 <div className="flex items-baseline gap-0.5 mb-2">
                   <span className="text-sm">$</span>
-                  <span
-                    className={cn(
-                      "text-4xl font-semibold tracking-tight tabular-nums",
-                      plan.highlight && "text-future-gradient",
-                    )}
-                  >
+                  <span className="text-4xl font-semibold tracking-tight tabular-nums text-zinc-950">
                     {plan.price}
                   </span>
-                  <span className="text-sm text-muted-foreground">USD / mes</span>
+                  <span className="text-sm text-zinc-600">USD / mes</span>
                 </div>
 
-                <p className="text-sm text-muted-foreground mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                <p className="text-sm text-zinc-600 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
                   {plan.description}
                 </p>
 
                 <Button
                   variant={plan.buttonVariant}
                   className={cn(
-                    "w-full mb-6",
-                    plan.buttonVariant === "outline" && "hover:bg-accent/60",
-                    plan.buttonVariant === "default" && "hover:bg-primary/90 hover:border-primary/90",
-                    plan.highlight && plan.buttonVariant === "default" && "shadow-sm",
+                    "w-full mb-6 rounded-xl font-semibold",
+                    plan.buttonVariant === "outline" &&
+                      "border-black/20 text-zinc-900 hover:bg-black/5 hover:text-zinc-950",
+                    plan.buttonVariant === "default" &&
+                      "bg-black text-white border border-black/10 hover:bg-zinc-900",
+                    plan.highlight && "shadow-sm",
                   )}
                   disabled={isCurrent || isLoading}
                   onClick={() => !isCurrent && onSelectPlan(plan.name, activeTab)}
@@ -316,20 +313,20 @@ export function PricingPlansSection(props: {
                 <div className="space-y-3 flex-1">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start gap-2 text-sm">
-                      <feature.icon className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                      <span className="text-foreground/80 leading-snug">{feature.text}</span>
+                      <feature.icon className="h-4 w-4 mt-0.5 text-zinc-500 flex-shrink-0" />
+                      <span className="text-zinc-800 leading-snug">{feature.text}</span>
                     </div>
                   ))}
                 </div>
 
                 {plan.footerNote && (
-                  <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
+                  <p className="text-xs text-zinc-500 mt-4 pt-4 border-t border-black/10">
                     {plan.footerNote.includes("Obtener más información") ? (
                       <>
                         {plan.footerNote.replace("Obtener más información", "")}
                         <button
                           type="button"
-                          className="underline underline-offset-4 decoration-muted-foreground/40 hover:text-foreground"
+                          className="underline underline-offset-4 decoration-zinc-300 hover:text-zinc-900 hover:decoration-zinc-600"
                         >
                           Obtener más información
                         </button>
@@ -339,7 +336,7 @@ export function PricingPlansSection(props: {
                         {plan.footerNote.replace("Se aplican límites", "")}
                         <button
                           type="button"
-                          className="underline underline-offset-4 decoration-muted-foreground/40 hover:text-foreground"
+                          className="underline underline-offset-4 decoration-zinc-300 hover:text-zinc-900 hover:decoration-zinc-600"
                         >
                           Se aplican límites
                         </button>
