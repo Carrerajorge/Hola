@@ -1909,7 +1909,7 @@ export function ChatInterface({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "ILIAGPT Response",
+          title: document.title || "Response",
           text: content
         });
       } catch (e) {

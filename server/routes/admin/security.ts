@@ -125,11 +125,18 @@ securityRouter.patch("/policies/:id/toggle", async (req, res) => {
             return res.status(404).json({ error: "Policy not found" });
         }
 
-        await storage.createAuditLog({
+        await auditLog(req, {
             action: isEnabled ? "security_policy_enable" : "security_policy_disable",
             resource: "security_policies",
             resourceId: req.params.id,
-            details: { policyName: policy.policyName }
+            details: {
+                policyName: policy.policyName,
+                policyType: policy.policyType,
+                appliedTo: policy.appliedTo,
+                isEnabled,
+            },
+            category: "security",
+            severity: "warning",
         });
 
         res.json(policy);
@@ -140,7 +147,23 @@ securityRouter.patch("/policies/:id/toggle", async (req, res) => {
 
 securityRouter.get("/audit-logs", async (req, res) => {
     try {
-        const { action, resource, date_from, date_to, severity, status, page = "1", limit = "50" } = req.query;
+        const {
+            action,
+            actor,
+            userId,
+            user_id,
+            role,
+            category,
+            severity,
+            exclude_admin,
+            excludeAdmin: excludeAdminParam,
+            resource,
+            date_from,
+            date_to,
+            status,
+            page = "1",
+            limit = "50"
+        } = req.query;
         const pageNum = parseInt(page as string);
         const limitNum = Math.min(parseInt(limit as string), 100);
 
@@ -148,6 +171,60 @@ securityRouter.get("/audit-logs", async (req, res) => {
 
         if (action) {
             logs = logs.filter(l => l.action?.includes(action as string));
+        }
+
+        const normalizedUserQuery = String(userId || user_id || "").trim().toLowerCase();
+        if (normalizedUserQuery) {
+            logs = logs.filter(l => (l.userId ? String(l.userId) : "").toLowerCase().includes(normalizedUserQuery));
+        }
+
+        const normalizedRoleQuery = String(role || "").trim().toLowerCase();
+        if (normalizedRoleQuery) {
+            logs = logs.filter(l => {
+                const details: any = l.details || {};
+                const actorRole = details.actorRole ? String(details.actorRole).toLowerCase() : "";
+                return actorRole.includes(normalizedRoleQuery);
+            });
+        }
+
+        const normalizedCategoryQuery = String(category || "").trim().toLowerCase();
+        if (normalizedCategoryQuery) {
+            logs = logs.filter(l => {
+                const details: any = l.details || {};
+                const cat = details.category ? String(details.category).toLowerCase() : "";
+                return cat.includes(normalizedCategoryQuery);
+            });
+        }
+
+        const normalizedSeverityQuery = String(severity || "").trim().toLowerCase();
+        if (normalizedSeverityQuery) {
+            logs = logs.filter(l => {
+                const details: any = l.details || {};
+                const sev = details.severity ? String(details.severity).toLowerCase() : "";
+                return sev.includes(normalizedSeverityQuery);
+            });
+        }
+
+        const excludeAdminRaw = String(exclude_admin || excludeAdminParam || "").trim().toLowerCase();
+        const excludeAdmins = excludeAdminRaw === "true" || excludeAdminRaw === "1" || excludeAdminRaw === "yes";
+        if (excludeAdmins) {
+            logs = logs.filter(l => {
+                const details: any = l.details || {};
+                const actorRole = details.actorRole ? String(details.actorRole).toLowerCase() : "";
+                const user = l.userId ? String(l.userId) : "";
+                return actorRole !== "admin" && user !== "admin-user-id";
+            });
+        }
+
+        if (actor) {
+            const q = String(actor).toLowerCase();
+            logs = logs.filter(l => {
+                const userId = l.userId ? String(l.userId).toLowerCase() : "";
+                const details: any = l.details || {};
+                const actorEmail = details.actorEmail || details.email;
+                const email = actorEmail ? String(actorEmail).toLowerCase() : "";
+                return userId.includes(q) || email.includes(q);
+            });
         }
         if (resource) {
             logs = logs.filter(l => l.resource === resource);

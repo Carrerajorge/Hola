@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 export interface AvailableModel {
   id: string;
@@ -38,6 +39,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const queryClient = useQueryClient();
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(null);
   const { settings, updateSetting } = useSettingsContext();
+  const { settings: platformSettings } = usePlatformSettings();
 
   const { data: modelsData, isLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],
@@ -106,9 +108,21 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   // Initialize selected model from Settings -> Default Model.
   useEffect(() => {
     if (selectedModelId) return;
-    const target = settings.defaultModel
-      ? enabledModels.find((m) => m.modelId === settings.defaultModel || m.id === settings.defaultModel)
-      : undefined;
+
+    const legacyDefaultModelIds = new Set(["gemini-2.5-flash"]);
+
+    const findEnabled = (id: string) =>
+      enabledModels.find((m) => m.modelId === id || m.id === id);
+
+    const userDefault = settings.defaultModel;
+    const platformDefault = platformSettings.default_model;
+    const preferPlatformDefault =
+      !userDefault || legacyDefaultModelIds.has(userDefault);
+
+    const primary = preferPlatformDefault ? platformDefault : userDefault;
+    const secondary = preferPlatformDefault ? userDefault : platformDefault;
+
+    const target = (primary ? findEnabled(primary) : undefined) || (secondary ? findEnabled(secondary) : undefined);
     if (target) {
       setSelectedModelIdState(target.id);
       return;
@@ -117,7 +131,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       // Fall back to the first enabled model so the rest of the app has a stable selection.
       setSelectedModelIdState(enabledModels[0].id);
     }
-  }, [enabledModels, selectedModelId, settings.defaultModel]);
+  }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
 
   // Keep Settings -> Default Model in sync with the selector.
   useEffect(() => {

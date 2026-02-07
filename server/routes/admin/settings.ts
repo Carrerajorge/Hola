@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { getActorEmailFromRequest, getActorIdFromRequest, invalidateSettingsCache } from "../../services/settingsConfigService";
 
 export const settingsRouter = Router();
 
@@ -51,13 +52,17 @@ settingsRouter.put("/:key", async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: "Setting not found" });
         }
+        const actorId = getActorIdFromRequest(req);
+        const actorEmail = getActorEmailFromRequest(req);
         const previousValue = existing.value;
         const updated = await storage.upsertSettingsConfig({
             ...existing,
             value: req.body.value,
-            updatedBy: req.body.updatedBy,
+            updatedBy: actorId,
             defaultValue: existing.defaultValue as any
         });
+
+        invalidateSettingsCache();
         
         await auditLog(req, {
             action: AuditActions.ADMIN_SETTINGS_CHANGED,
@@ -68,7 +73,7 @@ settingsRouter.put("/:key", async (req, res) => {
                 previousValue,
                 newValue: req.body.value,
                 category: existing.category,
-                changedBy: (req as any).user?.email
+                changedBy: actorEmail
             },
             category: "config",
             severity: "warning"
@@ -86,25 +91,52 @@ settingsRouter.post("/bulk", async (req, res) => {
         if (!Array.isArray(settings)) {
             return res.status(400).json({ error: "settings must be an array" });
         }
+        const actorId = getActorIdFromRequest(req);
+        const actorEmail = getActorEmailFromRequest(req);
+
         const results = [];
+        const changes: Array<{ key: string; previousValue: any; newValue: any; category?: string }> = [];
+
         for (const s of settings) {
+            if (!s?.key) continue;
+
             const existing = await storage.getSettingsConfigByKey(s.key);
-            if (existing) {
-                const updated = await storage.upsertSettingsConfig({
-                    ...existing,
-                    value: s.value,
-                    updatedBy: s.updatedBy,
-                    defaultValue: existing.defaultValue as any
-                });
-                results.push(updated);
-            }
+            if (!existing) continue;
+
+            const previousValue = existing.value;
+            const nextValue = s.value;
+
+            // Only write changes (prevents noisy updatedAt churn).
+            if (JSON.stringify(previousValue) === JSON.stringify(nextValue)) continue;
+
+            const updated = await storage.upsertSettingsConfig({
+                ...existing,
+                value: nextValue,
+                updatedBy: actorId,
+                defaultValue: existing.defaultValue as any
+            });
+            results.push(updated);
+            changes.push({ key: s.key, previousValue, newValue: nextValue, category: existing.category });
         }
-        await storage.createAuditLog({
-            action: "settings_bulk_update",
-            resource: "settings_config",
-            details: { count: results.length }
-        });
-        res.json({ updated: results.length, settings: results });
+
+        if (results.length > 0) {
+            invalidateSettingsCache();
+            await auditLog(req, {
+                action: AuditActions.ADMIN_SETTINGS_CHANGED,
+                resource: "settings_config",
+                resourceId: "bulk",
+                details: {
+                    count: results.length,
+                    keys: changes.map(c => c.key),
+                    changes,
+                    changedBy: actorEmail,
+                },
+                category: "config",
+                severity: "warning"
+            });
+        }
+
+        res.json({ updated: results.length, settings: results, skipped: (settings.length - results.length) });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -116,16 +148,32 @@ settingsRouter.post("/reset/:key", async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: "Setting not found" });
         }
+        const actorId = getActorIdFromRequest(req);
+        const actorEmail = getActorEmailFromRequest(req);
+        const previousValue = existing.value;
         const updated = await storage.upsertSettingsConfig({
             ...existing,
             value: existing.defaultValue as any,
-            updatedBy: req.body.updatedBy,
+            updatedBy: actorId,
             defaultValue: existing.defaultValue as any
         });
-        await storage.createAuditLog({
-            action: "setting_reset",
+
+        invalidateSettingsCache();
+
+        await auditLog(req, {
+            action: AuditActions.ADMIN_SETTINGS_CHANGED,
             resource: "settings_config",
-            details: { key: req.params.key, defaultValue: existing.defaultValue }
+            resourceId: req.params.key,
+            details: {
+                key: req.params.key,
+                previousValue,
+                newValue: existing.defaultValue,
+                category: existing.category,
+                changedBy: actorEmail,
+                resetToDefault: true,
+            },
+            category: "config",
+            severity: "warning"
         });
         res.json(updated);
     } catch (error: any) {
@@ -136,7 +184,15 @@ settingsRouter.post("/reset/:key", async (req, res) => {
 settingsRouter.post("/seed", async (req, res) => {
     try {
         await storage.seedDefaultSettings();
+        invalidateSettingsCache();
         const settings = await storage.getSettingsConfig();
+        await auditLog(req, {
+            action: "settings_seed",
+            resource: "settings_config",
+            details: { count: settings.length },
+            category: "config",
+            severity: "info"
+        });
         res.json({ seeded: true, count: settings.length });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -150,6 +206,8 @@ settingsRouter.post("/diff", async (req, res) => {
         if (!settings || typeof settings !== "object") {
             return res.status(400).json({ error: "settings object is required" });
         }
+        const actorId = getActorIdFromRequest(req);
+        const actorEmail = getActorEmailFromRequest(req);
 
         const updated: any[] = [];
         const unchanged: string[] = [];
@@ -174,7 +232,7 @@ settingsRouter.post("/diff", async (req, res) => {
                 const result = await storage.upsertSettingsConfig({
                     ...existing,
                     value: newValue as any,
-                    updatedBy: req.body.updatedBy,
+                    updatedBy: actorId,
                     defaultValue: existing.defaultValue as any
                 });
                 updated.push({ key, oldValue: currentValue, newValue, setting: result });
@@ -184,14 +242,20 @@ settingsRouter.post("/diff", async (req, res) => {
         }
 
         if (updated.length > 0) {
-            await storage.createAuditLog({
-                action: "settings_diff_update",
+            invalidateSettingsCache();
+            await auditLog(req, {
+                action: AuditActions.ADMIN_SETTINGS_CHANGED,
                 resource: "settings_config",
-                details: { 
+                resourceId: "diff",
+                details: {
                     updated: updated.map(u => u.key),
                     unchanged: unchanged.length,
-                    errors: errors.length
-                }
+                    errors: errors.length,
+                    changes: updated.map(u => ({ key: u.key, oldValue: u.oldValue, newValue: u.newValue })),
+                    changedBy: actorEmail,
+                },
+                category: "config",
+                severity: "warning"
             });
         }
 
@@ -223,10 +287,12 @@ settingsRouter.get("/export", async (req, res) => {
             return acc;
         }, {});
 
-        await storage.createAuditLog({
+        await auditLog(req, {
             action: "settings_export",
             resource: "settings_config",
-            details: { count: settings.length }
+            details: { count: settings.length },
+            category: "config",
+            severity: "info"
         });
 
         res.setHeader("Content-Type", "application/json");
@@ -244,6 +310,7 @@ settingsRouter.post("/import", async (req, res) => {
         if (!settings || typeof settings !== "object") {
             return res.status(400).json({ error: "settings object is required" });
         }
+        const actorId = getActorIdFromRequest(req);
 
         const imported: string[] = [];
         const skipped: string[] = [];
@@ -265,7 +332,7 @@ settingsRouter.post("/import", async (req, res) => {
                     await storage.upsertSettingsConfig({
                         ...existing,
                         value: value as any,
-                        updatedBy: req.body.updatedBy,
+                        updatedBy: actorId,
                         defaultValue: existing.defaultValue as any
                     });
                     imported.push(key);
@@ -275,10 +342,16 @@ settingsRouter.post("/import", async (req, res) => {
             }
         }
 
-        await storage.createAuditLog({
+        if (imported.length > 0) {
+            invalidateSettingsCache();
+        }
+
+        await auditLog(req, {
             action: "settings_import",
             resource: "settings_config",
-            details: { imported: imported.length, skipped: skipped.length, errors: errors.length }
+            details: { imported: imported.length, skipped: skipped.length, errors: errors.length },
+            category: "config",
+            severity: errors.length > 0 ? "warning" : "info"
         });
 
         res.json({

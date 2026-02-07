@@ -4,7 +4,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { db } from "./db";
-import { users } from "@shared/schema";
+import { libraryStorage, userSettings, users } from "@shared/schema";
 import { ObjectStorageService } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { env } from "./config/env";
@@ -14,6 +14,7 @@ import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { authStorage } from "./replit_integrations/auth/storage";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";
@@ -78,6 +79,7 @@ import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./se
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
+import { recordLoginAttempt } from "./services/twoFactorAuth";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
@@ -104,6 +106,9 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { compression } from "./middleware/compression";
+import { getPublicSettings } from "./services/settingsConfigService";
+import { maintenanceModeMiddleware } from "./middleware/maintenanceMode";
+import { sessionTimeoutMiddleware } from "./middleware/sessionTimeout";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -240,7 +245,61 @@ export async function registerRoutes(
 ): Promise<Server> {
   // Session + Passport (registers express-session before passport.session)
   await setupAuth(app);
+  app.use(sessionTimeoutMiddleware);
   registerAuthRoutes(app);
+
+  // Public settings (branding + maintenance state for all clients)
+  app.get("/api/settings/public", async (_req, res) => {
+    const data = await getPublicSettings();
+    res.json(data);
+  });
+
+  // Maintenance mode guard for API traffic (admins + auth are exempt)
+  app.use(maintenanceModeMiddleware);
+
+  async function trackPassportProviderLogin(req: Request, provider: string): Promise<void> {
+    const anyReq = req as any;
+    const userId = anyReq.user?.claims?.sub || anyReq.user?.id || null;
+    const email = anyReq.user?.claims?.email || anyReq.user?.email || null;
+    const ipAddress =
+      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      req.ip ||
+      null;
+    const userAgent = (req.headers["user-agent"] as string) || null;
+
+    // Keep session.authUserId populated for consistent identity extraction.
+    if (req.session && userId) {
+      (req.session as any).authUserId = userId;
+    }
+
+    if (!userId) return;
+
+    try {
+      await authStorage.updateUserLogin(userId, { ipAddress, userAgent });
+    } catch (e: any) {
+      console.warn(`[Auth] Failed to update user login for ${provider}:`, e?.message || e);
+    }
+
+    try {
+      await storage.createAuditLog({
+        userId,
+        action: "user_login",
+        resource: "auth",
+        details: { email, provider },
+        ipAddress,
+        userAgent,
+      });
+    } catch (e: any) {
+      console.warn(`[Auth] Failed to create audit log for ${provider} login:`, e?.message || e);
+    }
+
+    try {
+      await recordLoginAttempt(email || "unknown", userId, ipAddress || "unknown", String(userAgent || "unknown"), true);
+    } catch (e: any) {
+      console.warn(`[Auth] Failed to record login_attempts for ${provider}:`, e?.message || e);
+    }
+  }
 
   // Passport Auth Routes
   // Google (only register if credentials are configured)
@@ -251,7 +310,8 @@ export async function registerRoutes(
     }));
     app.get("/api/auth/google/callback",
       passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
-      (req, res, next) => {
+      async (req, res, next) => {
+        await trackPassportProviderLogin(req, "google");
         if (req.session) {
           req.session.save((err) => {
             if (err) {
@@ -276,7 +336,8 @@ export async function registerRoutes(
     app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
     app.get("/api/auth/microsoft/callback",
       passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
-      (req, res, next) => {
+      async (req, res, next) => {
+        await trackPassportProviderLogin(req, "microsoft");
         if (req.session) {
           req.session.save((err) => {
             if (err) {
@@ -300,7 +361,8 @@ export async function registerRoutes(
     app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
     app.get("/api/auth/auth0/callback",
       passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
-      (req, res, next) => {
+      async (req, res, next) => {
+        await trackPassportProviderLogin(req, "auth0");
         if (req.session) {
           req.session.save((err) => {
             if (err) {
@@ -397,6 +459,11 @@ export async function registerRoutes(
             status: "active",
           })
           .onConflictDoNothing();
+
+        // Best-effort bootstrap of dependent per-user tables for anonymous sessions.
+        // Keep this idempotent and non-blocking.
+        await db.insert(userSettings).values({ userId: anonUserId }).onConflictDoNothing();
+        await db.insert(libraryStorage).values({ userId: anonUserId }).onConflictDoNothing();
       } catch (e: any) {
         // If DB is unavailable in dev, identity should still work.
         console.warn("[SessionIdentity] Failed to ensure anon user row:", e?.message || e);

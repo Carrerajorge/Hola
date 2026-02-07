@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft } from "lucide-react";
 import { queryClient } from "@/lib/queryClient";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   auth_failed: "Error de autenticación con Google. Por favor intenta de nuevo.",
@@ -21,6 +22,10 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
+  const { settings: platformSettings } = usePlatformSettings();
+  const appName = platformSettings.app_name || "ILIAGPT";
+  const allowRegistration = platformSettings.allow_registration;
+  const supportEmail = (platformSettings.support_email || "").trim();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -256,7 +261,7 @@ export default function LoginPage() {
 
           <div className="text-center mb-8 fade-in-up">
             <h1 className="text-3xl font-bold mb-3 text-white">
-              Bienvenido a <span className="text-gradient-premium">ILIAGPT</span>
+              Bienvenido a <span className="text-gradient-premium">{appName}</span>
             </h1>
             <p className="text-zinc-400">
               Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
@@ -548,20 +553,30 @@ export default function LoginPage() {
           )}
 
           {!showPhoneAuth && (
-            <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
-              ¿No tienes una cuenta?{" "}
-              <button
-                onClick={() => setLocation("/signup")}
-                className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
-                data-testid="link-goto-signup"
-              >
-                Suscríbete gratis
-              </button>
-            </p>
+            allowRegistration ? (
+              <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
+                ¿No tienes una cuenta?{" "}
+                <button
+                  onClick={() => setLocation("/signup")}
+                  className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                  data-testid="link-goto-signup"
+                >
+                  Suscríbete gratis
+                </button>
+              </p>
+            ) : (
+              supportEmail ? (
+                <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
+                  Registro cerrado. Soporte:{" "}
+                  <a className="text-purple-400 hover:text-purple-300 hover:underline" href={`mailto:${supportEmail}`}>
+                    {supportEmail}
+                  </a>
+                </p>
+              ) : null
+            )
           )}
         </div>
       </div>
     </div>
   );
 }
-

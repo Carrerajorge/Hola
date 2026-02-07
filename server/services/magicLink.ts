@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { db } from "../db";
 import { users, magicLinks, workspaceInvitations } from "@shared/schema";
 import { eq, and, gt, desc, ne } from "drizzle-orm";
+import { getSettingValue } from "./settingsConfigService";
 
 const MAGIC_LINK_EXPIRY_MINUTES = 15;
 
@@ -24,6 +25,11 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
         let [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
 
         if (!user) {
+            const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
+            if (!allowRegistration) {
+                return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+            }
+
             // Create new user for magic link signup
             const [newUser] = await db.insert(users).values({
                 email: email.toLowerCase(),
@@ -31,6 +37,7 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
                 lastName: "",
                 role: "user",
                 status: "pending", // Will be activated on first magic link verification
+                emailVerified: "false",
             }).returning();
             user = newUser;
         }
@@ -91,11 +98,11 @@ export async function verifyMagicLink(token: string): Promise<{ success: boolean
             return { success: false, error: "Usuario no encontrado" };
         }
 
-        // Activate user if pending
+        // Activate user if pending + mark email verified
         const wasPending = user.status === "pending";
-        if (wasPending) {
-            await db.update(users).set({ status: "active" }).where(eq(users.id, user.id));
-        }
+        const patch: Record<string, any> = { emailVerified: "true", updatedAt: new Date() };
+        if (wasPending) patch.status = "active";
+        await db.update(users).set(patch).where(eq(users.id, user.id));
 
         // If the user was invited to a workspace, accept the invitation and bind org/role.
         try {

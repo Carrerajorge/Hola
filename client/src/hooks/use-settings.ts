@@ -125,7 +125,8 @@ const defaultSettings: UserSettings = {
   
   // AI Models
   showAdditionalModels: true,
-  defaultModel: "gemini-2.5-flash",
+  // Platform-level default model is applied via PlatformSettings.
+  defaultModel: "",
   streamResponses: true,
   
   // Keyboard & Accessibility

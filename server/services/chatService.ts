@@ -20,7 +20,6 @@ import { getStorageService } from "./storage"; // NEW
 import { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } from "./intentGuard";
 import { DeterministicPipeline } from "../agent/pipelines/deterministicPipeline";
 import OpenAI from "openai";
-import { knowledgeBaseService } from "./knowledgeBase";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -1345,7 +1344,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           const pipelineResponse = await multiIntentPipeline.execute(
             lastUserMessage.content,
             {
-              userId: conversationId,
+              userId: userId || conversationId || "anonymous",
               conversationId,
               messages: messages.map(m => ({ role: m.role, content: m.content })),
               onProgress: onAgentProgress
@@ -1593,23 +1592,6 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               p.journal, 
               p.doi ? `https://doi.org/${p.doi}` : undefined
             ));
-
-          if (userId) {
-            knowledgeBaseService.ingestWebSources(
-              userId,
-              lastUserMessage.content,
-              engineResult.papers.map(p => ({
-                title: p.title,
-                url: p.url || (p.doi ? `https://doi.org/${p.doi}` : undefined),
-                content: p.abstract || "",
-                siteName: p.journal,
-                publishedDate: p.year ? String(p.year) : undefined,
-              })),
-              { nodeType: "reference", sourceType: "academic" }
-            ).catch((error) => {
-              console.warn("[Knowledge] Academic ingest failed:", (error as Error)?.message || error);
-            });
-          }
             
           console.log(`[ChatService:AcademicEngine] Found ${engineResult.papers.length} papers from ${engineResult.sources.map(s => s.name).join(", ")} in ${engineResult.searchTime}ms`);
         }
@@ -1663,24 +1645,6 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             searchResults.results.map((r, i) =>
               `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
             ).join("\n");
-        }
-
-        if (userId) {
-          const ingestSources = (searchResults.contents.length > 0
-            ? searchResults.contents
-            : searchResults.results.map(r => ({
-                title: r.title,
-                url: r.url,
-                snippet: r.snippet,
-                siteName: r.siteName,
-                publishedDate: r.publishedDate,
-              }))
-          ) as Array<{ title?: string; url?: string; content?: string; snippet?: string; siteName?: string; publishedDate?: string }>;
-
-          knowledgeBaseService.ingestWebSources(userId, lastUserMessage.content, ingestSources)
-            .catch((error) => {
-              console.warn("[Knowledge] Web ingest failed:", (error as Error)?.message || error);
-            });
         }
       } catch (error) {
         await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
@@ -1737,19 +1701,6 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           { query: lastUserMessage.content }, null, "error", Date.now() - ragStartTime, String(error));
         console.error("RAG search error:", error);
       }
-    }
-  }
-
-  // Knowledge Base contextualization (opt-out via env)
-  const knowledgeContextEnabled = process.env.KNOWLEDGE_CONTEXT_ENABLED !== "false";
-  if (knowledgeContextEnabled && userId && lastUserMessage) {
-    try {
-      const knowledgeContext = await knowledgeBaseService.buildContext(userId, lastUserMessage.content, 5);
-      if (knowledgeContext) {
-        contextInfo += knowledgeContext;
-      }
-    } catch (error) {
-      console.warn("[Knowledge] Context build failed:", (error as Error)?.message || error);
     }
   }
 
@@ -2080,7 +2031,7 @@ REGLAS OBLIGATORIAS:
           model: MODELS.TEXT,
           temperature: 0.2,
           topP: 1,
-          userId: conversationId,
+          userId: userId || conversationId || "anonymous",
           requestId: `figma_${Date.now()}`,
         }
       );
@@ -2248,7 +2199,7 @@ REGLAS OBLIGATORIAS:
         model: model || MODELS.TEXT,
         temperature,
         topP,
-        userId: conversationId,
+        userId: userId || conversationId || "anonymous",
         requestId: `chat_${Date.now()}`,
       }
     );

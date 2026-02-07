@@ -4,9 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
+  const { settings: platformSettings } = usePlatformSettings();
+  const appName = platformSettings.app_name || "ILIAGPT";
+  const allowRegistration = platformSettings.allow_registration;
   const [inputValue, setInputValue] = useState("");
   const [showPromo, setShowPromo] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -92,7 +96,7 @@ export default function LandingPage() {
 
 
           <IliaGPTLogo size={32} />
-          <span className="font-semibold text-white">ILIAGPT</span>
+          <span className="font-semibold text-white">{appName}</span>
           <ChevronDown className="h-4 w-4 text-zinc-400" />
         </div>
 
@@ -115,14 +119,16 @@ export default function LandingPage() {
           >
             Inicia sesión
           </Button>
-          <Button
-            variant="outline"
-            className="rounded-full hidden sm:flex border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-300"
-            onClick={() => setLocation("/signup")}
-            data-testid="button-header-signup"
-          >
-            Suscríbete gratis
-          </Button>
+          {allowRegistration ? (
+            <Button
+              variant="outline"
+              className="rounded-full hidden sm:flex border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-300"
+              onClick={() => setLocation("/signup")}
+              data-testid="button-header-signup"
+            >
+              Suscríbete gratis
+            </Button>
+          ) : null}
           <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-400 hover:text-white hover:bg-white/10">
             <HelpCircle className="h-5 w-5" />
           </Button>
@@ -321,7 +327,7 @@ export default function LandingPage() {
 
       {/* Footer */}
       <footer className="relative z-10 py-4 text-center text-sm text-zinc-500 border-t border-white/10 backdrop-blur-sm">
-        Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
+        Al enviar un mensaje a {appName}, un chatbot de IA, aceptas nuestros{" "}
         <Link href="/terms" className="text-zinc-400 hover:text-white underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
         <Link href="/privacy-policy" className="text-zinc-400 hover:text-white underline transition-colors">Política de privacidad</Link>.

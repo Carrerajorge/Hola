@@ -8,6 +8,8 @@ import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityS
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import type { InsertApiLog } from "@shared/schema";
+import { getSettingValue } from "../services/settingsConfigService";
+import { getUserId as getCorrelationUserId } from "../middleware/correlationContext";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
@@ -221,38 +223,126 @@ class LLMGateway {
     setInterval(() => this.cleanupStreamCheckpoints(), 60000);
   }
 
+  private async applyPlatformDefaults(options: LLMRequestOptions): Promise<LLMRequestOptions> {
+    let platformDefaultModel: string | null = null;
+    try {
+      const configured = await getSettingValue<string>("default_model", "");
+      if (typeof configured === "string" && configured.trim().length > 0) {
+        platformDefaultModel = configured.trim();
+      }
+    } catch {
+      // Ignore settings fetch failures.
+    }
+
+    let platformMaxTokens = 4096;
+    try {
+      const configured = await getSettingValue<number>("max_tokens_per_request", 4096);
+      if (Number.isFinite(configured)) {
+        platformMaxTokens = Math.max(1, Math.floor(Number(configured)));
+      }
+    } catch {
+      // Ignore settings fetch failures.
+    }
+
+    const resolved: LLMRequestOptions = { ...options };
+
+    if (!resolved.model) {
+      const provider = resolved.provider;
+      const detected = platformDefaultModel ? detectProviderFromModel(platformDefaultModel) : null;
+
+      if (provider === "xai") {
+        resolved.model = detected === "xai" ? platformDefaultModel! : MODELS.TEXT;
+      } else if (provider === "gemini") {
+        resolved.model = detected === "gemini" ? platformDefaultModel! : GEMINI_MODELS.FLASH_PREVIEW;
+      } else {
+        resolved.model = platformDefaultModel || MODELS.TEXT;
+      }
+    }
+
+    const requestedMaxTokens = Number(resolved.maxTokens);
+    if (!Number.isFinite(requestedMaxTokens) || requestedMaxTokens <= 0) {
+      resolved.maxTokens = platformMaxTokens;
+    } else {
+      resolved.maxTokens = Math.min(Math.floor(requestedMaxTokens), platformMaxTokens);
+    }
+
+    return resolved;
+  }
+
 
 
   // ===== API Log Persistence =====
+  private clampText(text: string, maxLen: number): string {
+    if (text.length <= maxLen) return text;
+    return text.slice(0, maxLen);
+  }
+
+  private safeToString(value: unknown): string {
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private getLastUserMessagePreview(messages: ChatCompletionMessageParam[], maxLen = 800): string | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "user") continue;
+
+      if (typeof msg.content === "string") return this.clampText(msg.content, maxLen);
+      if (Array.isArray(msg.content)) {
+        return this.clampText(
+          msg.content
+            .map((p: any) => this.safeToString(p?.text ?? p))
+            .join("\n"),
+          maxLen
+        );
+      }
+
+      if (msg.content == null) continue;
+      return this.clampText(this.safeToString(msg.content), maxLen);
+    }
+    return null;
+  }
+
   private persistApiLog(logData: {
     provider: string;
     model: string;
     endpoint: string;
     latencyMs: number;
     statusCode: number;
-    tokensIn?: number;
-    tokensOut?: number;
+    tokensIn?: number | null;
+    tokensOut?: number | null;
     errorMessage?: string;
     userId?: string;
+    requestPreview?: string | null;
+    responsePreview?: string | null;
   }): void {
     const apiLog: InsertApiLog = {
-      userId: logData.userId || null,
+      userId: logData.userId ? logData.userId : null,
       endpoint: logData.endpoint,
       method: "POST",
       statusCode: logData.statusCode,
       latencyMs: logData.latencyMs,
-      tokensIn: logData.tokensIn || null,
-      tokensOut: logData.tokensOut || null,
+      tokensIn: logData.tokensIn ?? null,
+      tokensOut: logData.tokensOut ?? null,
       model: logData.model,
       provider: logData.provider,
-      requestPreview: null,
-      responsePreview: null,
-      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 200) : null,
+      requestPreview: logData.requestPreview ? this.clampText(logData.requestPreview, 2000) : null,
+      responsePreview: logData.responsePreview ? this.clampText(logData.responsePreview, 2000) : null,
+      errorMessage: logData.errorMessage ? this.clampText(logData.errorMessage, 2000) : null,
       ipAddress: null,
       userAgent: null,
     };
 
     storage.createApiLog(apiLog).catch((err) => {
+      const msg = (err?.message || "").toLowerCase();
+      if (apiLog.userId && (msg.includes("foreign key") || msg.includes("violates foreign key"))) {
+        storage.createApiLog({ ...apiLog, userId: null }).catch(() => undefined);
+        return;
+      }
       console.error("[LLMGateway] Failed to persist API log:", err.message);
     });
   }
@@ -493,15 +583,16 @@ class LLMGateway {
     options: LLMRequestOptions = {}
   ): Promise<LLMResponse> {
     const requestId = options.requestId || this.generateRequestId();
+    const resolvedOptions = await this.applyPlatformDefaults({ ...options, requestId });
     const startTime = Date.now();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
-    const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
+    const userId = resolvedOptions.userId || "anonymous";
+    const enableFallback = resolvedOptions.enableFallback !== false;
+    const timeout = resolvedOptions.timeout || DEFAULT_TIMEOUT_MS;
 
     this.metrics.totalRequests++;
 
     // Check cache first
-    const cacheKey = this.getCacheKey(messages, options);
+    const cacheKey = this.getCacheKey(messages, resolvedOptions);
     if (cacheKey) {
       const cached = this.requestCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -512,7 +603,7 @@ class LLMGateway {
     }
 
     // Check for duplicate in-flight request
-    const contentHash = this.generateContentHash(messages, options);
+    const contentHash = this.generateContentHash(messages, resolvedOptions);
     const inFlight = this.getInFlightRequest(contentHash);
     if (inFlight) {
       this.metrics.deduplicatedRequests++;
@@ -526,12 +617,12 @@ class LLMGateway {
     }
 
     // Truncate context
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(messages, resolvedOptions.maxTokens ? resolvedOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS);
 
     // Create the request promise
     const requestPromise = this.executeWithFallback(
       truncatedMessages,
-      { ...options, requestId, timeout },
+      { ...resolvedOptions, requestId, timeout },
       startTime,
       enableFallback
     );
@@ -720,6 +811,8 @@ class LLMGateway {
         tokensIn: usage?.prompt_tokens,
         tokensOut: usage?.completion_tokens,
         userId: options.userId,
+        requestPreview: this.getLastUserMessagePreview(messages),
+        responsePreview: content,
       });
 
       // Analyze response quality and record metrics
@@ -766,6 +859,7 @@ class LLMGateway {
         statusCode: error.status || 500,
         errorMessage: error.message,
         userId: options.userId,
+        requestPreview: this.getLastUserMessagePreview(messages),
       });
 
       if (error.name === "AbortError") {
@@ -853,6 +947,8 @@ class LLMGateway {
       tokensIn: usageRecord.promptTokens,
       tokensOut: usageRecord.completionTokens,
       userId: options.userId,
+      requestPreview: this.getLastUserMessagePreview(messages),
+      responsePreview: response.content,
     });
 
     // Analyze response quality and record metrics
@@ -892,11 +988,16 @@ class LLMGateway {
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
     const requestId = options.requestId || this.generateRequestId();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
+    const resolvedOptions = await this.applyPlatformDefaults({ ...options, requestId });
+    const correlationUserId = getCorrelationUserId();
+    const userId =
+      resolvedOptions.userId && resolvedOptions.userId !== "anonymous"
+        ? resolvedOptions.userId
+        : (correlationUserId || resolvedOptions.userId || "anonymous");
+    const enableFallback = resolvedOptions.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    let currentProvider: "xai" | "gemini" = this.selectProvider(options);
+    let currentProvider: "xai" | "gemini" = this.selectProvider(resolvedOptions);
 
     this.metrics.totalRequests++;
 
@@ -904,7 +1005,8 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(messages, resolvedOptions.maxTokens ? resolvedOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const requestPreview = this.getLastUserMessagePreview(truncatedMessages);
 
     // Check for existing checkpoint (recovery)
     const existingCheckpoint = this.streamCheckpoints.get(requestId);
@@ -923,10 +1025,11 @@ class LLMGateway {
         continue;
       }
 
+      const attemptStartedAt = Date.now();
       try {
         const stream = provider === "xai"
-          ? this.streamXai(truncatedMessages, options, requestId)
-          : this.streamGemini(truncatedMessages, options, requestId);
+          ? this.streamXai(truncatedMessages, resolvedOptions, requestId)
+          : this.streamGemini(truncatedMessages, resolvedOptions, requestId);
 
         for await (const chunk of stream) {
           accumulatedContent += chunk.content;
@@ -955,6 +1058,55 @@ class LLMGateway {
           if (chunk.done) {
             this.streamCheckpoints.delete(requestId);
             getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
+
+            const latencyMs = Date.now() - attemptStartedAt;
+            const promptTokens = Math.ceil(JSON.stringify(truncatedMessages).length / 4);
+            const completionTokens = Math.ceil(accumulatedContent.length / 4);
+            const totalTokens = promptTokens + completionTokens;
+
+            // Record metrics + persist log for admin analytics (api_logs is the source of truth for dashboards).
+            this.metrics.successfulRequests++;
+            this.metrics.totalLatencyMs += latencyMs;
+            this.metrics.totalTokens += totalTokens;
+            this.metrics.byProvider[provider].requests++;
+            this.metrics.byProvider[provider].tokens += totalTokens;
+
+            if (providers.indexOf(provider) > 0) {
+              this.metrics.fallbackSuccesses++;
+            }
+
+            const endpoint = provider === "xai" ? "/chat/completions" : "/generateContent";
+            const model = resolvedOptions.model || (provider === "xai" ? MODELS.TEXT : GEMINI_MODELS.FLASH_PREVIEW);
+
+            this.persistApiLog({
+              provider,
+              model,
+              endpoint,
+              latencyMs,
+              statusCode: 200,
+              tokensIn: promptTokens,
+              tokensOut: completionTokens,
+              userId,
+              requestPreview,
+              responsePreview: accumulatedContent,
+            });
+
+            this.recordTokenUsage({
+              requestId,
+              userId,
+              provider,
+              model,
+              promptTokens,
+              completionTokens,
+              totalTokens,
+              timestamp: Date.now(),
+              latencyMs,
+              cached: false,
+              fromFallback: providers.indexOf(provider) > 0,
+            });
+
+            // Connector usage for streaming.
+            recordConnectorUsage(provider, latencyMs, true);
             return;
           }
         }
@@ -969,6 +1121,27 @@ class LLMGateway {
 
         getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
         console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
+
+        const latencyMs = Date.now() - attemptStartedAt;
+        const endpoint = provider === "xai" ? "/chat/completions" : "/generateContent";
+        const model = resolvedOptions.model || (provider === "xai" ? MODELS.TEXT : GEMINI_MODELS.FLASH_PREVIEW);
+
+        this.metrics.failedRequests++;
+        this.metrics.byProvider[provider].failures++;
+
+        recordConnectorUsage(provider, latencyMs, false);
+
+        this.persistApiLog({
+          provider,
+          model,
+          endpoint,
+          latencyMs,
+          statusCode: error?.status || error?.statusCode || 500,
+          errorMessage: error?.message || String(error),
+          userId,
+          requestPreview,
+          responsePreview: accumulatedContent,
+        });
 
         if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
           throw error;

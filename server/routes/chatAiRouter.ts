@@ -32,11 +32,13 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
-import type { AuthenticatedRequest } from "../types/express";
+import { getUserId, type AuthenticatedRequest } from "../types/express";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { auditLog } from "../services/auditLogger";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
+import { getSettingValue } from "../services/settingsConfigService";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -193,14 +195,14 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model, attachments, lastImageBase64, lastImageId, session_id } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
       }
 
       const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = getUserId(req);
       const llmUserId = getOrCreateSecureUserId(req);
 
       // CONTEXT FIX: Augment client messages with server-side history
@@ -242,7 +244,8 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       // GPT Session Contract Resolution
       // Priority: session_id (reuse existing) > gptId (create new) > gptConfig (legacy)
       let gptSessionContract: GptSessionContract | null = null;
-      let effectiveModel = model;
+      const platformDefaultModel = await getSettingValue<string>("default_model", DEFAULT_MODEL);
+      let effectiveModel = model || platformDefaultModel;
       let serverSessionId: string | null = null;
 
       // Helper to determine if conversationId is valid for session lookup
@@ -256,14 +259,14 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       // First, try to retrieve existing session by session_id
       if (session_id) {
         try {
-          gptSessionContract = await getSessionById(session_id);
-          if (gptSessionContract) {
-            serverSessionId = gptSessionContract.sessionId;
-            effectiveModel = getEnforcedModel(gptSessionContract, model);
-            console.log(`[Chat API] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
-          } else {
-            console.log(`[Chat API] Session not found: session_id=${session_id}, will create new if gptId provided`);
-          }
+            gptSessionContract = await getSessionById(session_id);
+            if (gptSessionContract) {
+              serverSessionId = gptSessionContract.sessionId;
+              effectiveModel = getEnforcedModel(gptSessionContract, effectiveModel);
+              console.log(`[Chat API] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+            } else {
+              console.log(`[Chat API] Session not found: session_id=${session_id}, will create new if gptId provided`);
+            }
         } catch (sessionError) {
           console.error(`[Chat API] Error retrieving session ${session_id}:`, sessionError);
         }
@@ -282,7 +285,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
             console.log(`[Chat API] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}, configVersion=${gptSessionContract.configVersion}`);
           }
           serverSessionId = gptSessionContract.sessionId;
-          effectiveModel = getEnforcedModel(gptSessionContract, model);
+          effectiveModel = getEnforcedModel(gptSessionContract, effectiveModel);
         } catch (sessionError) {
           console.error(`[Chat API] Error creating GPT session for gptId=${gptId}:`, sessionError);
           // Fall back to legacy gptConfig if session creation fails
@@ -587,6 +590,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         chatId,
         attachments,
         gptId,
+        provider,
         model,
         session_id,
         docTool,
@@ -769,7 +773,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         };
 
         try {
-          const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
+          const effectiveUserId = getUserId(req) || 'anonymous';
           const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
           await handleProductionRequest(
@@ -804,14 +808,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = getUserId(req);
       // Always use a secure, session-bound identifier for LLM calls (works for both authed and anonymous users).
       const llmUserId = getOrCreateSecureUserId(req);
 
       // GPT Session Contract Resolution for streaming
       // Priority: session_id (reuse existing) > gptId (create new)
       let gptSessionContract: GptSessionContract | null = null;
-      let effectiveModel = model || DEFAULT_MODEL;
+      const platformDefaultModel = await getSettingValue<string>("default_model", DEFAULT_MODEL);
+      let effectiveModel = model || platformDefaultModel;
+      const effectiveProvider: "xai" | "gemini" | "auto" | undefined =
+        provider === "xai" || provider === "gemini" || provider === "auto" ? provider : undefined;
       let serverSessionId: string | null = null;
 
       const isValidConversationIdForStream = (id?: string): boolean => {
@@ -827,7 +834,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           gptSessionContract = await getSessionById(session_id);
           if (gptSessionContract) {
             serverSessionId = gptSessionContract.sessionId;
-            effectiveModel = getEnforcedModel(gptSessionContract, model);
+            effectiveModel = getEnforcedModel(gptSessionContract, effectiveModel);
             console.log(`[Stream] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
           } else {
             console.log(`[Stream] Session not found: session_id=${session_id}, will create new if gptId provided`);
@@ -849,7 +856,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             console.log(`[Stream] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}`);
           }
           serverSessionId = gptSessionContract.sessionId;
-          effectiveModel = getEnforcedModel(gptSessionContract, model);
+          effectiveModel = getEnforcedModel(gptSessionContract, effectiveModel);
         } catch (sessionError) {
           console.error(`[Stream] Error creating GPT session for gptId=${gptId}:`, sessionError);
         }
@@ -880,7 +887,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
-              const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
+              const effectiveUserId = getUserId(req) || 'anonymous';
               const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
               await handleProductionRequest(
@@ -1350,13 +1357,68 @@ ${attachmentContext}`;
 
       console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
 
+      const platformStreamingEnabled = await getSettingValue<boolean>("enable_streaming", true);
+      const maxTokensCapRaw = await getSettingValue<number>("max_tokens_per_request", 4096);
+      const maxTokensCap = Number.isFinite(maxTokensCapRaw) ? Math.max(1, Math.floor(Number(maxTokensCapRaw))) : effectiveMaxTokens;
+      const cappedMaxTokens = Math.min(effectiveMaxTokens, maxTokensCap);
+
+      // If streaming is disabled at platform level, still use SSE but emit the full response in one chunk.
+      if (!platformStreamingEnabled) {
+        const result = await llmGateway.chat(
+          [systemMessage, ...formattedMessages],
+          {
+            userId: llmUserId,
+            requestId,
+            provider: effectiveProvider,
+            model: effectiveModel,
+            disableImageGeneration: hasAttachments,
+            maxTokens: cappedMaxTokens,
+          }
+        );
+
+        if (!isConnectionClosed) {
+          writeSse(res, 'chunk', {
+            content: result.content,
+            sequenceId: 0,
+            requestId: result.requestId,
+            runId: effectiveRunId,
+            timestamp: Date.now(),
+          });
+
+          writeSse(res, 'done', {
+            sequenceId: 1,
+            requestId: result.requestId,
+            runId: effectiveRunId,
+            intent: unifiedContext?.requestSpec.intent,
+            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            timestamp: Date.now(),
+            ...sessionMetadata
+          });
+        }
+
+        // Update assistant message with full content and mark run as done
+        if (claimedRun && assistantMessageId) {
+          const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
+          await storage.updateChatMessageContent(assistantMessageId, result.content, 'done', metadata);
+          await storage.updateChatRunStatus(claimedRun.id, 'done');
+        }
+
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+        }
+
+        return res.end();
+      }
+
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
           userId: llmUserId,
           requestId,
+          provider: effectiveProvider,
+          model: effectiveModel,
           disableImageGeneration: hasAttachments,
-          maxTokens: effectiveMaxTokens,
+          maxTokens: cappedMaxTokens,
         }
       );
 
@@ -1447,23 +1509,22 @@ ${attachmentContext}`;
         }).catch(() => { });
       }
 
-      if (userId) {
-        try {
-          await storage.createAuditLog({
-            userId,
-            action: "chat_stream",
-            resource: "chats",
-            resourceId: conversationId || null,
-            details: {
-              messageCount: messages.length,
-              requestId,
-              runId: claimedRun?.id,
-              streaming: true
-            }
-          });
-        } catch (auditError) {
-          console.error("Failed to create audit log:", auditError);
-        }
+      try {
+        await auditLog(req, {
+          action: "chat_stream",
+          resource: "chats",
+          resourceId: conversationId || undefined,
+          details: {
+            messageCount: messages.length,
+            requestId,
+            runId: claimedRun?.id,
+            streaming: true,
+          },
+          category: "user",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
       }
 
     } catch (error: any) {

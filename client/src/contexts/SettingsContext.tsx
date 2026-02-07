@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useSettings, applyTheme, applyAccentColor, UserSettings } from "@/hooks/use-settings";
 import { useAuth } from "@/hooks/use-auth";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 interface SettingsContextType {
   settings: UserSettings;
@@ -26,13 +27,22 @@ export function useSettingsContext() {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
   const { settings, updateSetting, updateSettings, resetSettings, syncSettingsToServer, loadSettingsFromServer, isSyncing } = useSettings(user?.id);
+  const { settings: platformSettings } = usePlatformSettings();
 
   useEffect(() => {
-    applyTheme(settings.appearance);
+    // Platform theme mode is global; users can only override when platform is "auto".
+    const effectiveAppearance: UserSettings["appearance"] =
+      platformSettings.theme_mode === "dark"
+        ? "dark"
+        : platformSettings.theme_mode === "light"
+          ? "light"
+          : settings.appearance;
+
+    applyTheme(effectiveAppearance);
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
-      if (settings.appearance === "system") {
+      if (effectiveAppearance === "system") {
         applyTheme("system");
         applyAccentColor(settings.accentColor);
       }
@@ -40,7 +50,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [settings.appearance, settings.accentColor]);
+  }, [settings.appearance, settings.accentColor, platformSettings.theme_mode]);
 
   useEffect(() => {
     applyAccentColor(settings.accentColor);

@@ -31,9 +31,19 @@ import {
   RetrievalTelemetry,
   HydratedConversationState,
   ProcessedRequest,
+  chats,
 } from "@shared/schema";
 
 export class ConversationStateRepository {
+  private async getChatUserId(chatId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ userId: chats.userId })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .limit(1);
+    return row?.userId ?? null;
+  }
+
   async findByChatId(chatId: string): Promise<ConversationState | null> {
     const [state] = await db
       .select()
@@ -83,11 +93,21 @@ export class ConversationStateRepository {
 
   async getOrCreate(chatId: string, userId?: string): Promise<ConversationState> {
     const existing = await this.findByChatId(chatId);
-    if (existing) return existing;
+    if (existing) {
+      // Keep state.user_id in sync for traceability (null happens when callers omit userId).
+      if (!existing.userId) {
+        const effectiveUserId = userId || await this.getChatUserId(chatId);
+        if (effectiveUserId) {
+          return this.update(existing.id, { userId: effectiveUserId });
+        }
+      }
+      return existing;
+    }
 
+    const effectiveUserId = userId || await this.getChatUserId(chatId);
     return this.create({
       chatId,
-      userId: userId || null,
+      userId: effectiveUserId || null,
       version: 1,
       totalTokens: 0,
       messageCount: 0,

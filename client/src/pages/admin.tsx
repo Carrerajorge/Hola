@@ -1519,15 +1519,28 @@ function AIModelsSection() {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const readApiError = async (res: Response): Promise<string> => {
+    const raw = await res.text().catch(() => "");
+    if (!raw) return `${res.status} ${res.statusText}`.trim();
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.error || parsed?.message || raw;
+    } catch {
+      return raw;
+    }
+  };
+
+  const { data: stats, isLoading: statsLoading, isError: statsIsError, error: statsError } = useQuery({
     queryKey: ["/api/admin/models/stats"],
     queryFn: async () => {
       const res = await fetch("/api/admin/models/stats", { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
-    }
+    },
+    retry: false,
   });
 
-  const { data: modelsData, isLoading, refetch } = useQuery({
+  const { data: modelsData, isLoading, refetch, isError: modelsIsError, error: modelsError } = useQuery({
     queryKey: ["/api/admin/models/filtered", page, debouncedSearch, providerFilter, typeFilter, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "15" });
@@ -1536,8 +1549,10 @@ function AIModelsSection() {
       if (typeFilter !== "all") params.append("type", typeFilter);
       if (statusFilter !== "all") params.append("status", statusFilter);
       const res = await fetch(`/api/admin/models/filtered?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
-    }
+    },
+    retry: false,
   });
 
   const handleSearch = (value: string) => {
@@ -1552,10 +1567,25 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      const res = await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+
+      const payload = await res.json().catch(() => null);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+
+      const summary = payload?.summary;
+      const summaryText = summary && typeof summary.totalAdded === "number" && typeof summary.totalUpdated === "number"
+        ? `+${summary.totalAdded} nuevos, ${summary.totalUpdated} actualizados`
+        : "Sincronizacion completada";
+      toast.success(`Modelos sincronizados: ${summaryText}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Sincronizacion fallida: ${error.message}` : "Sincronizacion fallida");
     } finally {
       setIsSyncing(false);
     }
@@ -1569,26 +1599,102 @@ function AIModelsSection() {
         body: JSON.stringify(updates),
         credentials: "include"
       });
-      if (!res.ok) throw new Error("Failed to update model");
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
       return res.json();
     },
+    onMutate: async ({ id, updates }: { id: string; updates: any }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      // Optimistic: update model row so switches feel instant.
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, ...updates } : m)),
+        };
+      });
+
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
+    }
+  });
+
+  const toggleEnabledMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await fetch(`/api/admin/models/${id}/toggle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isEnabled: enabled }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      return res.json();
+    },
+    onMutate: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, isEnabled: enabled ? "true" : "false" } : m)),
+        };
+      });
+
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
     }
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
-    }
+      toast.success("Modelo eliminado");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `No se pudo eliminar: ${error.message}` : "No se pudo eliminar");
+    },
   });
 
   const providerColors: Record<string, string> = {
@@ -1664,6 +1770,14 @@ function AIModelsSection() {
         </Button>
       </div>
 
+      {(statsIsError || modelsIsError) && (
+        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive" data-testid="banner-models-error">
+          {statsIsError ? `Estadisticas: ${(statsError as any)?.message || "Error"}` : ""}
+          {statsIsError && modelsIsError ? " | " : ""}
+          {modelsIsError ? `Modelos: ${(modelsError as any)?.message || "Error"}` : ""}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsLoading ? (
           <>
@@ -1684,24 +1798,24 @@ function AIModelsSection() {
               <p className="text-2xl font-bold" data-testid="text-total-models-count">{stats?.total || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-active-models">
+            <div className="rounded-lg border p-4" data-testid="card-enabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-green-500/10">
                   <CheckCircle className="h-4 w-4 text-green-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Activos</span>
+                <span className="text-sm font-medium text-muted-foreground">Habilitados</span>
               </div>
-              <p className="text-2xl font-bold text-green-600" data-testid="text-active-models-count">{stats?.active || 0}</p>
+              <p className="text-2xl font-bold text-green-600" data-testid="text-enabled-models-count">{stats?.enabled || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-inactive-models">
+            <div className="rounded-lg border p-4" data-testid="card-disabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-red-500/10">
                   <X className="h-4 w-4 text-red-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Inactivos</span>
+                <span className="text-sm font-medium text-muted-foreground">Deshabilitados</span>
               </div>
-              <p className="text-2xl font-bold text-red-600" data-testid="text-inactive-models-count">{stats?.inactive || 0}</p>
+              <p className="text-2xl font-bold text-red-600" data-testid="text-disabled-models-count">{stats?.disabled || 0}</p>
             </div>
 
             <div className="rounded-lg border p-4" data-testid="card-providers">
@@ -1716,6 +1830,12 @@ function AIModelsSection() {
           </>
         )}
       </div>
+
+      {!statsLoading && (
+        <div className="text-xs text-muted-foreground" data-testid="text-models-status-summary">
+          Status: {stats?.active || 0} activos / {stats?.inactive || 0} inactivos
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
@@ -1838,10 +1958,10 @@ function AIModelsSection() {
                     <td className="p-3">
                       <Badge
                         variant="secondary"
-                        className={cn("text-xs", typeColors[model.type] || "bg-gray-500/10 text-gray-600")}
+                        className={cn("text-xs", typeColors[model.modelType || model.type] || "bg-gray-500/10 text-gray-600")}
                         data-testid={`badge-type-${model.id}`}
                       >
-                        {model.type || "TEXT"}
+                        {model.modelType || model.type || "TEXT"}
                       </Badge>
                     </td>
                     <td className="p-3 text-muted-foreground">
@@ -1861,13 +1981,11 @@ function AIModelsSection() {
                     <td className="p-3">
                       <Switch
                         checked={model.isEnabled === "true"}
-                        onCheckedChange={(checked) => updateMutation.mutate({
-                          id: model.id,
-                          updates: { isEnabled: checked ? "true" : "false" }
-                        })}
-                        disabled={updateMutation.isPending}
+                        onCheckedChange={(checked) => toggleEnabledMutation.mutate({ id: model.id, enabled: checked })}
+                        disabled={toggleEnabledMutation.isPending || (model.hasApiKey === false && model.isEnabled !== "true")}
                         className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
                         data-testid={`switch-enabled-${model.id}`}
+                        title={model.hasApiKey === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" : undefined}
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">
@@ -1879,7 +1997,11 @@ function AIModelsSection() {
                           variant="ghost"
                           size="sm"
                           className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          onClick={() => deleteMutation.mutate(model.id)}
+                          onClick={() => {
+                            const ok = window.confirm(`Eliminar modelo '${model.name}' (${model.modelId})?`);
+                            if (!ok) return;
+                            deleteMutation.mutate(model.id);
+                          }}
                           disabled={deleteMutation.isPending}
                           data-testid={`button-delete-model-${model.id}`}
                         >
@@ -2159,6 +2281,15 @@ function DatabaseSection() {
     refetchInterval: 30000
   });
 
+  const { data: coverageData, isLoading: coverageLoading, refetch: refetchCoverage } = useQuery({
+    queryKey: ["/api/admin/database/coverage"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/database/coverage", { credentials: "include" });
+      return res.json();
+    },
+    refetchInterval: 30000
+  });
+
   const { data: tablesData, isLoading: tablesLoading } = useQuery({
     queryKey: ["/api/admin/database/tables"],
     queryFn: async () => {
@@ -2206,7 +2337,7 @@ function DatabaseSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Database Management</h2>
-        <Button variant="outline" size="sm" onClick={() => refetchHealth()} data-testid="button-refresh-db">
+        <Button variant="outline" size="sm" onClick={() => { refetchHealth(); refetchCoverage(); }} data-testid="button-refresh-db">
           <RefreshCw className="h-4 w-4 mr-2" />
           Actualizar
         </Button>
@@ -2276,6 +2407,119 @@ function DatabaseSection() {
                   </div>
                   <p className="text-2xl font-bold">{Number(healthData?.pool?.transactions_committed || 0).toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground">Confirmadas</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-4" data-testid="card-db-coverage">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-medium flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4" />
+                    Traceability Coverage
+                  </h3>
+                  {coverageLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                </div>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <Users className="h-3.5 w-3.5" />
+                      Sessions attributed
+                    </div>
+                    <div className="text-lg font-semibold">
+                      {coverageData?.sessions?.ready
+                        ? `${coverageData?.sessions?.attributed || 0}/${coverageData?.sessions?.active || 0}`
+                        : "N/A"}
+                      {coverageData?.sessions?.ready && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({Math.round(((coverageData?.sessions?.attributionRate ?? 0) as number) * 100)}%)
+                        </span>
+                      )}
+                    </div>
+                    {!coverageData?.sessions?.ready && (
+                      <div className="text-xs text-muted-foreground mt-1">Run db:push to enable</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Sessions missing user
+                    </div>
+                    <div className={cn("text-lg font-semibold", (coverageData?.sessions?.missingUserId || 0) > 0 ? "text-destructive" : "")}>
+                      {coverageData?.sessions?.ready ? (coverageData?.sessions?.missingUserId || 0) : "N/A"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      anon: {coverageData?.sessions?.ready ? (coverageData?.sessions?.anonymous || 0) : "N/A"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      States missing user
+                    </div>
+                    <div className={cn("text-lg font-semibold", (coverageData?.conversationStates?.missingUserId || 0) > 0 ? "text-destructive" : "")}>
+                      {coverageData?.conversationStates?.ready ? (coverageData?.conversationStates?.missingUserId || 0) : "N/A"}
+                    </div>
+                    {!coverageData?.conversationStates?.ready && (
+                      <div className="text-xs text-muted-foreground mt-1">N/A</div>
+                    )}
+                  </div>
+
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Audit missing user (24h)
+                    </div>
+                    <div className={cn("text-lg font-semibold", (coverageData?.auditLogs?.last24hMissingUserId || 0) > 0 ? "text-destructive" : "")}>
+                      {coverageData?.auditLogs?.ready ? (coverageData?.auditLogs?.last24hMissingUserId || 0) : "N/A"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      total: {coverageData?.auditLogs?.ready ? (coverageData?.auditLogs?.last24hTotal || 0) : "N/A"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mt-4">
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <Key className="h-3.5 w-3.5" />
+                      Login attempts (24h)
+                    </div>
+                    <div className="text-lg font-semibold">
+                      {coverageData?.loginAttempts?.ready ? (coverageData?.loginAttempts?.last24hTotal || 0) : "N/A"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      ok: {coverageData?.loginAttempts?.ready ? (coverageData?.loginAttempts?.last24hSuccess || 0) : "N/A"} | fail: {coverageData?.loginAttempts?.ready ? (coverageData?.loginAttempts?.last24hFailure || 0) : "N/A"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <Brain className="h-3.5 w-3.5" />
+                      Agent gaps
+                    </div>
+                    <div className="text-lg font-semibold">
+                      {coverageData?.agentGaps?.ready ? (coverageData?.agentGaps?.open || 0) : "N/A"}
+                      {coverageData?.agentGaps?.ready && <span className="ml-2 text-xs text-muted-foreground">open</span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      resolved: {coverageData?.agentGaps?.ready ? (coverageData?.agentGaps?.resolved || 0) : "N/A"} | missing user: {coverageData?.agentGaps?.ready ? (coverageData?.agentGaps?.missingUserId || 0) : "N/A"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
+                      <Wrench className="h-3.5 w-3.5" />
+                      Tool calls (24h)
+                    </div>
+                    <div className="text-lg font-semibold">
+                      {coverageData?.toolCalls?.ready ? (coverageData?.toolCalls?.last24hTotal || 0) : "N/A"}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      missing user: {coverageData?.toolCalls?.ready ? (coverageData?.toolCalls?.last24hMissingUserId || 0) : "N/A"}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -2555,7 +2799,7 @@ function SecuritySection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
-  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+  const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2588,6 +2832,7 @@ function SecuritySection() {
         page: auditPage.toString(),
         limit: "20",
         ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.actor && { actor: auditFilters.actor }),
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
@@ -2711,14 +2956,50 @@ function SecuritySection() {
     return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
   };
 
-  const getSeverityBadge = (action: string) => {
-    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-    const warningActions = ["warning", "update", "delete"];
-    
-    if (criticalActions.some(a => action?.includes(a))) {
+  const getActorLabel = (log: any) => {
+    const details = (log?.details || {}) as any;
+    const email = details.actorEmail || details.email;
+    if (email) return String(email);
+
+    const userId = log?.userId;
+    if (userId) {
+      const id = String(userId);
+      if (id.startsWith("anon_")) return "Anonymous";
+      return id;
+    }
+
+    return "System";
+  };
+
+  const getSeverityBadge = (log: any) => {
+    const action = String(log?.action || "");
+    const details = (log?.details || {}) as any;
+
+    let severity: string | null =
+      typeof details.severity === "string" ? details.severity.toLowerCase() : null;
+
+    // Derive severity from HTTP status if available.
+    if (!severity && typeof details.statusCode === "number") {
+      severity =
+        details.statusCode >= 500 ? "error" :
+        details.statusCode >= 400 ? "warning" :
+        "info";
+    }
+
+    // Fallback heuristics based on action string.
+    if (!severity) {
+      const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied", "access_denied"];
+      const warningActions = ["warning", "update", "delete", "disable", "enable"];
+
+      if (criticalActions.some(a => action.includes(a))) severity = "critical";
+      else if (warningActions.some(a => action.includes(a))) severity = "warning";
+      else severity = "info";
+    }
+
+    if (severity === "critical" || severity === "error") {
       return <Badge variant="destructive" className="text-xs">Critical</Badge>;
     }
-    if (warningActions.some(a => action?.includes(a))) {
+    if (severity === "warning") {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
@@ -3011,10 +3292,11 @@ function SecuritySection() {
                 recentLogs.map((log: any) => (
                   <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      {getSeverityBadge(log.action)}
+                      {getSeverityBadge(log)}
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -3216,6 +3498,16 @@ function SecuritySection() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">User:</Label>
+              <Input 
+                data-testid="filter-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-44"
+                value={auditFilters.actor}
+                onChange={(e) => setAuditFilters({ ...auditFilters, actor: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
               <Input 
                 data-testid="filter-date-from"
@@ -3239,7 +3531,7 @@ function SecuritySection() {
               variant="outline" 
               size="sm" 
               onClick={() => {
-                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
               }}
               data-testid="button-clear-filters"
@@ -3253,6 +3545,7 @@ function SecuritySection() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
@@ -3262,7 +3555,7 @@ function SecuritySection() {
               <tbody>
                 {auditLogsData?.data?.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
                       No audit logs found matching your filters.
                     </td>
                   </tr>
@@ -3272,10 +3565,11 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
-                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                      <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
                   ))
                 )}
@@ -4183,27 +4477,73 @@ function SettingsSection() {
 
 function AgenticEngineSection() {
   const [activeTab, setActiveTab] = useState("overview");
+  const [rangeDays, setRangeDays] = useState(30);
+  const [selectedUserId, setSelectedUserId] = useState<string>("all");
+  const [toolSearch, setToolSearch] = useState("");
+
+  const userId = selectedUserId === "all" ? undefined : selectedUserId;
+  const providerId = "agentic_engine,sandbox";
+
+  const makeAgentUrl = (path: string, extra: Record<string, string | number | undefined> = {}) => {
+    const params = new URLSearchParams();
+    params.set("rangeDays", String(rangeDays));
+    params.set("providerId", providerId);
+    if (userId) params.set("userId", userId);
+    for (const [k, v] of Object.entries(extra)) {
+      if (v === undefined) continue;
+      params.set(k, String(v));
+    }
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+
+  const makeUserUrl = (path: string, extra: Record<string, string | number | undefined> = {}) => {
+    const params = new URLSearchParams();
+    if (userId) params.set("userId", userId);
+    for (const [k, v] of Object.entries(extra)) {
+      if (v === undefined) continue;
+      params.set(k, String(v));
+    }
+    const qs = params.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+
+  const { data: agentUsersData, isLoading: agentUsersLoading } = useQuery({
+    queryKey: ["/api/admin/agent/users"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/agent/users?limit=100", { credentials: "include" });
+      return res.json();
+    }
+  });
   
   const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
-    queryKey: ["/api/admin/agent/tools"],
+    queryKey: ["/api/admin/agent/tools", { rangeDays, userId, providerId }],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/tools", { credentials: "include" });
+      const res = await fetch(makeAgentUrl("/api/admin/agent/tools"), { credentials: "include" });
+      return res.json();
+    }
+  });
+
+  const { data: metricsData, refetch: refetchMetrics } = useQuery({
+    queryKey: ["/api/admin/agent/metrics", { rangeDays, userId, providerId }],
+    queryFn: async () => {
+      const res = await fetch(makeAgentUrl("/api/admin/agent/metrics"), { credentials: "include" });
       return res.json();
     }
   });
 
   const { data: gapsData, refetch: refetchGaps } = useQuery({
-    queryKey: ["/api/admin/agent/gaps"],
+    queryKey: ["/api/admin/agent/gaps", { userId }],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/gaps", { credentials: "include" });
+      const res = await fetch(makeUserUrl("/api/admin/agent/gaps"), { credentials: "include" });
       return res.json();
     }
   });
 
   const { data: memoryData, refetch: refetchMemory } = useQuery({
-    queryKey: ["/api/admin/agent/memory/stats"],
+    queryKey: ["/api/admin/agent/memory/stats", { userId }],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/memory/stats", { credentials: "include" });
+      const res = await fetch(makeUserUrl("/api/admin/agent/memory/stats"), { credentials: "include" });
       return res.json();
     }
   });
@@ -4214,6 +4554,26 @@ function AgenticEngineSection() {
       const res = await fetch("/api/admin/agent/circuits", { credentials: "include" });
       return res.json();
     }
+  });
+
+  const { data: orchestrationsData, isLoading: orchestrationsLoading, refetch: refetchOrchestrations } = useQuery({
+    queryKey: ["/api/admin/agent/orchestrations", { userId }],
+    queryFn: async () => {
+      const res = await fetch(makeUserUrl("/api/admin/agent/orchestrations", { limit: 50 }), { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeTab === "orchestration",
+    refetchInterval: activeTab === "orchestration" ? 10000 : false
+  });
+
+  const { data: toolCallsData, isLoading: toolCallsLoading, refetch: refetchToolCalls } = useQuery({
+    queryKey: ["/api/admin/agent/tool-calls", { rangeDays, userId, providerId }],
+    queryFn: async () => {
+      const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", { limit: 12 }), { credentials: "include" });
+      return res.json();
+    },
+    enabled: activeTab === "overview",
+    refetchInterval: activeTab === "overview" ? 15000 : false
   });
 
   const [analyzerPrompt, setAnalyzerPrompt] = useState("");
@@ -4241,11 +4601,44 @@ function AgenticEngineSection() {
     }
   };
 
+  const agentUsers = agentUsersData?.users || [];
+  const selectedUser = userId ? agentUsers.find((u: any) => u.id === userId) : null;
+  const selectedUserLabel = userId ? (selectedUser?.email || selectedUser?.fullName || userId) : "All users";
+
   const tools = toolsData?.tools || [];
   const gaps = gapsData?.gaps || [];
+  const metrics = metricsData || { successRate: 0, totalCalls: 0, rangeDays, avgLatencyMs: 0, byStatus: {} };
   const memory = memoryData || { totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} };
   const circuits = circuitsData || [];
-  const openCircuits = circuits.filter((c: any) => c.status === 'open').length;
+  const orchestrations = orchestrationsData?.runs || [];
+  const toolCalls = toolCallsData?.logs || [];
+
+  const triggeredCircuits = circuits.length;
+  const openCircuits = circuits.filter((c: any) => c?.status === "open").length;
+  const halfOpenCircuits = circuits.filter((c: any) => c?.status === "half_open").length;
+  const isDegraded = triggeredCircuits > 0;
+
+  const activeTools = tools.filter((t: any) => t.isEnabled !== false).length;
+  const toolsUsed = tools.filter((t: any) => Number(t?.usageCount || 0) > 0).length;
+
+  const toolSearchLower = toolSearch.trim().toLowerCase();
+  const filteredTools = toolSearchLower
+    ? tools.filter((t: any) => `${t.name} ${t.category}`.toLowerCase().includes(toolSearchLower))
+    : tools;
+  const sortedTools = [...filteredTools].sort((a: any, b: any) =>
+    (Number(b.usageCount || 0) - Number(a.usageCount || 0)) || String(a.name).localeCompare(String(b.name))
+  );
+  const maxToolUsage = sortedTools.reduce((m: number, t: any) => Math.max(m, Number(t?.usageCount || 0)), 0);
+
+  const refetchAll = () => {
+    refetchTools();
+    refetchMetrics();
+    refetchGaps();
+    refetchMemory();
+    refetchCircuits();
+    refetchToolCalls();
+    refetchOrchestrations();
+  };
 
   const getCategoryColor = (cat: string) => {
     if (cat === 'trivial') return 'bg-green-500';
@@ -4256,34 +4649,65 @@ function AgenticEngineSection() {
   };
 
   const getPathIcon = (path: string) => {
-    if (path === 'fast') return '⚡';
-    if (path === 'standard') return '🔄';
-    if (path === 'orchestrated') return '🎯';
-    return '🏛️';
+    if (path === "fast") return <Zap className="h-4 w-4" />;
+    if (path === "standard") return <RotateCcw className="h-4 w-4" />;
+    if (path === "orchestrated") return <Layers className="h-4 w-4" />;
+    return <Server className="h-4 w-4" />;
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Bot className="h-6 w-6 text-primary" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Bot className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold">Agentic Engine</h2>
+              <p className="text-sm text-muted-foreground">Enterprise AI Orchestration System</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-xl font-semibold">Agentic Engine</h2>
-            <p className="text-sm text-muted-foreground">Enterprise AI Orchestration System</p>
+          <div className="flex items-center gap-2">
+            <Badge variant={isDegraded ? "destructive" : "default"} className="gap-1">
+              <div className={`w-2 h-2 rounded-full ${isDegraded ? 'bg-red-400' : 'bg-green-400'}`} />
+              {isDegraded ? 'Degraded' : 'Healthy'}
+            </Badge>
+
+            <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v))}>
+              <SelectTrigger className="w-[140px] h-9">
+                <SelectValue placeholder="Range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">Last 24h</SelectItem>
+                <SelectItem value="7">Last 7d</SelectItem>
+                <SelectItem value="30">Last 30d</SelectItem>
+                <SelectItem value="90">Last 90d</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedUserId} onValueChange={setSelectedUserId} disabled={agentUsersLoading}>
+              <SelectTrigger className="w-[240px] h-9">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All users</SelectItem>
+                {agentUsers.map((u: any) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.email || u.fullName || u.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button variant="outline" size="sm" onClick={refetchAll}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={openCircuits > 0 ? "destructive" : "default"} className="gap-1">
-            <div className={`w-2 h-2 rounded-full ${openCircuits > 0 ? 'bg-red-400' : 'bg-green-400'}`} />
-            {openCircuits > 0 ? 'Degraded' : 'Healthy'}
-          </Badge>
-        </div>
-      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-7 w-full max-w-4xl">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-7 w-full max-w-4xl">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="tools" data-testid="tab-tools">Tools</TabsTrigger>
           <TabsTrigger value="analyzer" data-testid="tab-analyzer">Analyzer</TabsTrigger>
@@ -4301,118 +4725,296 @@ function AgenticEngineSection() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-blue-500/10">
-                    <Wrench className="h-5 w-5 text-blue-500" />
+                    <Activity className="h-5 w-5 text-blue-500" />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">{tools.length}</p>
-                    <p className="text-sm text-muted-foreground">Tools Active</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{(metrics.totalCalls || 0).toLocaleString()}</p>
+                    <p className="text-sm text-muted-foreground">Tool Calls</p>
+                    <p className="text-xs text-muted-foreground truncate">{toolsUsed} tools used</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-green-500/10">
                     <CheckCircle className="h-5 w-5 text-green-500" />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">94.2%</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{Number(metrics.successRate || 0).toFixed(1)}%</p>
                     <p className="text-sm text-muted-foreground">Success Rate</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {(metrics.successCalls || 0).toLocaleString()} ok · {(metrics.errorCalls || 0).toLocaleString()} errors
+                    </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-purple-500/10">
-                    <Brain className="h-5 w-5 text-purple-500" />
+                  <div className="p-2 rounded-lg bg-slate-500/10">
+                    <Timer className="h-5 w-5 text-slate-500" />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">{memory.totalAtoms}</p>
-                    <p className="text-sm text-muted-foreground">Memory Atoms</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{(metrics.avgLatencyMs || 0).toLocaleString()} ms</p>
+                    <p className="text-sm text-muted-foreground">Avg Latency</p>
+                    <p className="text-xs text-muted-foreground truncate">last {rangeDays} days</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-lg bg-yellow-500/10">
                     <AlertTriangle className="h-5 w-5 text-yellow-500" />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">{gaps.length}</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{gaps.length}</p>
                     <p className="text-sm text-muted-foreground">Pending Gaps</p>
+                    <p className="text-xs text-muted-foreground truncate">{selectedUserLabel}</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-red-500/10">
-                    <Zap className="h-5 w-5 text-red-500" />
+                  <div className="p-2 rounded-lg bg-purple-500/10">
+                    <Brain className="h-5 w-5 text-purple-500" />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">{openCircuits}</p>
-                    <p className="text-sm text-muted-foreground">Open Circuits</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{memory.totalAtoms}</p>
+                    <p className="text-sm text-muted-foreground">Memory Atoms</p>
+                    <p className="text-xs text-muted-foreground truncate">{(memory.storageBytes / 1024).toFixed(1)} KB used</p>
                   </div>
                 </div>
               </CardContent>
             </Card>
+
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-indigo-500/10">
-                    <Database className="h-5 w-5 text-indigo-500" />
+                  <div className={cn("p-2 rounded-lg", isDegraded ? "bg-red-500/10" : "bg-green-500/10")}>
+                    <Zap className={cn("h-5 w-5", isDegraded ? "text-red-500" : "text-green-500")} />
                   </div>
-                  <div>
-                    <p className="text-2xl font-bold">{(memory.storageBytes / 1024).toFixed(1)} KB</p>
-                    <p className="text-sm text-muted-foreground">Memory Used</p>
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums">{triggeredCircuits}</p>
+                    <p className="text-sm text-muted-foreground">Circuits Triggered</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      open {openCircuits} · half-open {halfOpenCircuits}
+                    </p>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4" />
+                      Recent Tool Calls
+                    </CardTitle>
+                    <CardDescription className="truncate">{selectedUserLabel} · last {rangeDays} days</CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => refetchToolCalls()} disabled={toolCallsLoading}>
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {toolCallsLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : toolCalls.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle className="h-10 w-10 mx-auto mb-3 opacity-60" />
+                    <p className="font-medium">No tool calls in range</p>
+                    <p className="text-sm">Try a wider time range</p>
+                  </div>
+                ) : (
+                  <div className="rounded-md border overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="text-left p-3 font-medium">Time</th>
+                            <th className="text-left p-3 font-medium">User</th>
+                            <th className="text-left p-3 font-medium">Tool</th>
+                            <th className="text-left p-3 font-medium">Status</th>
+                            <th className="text-right p-3 font-medium">Latency</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {toolCalls.map((log: any) => (
+                            <tr key={log.id} className="border-b last:border-0 hover:bg-muted/30">
+                              <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">{formatRelativeTime(log.createdAt)}</td>
+                              <td className="p-3 text-xs truncate max-w-[160px]" title={log.userEmail || log.userId || ""}>
+                                {log.userEmail || (log.userId ? `${String(log.userId).slice(0, 8)}…` : "—")}
+                              </td>
+                              <td className="p-3">
+                                <span className="font-mono text-xs">{log.toolId}</span>
+                                <span className="ml-2 text-xs text-muted-foreground">{log.providerId}</span>
+                              </td>
+                              <td className="p-3">
+                                <Badge
+                                  variant={log.status === "success" ? "default" : (log.status === "error" ? "destructive" : "secondary")}
+                                  className="text-xs"
+                                >
+                                  {String(log.status || "").toUpperCase()}
+                                </Badge>
+                              </td>
+                              <td className="p-3 text-right text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                                {Number.isFinite(Number(log.latencyMs)) ? `${Number(log.latencyMs)}ms` : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Breakdown
+                </CardTitle>
+                <CardDescription className="truncate">Tools enabled {activeTools}/{tools.length}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">By Status</p>
+                  {Object.keys(metrics.byStatus || {}).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No data</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(metrics.byStatus || {})
+                        .sort((a: any, b: any) => Number(b[1] || 0) - Number(a[1] || 0))
+                        .slice(0, 8)
+                        .map(([status, count]: [string, any]) => (
+                          <Badge key={status} variant="outline" className="text-xs">
+                            {status}: {Number(count || 0).toLocaleString()}
+                          </Badge>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium mb-2">Top Tools</p>
+                  {sortedTools.filter((t: any) => Number(t?.usageCount || 0) > 0).length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No tools used</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {sortedTools
+                        .filter((t: any) => Number(t?.usageCount || 0) > 0)
+                        .slice(0, 8)
+                        .map((t: any) => (
+                          <div key={t.id} className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{t.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">{t.category}</p>
+                            </div>
+                            <div className="shrink-0 text-sm tabular-nums">{Number(t.usageCount || 0).toLocaleString()}</div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        <TabsContent value="tools" className="mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Registered Tools</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => refetchTools()}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Refresh
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {toolsLoading ? (
-                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
-              ) : (
-                <div className="space-y-2">
-                  {tools.map((tool: any) => (
-                    <div key={tool.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline">{tool.category}</Badge>
-                        <span className="font-medium">{tool.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={tool.isEnabled ? "default" : "secondary"}>
-                          {tool.isEnabled ? 'Active' : 'Disabled'}
-                        </Badge>
-                        <span className="text-sm text-muted-foreground">{tool.usageCount} uses</span>
-                      </div>
-                    </div>
-                  ))}
+          <TabsContent value="tools" className="mt-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <CardTitle>Registered Tools</CardTitle>
+                    <CardDescription className="truncate">Usage counts · {selectedUserLabel} · last {rangeDays} days</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => { refetchTools(); refetchMetrics(); }}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+              </CardHeader>
+              <CardContent>
+                {toolsLoading ? (
+                  <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search tools..."
+                          className="pl-9 h-9"
+                          value={toolSearch}
+                          onChange={(e) => setToolSearch(e.target.value)}
+                        />
+                      </div>
+                      <Badge variant="secondary" className="text-xs">
+                        {sortedTools.length} tools
+                      </Badge>
+                    </div>
+
+                    {sortedTools.length === 0 ? (
+                      <div className="text-center py-10 text-muted-foreground">
+                        <Wrench className="h-10 w-10 mx-auto mb-3 opacity-60" />
+                        <p className="font-medium">No tools found</p>
+                        <p className="text-sm">Try clearing the search filter</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {sortedTools.map((tool: any) => {
+                          const usage = Number(tool.usageCount || 0);
+                          const pct = maxToolUsage > 0 ? Math.min(100, Math.round((usage / maxToolUsage) * 100)) : 0;
+                          return (
+                            <div key={tool.id} className="flex items-center justify-between gap-4 p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="shrink-0">{tool.category}</Badge>
+                                  <span className="font-medium truncate">{tool.name}</span>
+                                  <Badge variant={tool.isEnabled ? "default" : "secondary"} className="text-xs shrink-0">
+                                    {tool.isEnabled ? 'Active' : 'Disabled'}
+                                  </Badge>
+                                </div>
+                                {tool.description ? (
+                                  <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{tool.description}</p>
+                                ) : null}
+                                <div className="mt-2 h-1.5 w-full max-w-[420px] bg-muted rounded">
+                                  <div className="h-1.5 bg-primary rounded" style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="text-sm font-medium tabular-nums">{usage.toLocaleString()}</p>
+                                <p className="text-xs text-muted-foreground">uses</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
         <TabsContent value="analyzer" className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -4437,51 +5039,66 @@ function AgenticEngineSection() {
                 </CardContent>
               </Card>
 
-              {analysisResult && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Analysis Result</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="text-center p-4 rounded-lg bg-muted">
-                        <p className="text-5xl font-bold">{analysisResult.score}</p>
-                        <p className="text-sm text-muted-foreground mt-1">Complexity Score</p>
-                      </div>
-                      <div className="text-center p-4 rounded-lg bg-muted">
-                        <Badge className={`text-lg px-4 py-2 ${getCategoryColor(analysisResult.category)}`}>
-                          {analysisResult.category?.toUpperCase()}
-                        </Badge>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          {getPathIcon(analysisResult.recommended_path)} {analysisResult.recommended_path}
-                        </p>
-                      </div>
-                    </div>
-                    {analysisResult.signals?.length > 0 && (
-                      <div className="mt-4">
-                        <p className="text-sm font-medium mb-2">Signals Detected:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {analysisResult.signals.map((s: string) => (
-                            <Badge key={s} variant="outline">{s}</Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {analysisResult.dimensions && (
-                      <div className="mt-4 space-y-2">
-                        <p className="text-sm font-medium">Dimensions:</p>
-                        {Object.entries(analysisResult.dimensions).map(([key, value]: [string, any]) => (
-                          <div key={key} className="flex items-center gap-2">
-                            <span className="text-sm w-32 text-muted-foreground">{key.replace('_', ' ')}</span>
-                            <Progress value={value * 10} className="flex-1" />
-                            <span className="text-sm w-8 text-right">{value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+                {analysisResult && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Analysis Result</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {(() => {
+                        const recommendedPath =
+                          analysisResult.recommended_path ||
+                          analysisResult.suggestedPath ||
+                          analysisResult.suggested_path ||
+                          "standard";
+
+                        return (
+                          <>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="text-center p-4 rounded-lg bg-muted">
+                                <p className="text-5xl font-bold">{analysisResult.score}</p>
+                                <p className="text-sm text-muted-foreground mt-1">Complexity Score</p>
+                              </div>
+                              <div className="text-center p-4 rounded-lg bg-muted">
+                                <Badge className={cn("text-lg px-4 py-2 text-white", getCategoryColor(analysisResult.category))}>
+                                  {analysisResult.category?.toUpperCase()}
+                                </Badge>
+                                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground mt-2">
+                                  {getPathIcon(recommendedPath)}
+                                  <span className="font-mono">{recommendedPath}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {analysisResult.signals?.length > 0 && (
+                              <div className="mt-4">
+                                <p className="text-sm font-medium mb-2">Signals Detected:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {analysisResult.signals.map((s: string) => (
+                                    <Badge key={s} variant="outline">{s}</Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {analysisResult.dimensions && (
+                              <div className="mt-4 space-y-2">
+                                <p className="text-sm font-medium">Dimensions:</p>
+                                {Object.entries(analysisResult.dimensions).map(([key, value]: [string, any]) => (
+                                  <div key={key} className="flex items-center gap-2">
+                                    <span className="text-sm w-32 text-muted-foreground">{key.replace('_', ' ')}</span>
+                                    <Progress value={value * 10} className="flex-1" />
+                                    <span className="text-sm w-8 text-right">{value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+                )}
             </div>
 
             <div>
@@ -4516,30 +5133,63 @@ function AgenticEngineSection() {
           </div>
         </TabsContent>
 
-        <TabsContent value="orchestration" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Orchestration Monitor</CardTitle>
-              <CardDescription>Track task execution and parallel processing</CardDescription>
+          <TabsContent value="orchestration" className="mt-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Orchestration Monitor</CardTitle>
+                    <CardDescription className="truncate">Active runs · {selectedUserLabel}</CardDescription>
+                  </div>
+                <Button variant="outline" size="sm" onClick={() => { refetchOrchestrations(); refetchMetrics(); }}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No active orchestrations</p>
-                <p className="text-sm">Orchestrations will appear here when tasks are being processed</p>
-              </div>
+              {orchestrationsLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+              ) : orchestrations.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No active orchestrations</p>
+                  <p className="text-sm">Runs will appear here when tasks are being processed</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {orchestrations.map((run: any) => (
+                    <div key={run.id} className="flex items-center justify-between p-3 rounded-lg border">
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{run.id}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            chat: {run.chatId} · user: {run.userEmail || run.userId || "unknown"}
+                          </p>
+                        </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant={run.status === "running" ? "default" : run.status === "failed" ? "destructive" : "secondary"}>
+                          {String(run.status || "").toUpperCase()}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {run.startedAt ? format(new Date(run.startedAt), "HH:mm:ss") : run.createdAt ? format(new Date(run.createdAt), "HH:mm:ss") : ""}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="gaps" className="mt-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Capability Gaps</CardTitle>
-                  <CardDescription>Requests for missing functionality</CardDescription>
-                </div>
+          <TabsContent value="gaps" className="mt-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Capability Gaps</CardTitle>
+                    <CardDescription className="truncate">Requests for missing functionality · {selectedUserLabel}</CardDescription>
+                  </div>
                 <Button variant="outline" size="sm" onClick={() => refetchGaps()}>
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Refresh
@@ -4556,11 +5206,16 @@ function AgenticEngineSection() {
                 <div className="space-y-2">
                   {gaps.map((gap: any) => (
                     <div key={gap.id} className="p-4 rounded-lg border">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium">{gap.userPrompt}</p>
-                          <p className="text-sm text-muted-foreground mt-1">{gap.gapReason}</p>
-                        </div>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="font-medium">{gap.userPrompt}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{gap.gapReason}</p>
+                            {selectedUserId === "all" ? (
+                              <p className="text-xs text-muted-foreground mt-2">
+                                user: {gap.userEmail || (gap.userId ? `${String(gap.userId).slice(0, 8)}…` : "—")}
+                              </p>
+                            ) : null}
+                          </div>
                         <div className="flex items-center gap-2">
                           <Badge variant={gap.status === 'pending' ? 'secondary' : 'default'}>
                             {gap.status}

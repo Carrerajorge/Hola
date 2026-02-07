@@ -43,6 +43,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -77,6 +78,14 @@ type SettingsSection = "general" | "notifications" | "personalization" | "apps" 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+function mapPlatformDateFormatToUserDateFormat(
+  fmt: string
+): "dd/mm/yyyy" | "mm/dd/yyyy" | "yyyy-mm-dd" {
+  if (fmt === "YYYY-MM-DD") return "yyyy-mm-dd";
+  if (fmt === "MM/DD/YYYY") return "mm/dd/yyyy";
+  return "dd/mm/yyyy";
 }
 
 const menuItems: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -1171,10 +1180,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
 
   const { settings, updateSetting } = useSettingsContext();
+  const { settings: platformSettings } = usePlatformSettings();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
   const { user, logout } = useAuth();
   const { availableModels } = useModelAvailability();
+  const platformDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
+  const effectiveDefaultModel = settings.defaultModel || platformSettings.default_model;
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -1401,11 +1413,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
 
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Formato de fecha</span>
-                  <Select
-                    value={settings.dateFormat}
-                    onValueChange={(value) => updateSetting("dateFormat", value as any)}
-                  >
+                  <div>
+                    <span className="text-sm block">Formato de fecha</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                  </div>
+                  <Select value={platformDateFormat} disabled>
                     <SelectTrigger className="w-40" data-testid="select-date-format">
                       <SelectValue />
                     </SelectTrigger>
@@ -1415,6 +1427,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       <SelectItem value="yyyy-mm-dd">AAAA-MM-DD</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Zona horaria</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
+                  </div>
+                  <Input
+                    className="w-40"
+                    value={platformSettings.timezone_default || "UTC"}
+                    disabled
+                    data-testid="input-timezone"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between py-2">
@@ -1511,16 +1536,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Modelo predeterminado</span>
-                    <span className="text-xs text-muted-foreground">Modelo para nuevas conversaciones</span>
+                    <span className="text-xs text-muted-foreground">
+                      {settings.defaultModel ? "Modelo para nuevas conversaciones" : "Predeterminado de la plataforma"}
+                    </span>
                   </div>
                   <Select
-                    value={settings.defaultModel}
+                    value={effectiveDefaultModel}
                     onValueChange={(value) => updateSetting("defaultModel", value)}
                   >
                     <SelectTrigger className="w-48" data-testid="select-default-model">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                  <SelectContent>
+                      {availableModels.some((m) => m.modelId === platformSettings.default_model) ? null : (
+                        <SelectItem value={platformSettings.default_model}>
+                          {platformSettings.default_model}
+                        </SelectItem>
+                      )}
                       {availableModels.length > 0 ? (
                         availableModels.map((m) => (
                           <SelectItem key={m.id} value={m.modelId}>
@@ -1553,10 +1585,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Transmitir respuestas</span>
-                    <span className="text-xs text-muted-foreground">Ver las respuestas mientras se generan</span>
+                    <span className="text-xs text-muted-foreground">
+                      {platformSettings.enable_streaming
+                        ? "Ver las respuestas mientras se generan"
+                        : "Deshabilitado por el administrador"}
+                    </span>
                   </div>
                   <Switch
-                    checked={settings.streamResponses}
+                    checked={platformSettings.enable_streaming && settings.streamResponses}
+                    disabled={!platformSettings.enable_streaming}
                     onCheckedChange={(checked) => updateSetting("streamResponses", checked)}
                     data-testid="switch-stream"
                   />

@@ -66,6 +66,7 @@ import { ProjectMemoriesModal } from "@/components/project-memories-modal";
 import { ShareProjectModal } from "@/components/share-project-modal";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { useProjects, type Project } from "@/hooks/use-projects";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 interface SidebarProps {
   className?: string;
@@ -236,6 +237,9 @@ export function Sidebar({
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const isAdmin = isAdminUser(user as any);
+  const { settings: platformSettings } = usePlatformSettings();
+  const appName = platformSettings.app_name || "ILIAGPT";
+  const appDescription = platformSettings.app_description || "AI Platform";
   const { pinnedGpts, unpinGpt } = usePinnedGpts();
   const { status: waStatus } = useWhatsAppWebStatus(true);
   const handleLogout = () => {
@@ -559,8 +563,8 @@ export function Sidebar({
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
           <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-none liquid-text-gradient">ILIAGPT</span>
-            <span className="text-[10px] text-muted-foreground">AI Platform</span>
+            <span className="text-sm font-semibold leading-none liquid-text-gradient">{appName}</span>
+            <span className="text-[10px] text-muted-foreground">{appDescription}</span>
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8 liquid-button" onClick={onToggle}>

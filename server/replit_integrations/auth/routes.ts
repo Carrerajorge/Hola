@@ -6,6 +6,10 @@ import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 import { loginSchema, registerSchema, validate } from "../../validation/schemas";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
 import { sendMagicLinkEmail } from "../../services/genericEmailService";
+import { recordLoginAttempt } from "../../services/twoFactorAuth";
+import { getSecureUserId } from "../../lib/anonUserHelper";
+import { getSettingValue } from "../../services/settingsConfigService";
+import { checkLoginAllowed, resetLoginAttempts } from "../../services/loginSecurityService";
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -60,6 +64,23 @@ export function registerAuthRoutes(app: Express): void {
       }
       
       const { email, password } = validation.data;
+      const ipAddress =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
+
+      // Enforce configurable login attempt lockout (Security settings).
+      const lockout = await checkLoginAllowed(email, String(ipAddress));
+      if (!lockout.allowed) {
+        res.setHeader("Retry-After", lockout.retryAfterSeconds || 60);
+        return res.status(429).json({
+          message: "Demasiados intentos de inicio de sesión. Por favor espera e intenta de nuevo.",
+          retryAfterSeconds: lockout.retryAfterSeconds,
+          code: "LOGIN_LOCKOUT",
+        });
+      }
 
       // Check if it's the admin (case-insensitive email comparison)
       if (isAdminConfigured() && email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() && password === ADMIN_PASSWORD) {
@@ -102,6 +123,31 @@ export function registerAuthRoutes(app: Express): void {
               console.error("Session save error:", saveErr);
               return res.status(500).json({ message: "Error al guardar sesión" });
             }
+            try {
+              await authStorage.updateUserLogin(adminId, {
+                ipAddress: ipAddress || null,
+                userAgent: userAgent || null
+              });
+
+              try {
+                await recordLoginAttempt(ADMIN_EMAIL!, adminId, ipAddress, String(userAgent), true);
+              } catch (e) {
+                // Do not block login on telemetry failures
+                console.warn("[Auth] Failed to record admin login attempt:", (e as any)?.message || e);
+              }
+
+              await storage.createAuditLog({
+                userId: adminId,
+                action: "admin_login",
+                resource: "auth",
+                details: { email: ADMIN_EMAIL, via: "auth_login" },
+                ipAddress: ipAddress || null,
+                userAgent: userAgent || null
+              });
+            } catch (auditError) {
+              console.error("Failed to create audit log:", auditError);
+            }
+            await resetLoginAttempts(email, String(ipAddress));
             const user = await authStorage.getUser(adminId);
             res.json({ success: true, user: sanitizeUser(user) });
           });
@@ -113,6 +159,23 @@ export function registerAuthRoutes(app: Express): void {
       const dbUser = allUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
 
       if (!dbUser) {
+        try {
+          try {
+            await recordLoginAttempt(email, null, ipAddress, String(userAgent), false, "user_not_found");
+          } catch (e) {
+            console.warn("[Auth] Failed to record login attempt:", (e as any)?.message || e);
+          }
+
+          await storage.createAuditLog({
+            action: "login_failed",
+            resource: "auth",
+            details: { email, reason: "user_not_found" },
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
         return res.status(401).json({ message: "Usuario no encontrado" });
       }
 
@@ -130,6 +193,24 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       if (!passwordValid) {
+        try {
+          try {
+            await recordLoginAttempt(email, dbUser.id, ipAddress, String(userAgent), false, "invalid_password");
+          } catch (e) {
+            console.warn("[Auth] Failed to record login attempt:", (e as any)?.message || e);
+          }
+
+          await storage.createAuditLog({
+            userId: dbUser.id,
+            action: "login_failed",
+            resource: "auth",
+            details: { email: dbUser.email, reason: "invalid_password" },
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
         return res.status(401).json({ message: "Contraseña incorrecta" });
       }
 
@@ -146,7 +227,34 @@ export function registerAuthRoutes(app: Express): void {
 
       // Check if user is active
       if (dbUser.status !== "active") {
+        try {
+          try {
+            await recordLoginAttempt(email, dbUser.id, ipAddress, String(userAgent), false, "inactive_user");
+          } catch (e) {
+            console.warn("[Auth] Failed to record login attempt:", (e as any)?.message || e);
+          }
+
+          await storage.createAuditLog({
+            userId: dbUser.id,
+            action: "login_failed",
+            resource: "auth",
+            details: { email: dbUser.email, reason: "inactive_user" },
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
         return res.status(401).json({ message: "Usuario inactivo" });
+      }
+
+      const requireEmailVerification = await getSettingValue<boolean>("require_email_verification", false);
+      const isVerified = (dbUser as any).emailVerified === "true" || (dbUser as any).emailVerified === true;
+      if (requireEmailVerification && !isVerified) {
+        return res.status(401).json({
+          message: "Tu correo no está verificado. Inicia sesión con enlace mágico para verificarlo.",
+          code: "EMAIL_NOT_VERIFIED",
+        });
       }
 
       // Set up session
@@ -177,28 +285,35 @@ export function registerAuthRoutes(app: Express): void {
         // Track login and update last login
         try {
           await authStorage.updateUserLogin(dbUser.id, {
-            ipAddress: req.ip || req.socket.remoteAddress || null,
-            userAgent: req.headers["user-agent"] || null
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
           });
+
+          try {
+            await recordLoginAttempt(email, dbUser.id, ipAddress, String(userAgent), true);
+          } catch (e) {
+            console.warn("[Auth] Failed to record login attempt:", (e as any)?.message || e);
+          }
 
           await storage.createAuditLog({
             userId: dbUser.id,
             action: "user_login",
             resource: "auth",
             details: { email: dbUser.email },
-            ipAddress: req.ip || req.socket.remoteAddress || null,
-            userAgent: req.headers["user-agent"] || null
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
           });
         } catch (auditError) {
           console.error("Failed to create audit log:", auditError);
         }
 
         // Force session save before responding
-        req.session.save((saveErr: any) => {
+        req.session.save(async (saveErr: any) => {
           if (saveErr) {
             console.error("Session save error:", saveErr);
             return res.status(500).json({ message: "Error al guardar sesión" });
           }
+          await resetLoginAttempts(email, String(ipAddress));
           res.json({ success: true, user: sanitizeUser(dbUser) });
         });
       });
@@ -216,13 +331,46 @@ export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/admin-login", authRateLimiter, async (req: any, res) => {
     try {
       const { email, password } = req.body;
+      const ipAddress =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
 
       if (!email || !password) {
         return res.status(400).json({ message: "Email and password required" });
       }
 
+      const lockout = await checkLoginAllowed(email, String(ipAddress));
+      if (!lockout.allowed) {
+        res.setHeader("Retry-After", lockout.retryAfterSeconds || 60);
+        return res.status(429).json({
+          message: "Demasiados intentos de inicio de sesión. Por favor espera e intenta de nuevo.",
+          retryAfterSeconds: lockout.retryAfterSeconds,
+          code: "LOGIN_LOCKOUT",
+        });
+      }
+
       // Verify admin is configured and credentials match
       if (!isAdminConfigured() || email.toLowerCase() !== ADMIN_EMAIL!.toLowerCase() || password !== ADMIN_PASSWORD) {
+        try {
+          try {
+            await recordLoginAttempt(email, null, ipAddress, String(userAgent), false, "invalid_admin_credentials");
+          } catch (e) {
+            console.warn("[Auth] Failed to record admin login attempt:", (e as any)?.message || e);
+          }
+
+          await storage.createAuditLog({
+            action: "login_failed",
+            resource: "auth",
+            details: { email, reason: "invalid_admin_credentials" },
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -254,31 +402,45 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Login failed" });
         }
 
+        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+        if (req.session) {
+          req.session.authUserId = adminId;
+          req.session.passport = req.session.passport || {};
+          req.session.passport.user = adminUser;
+        }
+
         // Track admin login and update last login
         try {
           await authStorage.updateUserLogin(adminId, {
-            ipAddress: req.ip || req.socket.remoteAddress || null,
-            userAgent: req.headers["user-agent"] || null
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
           });
+
+          try {
+            await recordLoginAttempt(email, adminId, ipAddress, String(userAgent), true);
+          } catch (e) {
+            console.warn("[Auth] Failed to record admin login attempt:", (e as any)?.message || e);
+          }
 
           await storage.createAuditLog({
             userId: adminId,
             action: "admin_login",
             resource: "auth",
             details: { email: ADMIN_EMAIL },
-            ipAddress: req.ip || req.socket.remoteAddress || null,
-            userAgent: req.headers["user-agent"] || null
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null
           });
         } catch (auditError) {
           console.error("Failed to create audit log:", auditError);
         }
 
         // Force session save before responding
-        req.session.save((saveErr: any) => {
+        req.session.save(async (saveErr: any) => {
           if (saveErr) {
             console.error("Session save error:", saveErr);
             return res.status(500).json({ message: "Error saving session" });
           }
+          await resetLoginAttempts(email, String(ipAddress));
           res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User", role: "admin" } });
         });
       });
@@ -291,13 +453,13 @@ export function registerAuthRoutes(app: Express): void {
   // Logout via POST (for SPA - clears session without redirect)
   app.post("/api/auth/logout", async (req: any, res) => {
     try {
-      const userId = req.user?.claims?.sub;
-      if (userId) {
+      const userId = getSecureUserId(req);
+      if (userId && !userId.startsWith("anon_")) {
         await storage.createAuditLog({
           userId,
           action: "user_logout",
           resource: "auth",
-          details: {},
+          details: { email: req.user?.claims?.email || req.user?.email || null },
           ipAddress: req.ip || req.socket.remoteAddress || null,
           userAgent: req.headers["user-agent"] || null
         });
@@ -436,10 +598,35 @@ export function registerAuthRoutes(app: Express): void {
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
       };
 
-      req.login(userClaims, (err: any) => {
+      req.login(userClaims, async (err: any) => {
         if (err) {
           console.error("[MagicLink] Login error:", err);
           return res.redirect("/login?error=login_failed");
+        }
+
+        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+        if (req.session) {
+          req.session.authUserId = result.user.id;
+          req.session.passport = req.session.passport || {};
+          req.session.passport.user = userClaims;
+        }
+
+        try {
+          await authStorage.updateUserLogin(result.user.id, {
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+
+          await storage.createAuditLog({
+            userId: result.user.id,
+            action: "user_login",
+            resource: "auth",
+            details: { email: result.user.email, provider: "magic_link" },
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+        } catch (auditError) {
+          console.warn("[MagicLink] Failed to create audit log:", auditError);
         }
 
         req.session.save((saveErr: any) => {

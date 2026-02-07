@@ -66,7 +66,10 @@ modelsRouter.get("/filtered", async (req, res) => {
         });
 
         res.json({
-            models: result.models,
+            models: result.models.map((m: any) => ({
+                ...m,
+                hasApiKey: checkApiKeyExists(m.provider),
+            })),
             total: result.total,
             page: parseInt(page as string),
             limit: parseInt(limit as string),
@@ -87,6 +90,8 @@ modelsRouter.get("/stats", async (req, res) => {
         let active = 0;
         let inactive = 0;
         let deprecated = 0;
+        let enabled = 0;
+        let disabled = 0;
 
         for (const model of allModels) {
             byProvider[model.provider] = (byProvider[model.provider] || 0) + 1;
@@ -94,6 +99,8 @@ modelsRouter.get("/stats", async (req, res) => {
             if (model.status === "active") active++;
             else inactive++;
             if (model.isDeprecated === "true") deprecated++;
+            if (model.isEnabled === "true") enabled++;
+            else disabled++;
         }
 
         res.json({
@@ -101,6 +108,9 @@ modelsRouter.get("/stats", async (req, res) => {
             active,
             inactive,
             deprecated,
+            enabled,
+            disabled,
+            providers: Object.keys(byProvider).length,
             byProvider,
             byType,
             knownModels: knownStats,
@@ -113,7 +123,7 @@ modelsRouter.get("/stats", async (req, res) => {
 modelsRouter.patch("/:id", async (req, res) => {
     try {
         // Get model before update for audit
-        const previousModel = await storage.getAiModel(req.params.id);
+        const previousModel = await storage.getAiModelById(req.params.id);
         const model = await storage.updateAiModel(req.params.id, req.body);
         if (!model) {
             return res.status(404).json({ error: "Model not found" });
@@ -139,7 +149,7 @@ modelsRouter.patch("/:id", async (req, res) => {
 
 modelsRouter.delete("/:id", async (req, res) => {
     try {
-        const existing = await storage.getAiModel(req.params.id);
+        const existing = await storage.getAiModelById(req.params.id);
         await storage.deleteAiModel(req.params.id);
         await auditLog(req, {
             action: AuditActions.MODEL_DELETED,
@@ -189,18 +199,6 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
             details: { isEnabled, modelName: model.name }
         });
 
-        res.json(model);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-modelsRouter.get("/:id", async (req, res) => {
-    try {
-        const model = await storage.getAiModelById(req.params.id);
-        if (!model) {
-            return res.status(404).json({ error: "Model not found" });
-        }
         res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -292,7 +290,7 @@ modelsRouter.get("/health", async (req, res) => {
                 available: healthStatus?.xai?.available ?? false,
                 latency: healthStatus?.xai?.latency ?? null,
                 error: healthStatus?.xai?.error ?? null,
-                hasApiKey: !!process.env.XAI_API_KEY
+                hasApiKey: !!process.env.XAI_API_KEY || !!process.env.GROK_API_KEY
             },
             gemini: {
                 name: "Google Gemini",
@@ -422,22 +420,14 @@ modelsRouter.get("/usage", async (req, res) => {
     }
 });
 
-// GET /api/admin/models/health - Health check for all providers
-modelsRouter.get("/health", async (req, res) => {
+// NOTE: keep this AFTER fixed routes like /health, /usage to avoid capturing them as :id.
+modelsRouter.get("/:id", async (req, res) => {
     try {
-        const providers = getAvailableProviders();
-        const health: Record<string, { available: boolean; hasKey: boolean; lastCheck: string }> = {};
-        
-        for (const provider of providers) {
-            const hasKey = await checkApiKeyExists(provider);
-            health[provider] = {
-                available: hasKey,
-                hasKey,
-                lastCheck: new Date().toISOString()
-            };
+        const model = await storage.getAiModelById(req.params.id);
+        if (!model) {
+            return res.status(404).json({ error: "Model not found" });
         }
-        
-        res.json(health);
+        res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

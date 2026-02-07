@@ -130,6 +130,9 @@ export const AuditActions = {
   ADMIN_IMPORT_DATA: "admin.import_data",
   
   // AI Models
+  MODEL_CREATED: "model.created",
+  MODEL_UPDATED: "model.updated",
+  MODEL_DELETED: "model.deleted",
   MODEL_ENABLED: "model.enabled",
   MODEL_DISABLED: "model.disabled",
   MODEL_CONFIG_CHANGED: "model.config_changed",

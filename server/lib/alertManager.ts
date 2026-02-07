@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { logger } from "../utils/logger";
+import { getSettingValue } from "../services/settingsConfigService";
 
 export type AlertType = "api_failure" | "rate_limit" | "high_latency" | "error_spike";
 export type AlertSeverity = "low" | "medium" | "high" | "critical";
@@ -17,10 +18,22 @@ export interface Alert {
 
 const MAX_ALERTS = 200;
 const alerts: Alert[] = [];
-const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL;
+
+async function getAlertWebhookUrl(): Promise<string | null> {
+  try {
+    const configured = await getSettingValue<string>("slack_webhook_url", "");
+    if (typeof configured === "string" && configured.trim().length > 0) {
+      return configured.trim();
+    }
+  } catch {
+    // ignore
+  }
+  return process.env.ALERT_WEBHOOK_URL || null;
+}
 
 async function sendWebhookNotification(alert: Alert) {
-  if (!ALERT_WEBHOOK_URL) return;
+  const webhookUrl = await getAlertWebhookUrl();
+  if (!webhookUrl) return;
   if (alert.severity === 'low') return; // Don't spam low severity
 
   try {
@@ -37,7 +50,7 @@ async function sendWebhookNotification(alert: Alert) {
       ]
     };
 
-    const response = await fetch(ALERT_WEBHOOK_URL, {
+    const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
