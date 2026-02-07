@@ -44,7 +44,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const handleChange = () => {
       if (effectiveAppearance === "system") {
         applyTheme("system");
-        applyAccentColor(settings.accentColor);
+        // Do not override platform branding colors.
+        applyAccentColor("default");
       }
     };
 
@@ -53,8 +54,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [settings.appearance, settings.accentColor, platformSettings.theme_mode]);
 
   useEffect(() => {
-    applyAccentColor(settings.accentColor);
-  }, [settings.accentColor, settings.appearance]);
+    // Platform branding controls --primary/--ring. Always clear per-user overrides.
+    applyAccentColor("default");
+  }, [platformSettings.primary_color, platformSettings.secondary_color, settings.accentColor, settings.appearance]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -124,11 +126,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     updateSetting(key, value);
 
     if (key === "appearance") {
-      applyTheme(value as UserSettings["appearance"]);
-      setTimeout(() => applyAccentColor(settings.accentColor), 0);
+      const effectiveAppearance: UserSettings["appearance"] =
+        platformSettings.theme_mode === "dark"
+          ? "dark"
+          : platformSettings.theme_mode === "light"
+            ? "light"
+            : (value as UserSettings["appearance"]);
+
+      applyTheme(effectiveAppearance);
+      setTimeout(() => applyAccentColor("default"), 0);
     }
     if (key === "accentColor") {
-      applyAccentColor(value as UserSettings["accentColor"]);
+      applyAccentColor("default");
     }
   };
 

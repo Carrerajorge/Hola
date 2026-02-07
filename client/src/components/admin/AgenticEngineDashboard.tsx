@@ -49,18 +49,48 @@ function formatRelativeTime(date: Date | string | null): string {
   return format(d, "dd/MM/yy");
 }
 
+type TimeRangeUnit = "hours" | "days";
+
+type TimeRangeOption = {
+  id: string;
+  label: string;
+  unit: TimeRangeUnit;
+  value: number;
+};
+
+const TIME_RANGE_OPTIONS: TimeRangeOption[] = [
+  { id: "4h", label: "Last 4h", unit: "hours", value: 4 },
+  { id: "12h", label: "Last 12h", unit: "hours", value: 12 },
+  { id: "24h", label: "Last 24h", unit: "hours", value: 24 },
+  { id: "7d", label: "Last 7d", unit: "days", value: 7 },
+  { id: "30d", label: "Last 30d", unit: "days", value: 30 },
+  { id: "90d", label: "Last 90d", unit: "days", value: 90 },
+];
+
+function getTimeRangeOption(id: string): TimeRangeOption {
+  const found = TIME_RANGE_OPTIONS.find((o) => o.id === id);
+  return found || TIME_RANGE_OPTIONS.find((o) => o.id === "30d")!;
+}
+
 export default function AgenticEngineDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
-  const [rangeDays, setRangeDays] = useState(30);
+  const [rangeId, setRangeId] = useState<string>("30d");
   const [selectedUserId, setSelectedUserId] = useState<string>("all");
   const [toolSearch, setToolSearch] = useState("");
+
+  const range = getTimeRangeOption(rangeId);
+  const rangeDescription = range.unit === "hours" ? `last ${range.value}h` : `last ${range.value}d`;
 
   const userId = selectedUserId === "all" ? undefined : selectedUserId;
   const providerId = "agentic_engine,sandbox";
 
   const makeAgentUrl = (path: string, extra: Record<string, string | number | undefined> = {}) => {
     const params = new URLSearchParams();
-    params.set("rangeDays", String(rangeDays));
+    if (range.unit === "hours") {
+      params.set("rangeHours", String(range.value));
+    } else {
+      params.set("rangeDays", String(range.value));
+    }
     params.set("providerId", providerId);
     if (userId) params.set("userId", userId);
     for (const [k, v] of Object.entries(extra)) {
@@ -91,7 +121,7 @@ export default function AgenticEngineDashboard() {
   });
 
   const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
-    queryKey: ["/api/admin/agent/tools", { rangeDays, userId, providerId }],
+    queryKey: ["/api/admin/agent/tools", { rangeId, userId, providerId }],
     queryFn: async () => {
       const res = await fetch(makeAgentUrl("/api/admin/agent/tools"), { credentials: "include" });
       return res.json();
@@ -99,7 +129,7 @@ export default function AgenticEngineDashboard() {
   });
 
   const { data: metricsData, refetch: refetchMetrics } = useQuery({
-    queryKey: ["/api/admin/agent/metrics", { rangeDays, userId, providerId }],
+    queryKey: ["/api/admin/agent/metrics", { rangeId, userId, providerId }],
     queryFn: async () => {
       const res = await fetch(makeAgentUrl("/api/admin/agent/metrics"), { credentials: "include" });
       return res.json();
@@ -141,7 +171,7 @@ export default function AgenticEngineDashboard() {
   });
 
   const { data: toolCallsData, isLoading: toolCallsLoading, refetch: refetchToolCalls } = useQuery({
-    queryKey: ["/api/admin/agent/tool-calls", { rangeDays, userId, providerId }],
+    queryKey: ["/api/admin/agent/tool-calls", { rangeId, userId, providerId }],
     queryFn: async () => {
       const res = await fetch(makeAgentUrl("/api/admin/agent/tool-calls", { limit: 12 }), { credentials: "include" });
       return res.json();
@@ -181,7 +211,7 @@ export default function AgenticEngineDashboard() {
 
   const tools = toolsData?.tools || [];
   const gaps = gapsData?.gaps || [];
-  const metrics = metricsData || { successRate: 0, totalCalls: 0, rangeDays, avgLatencyMs: 0, byStatus: {} };
+  const metrics = metricsData || { successRate: 0, totalCalls: 0, avgLatencyMs: 0, byStatus: {} };
   const memory = memoryData || { totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} };
   const circuits = circuitsData || [];
   const orchestrations = orchestrationsData?.runs || [];
@@ -248,15 +278,16 @@ export default function AgenticEngineDashboard() {
             {isDegraded ? "Degraded" : "Healthy"}
           </Badge>
 
-          <Select value={String(rangeDays)} onValueChange={(v) => setRangeDays(Number(v))}>
+          <Select value={rangeId} onValueChange={setRangeId}>
             <SelectTrigger className="w-[140px] h-9">
               <SelectValue placeholder="Range" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">Last 24h</SelectItem>
-              <SelectItem value="7">Last 7d</SelectItem>
-              <SelectItem value="30">Last 30d</SelectItem>
-              <SelectItem value="90">Last 90d</SelectItem>
+              {TIME_RANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -337,7 +368,7 @@ export default function AgenticEngineDashboard() {
                   <div className="min-w-0">
                     <p className="text-2xl font-bold tabular-nums">{(metrics.avgLatencyMs || 0).toLocaleString()} ms</p>
                     <p className="text-sm text-muted-foreground">Avg Latency</p>
-                    <p className="text-xs text-muted-foreground truncate">last {rangeDays} days</p>
+                    <p className="text-xs text-muted-foreground truncate">{rangeDescription}</p>
                   </div>
                 </div>
               </CardContent>
@@ -400,7 +431,7 @@ export default function AgenticEngineDashboard() {
                       <Terminal className="h-4 w-4" />
                       Recent Tool Calls
                     </CardTitle>
-                    <CardDescription className="truncate">{selectedUserLabel} · last {rangeDays} days</CardDescription>
+                    <CardDescription className="truncate">{selectedUserLabel} · {rangeDescription}</CardDescription>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => refetchToolCalls()} disabled={toolCallsLoading}>
                     <RefreshCw className="h-4 w-4" />
@@ -520,7 +551,7 @@ export default function AgenticEngineDashboard() {
               <div className="flex items-center justify-between">
                 <div className="min-w-0">
                   <CardTitle>Registered Tools</CardTitle>
-                  <CardDescription className="truncate">Usage counts · {selectedUserLabel} · last {rangeDays} days</CardDescription>
+                  <CardDescription className="truncate">Usage counts · {selectedUserLabel} · {rangeDescription}</CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => { refetchTools(); refetchMetrics(); }}>
                   <RefreshCw className="h-4 w-4 mr-2" />
@@ -919,4 +950,3 @@ export default function AgenticEngineDashboard() {
     </div>
   );
 }
-

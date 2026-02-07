@@ -1187,6 +1187,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { availableModels } = useModelAvailability();
   const platformDateFormat = mapPlatformDateFormatToUserDateFormat(platformSettings.date_format);
   const effectiveDefaultModel = settings.defaultModel || platformSettings.default_model;
+  const themeManagedByPlatform = platformSettings.theme_mode !== "auto";
+  const effectiveAppearance = themeManagedByPlatform
+    ? (platformSettings.theme_mode === "light" ? "light" : "dark")
+    : settings.appearance;
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -1233,10 +1237,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Tema</span>
-                    <span className="text-xs text-muted-foreground">Selecciona el aspecto visual de la aplicación</span>
+                    <span className="text-xs text-muted-foreground">
+                      {themeManagedByPlatform
+                        ? "Gestionado por administrador"
+                        : "Selecciona el aspecto visual de la aplicacion"}
+                    </span>
                   </div>
                   <Select
-                    value={settings.appearance}
+                    value={effectiveAppearance}
+                    disabled={themeManagedByPlatform}
                     onValueChange={(value) => updateSetting("appearance", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-appearance">
@@ -1253,10 +1262,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <span className="text-sm block">Color de acento</span>
-                    <span className="text-xs text-muted-foreground">Color principal de la interfaz</span>
+                    <span className="text-xs text-muted-foreground">Gestionado por administrador</span>
                   </div>
                   <Select
-                    value={settings.accentColor}
+                    value="default"
+                    disabled
                     onValueChange={(value) => updateSetting("accentColor", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-accent-color">
