@@ -174,7 +174,7 @@ export const useAgentTraceStore = create<AgentTraceState>((set, get) => ({
 
     eventSource.onopen = () => {
       set({ isConnected: true, connectionError: null });
-      console.log(`[TraceStore] Connected to activity stream for run ${runId}`);
+      console.debug(`[TraceStore] Connected to activity stream for run ${runId}`);
     };
 
     eventSource.onerror = (error) => {
@@ -230,7 +230,7 @@ export const useAgentTraceStore = create<AgentTraceState>((set, get) => ({
         newEventSources.delete(runId);
         return { eventSources: newEventSources };
       });
-      console.log(`[TraceStore] Disconnected from run ${runId}`);
+      console.debug(`[TraceStore] Disconnected from run ${runId}`);
     }
   },
 

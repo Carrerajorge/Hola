@@ -1,4 +1,4 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, QueryFunction, QueryCache, MutationCache } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
@@ -196,6 +196,26 @@ function defaultRetryCondition(failureCount: number, error: unknown): boolean {
 }
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      // Ignore 401 (handled by redirect), 404 (often expected), and 422 (validation)
+      if (!msg.includes("401") && !msg.includes("404") && !msg.includes("422")) {
+        // Debounce network errors slightly to avoid spam
+        if (!document.hidden) {
+          showErrorToast(msg);
+        }
+      }
+    }
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : "Unknown error";
+      if (!msg.includes("401")) {
+        showErrorToast(msg, { description: "La acción falló. Por favor intente de nuevo." });
+      }
+    }
+  }),
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "returnNull" }),
