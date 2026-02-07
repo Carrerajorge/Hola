@@ -27,12 +27,14 @@ import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
 import { idempotency } from "./middleware/idempotency";
-import { rateLimiter } from "./middleware/userRateLimiter";
+import { globalLimiter, authLimiter } from "./middleware/rateLimiter";
 import { Logger } from "./lib/logger";
 import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
+import { setupSecurity } from "./middleware/security";
+import { runCleanup } from "./lib/cleanup";
 
 initTracing();
 
@@ -57,24 +59,7 @@ app.use(corsMiddleware);
 
 // Security Middleware (Helmet + HPP)
 app.use(hpp()); // Prevent HTTP Parameter Pollution
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
-      imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", "ws:"],
-      frameSrc: ["'self'", "https://accounts.google.com"],
-      frameAncestors: ["'self'"],
-      objectSrc: ["'none'"],
-      upgradeInsecureRequests: [],
-    },
-  },
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin for static assets if needed
-  crossOriginEmbedderPolicy: false,
-}));
+setupSecurity(app); // Enhanced Helmet Config
 
 // CSRF Token Generation (sets cookie)
 app.use(csrfTokenMiddleware);
@@ -85,8 +70,9 @@ app.use("/api", apiSecurityHeaders());
 // CSRF Protection for API (validates header)
 app.use("/api", csrfProtection);
 
-// Rate Limiting (User-based)
-app.use("/api", rateLimiter);
+// Rate Limiting
+app.use("/api", globalLimiter);
+app.use("/api/auth", authLimiter);
 
 // Idempotency for mutations
 app.use("/api", idempotency);
@@ -241,6 +227,15 @@ export function log(message: string, source = "express") {
       await shutdownTracing();
       log("OpenTelemetry tracing shutdown complete");
     });
+
+    // Schedule Daily Cleanup (24h)
+    setInterval(() => {
+        runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+    }, 24 * 60 * 60 * 1000);
+    // Run once on startup after delay
+    setTimeout(() => {
+        runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
+    }, 60 * 1000); 
 
     const tracingStatus = getTracingMetrics();
     log(

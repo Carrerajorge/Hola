@@ -6,8 +6,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-iliagpt}
-    ports:
-      - "5432:5432"
+    # SECURITY: Ports removed to prevent external access. Only accessible within Docker network.
+    # ports:
+    #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     # Add healthcheck for better container orchestration
@@ -26,8 +27,9 @@ services:
       --appendonly yes
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
-    ports:
-      - "127.0.0.1:6379:6379"
+    # SECURITY: Ports removed to prevent external access.
+    # ports:
+    #   - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
