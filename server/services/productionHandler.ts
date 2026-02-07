@@ -63,6 +63,16 @@ const SEARCH_FIRST_PATTERNS = [
     /dame\s+\d+\s*(art[ií]culos?|papers?|estudios?|citas?)/i,
     /necesito\s+\d+\s*(art[ií]culos?|papers?|estudios?|referencias?)/i,
     
+    // Singular: "buscarme un artículo/paper/estudio"
+    /buscame\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /buscarme\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /busca\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /buscar\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /encuentra(?:me)?\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /dame\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /necesito\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+
+
     // "articulos cientificos de/sobre"
     /art[ií]culos?\s+cient[ií]ficos?\s+(de|sobre|en|d)\s*/i,
     /busca.*art[ií]culos?\s+cient[ií]ficos?/i,
@@ -600,15 +610,21 @@ export async function handleProductionRequest(
     } catch (error: any) {
         console.error('[ProductionHandler] Pipeline error:', error);
 
+        const rawMessage = (error?.message || 'Unknown error').toString();
+        const userMessage =
+            rawMessage === 'Message does not require production mode'
+                ? 'Tu solicitud no requiere producción documental. Si necesitas un archivo, especifica el formato (Word/PDF/Excel/PPT) o selecciona la herramienta correspondiente.'
+                : rawMessage;
+
         writeSse(res, 'production_error', {
             runId,
             requestId,
-            error: error.message,
+            error: userMessage,
             timestamp: Date.now(),
         });
 
         // Send error as chat content
-        const errorContent = `❌ **Error en la producción documental**\n\n${error.message}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`;
+        const errorContent = `❌ **Error en la producción documental**\n\n${userMessage}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`;
         writeSse(res, 'chunk', {
             content: errorContent,
             sequenceId: 1,
@@ -631,7 +647,7 @@ export async function handleProductionRequest(
                 await conversationStateService.appendMessage(chatId, "assistant", errorContent, {
                     chatMessageId: assistantMessageId,
                     requestId: `${requestId}:state:assistant`,
-                    metadata: { error: error.message },
+                    metadata: { error: rawMessage },
                 });
             } catch (e) {
                 console.warn('[ProductionHandler] Failed to persist error assistant message (best-effort):', e);
@@ -640,7 +656,7 @@ export async function handleProductionRequest(
 
         return {
             handled: true,
-            error: error.message,
+            error: rawMessage,
         };
     }
 }

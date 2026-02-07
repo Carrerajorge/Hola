@@ -795,27 +795,41 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           normalized_text: userMessageText
         };
 
-        try {
-          const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+        // If the user is clearly asking to search (and not asking for an output artifact),
+        // do not force production just because a docTool is selected.
+        if (!isProductionIntent(syntheticIntent, userMessageText)) {
+          console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: message does not require production, continuing normal chat flow`);
 
-	          await handleProductionRequest(
-	            {
-	              message: userMessageText,
-	              userId: effectiveUserId,
-	              chatId: effectiveChatId,
-	              intentResult: syntheticIntent,
-	              locale: 'es',
-	              requestId,
-	            },
-	            res
-	          );
+          const toolLabel = docTool === 'word' ? 'Word' : docTool === 'excel' ? 'Excel' : 'PowerPoint';
+          messages.unshift({
+            role: 'system',
+            content:
+              `El usuario tiene seleccionada la herramienta ${toolLabel}, pero su mensaje parece ser solo una solicitud de búsqueda. ` +
+              `Responde con la información encontrada y pregunta si desea exportar el resultado a ${toolLabel}.`
+          });
+        } else {
+          try {
+            const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
+            const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
-          // Production handler completed, exit early
-          return;
-        } catch (productionError: any) {
-          console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
-          // Continue to normal chat flow if production fails
+            await handleProductionRequest(
+              {
+                message: userMessageText,
+                userId: effectiveUserId,
+                chatId: effectiveChatId,
+                intentResult: syntheticIntent,
+                locale: 'es',
+                requestId,
+              },
+              res
+            );
+
+            // Production handler completed, exit early
+            return;
+          } catch (productionError: any) {
+            console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
+            // Continue to normal chat flow if production fails
+          }
         }
       }
 
