@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
+import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu, ArrowRight, Star } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
 export default function LandingPage() {
@@ -60,28 +60,27 @@ export default function LandingPage() {
   };
 
   const features = [
-    { icon: Sparkles, label: "Adjuntar", color: "from-fuchsia-500 to-purple-600" },
-    { icon: Search, label: "Buscar", color: "from-violet-500 to-indigo-600" },
-    { icon: BookOpen, label: "Estudiemos", color: "from-purple-500 to-fuchsia-600" },
-    { icon: Image, label: "Crear imagen", color: "from-pink-500 to-fuchsia-600" },
-    { icon: Mic, label: "Voz", color: "from-fuchsia-600 to-purple-700" },
+    { icon: Paperclip, label: "Adjuntar" },
+    { icon: Search, label: "Buscar" },
+    { icon: BookOpen, label: "Estudiemos" },
+    { icon: Image, label: "Crear imagen" },
+    { icon: Mic, label: "Voz" },
   ];
 
   return (
-    <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
+    <div className="min-h-screen landing-luxe cyber-grid flex flex-col relative overflow-hidden">
       {/* Futuristic background orbs */}
       <div className="floating-orb-light floating-orb-light-1" />
       <div className="floating-orb-light floating-orb-light-2" />
       <div className="floating-orb-light floating-orb-light-3" />
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-purple-200/40 bg-white/70 backdrop-blur-md">
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-purple-200/30 bg-white/80 backdrop-blur-xl">
         <div className="flex items-center gap-2">
-          {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
           <Button
             variant="ghost"
             size="icon"
-            className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 md:hidden"
+            className="rounded-full text-zinc-700 hover:text-fuchsia-600 hover:bg-fuchsia-50 md:hidden"
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
             aria-expanded={mobileMenuOpen}
@@ -90,25 +89,23 @@ export default function LandingPage() {
             <Menu className="h-5 w-5" />
           </Button>
 
-
           <IliaGPTLogo size={32} className="shadow-sm" />
           <span className="font-semibold tracking-wide text-luxe text-luxe-sm" data-text="ILIAGPT">ILIAGPT</span>
-          <ChevronDown className="h-4 w-4 text-zinc-500" />
+          <ChevronDown className="h-4 w-4 text-purple-400" />
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-fuchsia-600 hover:text-fuchsia-500 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
+          <span onClick={() => setLocation("/about")} className="text-zinc-500 hover:text-fuchsia-600 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="text-zinc-500 hover:text-fuchsia-600 transition-colors duration-200 cursor-pointer">Aprender</span>
+          <span onClick={() => setLocation("/business")} className="text-zinc-500 hover:text-fuchsia-600 transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="text-zinc-500 hover:text-fuchsia-600 transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="text-fuchsia-600 font-medium hover:text-purple-700 transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="text-zinc-500 hover:text-fuchsia-600 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
-          {/* Mobile nav trigger (kept in the top-right corner) */}
           <Button
-            className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.25)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 via-purple-600 to-violet-700 text-white border-0 shadow-[0_4px_20px_rgba(168,85,247,0.3)] hover:shadow-[0_6px_30px_rgba(168,85,247,0.4)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
@@ -116,19 +113,19 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-purple-300/50 text-zinc-900 hover:bg-fuchsia-50 hover:border-fuchsia-400/60 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-purple-200/50 text-purple-700 hover:bg-fuchsia-50 hover:border-fuchsia-400/60 hover:text-fuchsia-700 transition-all duration-300"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
             Suscríbete gratis
           </Button>
-          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-600 hover:text-zinc-900 hover:bg-black/5">
+          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-purple-400 hover:text-fuchsia-600 hover:bg-fuchsia-50">
             <HelpCircle className="h-5 w-5" />
           </Button>
         </div>
       </header>
 
-      {/* Mobile menu: left drawer + scrim (keeps header clickable so user can close via hamburger) */}
+      {/* Mobile menu: left drawer + scrim */}
       <div
         className={
           "md:hidden" +
@@ -136,18 +133,16 @@ export default function LandingPage() {
         }
         aria-hidden={!mobileMenuOpen}
       >
-        {/* Scrim blocks interactions with the page, but starts below the header so the hamburger stays clickable */}
         <div
           className={
-            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/50 transition-opacity duration-200 " +
+            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-200 " +
             (mobileMenuOpen ? "opacity-100" : "opacity-0")
           }
         />
 
-        {/* Drawer */}
         <div
           className={
-            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white/90 backdrop-blur-xl shadow-2xl " +
+            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-purple-200/30 bg-white/95 backdrop-blur-xl shadow-2xl shadow-purple-900/10 " +
             "transition-transform duration-200 ease-out " +
             (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
           }
@@ -155,7 +150,7 @@ export default function LandingPage() {
           aria-label="Menú"
           data-testid="mobile-menu"
         >
-          <div className="p-2">
+          <div className="p-3">
             {[
               { label: "Sobre nosotros", to: "/about" },
               { label: "Aprender", to: "/learn" },
@@ -168,10 +163,10 @@ export default function LandingPage() {
                 key={item.to}
                 type="button"
                 className={
-                  "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
+                  "w-full text-left px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 " +
                   (item.label === "Imágenes"
-                    ? "text-fuchsia-600 hover:text-fuchsia-500 hover:bg-fuchsia-50"
-                    : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
+                    ? "text-fuchsia-600 hover:text-fuchsia-700 hover:bg-fuchsia-50"
+                    : "text-zinc-700 hover:text-fuchsia-600 hover:bg-fuchsia-50/50")
                 }
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -189,48 +184,59 @@ export default function LandingPage() {
       {/* Main Content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
         <div className="w-full max-w-3xl space-y-10">
+
           {/* Hero Title */}
-          <div className="text-center fade-in-up">
-            <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
+          <div className="text-center fade-in-up space-y-5">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-fuchsia-50 border border-fuchsia-200/60">
+              <Star className="h-3.5 w-3.5 text-fuchsia-500 fill-fuchsia-500" />
+              <span className="text-xs font-semibold text-fuchsia-600 uppercase tracking-wider">IA de nueva generación</span>
+            </div>
+            <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold leading-tight">
+              <span className="text-futuristic-hero">¿Con qué puedo</span>
+              <br />
+              <span className="text-luxe text-luxe-lg" data-text="ayudarte?">ayudarte?</span>
             </h1>
-            <p className="text-lg text-zinc-500 max-w-xl mx-auto">
+            <p className="text-base md:text-lg text-zinc-400 max-w-lg mx-auto leading-relaxed">
               El asistente de IA más inteligente para crear, investigar y aprender
             </p>
           </div>
 
+          {/* Neon line separator */}
+          <div className="neon-line-animated max-w-xs mx-auto fade-in-up fade-in-up-delay-1" />
+
           {/* Search Input */}
           <div className="space-y-6 fade-in-up fade-in-up-delay-1">
-            <div className="relative">
-              <div className="glass-luxe rounded-2xl p-1">
+            <div className="relative group">
+              <div className="glass-luxe rounded-2xl p-1 neon-border pulse-neon">
                 <Input
                   placeholder="Pregunta lo que quieras..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400 
+                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400
                     focus-visible:ring-0 focus-visible:ring-offset-0"
                   data-testid="input-landing-search"
                 />
               </div>
-              {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-300/40 via-purple-200/30 to-fuchsia-300/40 blur-xl opacity-70" />
+              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-fuchsia-400/25 via-purple-300/20 to-violet-400/25 blur-2xl opacity-60 group-hover:opacity-80 transition-opacity duration-500" />
             </div>
 
             {/* Feature Buttons */}
-            <div className="flex items-center justify-center gap-3 flex-wrap">
+            <div className="flex items-center justify-center gap-2.5 flex-wrap">
               {features.map((feature, index) => (
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-purple-200/40 bg-white/70 text-zinc-900
-                    hover:bg-white hover:border-fuchsia-400/60 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg hover:shadow-fuchsia-200/30 fade-in-up`}
+                  className="rounded-full gap-2 text-sm border-purple-200/40 bg-white/80 text-zinc-600
+                    hover:bg-fuchsia-50 hover:border-fuchsia-300 hover:text-fuchsia-700 transition-all duration-300
+                    hover:scale-105 hover:shadow-lg hover:shadow-fuchsia-200/20 fade-in-up"
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
                 >
-                  <feature.icon className="h-4 w-4" />
+                  <div className="icon-gradient rounded-md p-0.5">
+                    <feature.icon className="h-3.5 w-3.5 text-fuchsia-600" />
+                  </div>
                   {feature.label}
                 </Button>
               ))}
@@ -239,44 +245,50 @@ export default function LandingPage() {
 
           {/* Promo Card with Premium Design */}
           {showPromo && (
-            <div className="glass-luxe rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
+            <div className="glass-luxe rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift neon-border">
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full"
+                className="absolute top-4 right-4 h-8 w-8 text-zinc-400 hover:text-fuchsia-600 hover:bg-fuchsia-50 rounded-full z-10"
                 onClick={() => setShowPromo(false)}
                 data-testid="button-close-promo"
               >
                 <X className="h-4 w-4" />
               </Button>
 
-              <div className="flex flex-col md:flex-row md:items-center gap-6">
+              {/* Subtle background gradient inside the card */}
+              <div className="absolute inset-0 bg-gradient-to-br from-fuchsia-50/50 via-transparent to-purple-50/50 pointer-events-none" />
+
+              <div className="relative flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-5 w-5 text-fuchsia-500" />
-                    <span className="text-xs font-medium text-fuchsia-500 uppercase tracking-wider">Nuevo</span>
+                    <div className="icon-gradient-strong rounded-lg p-1.5">
+                      <Sparkles className="h-4 w-4 text-fuchsia-600" />
+                    </div>
+                    <span className="text-xs font-bold text-fuchsia-600 uppercase tracking-wider">Nuevo</span>
                   </div>
                   <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
-                  <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
+                  <p className="text-sm text-zinc-500 mb-5 leading-relaxed">
                     ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
                   </p>
                   <Button
-                    className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-700 text-white border border-fuchsia-400/40 hover:from-fuchsia-500 hover:to-purple-600 shadow-[0_0_24px_rgba(192,38,211,0.25)] hover:shadow-[0_0_32px_rgba(192,38,211,0.35)] transition-all duration-300"
+                    className="btn-luxe rounded-full bg-gradient-to-r from-fuchsia-600 via-purple-600 to-violet-700 text-white border-0 shadow-[0_4px_20px_rgba(168,85,247,0.3)] hover:shadow-[0_6px_30px_rgba(168,85,247,0.4)] transition-all duration-300"
                     onClick={() => setLocation("/login")}
                     data-testid="button-try-now"
                   >
                     <Zap className="h-4 w-4 mr-2" />
                     Probar ahora
+                    <ArrowRight className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
 
                 {/* Style Cards */}
                 <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:items-center md:gap-4">
                   {[
-                    { emoji: "🎨", label: "Boceto", gradient: "from-amber-500/30 to-orange-500/30" },
-                    { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/30 to-green-500/30" },
-                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/30 to-violet-500/30" },
-                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-500/30 to-rose-500/30" },
+                    { emoji: "🎨", label: "Boceto", gradient: "from-fuchsia-500/20 to-purple-500/20" },
+                    { emoji: "🎄", label: "Festivo", gradient: "from-violet-500/20 to-indigo-500/20" },
+                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/20 to-fuchsia-500/20" },
+                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-500/20 to-fuchsia-500/20" },
                   ].map((style) => (
                     <div
                       key={style.label}
@@ -284,12 +296,12 @@ export default function LandingPage() {
                       onClick={() => setLocation("/login")}
                     >
                       <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient}
-                        flex items-center justify-center border border-purple-200/30
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-fuchsia-400/60
-                        group-hover:shadow-lg group-hover:shadow-fuchsia-200/20`}>
-                        <span className="text-2xl">{style.emoji}</span>
+                        flex items-center justify-center border border-purple-200/40
+                        transition-all duration-300 group-hover:scale-110 group-hover:border-fuchsia-400/60
+                        group-hover:shadow-lg group-hover:shadow-fuchsia-200/30`}>
+                        <span className="text-2xl group-hover:scale-110 transition-transform">{style.emoji}</span>
                       </div>
-                      <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
+                      <span className="text-xs text-zinc-500 group-hover:text-fuchsia-600 font-medium transition-colors">{style.label}</span>
                     </div>
                   ))}
                 </div>
@@ -298,17 +310,17 @@ export default function LandingPage() {
           )}
 
           {/* Trust Indicators */}
-          <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm fade-in-up fade-in-up-delay-4">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4" />
+          <div className="flex items-center justify-center gap-6 md:gap-8 text-sm fade-in-up fade-in-up-delay-4">
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Shield className="h-4 w-4 text-purple-400" />
               <span>Seguro y privado</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4" />
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Globe className="h-4 w-4 text-fuchsia-400" />
               <span>Disponible 24/7</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4" />
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Zap className="h-4 w-4 text-violet-400" />
               <span>Respuestas instantáneas</span>
             </div>
           </div>
@@ -316,11 +328,11 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-purple-200/40 bg-white/70 backdrop-blur-md">
+      <footer className="relative z-10 py-4 text-center text-sm text-zinc-400 border-t border-purple-200/30 bg-white/80 backdrop-blur-xl">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
+        <Link href="/terms" className="text-purple-500 hover:text-fuchsia-600 underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
-        <Link href="/privacy-policy" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Política de privacidad</Link>.
+        <Link href="/privacy-policy" className="text-purple-500 hover:text-fuchsia-600 underline transition-colors">Política de privacidad</Link>.
       </footer>
     </div>
   );
