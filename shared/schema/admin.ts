@@ -81,6 +81,7 @@ export const invoices = pgTable("invoices", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("invoices_user_idx").on(table.userId),
+    uniqueIndex("invoices_user_invoice_number_unique_idx").on(table.userId, table.invoiceNumber),
 ]);
 
 export const insertInvoiceSchema = createInsertSchema(invoices);
