@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedDateTime, normalizeTimeZone } from '@/lib/platformDateTime';
 import {
   Dialog,
   DialogContent,
@@ -664,6 +666,9 @@ export function WordEditorPro({
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { toast } = useToast();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   // Auto-save draft to localStorage
   useEffect(() => {
@@ -698,14 +703,14 @@ export function WordEditorPro({
           setCode(parsed.code);
           toast({
             title: 'Borrador recuperado',
-            description: `Último guardado: ${new Date(parsed.timestamp).toLocaleString()}`,
+            description: `Último guardado: ${formatZonedDateTime(parsed.timestamp, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`,
           });
         }
       } catch (e) {
         // Ignore parse errors
       }
     }
-  }, [title]);
+  }, [title, initialCode, toast, platformTimeZone, platformDateFormat]);
 
   // Handle code change
   const handleCodeChange = useCallback((newCode: string) => {
@@ -844,9 +849,9 @@ export function WordEditorPro({
     setShowHistory(false);
     toast({
       title: 'Versión restaurada',
-      description: `Versión de ${version.timestamp.toLocaleString()}`,
+      description: `Versión de ${formatZonedDateTime(version.timestamp, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`,
     });
-  }, [toast]);
+  }, [toast, platformTimeZone, platformDateFormat]);
 
   // Translate document
   const handleTranslate = useCallback(async () => {
@@ -1282,15 +1287,17 @@ export function WordEditorPro({
                 <p className="text-center text-muted-foreground p-4">No hay versiones guardadas</p>
               ) : (
                 <div className="space-y-2">
-                  {versions.map((version, idx) => (
+	                  {versions.map((version, idx) => (
                     <div
                       key={version.id}
                       className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50"
                     >
-                      <div>
-                        <p className="font-medium">Versión {versions.length - idx}</p>
-                        <p className="text-sm text-muted-foreground">{version.timestamp.toLocaleString()}</p>
-                      </div>
+	                      <div>
+	                        <p className="font-medium">Versión {versions.length - idx}</p>
+	                        <p className="text-sm text-muted-foreground">
+	                          {formatZonedDateTime(version.timestamp, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+	                        </p>
+	                      </div>
                       <Button size="sm" variant="outline" onClick={() => handleRestoreVersion(version)}>
                         Restaurar
                       </Button>

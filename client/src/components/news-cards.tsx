@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import type { WebSource } from "@/hooks/use-chats";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { diffZonedDays, formatZonedDate, normalizeTimeZone, type PlatformDateFormat } from "@/lib/platformDateTime";
 
 interface NewsCardsProps {
   sources: WebSource[];
@@ -51,27 +53,40 @@ const getGradientForDomain = (domain: string): string => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-const formatRelativeDate = (dateStr?: string): string => {
+const formatRelativeDate = (
+  dateStr: string | undefined,
+  opts: { timeZone: string; dateFormat: PlatformDateFormat }
+): string => {
   if (!dateStr) return "";
   try {
     const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffDays = diffZonedDays(date, now, opts.timeZone) ?? Math.floor(diffMs / (1000 * 60 * 60 * 24));
     
     if (diffHours < 1) return "hace unos minutos";
     if (diffHours < 24) return `hace ${diffHours}h`;
     if (diffDays === 1) return "ayer";
     if (diffDays < 7) return `hace ${diffDays} días`;
-    return date.toLocaleDateString("es", { day: "numeric", month: "short" });
+    return formatZonedDate(date, { timeZone: opts.timeZone, dateFormat: opts.dateFormat });
   } catch {
     return dateStr;
   }
 };
 
 // Individual news card component
-const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; index: number }) {
+const NewsCard = memo(function NewsCard({
+  source,
+  index,
+  platformTimeZone,
+  platformDateFormat,
+}: {
+  source: WebSource;
+  index: number;
+  platformTimeZone: string;
+  platformDateFormat: PlatformDateFormat;
+}) {
   const [imageError, setImageError] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const hasImage = source.imageUrl && !imageError;
@@ -157,7 +172,7 @@ const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; 
             </span>
             {source.date && (
               <span className="text-xs text-muted-foreground/70">
-                {formatRelativeDate(source.date)}
+                {formatRelativeDate(source.date, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
               </span>
             )}
           </div>
@@ -293,6 +308,10 @@ const SourcesPanel = memo(function SourcesPanel({
 
 // Main NewsCards component
 export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRefresh }: NewsCardsProps) {
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
@@ -408,7 +427,13 @@ export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRe
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {displaySources.map((source, idx) => (
-              <NewsCard key={`${source.url}-${idx}`} source={source} index={idx} />
+              <NewsCard
+                key={`${source.url}-${idx}`}
+                source={source}
+                index={idx}
+                platformTimeZone={platformTimeZone}
+                platformDateFormat={platformDateFormat}
+              />
             ))}
           </div>
           

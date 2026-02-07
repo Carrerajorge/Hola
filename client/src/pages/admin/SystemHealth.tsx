@@ -4,6 +4,8 @@ import {
   RefreshCw, TrendingDown, TrendingUp, Server,
   Monitor, Cpu
 } from 'lucide-react';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedDateTime, normalizeTimeZone } from '@/lib/platformDateTime';
 
 interface ErrorStats {
   total: number;
@@ -27,6 +29,9 @@ export default function SystemHealth() {
   const [recentErrors, setRecentErrors] = useState<ErrorLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const fetchData = async () => {
     try {
@@ -281,11 +286,11 @@ export default function SystemHealth() {
                     <td className="px-4 py-3 text-sm text-gray-400 max-w-md truncate">
                       {error.message}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {new Date(error.timestamp).toLocaleString('es-ES')}
-                    </td>
-                  </tr>
-                ))}
+	                    <td className="px-4 py-3 text-sm text-gray-500">
+	                      {formatZonedDateTime(error.timestamp, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
+	                    </td>
+	                  </tr>
+	                ))}
               </tbody>
             </table>
           </div>

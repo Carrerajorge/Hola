@@ -163,9 +163,104 @@ export class ToolRegistry {
       logs.push({ level, message, timestamp: new Date(), data });
     };
 
+    const redactForLog = (value: any): any => {
+      const seen = new WeakSet();
+      const sensitiveKeys = ["password", "token", "secret", "key", "auth", "credential", "apiKey"];
+
+      const walk = (v: any): any => {
+        if (v === null || v === undefined) return v;
+        if (typeof v === "string") {
+          if (v.length > 2000) return v.slice(0, 2000) + "...[truncated]";
+          return v;
+        }
+        if (typeof v !== "object") return v;
+        if (seen.has(v)) return "[Circular]";
+        seen.add(v);
+
+        if (Array.isArray(v)) {
+          return v.slice(0, 50).map(walk);
+        }
+
+        const out: Record<string, any> = {};
+        for (const [k, child] of Object.entries(v)) {
+          if (sensitiveKeys.some(s => k.toLowerCase().includes(s.toLowerCase()))) {
+            out[k] = "[REDACTED]";
+          } else {
+            out[k] = walk(child);
+          }
+        }
+        return out;
+      };
+
+      return walk(value);
+    };
+
+    const persistToolCallLog = (params: {
+      status: string;
+      providerId?: string;
+      latencyMs?: number;
+      errorCode?: string;
+      errorMessage?: string;
+      output?: any;
+    }) => {
+      void (async () => {
+        try {
+          const safeUserId =
+            context.userId === "anonymous" || context.userId.startsWith("anon_")
+              ? undefined
+              : context.userId;
+          const { storage } = await import("../storage");
+          await storage.createToolCallLog({
+            userId: safeUserId,
+            chatId: context.chatId,
+            runId: context.runId,
+            toolId: name,
+            providerId: params.providerId || "agentic_engine",
+            inputRedacted: redactForLog(input),
+            outputRedacted: redactForLog(params.output),
+            status: params.status,
+            errorCode: params.errorCode,
+            errorMessage: params.errorMessage,
+            latencyMs: Math.max(0, Math.round(params.latencyMs ?? (Date.now() - startTime))),
+          });
+
+          // Best-effort gap tracking: if the tool was requested but does not exist, log it as a capability gap.
+          if (params.status === "not_found") {
+            await storage.createAgentGapLog({
+              userId: safeUserId,
+              userPrompt: `Missing tool: ${name}`,
+              detectedIntent: "tool_not_found",
+              gapReason: params.errorMessage || `Tool "${name}" not found`,
+              suggestedCapability: name,
+              status: "pending",
+            });
+          }
+        } catch (err: any) {
+          console.warn("[ToolRegistry] Failed to persist tool_call_logs:", err?.message || err);
+        }
+      })();
+    };
+
+    const trackAndReturn = (result: ToolResult, meta?: { status?: string; providerId?: string }) => {
+      persistToolCallLog({
+        status: meta?.status || (result.success ? "success" : "error"),
+        providerId: meta?.providerId,
+        latencyMs: result.metrics?.durationMs,
+        errorCode: result.error?.code,
+        errorMessage: result.error?.message,
+        output: {
+          success: result.success,
+          output: result.output,
+          error: result.error ? { code: result.error.code, message: result.error.message } : undefined,
+          metrics: result.metrics,
+        },
+      });
+      return result;
+    };
+
     if (context.signal?.aborted) {
       addLog("info", "Tool execution aborted before start");
-      return {
+      return trackAndReturn({
         success: false,
         output: null,
         artifacts: [],
@@ -177,7 +272,7 @@ export class ToolRegistry {
           message: "Tool execution was cancelled",
           retryable: false,
         },
-      };
+      }, { status: "cancelled" });
     }
     
     if (!tool) {
@@ -185,22 +280,22 @@ export class ToolRegistry {
       if (sandboxToolRegistry.has(name)) {
         addLog("info", `Using sandbox tool: ${name}`);
         
-        // Check abort signal before sandbox execution
-        if (context.signal?.aborted) {
-          return {
-            success: false,
-            output: null,
-            artifacts: [],
-            previews: [],
-            logs,
-            metrics: { durationMs: Date.now() - startTime },
-            error: {
-              code: "ABORTED",
-              message: "Tool execution was cancelled before sandbox tool",
-              retryable: false,
-            },
-          };
-        }
+	        // Check abort signal before sandbox execution
+	        if (context.signal?.aborted) {
+	          return trackAndReturn({
+	            success: false,
+	            output: null,
+	            artifacts: [],
+	            previews: [],
+	            logs,
+	            metrics: { durationMs: Date.now() - startTime },
+	            error: {
+	              code: "ABORTED",
+	              message: "Tool execution was cancelled before sandbox tool",
+	              retryable: false,
+	            },
+	          }, { status: "cancelled", providerId: "sandbox" });
+	        }
         
         try {
           const sandboxResult = await sandboxToolRegistry.execute(name, input);
@@ -267,21 +362,21 @@ export class ToolRegistry {
             timestamp: new Date(),
           });
           
-          return {
-            success: sandboxResult.success,
-            output,
-            artifacts,
-            previews,
-            logs,
-            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
-            error: sandboxResult.error ? {
-              code: "SANDBOX_ERROR",
-              message: sandboxResult.error,
-              retryable: true,
-            } : undefined,
-          };
-        } catch (sandboxError: any) {
-          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
+	          return trackAndReturn({
+	            success: sandboxResult.success,
+	            output,
+	            artifacts,
+	            previews,
+	            logs,
+	            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
+	            error: sandboxResult.error ? {
+	              code: "SANDBOX_ERROR",
+	              message: sandboxResult.error,
+	              retryable: true,
+	            } : undefined,
+	          }, { providerId: "sandbox" });
+	        } catch (sandboxError: any) {
+	          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
           
           metricsCollector.record({
             toolName: name,
@@ -291,36 +386,36 @@ export class ToolRegistry {
             timestamp: new Date(),
           });
           
-          return {
-            success: false,
-            output: null,
-            artifacts: [],
-            previews: [],
-            logs,
-            metrics: { durationMs: Date.now() - startTime },
-            error: {
-              code: "SANDBOX_ERROR",
-              message: sandboxError.message,
-              retryable: false,
-            },
-          };
-        }
-      }
-      
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: "TOOL_NOT_FOUND",
-          message: `Tool "${name}" not found`,
-          retryable: false,
-        },
-      };
-    }
+	          return trackAndReturn({
+	            success: false,
+	            output: null,
+	            artifacts: [],
+	            previews: [],
+	            logs,
+	            metrics: { durationMs: Date.now() - startTime },
+	            error: {
+	              code: "SANDBOX_ERROR",
+	              message: sandboxError.message,
+	              retryable: false,
+	            },
+	          }, { providerId: "sandbox" });
+	        }
+	      }
+	      
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: "TOOL_NOT_FOUND",
+	          message: `Tool "${name}" not found`,
+	          retryable: false,
+	        },
+	      }, { status: "not_found" });
+	    }
 
     const policyContext: PolicyContext = {
       userId: context.userId,
@@ -331,22 +426,22 @@ export class ToolRegistry {
 
     const policyCheck = policyEngine.checkAccess(policyContext);
     
-    if (!policyCheck.allowed) {
-      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
-          message: policyCheck.reason || "Access denied",
-          retryable: false,
-        },
-      };
-    }
+	    if (!policyCheck.allowed) {
+	      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
+	          message: policyCheck.reason || "Access denied",
+	          retryable: false,
+	        },
+	      }, { status: "denied" });
+	    }
 
     try {
       let validatedInput: unknown;
@@ -356,23 +451,23 @@ export class ToolRegistry {
           input,
           `ToolRegistry.execute(${name}).input`
         );
-      } catch (validationError: any) {
-        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
-        return {
-          success: false,
-          output: null,
-          artifacts: [],
-          previews: [],
-          logs,
-          metrics: { durationMs: Date.now() - startTime },
-          error: {
-            code: "INVALID_INPUT",
-            message: `Invalid input: ${validationError.message}`,
-            retryable: false,
-            details: validationError.zodError?.errors,
-          },
-        };
-      }
+	      } catch (validationError: any) {
+	        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
+	        return trackAndReturn({
+	          success: false,
+	          output: null,
+	          artifacts: [],
+	          previews: [],
+	          logs,
+	          metrics: { durationMs: Date.now() - startTime },
+	          error: {
+	            code: "INVALID_INPUT",
+	            message: `Invalid input: ${validationError.message}`,
+	            retryable: false,
+	            details: validationError.zodError?.errors,
+	          },
+	        }, { status: "validation_error" });
+	      }
 
       addLog("info", `Executing tool: ${name}`);
 
@@ -408,19 +503,19 @@ export class ToolRegistry {
           addLog("warn", `Tool output validation failed: ${validatedOutput.error.message}`);
         }
         
-        return {
-          success: result.success,
-          output: result.output,
-          artifacts: result.artifacts || [],
-          previews: result.previews || [],
-          logs: [...(result.logs || []), ...logs],
-          metrics: {
-            durationMs: executionResult.metrics.totalDurationMs,
-            ...result.metrics,
-          },
-          error: result.error,
-        };
-      } else {
+	        return trackAndReturn({
+	          success: result.success,
+	          output: result.output,
+	          artifacts: result.artifacts || [],
+	          previews: result.previews || [],
+	          logs: [...(result.logs || []), ...logs],
+	          metrics: {
+	            durationMs: executionResult.metrics.totalDurationMs,
+	            ...result.metrics,
+	          },
+	          error: result.error,
+	        });
+	      } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
         
         metricsCollector.record({
@@ -431,23 +526,23 @@ export class ToolRegistry {
           timestamp: new Date(),
         });
         
-        return {
-          success: false,
-          output: null,
-          artifacts: [],
-          previews: [],
-          logs,
-          metrics: {
-            durationMs: executionResult.metrics.totalDurationMs,
-          },
-          error: {
-            code: executionResult.error?.code || "EXECUTION_ERROR",
-            message: executionResult.error?.message || "Unknown error",
-            retryable: executionResult.error?.retryable || false,
-          },
-        };
-      }
-    } catch (error: any) {
+	        return trackAndReturn({
+	          success: false,
+	          output: null,
+	          artifacts: [],
+	          previews: [],
+	          logs,
+	          metrics: {
+	            durationMs: executionResult.metrics.totalDurationMs,
+	          },
+	          error: {
+	            code: executionResult.error?.code || "EXECUTION_ERROR",
+	            message: executionResult.error?.message || "Unknown error",
+	            retryable: executionResult.error?.retryable || false,
+	          },
+	        });
+	      }
+	    } catch (error: any) {
       addLog("error", `Unexpected error: ${error.message}`, { stack: error.stack });
       
       metricsCollector.record({
@@ -458,21 +553,21 @@ export class ToolRegistry {
         timestamp: new Date(),
       });
       
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: "UNEXPECTED_ERROR",
-          message: error.message || "Unknown error",
-          retryable: false,
-        },
-      };
-    }
-  }
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: "UNEXPECTED_ERROR",
+	          message: error.message || "Unknown error",
+	          retryable: false,
+	        },
+	      });
+	    }
+	  }
 
   createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string): ToolArtifact {
     return createArtifact(type, name, data, mimeType);

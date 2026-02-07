@@ -5,9 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react";
 import { validateEmail, validatePassword, validatePasswordMatch, getPasswordStrength } from "@/lib/validation";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
+  const { settings: platformSettings, isLoading: platformLoading } = usePlatformSettings();
+  const allowRegistration = platformSettings.allow_registration;
+  const supportEmail = (platformSettings.support_email || "").trim();
   const [step, setStep] = useState<"social" | "email">("social");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,6 +54,48 @@ export default function SignupPage() {
     // Redirect to Replit Auth (supports Google, Apple, etc.)
     window.location.href = "/api/login";
   };
+
+  if (!platformLoading && !allowRegistration) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-md relative space-y-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute -top-2 -right-2"
+            onClick={() => setLocation("/welcome")}
+            data-testid="button-close-signup-disabled"
+          >
+            <X className="h-5 w-5" />
+          </Button>
+
+          <div className="text-center mb-2 mt-4">
+            <h1 className="text-2xl font-semibold mb-2">Registro deshabilitado</h1>
+            <p className="text-muted-foreground">
+              En este momento no se aceptan nuevas cuentas.
+            </p>
+            {supportEmail ? (
+              <p className="text-sm text-muted-foreground mt-2">
+                Soporte:{" "}
+                <a className="text-primary hover:underline" href={`mailto:${supportEmail}`}>
+                  {supportEmail}
+                </a>
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setLocation("/login")}>
+              Iniciar sesion
+            </Button>
+            <Button className="flex-1" onClick={() => setLocation("/welcome")}>
+              Volver
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (step === "email") {
     return (

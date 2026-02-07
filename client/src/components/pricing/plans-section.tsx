@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -7,13 +6,11 @@ import {
   CheckCircle2,
   Clock,
   Code,
-  Crown,
   FileText,
   Image,
   Infinity,
   Loader2,
   MessageSquare,
-  Rocket,
   Shield,
   Sparkles,
   Star,
@@ -41,8 +38,6 @@ type PlanCard = {
   badge?: string;
   highlight?: boolean;
   isCurrentPlan?: boolean;
-  /** optional custom button class, used for the Go plan */
-  buttonColor?: string;
   footerNote?: string;
   features: PlanFeature[];
 };
@@ -68,7 +63,6 @@ const PERSONAL_PLANS: PlanCard[] = [
     description: "Logra más con una IA más avanzada",
     buttonText: "Mejorar el plan a Go",
     buttonVariant: "default",
-    buttonColor: "bg-purple-600 hover:bg-purple-700",
     highlight: true,
     features: [
       { icon: Target, text: "Explora a fondo preguntas más complejas" },
@@ -85,7 +79,7 @@ const PERSONAL_PLANS: PlanCard[] = [
     price: 10,
     description: "Descubre toda la experiencia",
     buttonText: "Obtener Plus",
-    buttonVariant: "default",
+    buttonVariant: "outline",
     features: [
       { icon: Sparkles, text: "Resuelve problemas complejos" },
       { icon: MessageSquare, text: "Ten largas charlas en varias sesiones" },
@@ -103,7 +97,7 @@ const PERSONAL_PLANS: PlanCard[] = [
     price: 200,
     description: "Maximiza tu productividad",
     buttonText: "Obtener Pro",
-    buttonVariant: "default",
+    buttonVariant: "outline",
     features: [
       { icon: Star, text: "Domina tareas y temas avanzados" },
       { icon: Infinity, text: "Trabaja en proyectos grandes con mensajes ilimitados" },
@@ -155,6 +149,33 @@ const EMPRESA_PLANS: PlanCard[] = [
   },
 ];
 
+function PlanBadge({
+  label,
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement> & { label: string }) {
+  const normalized = label.trim().toUpperCase();
+  const isRecommended = normalized === "RECOMENDADO";
+  const isNew = normalized === "NUEVO";
+
+  return (
+    <span
+      {...props}
+      className={cn(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide",
+        isRecommended
+          ? "border-foreground/10 bg-foreground text-background"
+          : isNew
+            ? "border-[hsl(var(--future-b,195_95%_35%)/0.25)] bg-[hsl(var(--future-b,195_95%_35%)/0.08)] text-[hsl(var(--future-b,195_95%_35%))]"
+            : "border-border bg-background text-muted-foreground",
+        className,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function PricingPlansSection(props: {
   /** If true, shows tab switcher (Personal/Empresa). Defaults true. */
   showTabs?: boolean;
@@ -187,26 +208,32 @@ export function PricingPlansSection(props: {
     <div>
       {showTabs && (
         <div className="flex justify-center mt-4">
-          <div className="inline-flex bg-muted rounded-full p-1">
+          <div className="inline-flex items-center rounded-full border border-border bg-muted/60 p-1">
             <button
               className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                activeTab === "personal" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                activeTab === "personal"
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => setActiveTab("personal")}
               data-testid="tab-personal"
               type="button"
+              aria-pressed={activeTab === "personal"}
             >
               Personal
             </button>
             <button
               className={cn(
-                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors",
-                activeTab === "empresa" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+                "px-4 py-1.5 text-sm font-medium rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                activeTab === "empresa"
+                  ? "bg-background shadow-sm text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => setActiveTab("empresa")}
               data-testid="tab-empresa"
               type="button"
+              aria-pressed={activeTab === "empresa"}
             >
               Empresa
             </button>
@@ -217,7 +244,7 @@ export function PricingPlansSection(props: {
       <div className="p-6">
         <div
           className={cn(
-            "grid gap-4",
+            "grid gap-5",
             activeTab === "personal" ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-4" : "grid-cols-1 md:grid-cols-2",
           )}
         >
@@ -230,37 +257,35 @@ export function PricingPlansSection(props: {
               <div
                 key={`${activeTab}:${plan.name}`}
                 className={cn(
-                  // Pricing page uses a dark/gradient background even when the browser/theme is light.
-                  // Keep a subtle glass surface but force readable (light) text without making the card bright.
-                  "rounded-xl border p-6 flex flex-col backdrop-blur-sm bg-white/5 text-white border-white/10",
-                  plan.highlight && "border-primary/50 shadow-lg",
+                  "rounded-2xl border border-border p-6 flex flex-col bg-card text-card-foreground shadow-sm transition-shadow hover:shadow-md",
+                  plan.highlight &&
+                    "bg-muted/20 ring-1 ring-[hsl(var(--future-b,195_95%_35%)/0.18)] shadow-md",
                 )}
                 data-testid={`plan-card-${plan.name.toLowerCase()}`}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <h3 className="text-xl font-semibold">{plan.name}</h3>
+                  <h3 className={cn("text-lg font-semibold tracking-tight", plan.highlight && "text-future-gradient")}>
+                    {plan.name}
+                  </h3>
                   {plan.badge && (
-                    <Badge
-                      variant="secondary"
-                      className={cn(
-                        "text-xs",
-                        plan.badge === "NUEVO" && "bg-green-500/15 text-green-300",
-                        plan.badge === "RECOMENDADO" && "bg-primary/20 text-primary",
-                      )}
-                      data-testid="badge-secondary"
-                    >
-                      {plan.badge}
-                    </Badge>
+                    <PlanBadge label={plan.badge} data-testid={`badge-${plan.badge.toLowerCase()}`} />
                   )}
                 </div>
 
                 <div className="flex items-baseline gap-0.5 mb-2">
                   <span className="text-sm">$</span>
-                  <span className="text-4xl font-bold">{plan.price}</span>
-                  <span className="text-sm text-white/70">USD / mes</span>
+                  <span
+                    className={cn(
+                      "text-4xl font-semibold tracking-tight tabular-nums",
+                      plan.highlight && "text-future-gradient",
+                    )}
+                  >
+                    {plan.price}
+                  </span>
+                  <span className="text-sm text-muted-foreground">USD / mes</span>
                 </div>
 
-                <p className="text-sm text-white/70 mb-4 min-h-[2.5rem] md:min-h-[3rem]">
+                <p className="text-sm text-muted-foreground mb-4 min-h-[2.5rem] md:min-h-[3rem]">
                   {plan.description}
                 </p>
 
@@ -268,7 +293,9 @@ export function PricingPlansSection(props: {
                   variant={plan.buttonVariant}
                   className={cn(
                     "w-full mb-6",
-                    plan.buttonColor ? plan.buttonColor : plan.highlight && "bg-primary hover:bg-primary/90",
+                    plan.buttonVariant === "outline" && "hover:bg-accent/60",
+                    plan.buttonVariant === "default" && "hover:bg-primary/90 hover:border-primary/90",
+                    plan.highlight && plan.buttonVariant === "default" && "shadow-sm",
                   )}
                   disabled={isCurrent || isLoading}
                   onClick={() => !isCurrent && onSelectPlan(plan.name, activeTab)}
@@ -289,25 +316,31 @@ export function PricingPlansSection(props: {
                 <div className="space-y-3 flex-1">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start gap-2 text-sm">
-                      <feature.icon className="h-4 w-4 mt-0.5 text-white/60 flex-shrink-0" />
-                      <span className="text-white/85">{feature.text}</span>
+                      <feature.icon className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                      <span className="text-foreground/80 leading-snug">{feature.text}</span>
                     </div>
                   ))}
                 </div>
 
                 {plan.footerNote && (
-                  <p className="text-xs text-white/60 mt-4 pt-4 border-t border-white/10">
+                  <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
                     {plan.footerNote.includes("Obtener más información") ? (
                       <>
                         {plan.footerNote.replace("Obtener más información", "")}
-                        <button type="button" className="underline hover:text-foreground">
+                        <button
+                          type="button"
+                          className="underline underline-offset-4 decoration-muted-foreground/40 hover:text-foreground"
+                        >
                           Obtener más información
                         </button>
                       </>
                     ) : plan.footerNote.includes("Se aplican límites") ? (
                       <>
                         {plan.footerNote.replace("Se aplican límites", "")}
-                        <button type="button" className="underline hover:text-foreground">
+                        <button
+                          type="button"
+                          className="underline underline-offset-4 decoration-muted-foreground/40 hover:text-foreground"
+                        >
                           Se aplican límites
                         </button>
                       </>

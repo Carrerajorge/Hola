@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { Message } from "@/hooks/use-chats";
 import { AttachmentList, formatMessageTime, DocumentBlock } from "./MessageParts";
 
@@ -41,6 +42,8 @@ export const UserMessage = memo(function UserMessage({
     onOpenPreview,
     onReopenDocument
 }: UserMessageProps) {
+    const { settings: platformSettings } = usePlatformSettings();
+
     if (variant === "compact") {
         return (
             <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
@@ -99,7 +102,7 @@ export const UserMessage = memo(function UserMessage({
                     <div className="flex items-center justify-end gap-1.5 mt-2">
                         {message.timestamp && (
                             <span className="text-[10px] text-muted-foreground/60 mr-1">
-                                {formatMessageTime(message.timestamp)}
+                                {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
                             </span>
                         )}
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

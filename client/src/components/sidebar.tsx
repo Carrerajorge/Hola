@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -54,7 +55,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { Chat } from "@/hooks/use-chats";
 import { useWhatsAppWebStatus } from "@/hooks/use-whatsapp-web";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
-import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
+import { diffZonedDays, formatZonedDate, getZonedDateParts, normalizeTimeZone } from "@/lib/platformDateTime";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { NewChatButton } from "@/components/chat/NewChatButton";
@@ -65,6 +66,7 @@ import { ProjectMemoriesModal } from "@/components/project-memories-modal";
 import { ShareProjectModal } from "@/components/share-project-modal";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { useProjects, type Project } from "@/hooks/use-projects";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 interface SidebarProps {
   className?: string;
@@ -234,6 +236,12 @@ export function Sidebar({
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
+  const isAdmin = isAdminUser(user as any);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+  const appName = platformSettings.app_name || "ILIAGPT";
+  const appDescription = platformSettings.app_description || "AI Platform";
   const { pinnedGpts, unpinGpt } = usePinnedGpts();
   const { status: waStatus } = useWhatsAppWebStatus(true);
   const handleLogout = () => {
@@ -302,12 +310,24 @@ export function Sidebar({
   };
 
   const getChatDateLabel = (timestamp: number) => {
-    const date = new Date(timestamp);
-    if (isToday(date)) return "Today";
-    if (isYesterday(date)) return "Yesterday";
-    if (isThisWeek(date)) return "Previous 7 Days";
-    if (isThisYear(date)) return format(date, "MMM d");
-    return format(date, "yyyy");
+    const now = Date.now();
+    const diff = diffZonedDays(timestamp, now, platformTimeZone);
+
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    if (diff !== null && diff > 1 && diff < 7) return "Previous 7 Days";
+
+    const parts = getZonedDateParts(timestamp, platformTimeZone);
+    const nowParts = getZonedDateParts(now, platformTimeZone);
+    if (parts && nowParts && parts.year === nowParts.year) {
+      return formatZonedDate(timestamp, {
+        timeZone: platformTimeZone,
+        dateFormat: platformDateFormat,
+        includeYear: false,
+      });
+    }
+
+    return parts ? String(parts.year) : "";
   };
 
   // Group unfoldered chats
@@ -556,9 +576,16 @@ export function Sidebar({
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-none liquid-text-gradient">ILIAGPT</span>
-            <span className="text-[10px] text-muted-foreground">AI Platform</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm font-semibold leading-none liquid-text-gradient">{appName}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] text-muted-foreground truncate">{appDescription}</span>
+              {isAdmin && platformSettings.maintenance_mode ? (
+                <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium">
+                  Mantenimiento
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8 liquid-button" onClick={onToggle}>
@@ -1056,7 +1083,7 @@ export function Sidebar({
                 <div className="relative">
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
-                      {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                      {isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   {/* Online status indicator */}
@@ -1064,7 +1091,7 @@ export function Sidebar({
                 </div>
                 <div className="flex flex-1 flex-col overflow-hidden text-left">
                   <span className="truncate text-sm font-medium">
-                    {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
+                    {isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
                     {(() => {
@@ -1083,7 +1110,7 @@ export function Sidebar({
                   <User className="h-4 w-4" />
                   Perfil
                 </Button>
-                {user?.role === "admin" && (
+                {isAdmin && (
                   <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
                     <CreditCard className="h-4 w-4" />
                     Facturación
@@ -1110,7 +1137,7 @@ export function Sidebar({
                   Mis Memorias
                 </Button>
 
-                {user?.role === "admin" && (
+                {isAdmin && (
                   <>
                     <Separator className="my-1.5" />
                     <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">

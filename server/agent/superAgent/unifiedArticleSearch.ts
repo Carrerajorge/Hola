@@ -57,6 +57,9 @@ export interface SearchOptions {
     endYear?: number;
     sources?: ("scopus" | "pubmed" | "scielo" | "redalyc")[];
     language?: string;
+    // Scopus-only: filter by affiliation country (e.g. ["Spain","Mexico"]).
+    // Note: SciELO/Redalyc are already LatAm-focused; PubMed doesn't reliably expose affiliation country at search time.
+    affilCountries?: string[];
 }
 
 // =============================================================================
@@ -89,7 +92,8 @@ export async function searchAllSources(
         startYear,
         endYear,
         sources = ["scopus", "pubmed", "scielo", "redalyc"],
-        language
+        language,
+        affilCountries
     } = options;
 
     const startTime = Date.now();
@@ -125,7 +129,8 @@ export async function searchAllSources(
                     const scopusResult = await searchScopus(englishQuery, {
                         maxResults: maxPerSource,
                         startYear,
-                        endYear
+                        endYear,
+                        affilCountries
                     });
                     results.scopus = scopusResult.articles.map(a => convertScopusToUnified(a));
                     console.log(`[UnifiedSearch] Scopus: ${results.scopus.length} articles`);
@@ -277,6 +282,7 @@ function convertPubMedToUnified(article: PubMedArticle): UnifiedArticle {
 }
 
 function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
+    const country = scieloCollectionToCountry(article.collection);
     return {
         id: `scielo_${article.scielo_id}`,
         source: "scielo",
@@ -292,7 +298,7 @@ function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
         pages: article.pages,
         language: article.language,
         documentType: "Article",
-        country: "LatAm", // SciELO is LatAm focused
+        country, // Derived from SciELO collection when possible
         city: "n.d.",
         apaCitation: generateSciELOAPA7Citation(article)
     };
@@ -462,27 +468,115 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
  */
 export function generateExcelReport(articles: UnifiedArticle[]): Buffer {
     // Columns: Authors Title Year Journal Abstract Keywords Language Document Type DOI City of publication Country of study Scopus
-    const data = articles.map(a => ({
-        Authors: a.authors.join(", "),
-        Title: a.title,
-        Year: a.year,
-        Journal: a.journal,
-        Abstract: a.abstract,
-        Keywords: a.keywords.join(", "),
-        Language: a.language,
-        "Document Type": a.documentType || "Article",
-        DOI: a.doi || "",
-        "City of publication": a.city || "n.d.",
-        "Country of study": a.country || "n.d.",
-        Scopus: a.source === "scopus" ? "Yes" : "No", // Request asked for "Scopus" column
-        Source: a.source // Extra useful column
-    }));
+    const sorted = [...articles].sort((a, b) => {
+        const aKey = (a.authors[0] || "").toLowerCase();
+        const bKey = (b.authors[0] || "").toLowerCase();
+        if (aKey !== bKey) return aKey.localeCompare(bKey);
+        const at = (a.title || "").toLowerCase();
+        const bt = (b.title || "").toLowerCase();
+        if (at !== bt) return at.localeCompare(bt);
+        return (b.year || "").localeCompare(a.year || "");
+    });
 
-    const worksheet = XLSX.utils.json_to_sheet(data);
+    const headers = [
+        "Authors",
+        "Title",
+        "Year",
+        "Journal",
+        "Abstract",
+        "Keywords",
+        "Language",
+        "Document Type",
+        "DOI",
+        "City of publication",
+        "Country of study",
+        "Scopus",
+    ];
+
+    const rows = [
+        headers,
+        ...sorted.map(a => ([
+            a.authors?.join(", ") || "n.d.",
+            a.title || "n.d.",
+            a.year || "n.d.",
+            a.journal || "n.d.",
+            a.abstract || "n.d.",
+            (a.keywords || []).join(", ") || "n.d.",
+            normalizeLanguageLabel(a.language) || "n.d.",
+            a.documentType || "Article",
+            a.doi || "",
+            a.city || "n.d.",
+            a.country || "n.d.",
+            a.source === "scopus" ? "Yes" : "No",
+        ])),
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Articles");
 
     return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+}
+
+function scieloCollectionToCountry(collection: string): string {
+    const c = (collection || "").trim().toLowerCase();
+    if (!c) return "n.d.";
+
+    const map: Record<string, string> = {
+        // Common SciELO collections (3-letter codes in `in` / `collection`)
+        // NOTE: Some deployments use `scl` for Brazil.
+        arg: "Argentina",
+        bol: "Bolivia",
+        bra: "Brazil",
+        chl: "Chile",
+        col: "Colombia",
+        cri: "Costa Rica",
+        cub: "Cuba",
+        ecu: "Ecuador",
+        mex: "Mexico",
+        nic: "Nicaragua",
+        pan: "Panama",
+        per: "Peru",
+        pry: "Paraguay",
+        ury: "Uruguay",
+        ven: "Venezuela",
+        spa: "Spain",
+        esp: "Spain",
+        prt: "Portugal",
+        scl: "Brazil",
+        // Non-LatAm (still present in SciELO network)
+        zaf: "South Africa",
+        sza: "South Africa",
+    };
+
+    return map[c] || "LatAm";
+}
+
+function normalizeLanguageLabel(lang: string | undefined): string | undefined {
+    const l = (lang || "").trim();
+    if (!l) return undefined;
+    const lower = l.toLowerCase();
+
+    const map: Record<string, string> = {
+        es: "Spanish",
+        spa: "Spanish",
+        spanish: "Spanish",
+        español: "Spanish",
+        espanol: "Spanish",
+        pt: "Portuguese",
+        por: "Portuguese",
+        portuguese: "Portuguese",
+        português: "Portuguese",
+        portugues: "Portuguese",
+        en: "English",
+        eng: "English",
+        english: "English",
+        fr: "French",
+        fra: "French",
+        french: "French",
+    };
+
+    return map[lower] || l;
 }
 
 // =============================================================================

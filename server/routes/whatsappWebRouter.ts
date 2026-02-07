@@ -1,21 +1,15 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { whatsappWebManager } from '../integrations/whatsappWeb';
+import { whatsappWebSseHub } from '../integrations/whatsappWebSse';
 import { chunkText, isGroupJid, MemorySseResponse } from '../integrations/whatsappWebAutoReply';
 import type { AuthenticatedRequest } from '../types/express';
+import { getSecureUserId } from '../lib/anonUserHelper';
 import { storage } from '../storage';
 import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandler';
 
 function requireUserId(req: AuthenticatedRequest): string {
-  const user = req.user;
-  const session = req.session as any;
-  return (
-    user?.claims?.sub ||
-    user?.id ||
-    session?.authUserId ||
-    session?.anonUserId ||
-    ''
-  );
+  return getSecureUserId(req as any) || '';
 }
 
 function safeChatId(userId: string, remoteJid: string): string {
@@ -25,6 +19,18 @@ function safeChatId(userId: string, remoteJid: string): string {
 
 export function createWhatsAppWebRouter(): Router {
   const router = Router();
+
+  // Server-Sent Events for live WhatsApp status + mirrored messages.
+  router.get('/events', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    whatsappWebSseHub.subscribe(userId, res);
+
+    // Send initial status snapshot.
+    const status = whatsappWebManager.getStatus(userId);
+    whatsappWebSseHub.broadcast(userId, 'wa_status', { status });
+  });
 
   router.get('/status', async (req, res) => {
     const userId = requireUserId(req as any);
@@ -86,8 +92,9 @@ async function autoReplyFromWhatsApp(opts: {
   fromJid: string;
   chatId: string;
   inboundText: string;
+  chatTitle?: string;
 }): Promise<void> {
-  const { userId, fromJid, chatId } = opts;
+  const { userId, fromJid, chatId, chatTitle } = opts;
 
   // Safety: default to not replying to groups automatically.
   if (isGroupJid(fromJid)) {
@@ -128,7 +135,7 @@ async function autoReplyFromWhatsApp(opts: {
     : 'Listo.');
 
   // Persist assistant message to mirrored chat.
-  await storage.createChatMessage({
+  const savedAssistantMessage = await storage.createChatMessage({
     chatId,
     role: 'assistant',
     content: finalText,
@@ -139,6 +146,25 @@ async function autoReplyFromWhatsApp(opts: {
       to: fromJid,
     },
   } as any);
+  await storage.updateChat(chatId, { lastMessageAt: new Date() } as any);
+
+  whatsappWebSseHub.broadcast(userId, 'wa_message', {
+    chat: {
+      id: chatId,
+      title: chatTitle || `WhatsApp: ${fromJid}`,
+      channel: 'whatsapp_web',
+      updatedAt: new Date().toISOString(),
+    },
+    message: {
+      id: savedAssistantMessage.id,
+      role: savedAssistantMessage.role,
+      content: savedAssistantMessage.content,
+      createdAt: savedAssistantMessage.createdAt instanceof Date ? savedAssistantMessage.createdAt.toISOString() : savedAssistantMessage.createdAt,
+      requestId: savedAssistantMessage.requestId,
+      userMessageId: savedAssistantMessage.userMessageId,
+      metadata: savedAssistantMessage.metadata,
+    },
+  });
 
   // Send to WhatsApp (split if needed)
   for (const part of chunkText(finalText, 1400)) {
@@ -151,9 +177,9 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
   try {
     const chatId = safeChatId(userId, msg.from);
 
-    const existing = await storage.getChat(chatId);
-    if (!existing) {
-      await storage.createChat({
+    let chat = await storage.getChat(chatId);
+    if (!chat) {
+      chat = await storage.createChat({
         id: chatId,
         userId,
         title: `WhatsApp: ${msg.from}`,
@@ -163,7 +189,7 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
       } as any);
     }
 
-    await storage.createChatMessage({
+    const savedUserMessage = await storage.createChatMessage({
       chatId,
       role: 'user',
       content: msg.text,
@@ -179,16 +205,43 @@ whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: str
 
     await storage.updateChat(chatId, { lastMessageAt: new Date() } as any);
 
+    whatsappWebSseHub.broadcast(userId, 'wa_message', {
+      chat: {
+        id: chatId,
+        title: chat.title,
+        channel: 'whatsapp_web',
+        archived: chat.archived === 'true',
+        hidden: chat.hidden === 'true',
+        pinned: chat.pinned === 'true',
+        pinnedAt: chat.pinnedAt instanceof Date ? chat.pinnedAt.toISOString() : chat.pinnedAt,
+        updatedAt: new Date().toISOString(),
+      },
+      message: {
+        id: savedUserMessage.id,
+        role: savedUserMessage.role,
+        content: savedUserMessage.content,
+        createdAt: savedUserMessage.createdAt instanceof Date ? savedUserMessage.createdAt.toISOString() : savedUserMessage.createdAt,
+        requestId: savedUserMessage.requestId,
+        userMessageId: savedUserMessage.userMessageId,
+        metadata: savedUserMessage.metadata,
+      },
+    });
+
     // Fire-and-forget auto-reply.
     void autoReplyFromWhatsApp({
       userId,
       fromJid: msg.from,
       chatId,
       inboundText: msg.text,
+      chatTitle: chat.title,
     }).catch((e) => {
       console.error('[WhatsAppWebRouter] autoReply failed:', (e as any)?.message || e);
     });
   } catch (e) {
     console.error('[WhatsAppWebRouter] inbound_message persist failed:', (e as any)?.message || e);
   }
+});
+
+whatsappWebManager.on('status', (userId: string, status: any) => {
+  whatsappWebSseHub.broadcast(userId, 'wa_status', { status });
 });

@@ -8,6 +8,8 @@ import { Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight } from 'luc
 import { Toggle } from '@/components/ui/toggle';
 import { Separator } from '@/components/ui/separator';
 import * as XLSX from 'xlsx';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedDate, normalizeTimeZone, type PlatformDateFormat } from '@/lib/platformDateTime';
 import {
   buildPositionCache,
   getVisibleRange,
@@ -22,7 +24,11 @@ export interface SelectionRange {
   endCol: number;
 }
 
-function formatDisplayValue(value: string, numberFormat?: string): string {
+function formatDisplayValue(
+  value: string,
+  numberFormat: string | undefined,
+  opts?: { timeZone: string; dateFormat: PlatformDateFormat }
+): string {
   if (!numberFormat || numberFormat === 'General' || numberFormat === 'Texto') {
     return value;
   }
@@ -45,7 +51,10 @@ function formatDisplayValue(value: string, numberFormat?: string): string {
       try {
         const date = new Date(num);
         if (!isNaN(date.getTime())) {
-          return date.toLocaleDateString('es-ES');
+          return formatZonedDate(date, {
+            timeZone: opts?.timeZone || "UTC",
+            dateFormat: opts?.dateFormat || "YYYY-MM-DD",
+          });
         }
       } catch { }
       return value;
@@ -271,6 +280,8 @@ const VirtualCell = memo(function VirtualCell({
   onChange,
   onTypingChange,
   onKeyDown,
+  platformTimeZone,
+  platformDateFormat,
 }: {
   row: number;
   col: number;
@@ -291,6 +302,8 @@ const VirtualCell = memo(function VirtualCell({
   onChange: (value: string) => void;
   onTypingChange: (value: string) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
+  platformTimeZone: string;
+  platformDateFormat: PlatformDateFormat;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -302,7 +315,10 @@ const VirtualCell = memo(function VirtualCell({
   }, [isEditing]);
 
   const borderStyles = getBorderStyle(data.borders);
-  const displayValue = formatDisplayValue(data.value, data.numberFormat);
+  const displayValue = formatDisplayValue(data.value, data.numberFormat, {
+    timeZone: platformTimeZone,
+    dateFormat: platformDateFormat,
+  });
 
   const textDecorations: string[] = [];
   if (data.underline) textDecorations.push('underline');
@@ -546,6 +562,10 @@ export function VirtualizedExcel({
   onSelectionRangeChange,
 }: VirtualizedExcelProps) {
   void version;
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
+
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const scrollRAF = useRef<number | null>(null);
@@ -1582,25 +1602,27 @@ export function VirtualizedExcel({
                         const isRecentlyWritten = isRecentCell(row, col);
                         const conditionalStyle = getConditionalStyle(row, col, safeData.value);
 
-                        return (
-                          <VirtualCell
-                            key={`${row}:${col}`}
-                            row={row}
-                            col={col}
-                            data={safeData}
-                            isSelected={isSelected}
-                            isInRange={inRange}
-                            isEditing={isEditing}
-                            isStreaming={isStreamingCell}
-                            isRecentlyWritten={isRecentlyWritten}
-                            typingValue={isStreamingCell ? typingValue : undefined}
-                            editingValue={isEditing ? editingValue : undefined}
-                            style={{
-                              top: getRowTop(row),
-                              left: getColumnLeft(col),
-                              width: getColumnWidth(col),
-                              height: getRowHeight(row),
-                            }}
+	                        return (
+	                          <VirtualCell
+	                            key={`${row}:${col}`}
+	                            row={row}
+	                            col={col}
+	                            data={safeData}
+	                            isSelected={isSelected}
+	                            isInRange={inRange}
+	                            isEditing={isEditing}
+	                            isStreaming={isStreamingCell}
+	                            isRecentlyWritten={isRecentlyWritten}
+	                            typingValue={isStreamingCell ? typingValue : undefined}
+	                            editingValue={isEditing ? editingValue : undefined}
+	                            platformTimeZone={platformTimeZone}
+	                            platformDateFormat={platformDateFormat}
+	                            style={{
+	                              top: getRowTop(row),
+	                              left: getColumnLeft(col),
+	                              width: getColumnWidth(col),
+	                              height: getRowHeight(row),
+	                            }}
                             conditionalStyle={conditionalStyle}
                             onMouseDown={(e) => handleCellMouseDown(row, col, e)}
                             onMouseEnter={() => handleCellMouseEnter(row, col)}

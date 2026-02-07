@@ -36,6 +36,7 @@ import { FigmaBlock } from "@/components/figma-block";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SourcesPanel } from "@/components/sources-panel";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 
 import {
     parseDocumentBlocks,
@@ -114,6 +115,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 }: AssistantMessageProps) {
     const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
     const superAgentState = useSuperAgentRun(message.id);
+    const { settings: platformSettings } = usePlatformSettings();
 
     const parsedContent = useMemo(() => {
         if (!message.content || message.isThinking) {
@@ -514,7 +516,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                 <div className="flex items-center gap-3 mt-4">
                     {message.timestamp && (
                         <span className="text-[10px] text-muted-foreground/60">
-                            {formatMessageTime(message.timestamp)}
+                            {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
                         </span>
                     )}
                     <ActionToolbar

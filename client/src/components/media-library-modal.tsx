@@ -29,8 +29,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMediaLibrary, formatFileSize } from "@/hooks/use-media-library";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
 
 interface MediaLibraryModalProps {
   open: boolean;
@@ -250,6 +250,9 @@ export function MediaLibraryModal({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const containerRef = useRef<HTMLDivElement>(null);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const {
     items,
@@ -499,7 +502,7 @@ export function MediaLibraryModal({
                       <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {format(new Date(item.createdAt), "d MMM yyyy", { locale: es })}
+                          {formatZonedDate(item.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}
                         </span>
                         <span>{formatFileSize(item.size)}</span>
                         <span className="capitalize">{item.type}</span>

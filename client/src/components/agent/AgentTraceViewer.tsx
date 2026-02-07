@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAgentTraceStore, type TraceStep, type TraceRun } from '@/stores/agentTraceStore';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +19,8 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedTime, normalizeTimeZone } from '@/lib/platformDateTime';
 
 interface AgentTraceViewerProps {
   runId: string;
@@ -324,6 +326,8 @@ function ShellPanel({ step }: { step: TraceStep }) {
 
 function LogsPanel({ step }: { step: TraceStep }) {
   const [showRaw, setShowRaw] = useState(false);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
 
   return (
     <div className="space-y-2" data-testid={`logs-panel-${step.index}`}>
@@ -351,7 +355,7 @@ function LogsPanel({ step }: { step: TraceStep }) {
                 className="flex items-center gap-2 text-xs py-1 border-b border-border/50 last:border-0"
               >
                 <span className="text-muted-foreground w-16 shrink-0">
-                  {new Date(event.timestamp).toLocaleTimeString()}
+                  {formatZonedTime(event.timestamp, { timeZone: platformTimeZone, includeSeconds: true })}
                 </span>
                 <Badge variant="outline" className="text-[10px] shrink-0">
                   {event.event_type}
@@ -367,8 +371,6 @@ function LogsPanel({ step }: { step: TraceStep }) {
     </div>
   );
 }
-
-import { useState } from 'react';
 
 export function AgentTraceViewer({ runId, onClose }: AgentTraceViewerProps) {
   const { runs, subscribeToRun, unsubscribeFromRun, isConnected, connectionError } = useAgentTraceStore();

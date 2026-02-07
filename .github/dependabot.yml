@@ -16,8 +16,6 @@ updates:
     labels:
       - "dependencies"
       - "npm"
-    reviewers:
-      - "maintainers"
     groups:
       # Group React dependencies
       react:
@@ -46,6 +44,21 @@ updates:
       # Don't update major versions automatically
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  # Docker (Dockerfile, docker-compose*.yml)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(docker)"
+    labels:
+      - "dependencies"
+      - "docker"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

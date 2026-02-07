@@ -1,6 +1,6 @@
 import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, writeFile } from "fs/promises";
+import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -11,7 +11,18 @@ async function bumpBuiltSwCleanupVersion() {
   // This breaks the cache-cycle for users who still have an older Service Worker
   // that serves stale HTML/JS after deploys.
   const swCleanupPath = "dist/public/sw-cleanup.js";
-  const src = await readFile(swCleanupPath, "utf-8");
+  let src: string;
+  try {
+    src = await readFile(swCleanupPath, "utf-8");
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+
+    // Defensive: some build setups can race the public asset copy step.
+    // Ensure we have the cleanup script before we bump its version.
+    await mkdir("dist/public", { recursive: true });
+    await copyFile("client/public/sw-cleanup.js", swCleanupPath);
+    src = await readFile(swCleanupPath, "utf-8");
+  }
 
   const version = `build-${Date.now()}`;
   const next = src.replace(

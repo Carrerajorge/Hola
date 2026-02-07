@@ -90,7 +90,8 @@ import {
 import * as crypto from "crypto";
 import { randomUUID } from "crypto";
 import { db, dbRead } from "./db";
-import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
+import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzle-orm";
+import { knowledgeBaseService } from "./services/knowledgeBase";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -203,7 +204,7 @@ export interface IStorage {
   // Admin: AI Models
   createAiModel(model: InsertAiModel): Promise<AiModel>;
   getAiModels(): Promise<AiModel[]>;
-  getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }>;
+  getAiModelsFiltered(filters: { provider?: string; providers?: string[]; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }>;
   getAiModelById(id: string): Promise<AiModel | undefined>;
   getAiModelByModelId(modelId: string, provider: string): Promise<AiModel | undefined>;
   updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined>;
@@ -359,7 +360,7 @@ export interface IStorage {
   seedDefaultSettings(): Promise<void>;
   // Agent Gap Logs
   createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog>;
-  getAgentGapLogs(status?: string): Promise<AgentGapLog[]>;
+  getAgentGapLogs(status?: string, userId?: string): Promise<AgentGapLog[]>;
   updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined>;
   // Library Folder CRUD
   getLibraryFolders(userId: string): Promise<LibraryFolder[]>;
@@ -650,6 +651,18 @@ export class MemStorage implements IStorage {
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const [result] = await db.insert(chatMessages).values(message).returning();
     await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    if (message.role === "user" || message.role === "assistant") {
+      queueMicrotask(() => {
+        knowledgeBaseService.ingestChatMessage({
+          chatId: message.chatId,
+          messageId: result.id,
+          role: message.role,
+          content: message.content,
+        }).catch((error) => {
+          console.warn("[Knowledge] Failed to ingest chat message:", error?.message || error);
+        });
+      });
+    }
     return result;
   }
 
@@ -715,7 +728,7 @@ export class MemStorage implements IStorage {
   }
 
   async createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }> {
-    return db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       // Create chat first
       const [createdChat] = await tx.insert(chats).values(chat).returning();
 
@@ -735,6 +748,23 @@ export class MemStorage implements IStorage {
 
       return { chat: createdChat, messages: savedMessages };
     });
+    if (result.messages.length > 0) {
+      queueMicrotask(() => {
+        for (const msg of result.messages) {
+          if (msg.role === "user" || msg.role === "assistant") {
+            knowledgeBaseService.ingestChatMessage({
+              chatId: result.chat.id,
+              messageId: msg.id,
+              role: msg.role,
+              content: msg.content,
+            }).catch((error) => {
+              console.warn("[Knowledge] Failed to ingest chat message:", error?.message || error);
+            });
+          }
+        }
+      });
+    }
+    return result;
   }
 
   async saveDocumentToChat(chatId: string, document: { type: string; title: string; content: string }): Promise<ChatMessage> {
@@ -1171,13 +1201,22 @@ export class MemStorage implements IStorage {
   }
 
   async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }> {
-    const allUsers = await dbRead.select().from(users);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const total = allUsers.length;
-    const active = allUsers.filter(u => u.status === "active").length;
-    const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
-    return { total, active, newThisMonth };
+
+    const [row] = await dbRead
+      .select({
+        total: sql<number>`count(*)`,
+        active: sql<number>`count(*) filter (where ${users.status} = 'active')`,
+        newThisMonth: sql<number>`count(*) filter (where ${users.createdAt} >= ${monthStart})`,
+      })
+      .from(users);
+
+    return {
+      total: Number(row?.total ?? 0),
+      active: Number(row?.active ?? 0),
+      newThisMonth: Number(row?.newThisMonth ?? 0),
+    };
   }
 
   // Admin: AI Models
@@ -1190,12 +1229,18 @@ export class MemStorage implements IStorage {
     return dbRead.select().from(aiModels).orderBy(desc(aiModels.createdAt));
   }
 
-  async getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
-    const { provider, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
+  async getAiModelsFiltered(filters: { provider?: string; providers?: string[]; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
+    const { provider, providers, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
     const conditions = [];
 
     if (provider) {
       conditions.push(eq(aiModels.provider, provider.toLowerCase()));
+    }
+    if (providers && providers.length > 0) {
+      const normalizedProviders = providers.map((p) => String(p).toLowerCase().trim()).filter(Boolean);
+      if (normalizedProviders.length > 0) {
+        conditions.push(inArray(aiModels.provider, normalizedProviders));
+      }
     }
     if (type) {
       conditions.push(eq(aiModels.modelType, type));
@@ -1211,26 +1256,45 @@ export class MemStorage implements IStorage {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const allModels = await dbRead.select().from(aiModels).where(whereClause);
-    const total = allModels.length;
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    const offset = (safePage - 1) * safeLimit;
 
-    let sortedModels = [...allModels];
-    sortedModels.sort((a, b) => {
-      let aVal: any, bVal: any;
-      switch (sortBy) {
-        case "name": aVal = a.name; bVal = b.name; break;
-        case "provider": aVal = a.provider; bVal = b.provider; break;
-        case "modelType": aVal = a.modelType; bVal = b.modelType; break;
-        case "contextWindow": aVal = a.contextWindow || 0; bVal = b.contextWindow || 0; break;
-        case "createdAt": aVal = a.createdAt; bVal = b.createdAt; break;
-        default: aVal = a.name; bVal = b.name;
-      }
-      const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-      return sortOrder === "desc" ? -cmp : cmp;
-    });
+    const normalizedSortOrder = sortOrder === "desc" ? "desc" : "asc";
+    const normalizedSortBy = new Set(["name", "provider", "modelType", "contextWindow", "createdAt", "lastSyncAt"]).has(sortBy)
+      ? sortBy
+      : "name";
 
-    const offset = (page - 1) * limit;
-    const models = sortedModels.slice(offset, offset + limit);
+    let sortCol: any = aiModels.name;
+    switch (normalizedSortBy) {
+      case "provider": sortCol = aiModels.provider; break;
+      case "modelType": sortCol = aiModels.modelType; break;
+      case "contextWindow": sortCol = aiModels.contextWindow; break;
+      case "createdAt": sortCol = aiModels.createdAt; break;
+      case "lastSyncAt": sortCol = aiModels.lastSyncAt; break;
+      case "name":
+      default:
+        sortCol = aiModels.name;
+        break;
+    }
+
+    const orderExpr = normalizedSortOrder === "desc" ? desc(sortCol) : sortCol;
+
+    const countQuery = dbRead
+      .select({ count: sql<number>`count(*)::int` })
+      .from(aiModels);
+    if (whereClause) countQuery.where(whereClause);
+
+    const [countRow] = await countQuery;
+    const total = countRow?.count || 0;
+
+    const modelsQuery = dbRead.select().from(aiModels);
+    if (whereClause) modelsQuery.where(whereClause);
+
+    const models = await modelsQuery
+      .orderBy(orderExpr, aiModels.id)
+      .limit(safeLimit)
+      .offset(offset);
 
     return { models, total };
   }
@@ -1272,14 +1336,22 @@ export class MemStorage implements IStorage {
   }
 
   async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
-    const allPayments = await dbRead.select().from(payments);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const completedPayments = allPayments.filter(p => p.status === "completed");
-    const thisMonthPayments = completedPayments.filter(p => p.createdAt >= monthStart);
-    const total = completedPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const thisMonth = thisMonthPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    return { total: total.toFixed(2), thisMonth: thisMonth.toFixed(2), count: completedPayments.length };
+
+    const [row] = await dbRead
+      .select({
+        total: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed'), 0)`,
+        thisMonth: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed' and ${payments.createdAt} >= ${monthStart}), 0)`,
+        count: sql<number>`count(*) filter (where ${payments.status} = 'completed')`,
+      })
+      .from(payments);
+
+    return {
+      total: Number(row?.total ?? 0).toFixed(2),
+      thisMonth: Number(row?.thisMonth ?? 0).toFixed(2),
+      count: Number(row?.count ?? 0),
+    };
   }
 
   // Admin: Invoices
@@ -1357,8 +1429,12 @@ export class MemStorage implements IStorage {
   async getDashboardMetrics(): Promise<{ users: number; queries: number; revenue: string; uptime: number }> {
     const userStats = await this.getUserStats();
     const paymentStats = await this.getPaymentStats();
-    const allUsers = await dbRead.select().from(users);
-    const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
+    const [row] = await dbRead
+      .select({
+        totalQueries: sql<number>`coalesce(sum(${users.queryCount}), 0)`,
+      })
+      .from(users);
+    const totalQueries = Number(row?.totalQueries ?? 0);
     return {
       users: userStats.total,
       queries: totalQueries,
@@ -2322,12 +2398,9 @@ export class MemStorage implements IStorage {
   }
 
   async seedDefaultSettings(): Promise<void> {
-    const existing = await this.getSettingsConfig();
-    if (existing.length > 0) return;
-
     const defaultSettings: InsertSettingsConfig[] = [
-      { category: "general", key: "app_name", value: "Sira GPT", defaultValue: "Sira GPT", valueType: "string", description: "Application name" },
-      { category: "general", key: "app_description", value: "AI-powered chat assistant", defaultValue: "AI-powered chat assistant", valueType: "string", description: "Application description" },
+      { category: "general", key: "app_name", value: "ILIAGPT", defaultValue: "ILIAGPT", valueType: "string", description: "Application name" },
+      { category: "general", key: "app_description", value: "AI Platform", defaultValue: "AI Platform", valueType: "string", description: "Application description" },
       { category: "general", key: "support_email", value: "", defaultValue: "", valueType: "string", description: "Support email address" },
       { category: "general", key: "timezone_default", value: "UTC", defaultValue: "UTC", valueType: "string", description: "Default timezone" },
       { category: "general", key: "date_format", value: "YYYY-MM-DD", defaultValue: "YYYY-MM-DD", valueType: "string", description: "Date format" },
@@ -2338,7 +2411,7 @@ export class MemStorage implements IStorage {
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },
-      { category: "ai_models", key: "default_model", value: "grok-3-fast", defaultValue: "grok-3-fast", valueType: "string", description: "Default AI model" },
+      { category: "ai_models", key: "default_model", value: "grok-4-1-fast-non-reasoning", defaultValue: "grok-4-1-fast-non-reasoning", valueType: "string", description: "Default AI model" },
       { category: "ai_models", key: "max_tokens_per_request", value: 4096, defaultValue: 4096, valueType: "number", description: "Max tokens per request" },
       { category: "ai_models", key: "enable_streaming", value: true, defaultValue: true, valueType: "boolean", description: "Enable streaming responses" },
       { category: "security", key: "max_login_attempts", value: 5, defaultValue: 5, valueType: "number", description: "Max login attempts before lockout" },
@@ -2354,8 +2427,9 @@ export class MemStorage implements IStorage {
   }
 
   // Agent Gap Logs CRUD
-  private generateGapSignature(prompt: string, intent: string | null): string {
-    const normalized = (prompt.toLowerCase().trim() + '|' + (intent || 'unknown')).substring(0, 200);
+  private generateGapSignature(userId: string | null | undefined, prompt: string, intent: string | null): string {
+    // Include userId so frequency aggregation doesn't merge across different accounts.
+    const normalized = ((userId || 'unknown') + '|' + prompt.toLowerCase().trim() + '|' + (intent || 'unknown')).substring(0, 240);
     let hash = 0;
     for (let i = 0; i < normalized.length; i++) {
       const char = normalized.charCodeAt(i);
@@ -2366,14 +2440,15 @@ export class MemStorage implements IStorage {
   }
 
   async createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog> {
-    const signature = this.generateGapSignature(log.userPrompt, log.detectedIntent || null);
+    const signature = this.generateGapSignature(log.userId || null, log.userPrompt, log.detectedIntent || null);
 
     const existing = await db.select()
       .from(agentGapLogs)
       .where(
         and(
           eq(agentGapLogs.gapSignature, signature),
-          eq(agentGapLogs.status, 'pending')
+          eq(agentGapLogs.status, 'pending'),
+          log.userId ? eq(agentGapLogs.userId, log.userId) : isNull(agentGapLogs.userId)
         )
       )
       .limit(1);
@@ -2395,10 +2470,20 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getAgentGapLogs(status?: string): Promise<AgentGapLog[]> {
+  async getAgentGapLogs(status?: string, userId?: string): Promise<AgentGapLog[]> {
+    if (status && userId) {
+      return dbRead.select().from(agentGapLogs)
+        .where(and(eq(agentGapLogs.status, status), eq(agentGapLogs.userId, userId)))
+        .orderBy(desc(agentGapLogs.createdAt));
+    }
     if (status) {
       return dbRead.select().from(agentGapLogs)
         .where(eq(agentGapLogs.status, status))
+        .orderBy(desc(agentGapLogs.createdAt));
+    }
+    if (userId) {
+      return dbRead.select().from(agentGapLogs)
+        .where(eq(agentGapLogs.userId, userId))
         .orderBy(desc(agentGapLogs.createdAt));
     }
     return dbRead.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));
@@ -2632,6 +2717,18 @@ export class MemStorage implements IStorage {
   // Conversation Documents - Persistent document context
   async createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument> {
     const [result] = await db.insert(conversationDocuments).values(doc).returning();
+    if (doc.extractedText && doc.extractedText.trim().length > 0) {
+      queueMicrotask(() => {
+        knowledgeBaseService.ingestConversationDocument({
+          chatId: doc.chatId,
+          documentId: result.id,
+          fileName: doc.fileName,
+          content: doc.extractedText || "",
+        }).catch((error) => {
+          console.warn("[Knowledge] Failed to ingest conversation document:", error?.message || error);
+        });
+      });
+    }
     return result;
   }
 

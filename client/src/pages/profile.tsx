@@ -27,10 +27,12 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { getPlanLabel } from "@/lib/planUtils";
 import { cn } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin";
 
 export default function ProfilePage() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const isAdmin = isAdminUser(user as any);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [emailUpdates, setEmailUpdates] = useState(false);
 
@@ -48,7 +50,7 @@ export default function ProfilePage() {
 
   const quickActions = [
     { label: "Privacidad y seguridad", icon: Shield, path: "/privacy" },
-    ...(user?.role === "admin" ? [{ label: "Facturación", icon: Calendar, path: "/billing" }] : []),
+    ...(isAdmin ? [{ label: "Facturación", icon: Calendar, path: "/billing" }] : []),
     { label: "Configuración", icon: Globe, path: "/workspace-settings" },
   ];
 
@@ -92,7 +94,7 @@ export default function ProfilePage() {
               <div className="text-center sm:text-left flex-1">
                 <div className="flex items-center justify-center sm:justify-start gap-2">
                   <h2 className="text-2xl font-bold">{displayName}</h2>
-                  {user?.role === "admin" && (
+                  {isAdmin && (
                     <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
                       Admin
                     </Badge>

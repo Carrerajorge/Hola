@@ -77,6 +77,7 @@ import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./l
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
+import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
@@ -1257,13 +1258,13 @@ export async function registerRoutes(
       "Expires": "0"
     });
     try {
-      const allModels = await storage.getAiModels();
-      const models = allModels
-        .filter((m: any) => m.isEnabled === "true")
-        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-        .map((m: any) => ({
-          id: m.id,
-          name: m.name,
+	      const allModels = await storage.getAiModels();
+	      const models = allModels
+	        .filter((m: any) => isModelEligibleForPublic(m))
+	        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+	        .map((m: any) => ({
+	          id: m.id,
+	          name: m.name,
           provider: m.provider,
           modelId: m.modelId,
           description: m.description,

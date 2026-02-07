@@ -76,8 +76,6 @@ import {
   type TraceProgress,
 } from "@/stores/agentTraceStore";
 import { useAgentStore } from "@/stores/agent-store";
-import { format, formatDistanceToNow } from "date-fns";
-import { es } from "date-fns/locale";
 
 export function useActivityFeed(messageId?: string | null) {
   const { subscribeToRun, unsubscribeFromRun, runs, activeRunId, isConnected } = useAgentTraceStore();

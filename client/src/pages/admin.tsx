@@ -78,9 +78,12 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
+import AgenticEngineDashboard from "@/components/admin/AgenticEngineDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
@@ -1508,35 +1511,70 @@ function ConversationsSection() {
 
 function AIModelsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [health, setHealth] = useState<any>(null);
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [modelsScope, setModelsScope] = useState<"supported" | "integrated" | "all">("integrated");
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["/api/admin/models/stats"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/models/stats", { credentials: "include" });
-      return res.json();
+  const readApiError = async (res: Response): Promise<string> => {
+    const raw = await res.text().catch(() => "");
+    if (!raw) return `${res.status} ${res.statusText}`.trim();
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.error || parsed?.message || raw;
+    } catch {
+      return raw;
     }
+  };
+
+  const { data: stats, isLoading: statsLoading, isError: statsIsError, error: statsError } = useQuery({
+    queryKey: ["/api/admin/models/stats", modelsScope],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/models/stats?scope=${modelsScope}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    retry: false,
   });
 
-  const { data: modelsData, isLoading, refetch } = useQuery({
-    queryKey: ["/api/admin/models/filtered", page, debouncedSearch, providerFilter, typeFilter, statusFilter],
+  const { data: modelsData, isLoading, refetch, isError: modelsIsError, error: modelsError } = useQuery({
+    queryKey: ["/api/admin/models/filtered", modelsScope, page, debouncedSearch, providerFilter, typeFilter, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "15" });
       if (debouncedSearch) params.append("search", debouncedSearch);
       if (providerFilter !== "all") params.append("provider", providerFilter);
       if (typeFilter !== "all") params.append("type", typeFilter);
       if (statusFilter !== "all") params.append("status", statusFilter);
+      params.append("scope", modelsScope);
       const res = await fetch(`/api/admin/models/filtered?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
-    }
+    },
+    retry: false,
   });
+
+  const { data: providersData } = useQuery({
+    queryKey: ["/api/admin/models/providers/list", modelsScope],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/models/providers/list?scope=${modelsScope}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const providers = Array.isArray(providersData) ? providersData : [];
 
   const handleSearch = (value: string) => {
     setSearch(value);
@@ -1550,12 +1588,45 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      const res = await fetch(`/api/admin/models/sync?scope=${modelsScope}`, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+
+      const payload = await res.json().catch(() => null);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+
+      const summary = payload?.summary;
+      const summaryText = summary && typeof summary.totalAdded === "number" && typeof summary.totalUpdated === "number"
+        ? `+${summary.totalAdded} nuevos, ${summary.totalUpdated} actualizados`
+        : "Sincronizacion completada";
+      toast.success(`Modelos sincronizados: ${summaryText}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Sincronizacion fallida: ${error.message}` : "Sincronizacion fallida");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const checkHealth = async () => {
+    setIsCheckingHealth(true);
+    try {
+      const res = await fetch(`/api/admin/models/health`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      const payload = await res.json();
+      setHealth(payload);
+      const status = payload?.status || "unknown";
+      toast.success(`Health check: ${status}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Health check fallido: ${error.message}` : "Health check fallido");
+    } finally {
+      setIsCheckingHealth(false);
     }
   };
 
@@ -1567,26 +1638,136 @@ function AIModelsSection() {
         body: JSON.stringify(updates),
         credentials: "include"
       });
-      if (!res.ok) throw new Error("Failed to update model");
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
       return res.json();
     },
+    onMutate: async ({ id, updates }: { id: string; updates: any }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      // Optimistic: update model row so switches feel instant.
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        const applied = { ...updates };
+        if (typeof updates?.status === "string" && updates.status !== "active") {
+          applied.isEnabled = "false";
+          applied.enabledAt = null;
+          applied.enabledByAdminId = null;
+        }
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, ...applied } : m)),
+        };
+      });
+
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
     }
+  });
+
+  const toggleEnabledMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await fetch(`/api/admin/models/${id}/toggle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isEnabled: enabled }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      return res.json();
+    },
+    onMutate: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, isEnabled: enabled ? "true" : "false" } : m)),
+        };
+      });
+
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
+    }
+  });
+
+  const testModelMutation = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const res = await fetch(`/api/admin/models/${id}/test`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    onMutate: ({ id }: { id: string }) => {
+      setTestingModelId(id);
+    },
+    onSettled: () => {
+      setTestingModelId(null);
+    },
+    onSuccess: (payload: any) => {
+      if (payload?.success) {
+        const latency = typeof payload.latency === "number" ? `${payload.latency}ms` : "";
+        toast.success(`Test OK: ${payload.model || "modelo"} ${latency}`.trim());
+      } else {
+        toast.error(payload?.error ? `Test fallido: ${payload.error}` : "Test fallido");
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `Test fallido: ${error.message}` : "Test fallido");
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
-    }
+      toast.success("Modelo eliminado");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `No se pudo eliminar: ${error.message}` : "No se pudo eliminar");
+    },
   });
 
   const providerColors: Record<string, string> = {
@@ -1641,26 +1822,47 @@ function AIModelsSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium" data-testid="text-ai-models-title">AI Models</h2>
-        <Button
-          size="sm"
-          onClick={syncAll}
-          disabled={isSyncing}
-          className="gap-2"
-          data-testid="button-sync-all"
-        >
-          {isSyncing ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Sincronizando...
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-4 w-4" />
-              Sincronizar Todo
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={checkHealth}
+            disabled={isCheckingHealth}
+            className="gap-2"
+            data-testid="button-models-health"
+          >
+            {isCheckingHealth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+            Salud
+          </Button>
+          <Button
+            size="sm"
+            onClick={syncAll}
+            disabled={isSyncing}
+            className="gap-2"
+            data-testid="button-sync-all"
+          >
+            {isSyncing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Sincronizar Todo
+              </>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {(statsIsError || modelsIsError) && (
+        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive" data-testid="banner-models-error">
+          {statsIsError ? `Estadisticas: ${(statsError as any)?.message || "Error"}` : ""}
+          {statsIsError && modelsIsError ? " | " : ""}
+          {modelsIsError ? `Modelos: ${(modelsError as any)?.message || "Error"}` : ""}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsLoading ? (
@@ -1682,24 +1884,24 @@ function AIModelsSection() {
               <p className="text-2xl font-bold" data-testid="text-total-models-count">{stats?.total || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-active-models">
+            <div className="rounded-lg border p-4" data-testid="card-enabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-green-500/10">
                   <CheckCircle className="h-4 w-4 text-green-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Activos</span>
+                <span className="text-sm font-medium text-muted-foreground">Habilitados</span>
               </div>
-              <p className="text-2xl font-bold text-green-600" data-testid="text-active-models-count">{stats?.active || 0}</p>
+              <p className="text-2xl font-bold text-green-600" data-testid="text-enabled-models-count">{stats?.enabled || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-inactive-models">
+            <div className="rounded-lg border p-4" data-testid="card-disabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-red-500/10">
                   <X className="h-4 w-4 text-red-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Inactivos</span>
+                <span className="text-sm font-medium text-muted-foreground">Deshabilitados</span>
               </div>
-              <p className="text-2xl font-bold text-red-600" data-testid="text-inactive-models-count">{stats?.inactive || 0}</p>
+              <p className="text-2xl font-bold text-red-600" data-testid="text-disabled-models-count">{stats?.disabled || 0}</p>
             </div>
 
             <div className="rounded-lg border p-4" data-testid="card-providers">
@@ -1715,6 +1917,36 @@ function AIModelsSection() {
         )}
       </div>
 
+      {!statsLoading && (
+        <div className="text-xs text-muted-foreground" data-testid="text-models-status-summary">
+          Status: {stats?.active || 0} activos / {stats?.inactive || 0} inactivos
+        </div>
+      )}
+
+      {health && (
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border bg-muted/30 text-xs" data-testid="card-models-health">
+          <Badge variant="outline" className="text-xs">{String(health.status || "unknown")}</Badge>
+          {Object.entries(health.providers || {}).map(([id, p]: any) => (
+            <div key={id} className="flex items-center gap-2">
+              <span className="font-medium">{id}</span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs border",
+                  p?.available ? "bg-green-500/10 text-green-600 border-green-500/30" : p?.hasApiKey ? "bg-red-500/10 text-red-600 border-red-500/30" : "bg-gray-500/10 text-gray-600 border-gray-500/30"
+                )}
+              >
+                {p?.available ? `OK${typeof p?.latencyMs === "number" ? ` ${p.latencyMs}ms` : ""}` : p?.hasApiKey ? "DOWN" : "NO KEY"}
+              </Badge>
+              {p?.error && <span className="text-muted-foreground truncate max-w-[240px]" title={p.error}>{p.error}</span>}
+            </div>
+          ))}
+          <span className="ml-auto text-muted-foreground">
+            {health.checkedAt ? formatZonedDateTime(health.checkedAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : ""}
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1727,18 +1959,34 @@ function AIModelsSection() {
           />
         </div>
 
+        <Select
+          value={modelsScope}
+          onValueChange={(v) => {
+            const scope = v as "supported" | "integrated" | "all";
+            setModelsScope(scope);
+            setProviderFilter("all");
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[160px] h-9" data-testid="select-models-scope">
+            <SelectValue placeholder="Scope" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="integrated">Integrados</SelectItem>
+            <SelectItem value="supported">Soportados</SelectItem>
+            <SelectItem value="all">Todos</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select value={providerFilter} onValueChange={(v) => { setProviderFilter(v); setPage(1); }}>
           <SelectTrigger className="w-[140px] h-9" data-testid="select-provider-filter">
             <SelectValue placeholder="Proveedor" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="anthropic">Anthropic</SelectItem>
-            <SelectItem value="google">Google</SelectItem>
-            <SelectItem value="xai">xAI</SelectItem>
-            <SelectItem value="openai">OpenAI</SelectItem>
-            <SelectItem value="openrouter">OpenRouter</SelectItem>
-            <SelectItem value="perplexity">Perplexity</SelectItem>
+            {providers.map((p: any) => (
+              <SelectItem key={p.id} value={p.id}>{p.name || p.id}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -1803,13 +2051,22 @@ function AIModelsSection() {
               ) : models.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                    <div className="flex flex-col items-center gap-2">
-                      <Bot className="h-8 w-8 text-muted-foreground/50" />
-                      <p>No hay modelos {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all" ? "que coincidan con los filtros" : "configurados"}</p>
-                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
-                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Sincronizar modelos
+	                      <div className="flex flex-col items-center gap-2">
+	                      <Bot className="h-8 w-8 text-muted-foreground/50" />
+	                      <p>
+	                        No hay modelos{" "}
+	                        {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all"
+	                          ? "que coincidan con los filtros"
+	                          : modelsScope === "integrated"
+	                            ? "integrados (configura API keys)"
+	                            : modelsScope === "supported"
+	                              ? "soportados"
+	                              : "configurados"}
+	                      </p>
+	                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
+	                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
+	                          <RefreshCw className="h-4 w-4 mr-2" />
+	                          Sincronizar modelos
                         </Button>
                       )}
                     </div>
@@ -1825,21 +2082,41 @@ function AIModelsSection() {
                       </div>
                     </td>
                     <td className="p-3">
-                      <Badge
-                        variant="outline"
-                        className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
-                        data-testid={`badge-provider-${model.id}`}
-                      >
-                        {model.provider}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
+                          data-testid={`badge-provider-${model.id}`}
+                        >
+                          {model.provider}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-xs border",
+                            model.isSupported === false ? "bg-red-500/10 text-red-600 border-red-500/30" :
+                            model.isIntegrated === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            model.isChatCapable === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            "bg-green-500/10 text-green-600 border-green-500/30"
+                          )}
+                          title={
+                            model.isSupported === false ? "Proveedor no soportado por el runtime" :
+                            model.isIntegrated === false ? "API key no configurada para este proveedor" :
+                            model.isChatCapable === false ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                            "Integrado"
+                          }
+                        >
+                          {model.isSupported === false ? "UNSUPPORTED" : model.isIntegrated === false ? "NO KEY" : model.isChatCapable === false ? "NO CHAT" : "OK"}
+                        </Badge>
+                      </div>
                     </td>
                     <td className="p-3">
                       <Badge
                         variant="secondary"
-                        className={cn("text-xs", typeColors[model.type] || "bg-gray-500/10 text-gray-600")}
+                        className={cn("text-xs", typeColors[model.modelType || model.type] || "bg-gray-500/10 text-gray-600")}
                         data-testid={`badge-type-${model.id}`}
                       >
-                        {model.type || "TEXT"}
+                        {model.modelType || model.type || "TEXT"}
                       </Badge>
                     </td>
                     <td className="p-3 text-muted-foreground">
@@ -1859,25 +2136,50 @@ function AIModelsSection() {
                     <td className="p-3">
                       <Switch
                         checked={model.isEnabled === "true"}
-                        onCheckedChange={(checked) => updateMutation.mutate({
-                          id: model.id,
-                          updates: { isEnabled: checked ? "true" : "false" }
-                        })}
-                        disabled={updateMutation.isPending}
+                        onCheckedChange={(checked) => toggleEnabledMutation.mutate({ id: model.id, enabled: checked })}
+                        disabled={
+                          toggleEnabledMutation.isPending ||
+                          (model.isEnabled !== "true" && (model.isIntegrated !== true || model.isChatCapable === false || model.status !== "active"))
+                        }
                         className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
                         data-testid={`switch-enabled-${model.id}`}
+                        title={
+                          model.isEnabled !== "true" && model.status !== "active" ? "Activa el modelo primero (Status)" :
+                          model.isIntegrated === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                          model.isChatCapable === false && model.isEnabled !== "true" ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                          undefined
+                        }
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">
-                      {model.lastSyncAt ? format(new Date(model.lastSyncAt), "dd/MM/yyyy HH:mm") : "Never"}
+                      {model.lastSyncAt ? formatZonedDateTime(model.lastSyncAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "Never"}
                     </td>
                     <td className="p-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => testModelMutation.mutate({ id: model.id })}
+                          disabled={testModelMutation.isPending || model.isIntegrated !== true || model.isChatCapable !== true}
+                          data-testid={`button-test-model-${model.id}`}
+                          title={
+                            model.isIntegrated !== true ? "Configura API key para testear" :
+                            model.isChatCapable !== true ? "Modelo no compatible con chat" :
+                            "Testear modelo"
+                          }
+                        >
+                          {testModelMutation.isPending && testingModelId === model.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          onClick={() => deleteMutation.mutate(model.id)}
+                          onClick={() => {
+                            const ok = window.confirm(`Eliminar modelo '${model.name}' (${model.modelId})?`);
+                            if (!ok) return;
+                            deleteMutation.mutate(model.id);
+                          }}
                           disabled={deleteMutation.isPending}
                           data-testid={`button-delete-model-${model.id}`}
                         >
@@ -5070,7 +5372,7 @@ export default function AdminPage() {
       case "settings":
         return <SettingsSection />;
       case "agentic":
-        return <AgenticEngineSection />;
+        return <AgenticEngineDashboard />;
       case "excel":
         return <ExcelManagerSection />;
       default:

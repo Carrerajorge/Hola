@@ -54,8 +54,11 @@ const MIME_ALLOWLIST: string[] = [
   'application/rtf',
   'image/png',
   'image/jpeg',
+  'image/jpg',
   'image/gif',
   'image/webp',
+  'image/bmp',
+  'image/tiff',
   'image/svg+xml',
   'text/markdown',
   'application/zip',
@@ -65,7 +68,7 @@ const MIME_ALLOWLIST_PATTERNS: RegExp[] = [
   /^application\/vnd\.openxmlformats-officedocument\..*/,
   /^application\/vnd\.oasis\.opendocument\..*/,
   /^text\/.*/,
-  /^image\/(png|jpeg|gif|webp|svg\+xml)$/,
+  /^image\/(png|jpeg|jpg|gif|webp|bmp|tiff|svg\+xml)$/,
 ];
 
 const MIME_DENYLIST: string[] = [
@@ -111,7 +114,23 @@ const MAGIC_SIGNATURES: MagicSignature[] = [
   { bytes: [0xFF, 0xD8, 0xFF], mime: 'image/jpeg', extension: 'jpg' },
   { bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61], mime: 'image/gif', extension: 'gif' },
   { bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], mime: 'image/gif', extension: 'gif' },
-  { bytes: [0x52, 0x49, 0x46, 0x46], mime: 'application/octet-stream', extension: 'webp' },
+  {
+    bytes: [
+      0x52, 0x49, 0x46, 0x46, // RIFF
+      0x00, 0x00, 0x00, 0x00, // size (ignored)
+      0x57, 0x45, 0x42, 0x50, // WEBP
+    ],
+    mask: [
+      0xFF, 0xFF, 0xFF, 0xFF,
+      0x00, 0x00, 0x00, 0x00,
+      0xFF, 0xFF, 0xFF, 0xFF,
+    ],
+    mime: 'image/webp',
+    extension: 'webp',
+  },
+  { bytes: [0x42, 0x4D], mime: 'image/bmp', extension: 'bmp' }, // BMP
+  { bytes: [0x49, 0x49, 0x2A, 0x00], mime: 'image/tiff', extension: 'tiff' }, // TIFF (LE)
+  { bytes: [0x4D, 0x4D, 0x00, 0x2A], mime: 'image/tiff', extension: 'tiff' }, // TIFF (BE)
   { bytes: [0x00, 0x00, 0x00], mime: 'video/mp4', extension: 'mp4', offset: 4 },
   { bytes: [0x1A, 0x45, 0xDF, 0xA3], mime: 'video/webm', extension: 'webm' },
   { bytes: [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], mime: 'application/x-cfb', extension: 'doc' },
@@ -141,6 +160,9 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   'jpeg': 'image/jpeg',
   'gif': 'image/gif',
   'webp': 'image/webp',
+  'bmp': 'image/bmp',
+  'tif': 'image/tiff',
+  'tiff': 'image/tiff',
   'svg': 'image/svg+xml',
   'exe': 'application/x-msdownload',
   'sh': 'application/x-sh',
