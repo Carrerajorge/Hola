@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, dbRead } from "../db";
 import { Logger } from "../lib/logger";
 import { storage } from "../storage";
 import { chatService } from "./ChatServiceV2";
 import { usageQuotaService } from "./usageQuotaService";
+import { knowledgeBaseService } from "./knowledgeBase";
 import { chatMessages, chatSchedules, chats } from "../../shared/schema";
 import { computeNextRunAt, type ChatScheduleType } from "./chatScheduleUtils";
 
@@ -231,7 +232,10 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
 
   const userReqId = `schedule:${schedule.id}:${plannedAtEpochMs}:user`;
 
-  await db.transaction(async (tx) => {
+  const userCreatedAt = new Date();
+  const assistantCreatedAt = new Date(userCreatedAt.getTime() + 1);
+
+  const inserted = await db.transaction(async (tx) => {
     const [userMsg] = await tx
       .insert(chatMessages)
       .values({
@@ -241,6 +245,7 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
         status: "done",
         requestId: userReqId,
         userMessageId: null,
+        createdAt: userCreatedAt,
         metadata: {
           scheduleId: schedule.id,
           scheduleName: schedule.name,
@@ -250,7 +255,7 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
       })
       .returning();
 
-    await tx
+    const [assistantMsg] = await tx
       .insert(chatMessages)
       .values({
         chatId: schedule.chatId,
@@ -260,6 +265,7 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
         requestId: assistantReqId,
         userMessageId: userMsg?.id || null,
         sources: (response as any).sources || null,
+        createdAt: assistantCreatedAt,
         metadata: {
           scheduleId: schedule.id,
           scheduleName: schedule.name,
@@ -274,8 +280,50 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
       })
       .returning();
 
-    await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, schedule.chatId));
+    await tx
+      .update(chats)
+      .set({
+        updatedAt: new Date(),
+        lastMessageAt: assistantCreatedAt,
+        messageCount: sql<number>`coalesce(${chats.messageCount}, 0) + 2`,
+      })
+      .where(eq(chats.id, schedule.chatId));
+
+    return {
+      userMsgId: userMsg?.id || null,
+      assistantMsgId: assistantMsg?.id || null,
+    };
   });
+
+  // Keep RAG/search features consistent: scheduled messages should be ingested like normal chat traffic.
+  if (inserted.userMsgId) {
+    queueMicrotask(() => {
+      knowledgeBaseService
+        .ingestChatMessage({
+          chatId: schedule.chatId,
+          messageId: inserted.userMsgId,
+          role: "user",
+          content: prompt,
+        })
+        .catch((error) => {
+          Logger.error(`[Knowledge] Failed to ingest scheduled user msg scheduleId=${schedule.id}: ${error?.message || error}`);
+        });
+    });
+  }
+  if (inserted.assistantMsgId) {
+    queueMicrotask(() => {
+      knowledgeBaseService
+        .ingestChatMessage({
+          chatId: schedule.chatId,
+          messageId: inserted.assistantMsgId,
+          role: "assistant",
+          content: assistantContent,
+        })
+        .catch((error) => {
+          Logger.error(`[Knowledge] Failed to ingest scheduled assistant msg scheduleId=${schedule.id}: ${error?.message || error}`);
+        });
+    });
+  }
 
   await advanceScheduleAfterSuccess(schedule, new Date());
 }

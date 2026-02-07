@@ -35,11 +35,13 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
             const newUserId = crypto.randomUUID();
             const [newUser] = await db.insert(users).values({
                 id: newUserId,
-                orgId: "default",
+                // Each user starts with their own workspace by default.
+                // If they were invited to an existing workspace, we'll swap org/role on first login.
+                orgId: newUserId,
                 email: email.toLowerCase(),
                 firstName: email.split("@")[0],
                 lastName: "",
-                role: "user",
+                role: "team_admin",
                 status: "pending", // Will be activated on first magic link verification
                 emailVerified: "false",
             }).returning();

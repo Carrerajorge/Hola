@@ -93,8 +93,16 @@ export function sanitizePermissions(input: string[]): Permission[] {
   return Array.from(unique);
 }
 
+export const WORKSPACE_BUILTIN_ROLE_KEYS = ["team_member", "billing_manager", "team_admin"] as const;
+const WORKSPACE_BUILTIN_ROLE_SET = new Set<string>(WORKSPACE_BUILTIN_ROLE_KEYS);
+
+export function isWorkspaceBuiltinRole(roleKeyRaw: string): boolean {
+  const roleKey = normalizeRoleKey(roleKeyRaw);
+  return WORKSPACE_BUILTIN_ROLE_SET.has(roleKey);
+}
+
 export async function listRolesForOrg(orgId: string): Promise<WorkspaceRoleSummary[]> {
-  const builtins: WorkspaceRoleSummary[] = BUILTIN_ROLE_KEYS.map((key) => {
+  const builtins: WorkspaceRoleSummary[] = WORKSPACE_BUILTIN_ROLE_KEYS.map((key) => {
     const role = BUILTIN_ROLES[key];
     return {
       id: key,

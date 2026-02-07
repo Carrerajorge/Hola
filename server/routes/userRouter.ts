@@ -15,6 +15,7 @@ import { requireAdmin } from "./admin/utils";
 import { auditLog, AuditActions } from "../services/auditLogger";
 import { ensureIntegrationCatalogSeeded, seedIntegrationCatalog } from "../services/integrationCatalog";
 import { invalidateIntegrationPolicyCache } from "../services/integrationPolicyCache";
+import { invalidateUserSettingsCache } from "../services/userSettingsCache";
 import { computeNextRunAt, normalizeTimeZone, parseTimeOfDay, type ChatScheduleType } from "../services/chatScheduleUtils";
 import { runChatScheduleNow } from "../services/chatScheduleRunner";
 
@@ -373,9 +374,20 @@ export function createUserRouter() {
 
       if (responsePreferences) updates.responsePreferences = responsePreferences;
       if (userProfile) updates.userProfile = userProfile;
-      if (featureFlags) updates.featureFlags = featureFlags;
+      if (featureFlags) {
+        // Server-side normalization: keep feature flags consistent even if a client
+        // sends partial updates.
+        const normalized = { ...featureFlags } as any;
+        if (normalized.voiceEnabled === false) {
+          normalized.voiceAdvanced = false;
+        } else if (normalized.voiceAdvanced === true) {
+          normalized.voiceEnabled = true;
+        }
+        updates.featureFlags = normalized;
+      }
 
       const settings = await storage.upsertUserSettings(id, updates);
+      invalidateUserSettingsCache(id);
       res.json(settings);
     } catch (error: any) {
       console.error("Error updating user settings:", error);
@@ -916,9 +928,15 @@ export function createUserRouter() {
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const sanitizeAccount = (account: any) => {
-        // Never return tokens to the client.
-        const { accessToken, refreshToken, ...safe } = account || {};
-        return safe;
+        // Never return tokens/metadata to the client (UI only needs display identity).
+        return {
+          id: account?.id,
+          userId: account?.userId,
+          providerId: account?.providerId,
+          displayName: account?.displayName ?? null,
+          email: account?.email ?? null,
+          status: account?.status ?? null,
+        };
       };
 
       await ensureIntegrationCatalogSeeded().catch((err) => {
@@ -970,6 +988,7 @@ export function createUserRouter() {
 
       const { enabledApps, enabledTools, disabledTools, resourceScopes, autoConfirmPolicy, sandboxMode, maxParallelCalls } = req.body;
 
+      const before = await storage.getIntegrationPolicy(id);
       const policy = await storage.upsertIntegrationPolicy(id, {
         enabledApps,
         enabledTools,
@@ -981,6 +1000,32 @@ export function createUserRouter() {
       });
 
       invalidateIntegrationPolicyCache(id);
+      void auditLog(req, {
+        action: "user.integration_policy_updated",
+        resource: "integration_policy",
+        details: {
+          changedFields: Object.keys(req.body || {}),
+          // Log summaries only (avoid large payloads).
+          enabledAppsCount: Array.isArray(policy.enabledApps) ? policy.enabledApps.length : 0,
+          enabledToolsCount: Array.isArray(policy.enabledTools) ? policy.enabledTools.length : 0,
+          disabledToolsCount: Array.isArray(policy.disabledTools) ? policy.disabledTools.length : 0,
+          autoConfirmPolicy: policy.autoConfirmPolicy,
+          sandboxMode: policy.sandboxMode,
+          maxParallelCalls: policy.maxParallelCalls,
+          before: before
+            ? {
+                enabledAppsCount: Array.isArray(before.enabledApps) ? before.enabledApps.length : 0,
+                enabledToolsCount: Array.isArray(before.enabledTools) ? before.enabledTools.length : 0,
+                disabledToolsCount: Array.isArray(before.disabledTools) ? before.disabledTools.length : 0,
+                autoConfirmPolicy: before.autoConfirmPolicy,
+                sandboxMode: before.sandboxMode,
+                maxParallelCalls: before.maxParallelCalls,
+              }
+            : null,
+        },
+        category: "config",
+        severity: "info",
+      });
       res.json(policy);
     } catch (error: any) {
       console.error("Error updating policy:", error);
@@ -1002,10 +1047,14 @@ export function createUserRouter() {
 
       const providerInfo = await storage.getIntegrationProvider(provider);
       if (!providerInfo) return res.status(404).json({ error: "Provider not found" });
+      if (String(providerInfo.isActive || "").toLowerCase().trim() !== "true") {
+        return res.status(409).json({ error: "Provider is inactive" });
+      }
 
       // Minimal, robust behavior: mark provider as connected even if OAuth isn't implemented yet.
       // This unblocks the UI wiring (connect/disconnect + enable/disable policy).
       const existing = await storage.getIntegrationAccountByProvider(id, provider);
+      const alreadyConnected = !!existing && existing.status === "active";
       const account = existing
         ? (existing.status === "active"
           ? existing
@@ -1028,15 +1077,26 @@ export function createUserRouter() {
       await storage.upsertIntegrationPolicy(id, { enabledApps });
       invalidateIntegrationPolicyCache(id);
 
+      void auditLog(req, {
+        action: "user.integration_connected",
+        resource: "integration_account",
+        details: { providerId: provider, authType: providerInfo.authType, alreadyConnected },
+        category: "config",
+        severity: "info",
+      });
       res.json({
         success: true,
-        message: "Connected",
+        message: alreadyConnected ? "Already connected" : "Connected",
         provider: providerInfo.name,
         authType: providerInfo.authType,
-        account: (() => {
-          const { accessToken, refreshToken, ...safe } = account || ({} as any);
-          return safe;
-        })(),
+        account: {
+          id: account?.id,
+          userId: account?.userId,
+          providerId: account?.providerId,
+          displayName: account?.displayName ?? null,
+          email: account?.email ?? null,
+          status: account?.status ?? null,
+        },
       });
     } catch (error: any) {
       console.error("Error initiating connect:", error);
@@ -1053,9 +1113,9 @@ export function createUserRouter() {
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const account = await storage.getIntegrationAccountByProvider(id, provider);
-      if (!account) return res.status(404).json({ error: "Account not found" });
-
-      await storage.deleteIntegrationAccount(account.id);
+      if (account) {
+        await storage.deleteIntegrationAccount(account.id);
+      }
 
       // Best-effort: disable provider on disconnect.
       const policy = await storage.getIntegrationPolicy(id);
@@ -1066,7 +1126,15 @@ export function createUserRouter() {
       }
       invalidateIntegrationPolicyCache(id);
 
-      res.json({ success: true });
+      void auditLog(req, {
+        action: "user.integration_disconnected",
+        resource: "integration_account",
+        details: { providerId: provider, hadAccount: !!account },
+        category: "config",
+        severity: "info",
+      });
+
+      res.json({ success: true, alreadyDisconnected: !account });
     } catch (error: any) {
       console.error("Error disconnecting:", error);
       res.status(500).json({ error: "Failed to disconnect" });

@@ -19,9 +19,11 @@ import { createMagicLink, getMagicLinkUrl } from "../services/magicLink";
 import { sendWorkspaceInviteEmail } from "../services/genericEmailService";
 import {
   getPermissionCatalog,
+  isCustomRoleKey,
   isReservedRoleName,
   isRoleKeyValidForOrg,
   isSystemAdminRole,
+  isWorkspaceBuiltinRole,
   isWorkspaceAdminRole,
   listRolesForOrg,
   normalizeRoleKey,
@@ -113,6 +115,9 @@ async function validateAssignableRole(actor: { orgId: string; roleKey: string; e
   if (!roleKey) return { ok: false, roleKey: "", error: "INVALID_ROLE" };
   const valid = await isRoleKeyValidForOrg(actor.orgId, roleKey);
   if (!valid) return { ok: false, roleKey, error: "ROLE_NOT_FOUND" };
+  if (!isCustomRoleKey(roleKey) && !isWorkspaceBuiltinRole(roleKey) && !isSystemAdminRole(roleKey)) {
+    return { ok: false, roleKey, error: "FORBIDDEN_ROLE" };
+  }
   if (isSystemAdminRole(roleKey) && !isSystemAdminRole(actor.roleKey) && !isAdminEmail(actor.email)) {
     return { ok: false, roleKey, error: "FORBIDDEN_ROLE" };
   }
@@ -263,7 +268,7 @@ export function createWorkspaceRouter() {
           firstName: m.firstName ? String(m.firstName) : null,
           lastName: m.lastName ? String(m.lastName) : null,
           profileImageUrl: m.profileImageUrl ? String(m.profileImageUrl) : null,
-          role: m.role ? String(m.role) : null,
+          role: m.role ? normalizeRoleKey(String(m.role)) : null,
           status: m.status ? String(m.status) : null,
           createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
           lastLoginAt: m.lastLoginAt ? new Date(m.lastLoginAt).toISOString() : null,
@@ -367,7 +372,7 @@ export function createWorkspaceRouter() {
         invitations: invites.map((inv) => ({
           id: String(inv.id),
           email: String(inv.email),
-          role: inv.role ? String(inv.role) : null,
+          role: inv.role ? normalizeRoleKey(String(inv.role)) : null,
           status: inv.status ? String(inv.status) : null,
           createdAt: inv.createdAt ? new Date(inv.createdAt).toISOString() : null,
           lastSentAt: inv.lastSentAt ? new Date(inv.lastSentAt).toISOString() : null,

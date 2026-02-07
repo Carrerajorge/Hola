@@ -400,7 +400,13 @@ export class ToolRegistry {
       isConfirmed: context.isConfirmed === true || autoConfirmPolicy === "always",
     };
 
-    const concurrencyKey = `${effectiveContext.userId}:${effectiveContext.runId}`;
+    // Concurrency is a user preference; enforce it globally per user (not just per run).
+    // Fallback to runId only when we can't identify a stable user.
+    const normalizedUserId = String(effectiveContext.userId || "").trim();
+    const concurrencyKey =
+      normalizedUserId && normalizedUserId !== "anonymous"
+        ? `user:${normalizedUserId}`
+        : `run:${effectiveContext.runId}`;
     
     if (!tool) {
       // Try sandbox tools as fallback with proper adaptation

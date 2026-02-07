@@ -7,6 +7,10 @@ const REDIS_URL = process.env.REDIS_URL;
 // Lazy connection - only create when needed and if Redis is configured
 let sharedConnection: IORedis | null = null;
 function getConnection(): IORedis | null {
+    // Tests should be hermetic: don't try to connect to Redis unless explicitly enabled.
+    if (process.env.NODE_ENV === "test" && process.env.ENABLE_QUEUES_IN_TEST !== "true") {
+        return null;
+    }
     if (!REDIS_URL && !process.env.REDIS_HOST) {
         console.warn('[QueueFactory] No REDIS_URL configured, queues disabled');
         return null;

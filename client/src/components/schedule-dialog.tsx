@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from "lucide-react";
 
 type ScheduleType = "once" | "daily" | "weekly";
 
@@ -22,6 +23,8 @@ type ExistingSchedule = {
   daysOfWeek: number[] | null;
   isActive: boolean;
 };
+
+type ChatOption = { id: string; title: string };
 
 const WEEKDAYS: Array<{ id: number; label: string }> = [
   { id: 1, label: "Lun" },
@@ -56,7 +59,7 @@ function isoToDatetimeLocal(iso: string): string {
 export function ScheduleDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  chatId: string;
+  chatId?: string | null;
   defaultPrompt?: string;
   schedule?: ExistingSchedule | null;
 }) {
@@ -68,6 +71,26 @@ export function ScheduleDialog(props: {
   const isEdit = !!schedule?.id;
   const browserTimeZone = useMemo(() => getBrowserTimeZone(), []);
   const timeZone = String(schedule?.timeZone || browserTimeZone || "UTC");
+
+  const chatsQuery = useQuery<ChatOption[]>({
+    queryKey: ["/api/chats", "scheduleOptions"],
+    queryFn: async () => {
+      const res = await fetch("/api/chats", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      const rows = await res.json();
+      return (Array.isArray(rows) ? rows : []).map((c: any) => ({
+        id: String(c.id),
+        title: String(c.title || "Chat"),
+      }));
+    },
+    enabled: open && isAuthenticated && !isEdit && !chatId,
+    staleTime: 60_000,
+  });
+
+  const chatOptions = chatsQuery.data || [];
+  const [chatIdDraft, setChatIdDraft] = useState<string>("");
 
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -90,6 +113,7 @@ export function ScheduleDialog(props: {
           ? schedule.daysOfWeek
           : [1, 2, 3, 4, 5],
       );
+      setChatIdDraft(chatId ? String(chatId) : "");
       return;
     }
 
@@ -99,12 +123,24 @@ export function ScheduleDialog(props: {
     setRunAtLocal("");
     setTimeOfDay("09:00");
     setDaysOfWeek([1, 2, 3, 4, 5]);
+    setChatIdDraft(chatId ? String(chatId) : "");
   }, [open, schedule?.id, defaultPrompt, schedule]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (isEdit) return;
+    if (chatId) return;
+    if (chatIdDraft) return;
+    const first = chatOptions[0]?.id;
+    if (first) setChatIdDraft(first);
+  }, [open, isEdit, chatId, chatIdDraft, chatOptions]);
+
+  const effectiveChatId = String(chatId || chatIdDraft || "").trim();
 
   const saveSchedule = useMutation({
     mutationFn: async () => {
       if (!user?.id) throw new Error("Unauthorized");
-      if (!chatId) throw new Error("Chat inválido");
+      if (!isEdit && !effectiveChatId) throw new Error("Selecciona un chat");
 
       const payload: any = {
         name: name.trim() || undefined,
@@ -133,7 +169,7 @@ export function ScheduleDialog(props: {
       const url = isEdit ? `/api/users/${user.id}/schedules/${schedule!.id}` : `/api/users/${user.id}/schedules`;
       const method = isEdit ? "PUT" : "POST";
 
-      if (!isEdit) payload.chatId = chatId;
+      if (!isEdit) payload.chatId = effectiveChatId;
 
       const res = await fetch(url, {
         method,
@@ -167,7 +203,7 @@ export function ScheduleDialog(props: {
   const canSave =
     !!isAuthenticated &&
     !!user?.id &&
-    !!chatId &&
+    (!!effectiveChatId || isEdit) &&
     prompt.trim().length > 0 &&
     (scheduleType !== "once" || !!runAtLocal) &&
     (scheduleType !== "weekly" || daysOfWeek.length > 0);
@@ -189,6 +225,40 @@ export function ScheduleDialog(props: {
           </div>
         ) : (
           <div className="space-y-4">
+            {!isEdit && !chatId && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Chat</label>
+                <Select value={chatIdDraft} onValueChange={setChatIdDraft}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={chatsQuery.isLoading ? "Cargando chats..." : "Selecciona un chat"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {chatsQuery.isLoading ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Cargando...
+                      </div>
+                    ) : chatOptions.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        No tienes chats disponibles.
+                      </div>
+                    ) : (
+                      chatOptions.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.title}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                {chatsQuery.isError ? (
+                  <div className="text-xs text-red-600 dark:text-red-400">
+                    No se pudieron cargar los chats.
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="text-sm font-medium">Nombre (opcional)</label>
               <Input

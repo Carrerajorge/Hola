@@ -1642,8 +1642,12 @@ export class MemStorage implements IStorage {
   }
 
   async getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null> {
-    const [result] = await db.select().from(integrationAccounts)
-      .where(sql`${integrationAccounts.userId} = ${userId} AND ${integrationAccounts.providerId} = ${providerId}`);
+    const [result] = await db
+      .select()
+      .from(integrationAccounts)
+      .where(and(eq(integrationAccounts.userId, userId), eq(integrationAccounts.providerId, providerId)))
+      .orderBy(desc(integrationAccounts.createdAt))
+      .limit(1);
     return result || null;
   }
 

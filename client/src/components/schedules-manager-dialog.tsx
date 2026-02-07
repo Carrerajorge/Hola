@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, Clock, ExternalLink, Loader2, Play, Trash2, AlertCircle, Pencil } from "lucide-react";
+import { Calendar, Clock, ExternalLink, Loader2, Play, Trash2, AlertCircle, Pencil, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
@@ -104,6 +104,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
 
   const [deleteTarget, setDeleteTarget] = useState<ScheduleRow | null>(null);
   const [editTarget, setEditTarget] = useState<ScheduleRow | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const toggleActive = useMutation({
     mutationFn: async (row: { scheduleId: string; isActive: boolean }) => {
@@ -339,7 +340,15 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
 
           <Separator />
 
-          <div className="p-4 flex items-center justify-end gap-2">
+          <div className="p-4 flex items-center justify-between gap-2">
+            <Button
+              onClick={() => setCreateOpen(true)}
+              disabled={!isAuthenticated}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Nueva programación
+            </Button>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
               Cerrar
             </Button>
@@ -403,6 +412,12 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
           }}
         />
       ) : null}
+
+      <ScheduleDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        chatId={null}
+      />
     </>
   );
 }

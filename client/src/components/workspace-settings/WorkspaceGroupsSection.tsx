@@ -17,6 +17,8 @@ type WorkspaceGroupSummary = {
   createdAt: string;
   updatedAt: string;
   memberCount: number;
+  directSharedChatsCount: number;
+  groupSharedChatsCount: number;
   sharedChatsCount: number;
 };
 
@@ -400,6 +402,17 @@ export function WorkspaceGroupsSection({ canManage }: { canManage: boolean }) {
                     </div>
 
                     <CollapsibleContent className="mt-4 space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-md border bg-muted/10 p-3">
+                          <div className="text-xs text-muted-foreground">Chats compartidos al grupo</div>
+                          <div className="text-lg font-semibold">{g.groupSharedChatsCount}</div>
+                        </div>
+                        <div className="rounded-md border bg-muted/10 p-3">
+                          <div className="text-xs text-muted-foreground">Chats compartidos a miembros</div>
+                          <div className="text-lg font-semibold">{g.directSharedChatsCount}</div>
+                        </div>
+                      </div>
+
                       <div className="rounded-md bg-muted/20 border p-3">
                         <div className="text-sm font-medium mb-2 flex items-center gap-2">
                           <UserPlus className="h-4 w-4" />

@@ -76,7 +76,8 @@ async function getRedisClient() {
 
     try {
         const { default: Redis } = await import("ioredis");
-        const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+        const redisUrl = process.env.REDIS_URL;
+        if (!redisUrl) return null;
 
         redisClient = new Redis(redisUrl, {
             maxRetriesPerRequest: 1,

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { sendEmail } from "../services/genericEmailService";
 import { requireAdmin } from "./admin/utils";
 import { auditLog, AuditActions } from "../services/auditLogger";
+import { isSystemAdminRole, isWorkspaceAdminRole, normalizeRoleKey, resolveRolePermissionsForOrg } from "../services/workspaceRoleService";
 
 const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
   price_go_monthly: { name: "Go", amount: 500, interval: "month" },
@@ -16,15 +17,6 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
   price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
 
-const BILLING_MANAGER_ROLES = new Set([
-  "admin",
-  "superadmin",
-  "team_admin",
-  "workspace_owner",
-  "workspace_admin",
-  "billing_manager",
-  "owner",
-]);
 const BILLING_CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
 const billingContactCooldown = new Map<string, number>();
 const billingContactIpCooldown = new Map<string, number>();
@@ -60,10 +52,6 @@ function getAdminEmailNormalized(): string {
   return normalizeEmail(process.env.ADMIN_EMAIL);
 }
 
-function isBillingManagerRole(role: string): boolean {
-  return BILLING_MANAGER_ROLES.has(normalizeRole(role));
-}
-
 function isAdminEmail(email: string): boolean {
   const adminEmail = getAdminEmailNormalized();
   const normalized = normalizeEmail(email);
@@ -91,10 +79,15 @@ function getActorRole(req: any): string {
   );
 }
 
-function canManageBillingForDbUser(dbUser: any): boolean {
-  const role = normalizeRole(dbUser?.role);
+async function canManageBillingForDbUser(dbUser: any): Promise<boolean> {
+  const roleKey = normalizeRoleKey(dbUser?.role);
   const email = normalizeEmail(dbUser?.email);
-  return isBillingManagerRole(role) || isAdminEmail(email);
+  if (isAdminEmail(email)) return true;
+  if (isSystemAdminRole(roleKey) || isWorkspaceAdminRole(roleKey)) return true;
+
+  const orgId = String(dbUser?.orgId || "").trim() || "default";
+  const perms = await resolveRolePermissionsForOrg(orgId, roleKey);
+  return perms.includes("admin:billing" as any) || perms.includes("*" as any);
 }
 
 function getEffectiveUserId(req: any): string | undefined {
@@ -278,10 +271,10 @@ export function createStripeRouter() {
     }
   });
 
-  router.post("/api/checkout", async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const userId = user?.claims?.sub;
+	  router.post("/api/checkout", async (req, res) => {
+	    try {
+	      const user = (req as any).user;
+	      const userId = user?.claims?.sub;
 
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión para suscribirte" });
@@ -843,16 +836,16 @@ export function createStripeRouter() {
     }
   });
 
-  router.get("/api/billing/status", async (req, res) => {
-    try {
-      const userId = getEffectiveUserId(req);
+	  router.get("/api/billing/status", async (req, res) => {
+	    try {
+	      const userId = getEffectiveUserId(req);
 
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
-      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
+	      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+	      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
       const inferredStatus =
         subscriptionStatusRaw ||
         ((dbUser as any)?.stripeSubscriptionId ? "active" : null) ||
@@ -869,10 +862,10 @@ export function createStripeRouter() {
         !!periodEndMs &&
         periodEndMs > now;
 
-      const [{ monthsPaid = 0 } = { monthsPaid: 0 }] = await db
-        .select({
-          monthsPaid: sql<number>`COALESCE(COUNT(*), 0)`,
-        })
+	      const [{ monthsPaid = 0 } = { monthsPaid: 0 }] = await db
+	        .select({
+	          monthsPaid: sql<number>`COALESCE(COUNT(*), 0)`,
+	        })
         .from(payments)
         .where(
           and(
@@ -883,7 +876,7 @@ export function createStripeRouter() {
           )
         );
 
-      const nowDate = new Date();
+	      const nowDate = new Date();
       const [{ extraCredits = 0 } = { extraCredits: 0 }] = await db
         .select({
           extraCredits: sql<number>`COALESCE(SUM(${billingCreditGrants.creditsRemaining}), 0)`,
@@ -897,19 +890,20 @@ export function createStripeRouter() {
           )
         );
 
-      res.json({
-        subscriptionStatus,
-        subscriptionPeriodEnd,
-        willDeactivate,
-        plan: (dbUser as any)?.plan || "free",
-        monthsPaid,
-        extraCredits,
-      });
-    } catch (error: any) {
-      console.error("Billing status error:", error);
-      res.status(500).json({ error: "Failed to get billing status" });
-    }
-  });
+	      res.json({
+	        subscriptionStatus,
+	        subscriptionPeriodEnd,
+	        willDeactivate,
+	        plan: (dbUser as any)?.plan || "free",
+	        monthsPaid,
+	        extraCredits,
+	        canManageBilling: await canManageBillingForDbUser(dbUser),
+	      });
+	    } catch (error: any) {
+	      console.error("Billing status error:", error);
+	      res.status(500).json({ error: "Failed to get billing status" });
+	    }
+	  });
 
   router.get("/api/billing/credits/usage", async (req, res) => {
     try {
@@ -1041,7 +1035,7 @@ export function createStripeRouter() {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      const canManageBilling = canManageBillingForDbUser(dbUser);
+      const canManageBilling = await canManageBillingForDbUser(dbUser);
       if (!canManageBilling) {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
@@ -1160,7 +1154,7 @@ export function createStripeRouter() {
       const prefs = (dbUser as any).preferences || {};
       const saved = prefs?.billing?.creditAlerts || {};
 
-      const canManage = canManageBillingForDbUser(dbUser);
+      const canManage = await canManageBillingForDbUser(dbUser);
       const adminEmail = canManage ? String(process.env.ADMIN_EMAIL || "").trim() : "";
 
       res.json({
@@ -1193,13 +1187,17 @@ export function createStripeRouter() {
       }
       const body = parsedBody.data;
 
-      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
-      if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
-      }
+	      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+	      if (!dbUser) {
+	        return res.status(404).json({ error: "User not found" });
+	      }
+	      // Only billing managers can start a subscription checkout for the workspace.
+	      if (!(await canManageBillingForDbUser(dbUser))) {
+	        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+	      }
 
       const role = normalizeRole((dbUser as any).role);
-      const canManage = canManageBillingForDbUser(dbUser);
+      const canManage = await canManageBillingForDbUser(dbUser);
       if (!canManage) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
@@ -1262,7 +1260,7 @@ export function createStripeRouter() {
       }
 
       const role = normalizeRole((dbUser as any).role);
-      const canManage = canManageBillingForDbUser(dbUser);
+      const canManage = await canManageBillingForDbUser(dbUser);
       if (!canManage) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
@@ -1476,7 +1474,7 @@ export function createStripeRouter() {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      const canManageBilling = canManageBillingForDbUser(dbUser);
+      const canManageBilling = await canManageBillingForDbUser(dbUser);
       if (!canManageBilling) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
@@ -1562,7 +1560,7 @@ export function createStripeRouter() {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      const canManageBilling = canManageBillingForDbUser(dbUser);
+      const canManageBilling = await canManageBillingForDbUser(dbUser);
       if (!canManageBilling) {
         await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,

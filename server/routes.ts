@@ -327,7 +327,9 @@ export async function registerRoutes(
   app.use(compression);
 
   // Global Audit Middleware (Logs mutations)
-  app.use(globalAuditMiddleware);
+  if (process.env.NODE_ENV !== "test" || process.env.ENABLE_AUDIT_IN_TEST === "true") {
+    app.use(globalAuditMiddleware);
+  }
 
   // Session identity endpoint for consistent user ID across frontend/backend
 

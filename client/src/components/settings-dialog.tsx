@@ -244,6 +244,8 @@ function AppsSection() {
   const { settings: platformSettings } = usePlatformSettings();
   const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [providerIconFailed, setProviderIconFailed] = useState<Record<string, boolean>>({});
+  const [maxParallelDraft, setMaxParallelDraft] = useState<string>("3");
 
   const {
     data: integrationsData,
@@ -333,6 +335,10 @@ function AppsSection() {
   const accounts = integrationsData?.accounts || [];
   const policy = integrationsData?.policy;
   const logs = logsData || [];
+
+  useEffect(() => {
+    setMaxParallelDraft(String(policy?.maxParallelCalls ?? 3));
+  }, [policy?.maxParallelCalls]);
 
   const isProviderConnected = (providerId: string) => {
     return accounts.some(a => a.providerId === providerId && a.status === 'active');
@@ -432,29 +438,55 @@ function AppsSection() {
               const connected = isProviderConnected(provider.id);
               const enabled = isProviderEnabled(provider.id);
               const account = accounts.find(a => a.providerId === provider.id);
+              const inactive = String(provider.isActive || "").toLowerCase().trim() !== "true";
+              const showRemoteIcon = !!provider.iconUrl && !providerIconFailed[provider.id];
 
               return (
                 <div
                   key={provider.id}
-                  className="flex items-center justify-between p-4 rounded-lg border bg-card"
+                  className={cn(
+                    "flex items-center justify-between p-4 rounded-lg border bg-card",
+                    inactive && "opacity-70"
+                  )}
                   data-testid={`card-provider-${provider.id}`}
                 >
                   <div className="flex items-center gap-4">
                     <div className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center",
+                      "w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden",
                       connected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
                     )}>
-                      {providerIcons[provider.id] || <AppWindow className="h-5 w-5" />}
+                      {showRemoteIcon ? (
+                        <img
+                          src={provider.iconUrl as string}
+                          alt={provider.name}
+                          className="h-6 w-6 object-contain"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={() => setProviderIconFailed((prev) => ({ ...prev, [provider.id]: true }))}
+                        />
+                      ) : (
+                        providerIcons[provider.id] || <AppWindow className="h-5 w-5" />
+                      )}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium" data-testid={`text-provider-name-${provider.id}`}>
                           {provider.name}
                         </span>
+                        {inactive && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                            Inactivo
+                          </span>
+                        )}
                         {connected && (
                           <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">
                             <CheckCircle2 className="h-3 w-3" />
                             Conectado
+                          </span>
+                        )}
+                        {connected && !enabled && (
+                          <span className="inline-flex items-center gap-1 text-xs text-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-300 px-2 py-0.5 rounded-full">
+                            Deshabilitado
                           </span>
                         )}
                       </div>
@@ -476,6 +508,7 @@ function AppsSection() {
                         <Switch
                           checked={enabled}
                           onCheckedChange={(checked) => toggleProviderEnabled(provider.id, checked)}
+                          disabled={inactive || updatePolicy.isPending}
                           data-testid={`switch-enable-${provider.id}`}
                         />
                       </div>
@@ -504,7 +537,7 @@ function AppsSection() {
                         variant="default"
                         size="sm"
                         onClick={() => connectProvider.mutate(provider.id)}
-                        disabled={connectProvider.isPending}
+                        disabled={connectProvider.isPending || inactive}
                         data-testid={`button-connect-${provider.id}`}
                       >
                         {connectProvider.isPending ? (
@@ -598,9 +631,24 @@ function AppsSection() {
                 type="number"
                 min={1}
                 max={10}
-                value={policy?.maxParallelCalls || 3}
-                onChange={(e) => updatePolicy.mutate({ maxParallelCalls: parseInt(e.target.value) || 3 })}
+                value={maxParallelDraft}
+                onChange={(e) => setMaxParallelDraft(e.target.value)}
+                onBlur={() => {
+                  const parsed = Number.parseInt(String(maxParallelDraft || "").trim(), 10);
+                  const next = Number.isFinite(parsed)
+                    ? Math.min(10, Math.max(1, parsed))
+                    : 3;
+                  if (next !== (policy?.maxParallelCalls ?? 3)) {
+                    updatePolicy.mutate({ maxParallelCalls: next });
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    (e.currentTarget as HTMLInputElement).blur();
+                  }
+                }}
                 className="w-20 text-center"
+                disabled={updatePolicy.isPending}
                 data-testid="input-max-parallel"
               />
             </div>
