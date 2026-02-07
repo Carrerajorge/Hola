@@ -147,7 +147,10 @@ export function PlatformSettingsProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     // Branding variables used by shadcn/ui theme.
     applyBrandingCss(settings);
-    document.documentElement.dataset.platformThemeMode = settings.theme_mode;
+    
+    // REMOVED: Do not force theme mode from platform settings. 
+    // Let user preferences (SettingsContext) handle light/dark mode.
+    // document.documentElement.dataset.platformThemeMode = settings.theme_mode;
   }, [settings.primary_color, settings.secondary_color, settings.theme_mode]);
 
   return (
