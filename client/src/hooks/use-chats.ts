@@ -918,7 +918,7 @@ export function useChats() {
       : "Nuevo Chat";
 
     // Track whether message was actually added (for requestId cleanup)
-    let messageAdded = false;
+    
 
     // Check if message already exists in chat (by ID) and add if not
     setChats(prev => {
@@ -928,7 +928,7 @@ export function useChats() {
       if (!chatExists && isPending) {
         // Chat doesn't exist yet - create it with this message
         console.error("[CRITICAL] Chat doesn't exist, creating new pending chat");
-        messageAdded = true;
+        
         return [...prev, {
           id: chatId,
           title: title,
@@ -953,7 +953,7 @@ export function useChats() {
             return chat;
           }
 
-          messageAdded = true;
+          
           const isFirstMessage = chat.messages.length === 0;
           return {
             ...chat,
@@ -967,14 +967,7 @@ export function useChats() {
     });
 
     // If message wasn't added (duplicate), don't proceed with persistence
-    if (!messageAdded) {
-      // Return existing run if available
-      const existingRun = getActiveRun(resolvedChatId);
-      if (existingRun) {
-        return { run: existingRun, deduplicated: true };
-      }
-      return undefined;
-    }
+    
 
     if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
