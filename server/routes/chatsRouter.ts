@@ -14,62 +14,6 @@ const messageBodyLimit = express.json({ limit: '5mb' });
 export function createChatsRouter() {
   const router = Router();
 
-  const normalizeAttachments = async (attachments: any): Promise<any[] | null> => {
-    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) return null;
-
-    const fileIds = Array.from(new Set(
-      attachments
-        .map((a: any) => a?.fileId)
-        .filter((id: any) => typeof id === "string" && id.length > 0)
-    ));
-
-    const filesById = new Map<string, { storagePath: string }>();
-    if (fileIds.length > 0) {
-      const records = await Promise.all(fileIds.map(async (id) => {
-        try {
-          const file = await storage.getFile(id);
-          return file?.storagePath ? { id, storagePath: file.storagePath } : null;
-        } catch {
-          return null;
-        }
-      }));
-      for (const rec of records) {
-        if (rec) filesById.set(rec.id, { storagePath: rec.storagePath });
-      }
-    }
-
-    return attachments
-      .filter((a: any) => a && typeof a === "object")
-      .map((att: any) => {
-        const out: any = { ...att };
-
-        // Strip base64 data URLs (defense-in-depth). Keep only stable server-backed URLs.
-        if (typeof out.imageUrl === "string" && out.imageUrl.startsWith("data:")) {
-          delete out.imageUrl;
-        }
-
-        // Validate storagePath format
-        if (typeof out.storagePath === "string" && out.storagePath && !out.storagePath.startsWith("/objects/")) {
-          console.warn(`[Attachment] Invalid storagePath stripped: ${out.storagePath}`);
-          delete out.storagePath;
-        }
-
-        // Best-effort hydration: if storagePath is missing but fileId exists, resolve from DB.
-        if (!out.storagePath && typeof out.fileId === "string") {
-          const file = filesById.get(out.fileId);
-          if (file?.storagePath) out.storagePath = file.storagePath;
-        }
-
-        // For images, persist a renderable URL when possible.
-        if (out.type === "image" && !out.imageUrl && out.storagePath) {
-          out.imageUrl = out.storagePath;
-        }
-
-        return out;
-      })
-      .filter((att: any) => att.name && att.type);
-  };
-
   router.get("/chats", async (req, res) => {
     try {
       const userId = getSecureUserId(req);
@@ -185,17 +129,10 @@ export function createChatsRouter() {
           }
         }
 
-        const normalizedMessages = await Promise.all(
-          messages.map(async (msg: any) => ({
-            ...msg,
-            attachments: await normalizeAttachments(msg.attachments),
-          }))
-        );
-
         // Create chat with messages atomically using transaction
         const result = await storage.createChatWithMessages(
           { title: title || "New Chat", userId },
-          normalizedMessages.map((msg: any) => ({
+          messages.map((msg: any) => ({
             role: msg.role,
             content: msg.content,
             requestId: msg.requestId,
@@ -254,7 +191,27 @@ export function createChatsRouter() {
       }
 
       const messages = await storage.getChatMessages(req.params.id);
-      res.json({ ...chat, messages, shareRole, isOwner });
+      // Also include conversationDocuments so the frontend can hydrate attachment display data
+      const conversationDocs = await storage.getConversationDocuments(req.params.id);
+      res.json({ ...chat, messages, conversationDocuments: conversationDocs, shareRole, isOwner });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Retrieve conversation documents (uploaded file references) for a chat
+  router.get("/chats/:id/conversation-documents", async (req, res) => {
+    try {
+      const userId = getSecureUserId(req);
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      const docs = await storage.getConversationDocuments(req.params.id);
+      res.json(docs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -504,7 +461,39 @@ export function createChatsRouter() {
       // SANITIZATION: Prevent XSS
       const sanitizedContent = sanitizeMessageContent(content);
 
-      const normalizedAttachments = await normalizeAttachments(attachments);
+      // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
+      // Strip all large data fields (imageUrl, content, thumbnail, dataUrl) that should not be
+      // stored in JSONB. The actual file data lives in object storage (storagePath) and
+      // conversationDocuments. Only lightweight metadata is persisted in the message JSONB.
+      const sanitizedAttachments = attachments && Array.isArray(attachments)
+        ? attachments.map((att: any) => {
+            // Build a clean attachment with only metadata fields
+            const clean: Record<string, any> = {
+              id: att.id || att.fileId,
+              fileId: att.fileId,
+              name: att.name,
+              type: att.type,
+              mimeType: att.mimeType || att.type,
+              size: att.size,
+              storagePath: att.storagePath,
+            };
+            // Preserve spreadsheet metadata (without large preview data)
+            if (att.spreadsheetData) {
+              clean.spreadsheetData = {
+                uploadId: att.spreadsheetData.uploadId,
+                sheets: att.spreadsheetData.sheets,
+                analysisId: att.spreadsheetData.analysisId,
+                sessionId: att.spreadsheetData.sessionId,
+              };
+            }
+            // Validate storagePath format
+            if (clean.storagePath && typeof clean.storagePath === 'string' && !clean.storagePath.startsWith('/objects/')) {
+              console.warn(`[Attachment] Invalid storagePath stripped: ${clean.storagePath}`);
+              delete clean.storagePath;
+            }
+            return clean;
+          }).filter((att: any) => att.name && att.type) // Must have at least name and type
+        : null;
 
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
@@ -532,7 +521,7 @@ export function createChatsRouter() {
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
-            attachments: normalizedAttachments,
+            attachments: sanitizedAttachments,
             sources: sources || null,
             figmaDiagram: figmaDiagram || null,
             googleFormPreview: googleFormPreview || null,
@@ -541,6 +530,27 @@ export function createChatsRouter() {
           },
           clientRequestId
         );
+
+        // Persist conversationDocuments for each attachment so files survive reload.
+        // Best-effort — failures here don't block message creation.
+        if (sanitizedAttachments && sanitizedAttachments.length > 0) {
+          for (const att of sanitizedAttachments) {
+            try {
+              await storage.createConversationDocument({
+                chatId: req.params.id,
+                messageId: message.id,
+                fileName: att.name || 'document',
+                storagePath: att.storagePath || null,
+                mimeType: att.mimeType || att.type || 'application/octet-stream',
+                fileSize: att.size || null,
+                extractedText: null, // Text extraction happens in the streaming endpoint
+                metadata: { fileId: att.fileId || att.id },
+              });
+            } catch (docErr) {
+              console.warn(`[Messages] Failed to persist conversationDocument for ${att.name}:`, docErr);
+            }
+          }
+        }
 
         if (chat.title === "New Chat") {
           const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
@@ -566,7 +576,7 @@ export function createChatsRouter() {
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
-        attachments: normalizedAttachments,
+        attachments: sanitizedAttachments,
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
         googleFormPreview: googleFormPreview || null,

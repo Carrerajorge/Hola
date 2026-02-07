@@ -327,6 +327,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
                     fileName: extracted.fileName,
                     storagePath: attachment.storagePath || null,
                     mimeType: extracted.mimeType || "application/octet-stream",
+                    fileSize: (attachment as any).size || null,
                     extractedText: extracted.content,
                     metadata: { fileId: attachment.fileId }
                   });
@@ -1264,13 +1265,32 @@ ${attachmentContext}`;
       if (!claimedRun) {
         try {
           if (userMessageText && effectiveChatIdForPersistence) {
-            // Include attachments metadata (without base64 data) so files are associated with the message
-            const sanitizedAttachments = attachments && Array.isArray(attachments)
-              ? attachments.map((att: any) => {
-                  const { imageUrl, ...rest } = att;
-                  return rest;
-                })
-              : null;
+            // Sanitize attachments: strip large binary/text data, keep only metadata for JSONB storage.
+            // The actual file content lives in object storage (storagePath) and conversationDocuments.
+            const sanitizedAttachments = resolvedAttachments.length > 0
+              ? resolvedAttachments.map((att: any) => {
+                  // Only keep lightweight metadata fields — strip content, imageUrl, thumbnail, dataUrl
+                  return {
+                    id: att.id || att.fileId,
+                    fileId: att.fileId,
+                    name: att.name,
+                    type: att.type,
+                    mimeType: att.mimeType || att.type,
+                    size: att.size,
+                    storagePath: att.storagePath,
+                  };
+                }).filter((att: any) => att.name)
+              : (attachments && Array.isArray(attachments) && attachments.length > 0
+                ? attachments.map((att: any) => ({
+                    id: att.id || att.fileId,
+                    fileId: att.fileId,
+                    name: att.name,
+                    type: att.type,
+                    mimeType: att.mimeType || att.type,
+                    size: att.size,
+                    storagePath: att.storagePath,
+                  })).filter((att: any) => att.name)
+                : null);
 
             const userMsg = await storage.createChatMessage({
               chatId: effectiveChatIdForPersistence,
@@ -1281,6 +1301,46 @@ ${attachmentContext}`;
               attachments: sanitizedAttachments,
             });
             persistedUserMessageId = userMsg.id;
+
+            // Persist each attachment as a conversationDocument for durable cross-session retrieval.
+            // This was previously only done in the legacy /chat endpoint, causing attachments sent
+            // via /chat/stream to be lost on reload.
+            if (resolvedAttachments.length > 0) {
+              for (const att of resolvedAttachments) {
+                try {
+                  // Determine extracted text: use batch result if available, else attachment content
+                  let extractedText = att.content || null;
+                  if (batchResult && batchResult.stats) {
+                    const fileStat = batchResult.stats.find(
+                      (s: any) => s.filename === att.name && s.status === 'success'
+                    );
+                    if (fileStat) {
+                      // Find the matching chunk from batch result for this file's content
+                      const fileChunks = batchResult.chunks.filter(
+                        (c: any) => c.source === att.name
+                      );
+                      if (fileChunks.length > 0) {
+                        extractedText = fileChunks.map((c: any) => c.content).join('\n');
+                      }
+                    }
+                  }
+
+                  await storage.createConversationDocument({
+                    chatId: effectiveChatIdForPersistence,
+                    messageId: userMsg.id,
+                    fileName: att.name || 'document',
+                    storagePath: att.storagePath || null,
+                    mimeType: att.mimeType || att.type || 'application/octet-stream',
+                    fileSize: att.size || null,
+                    extractedText,
+                    metadata: { fileId: att.fileId || att.id },
+                  });
+                  console.log(`[Stream] Persisted conversationDocument: ${att.name} → chat ${effectiveChatIdForPersistence}, message ${userMsg.id}`);
+                } catch (docError) {
+                  console.error(`[Stream] Failed to persist conversationDocument for ${att.name}:`, docError);
+                }
+              }
+            }
 
             // Also persist into Conversation State (separate store used by /api/memory/chats/:id/state)
             // Best-effort + idempotent (per-request) to avoid UI retry loops duplicating messages.
@@ -1296,6 +1356,43 @@ ${attachmentContext}`;
           }
         } catch (e) {
           console.warn('[Stream] Failed to persist user message (best-effort):', e);
+        }
+      }
+
+      // For claimed runs (run-based flow), the user message was already persisted
+      // via createUserMessageAndRun, but conversationDocuments were not created.
+      // Persist them now so attachments survive reload.
+      if (claimedRun && resolvedAttachments.length > 0 && effectiveChatIdForPersistence) {
+        for (const att of resolvedAttachments) {
+          try {
+            let extractedText = att.content || null;
+            if (batchResult && batchResult.stats) {
+              const fileStat = batchResult.stats.find(
+                (s: any) => s.filename === att.name && s.status === 'success'
+              );
+              if (fileStat) {
+                const fileChunks = batchResult.chunks.filter(
+                  (c: any) => c.source === att.name
+                );
+                if (fileChunks.length > 0) {
+                  extractedText = fileChunks.map((c: any) => c.content).join('\n');
+                }
+              }
+            }
+            await storage.createConversationDocument({
+              chatId: effectiveChatIdForPersistence,
+              messageId: claimedRun.userMessageId || null,
+              fileName: att.name || 'document',
+              storagePath: att.storagePath || null,
+              mimeType: att.mimeType || att.type || 'application/octet-stream',
+              fileSize: att.size || null,
+              extractedText,
+              metadata: { fileId: att.fileId || att.id },
+            });
+            console.log(`[Stream] Persisted conversationDocument (run): ${att.name} → chat ${effectiveChatIdForPersistence}`);
+          } catch (docError) {
+            console.error(`[Stream] Failed to persist conversationDocument for ${att.name} (run):`, docError);
+          }
         }
       }
 
