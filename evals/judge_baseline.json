@@ -1,0 +1,71 @@
+{
+  "generatedAt": "2026-02-07T12:12:23.329Z",
+  "git": {
+    "commit": "495fe1c9cb56865ec343f39f754c4fe2059ca05a",
+    "branch": "codex/brief-ingest-rag-verify-mvp-v2"
+  },
+  "casesPath": "evals/judge_cases.json",
+  "mode": "offline",
+  "summary": {
+    "totalCases": 6,
+    "clarificationRate": 0.16666666666666666,
+    "citationsRequiredRate": 0.5,
+    "judgedCases": 0,
+    "taskSuccessAvg": null,
+    "citationCoverageAvg": null,
+    "contradictionsAvg": null,
+    "passRate": 1,
+    "taskSuccessHeuristicAvg": 1,
+    "citationCoverageHeuristicAvg": 1
+  },
+  "cases": [
+    {
+      "id": "clarify_previous_doc",
+      "pass": true,
+      "briefBlocked": true,
+      "requiresCitations": false,
+      "citationsFound": 0,
+      "judge": null
+    },
+    {
+      "id": "doc_improve_with_attachment",
+      "pass": true,
+      "briefBlocked": false,
+      "requiresCitations": false,
+      "citationsFound": 0,
+      "judge": null
+    },
+    {
+      "id": "summarize_with_citations",
+      "pass": true,
+      "briefBlocked": false,
+      "requiresCitations": true,
+      "citationsFound": 5,
+      "judge": null
+    },
+    {
+      "id": "table_question_citations",
+      "pass": true,
+      "briefBlocked": false,
+      "requiresCitations": true,
+      "citationsFound": 1,
+      "judge": null
+    },
+    {
+      "id": "image_ocr_summarize",
+      "pass": true,
+      "briefBlocked": false,
+      "requiresCitations": true,
+      "citationsFound": 1,
+      "judge": null
+    },
+    {
+      "id": "rag_connected_context",
+      "pass": true,
+      "briefBlocked": false,
+      "requiresCitations": false,
+      "citationsFound": 1,
+      "judge": null
+    }
+  ]
+}

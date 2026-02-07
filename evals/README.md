@@ -32,19 +32,19 @@ Outputs:
 Guardar baseline (por defecto en `evals/judge_baseline.json`):
 
 ```bash
-npm run eval:judge:llm -- --save-baseline
+npm run eval:judge -- --mode offline --save-baseline evals/judge_baseline.json
 ```
 
 Comparar contra baseline y fallar si hay regresiones:
 
 ```bash
-npm run eval:judge:llm -- --baseline evals/judge_baseline.json
+npm run eval:judge -- --mode offline --baseline evals/judge_baseline.json
 ```
 
 Ajustar tolerancias (defaults: `task_success_drop=0.03`, `citation_drop=0.03`, `clarification_increase=0.05`, `contradictions_increase=0.1`):
 
 ```bash
-npm run eval:judge:llm -- \\
+npm run eval:judge -- --mode offline \\
   --baseline evals/judge_baseline.json \\
   --max-task-success-drop 0.02 \\
   --max-citation-coverage-drop 0.02 \\
@@ -55,6 +55,9 @@ npm run eval:judge:llm -- \\
 Si queres comparar sin cortar el proceso (solo reporte), agrega:
 
 ```bash
-npm run eval:judge:llm -- --baseline evals/judge_baseline.json --no-fail
+npm run eval:judge -- --mode offline --baseline evals/judge_baseline.json --no-fail
 ```
 
+Notas:
+- El baseline es compatible con modo LLM tambien, pero CI corre por defecto en modo offline para evitar flakiness por providers.
+- `casesPath` se guarda en formato relativo (portable) para que el baseline sea estable entre local/CI.
