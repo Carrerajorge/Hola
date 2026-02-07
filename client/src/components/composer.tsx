@@ -37,10 +37,13 @@ import {
   SILVER_CONTAINER_SHADOW,
   SILVER_GLASS_BG,
   SILVER_HAIRLINE,
+  SILVER_HAIRLINE_DASHED,
   SILVER_HOVER_BORDER_INNER,
   SILVER_HOVER_BORDER_SOFT,
   SILVER_ICON_BUTTON_BASE,
   SILVER_ICON_BUTTON_TONE,
+  SILVER_KBD,
+  SILVER_RING_SOFT,
 } from "@/lib/silver-ui";
 import { SourceListItem } from "@/components/ui/source-list-item";
 import { RecordingPanel } from "@/components/recording-panel";
@@ -400,10 +403,11 @@ export function Composer({
             <div
               key={file.id || index}
               className={cn(
-                "relative group rounded-lg border overflow-hidden",
+                "relative group rounded-lg overflow-hidden",
+                SILVER_HAIRLINE,
                 file.status === "error"
                   ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
-                  : "bg-card border-border"
+                  : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
               )}
               data-testid={`inline-file-${index}`}
             >
@@ -476,7 +480,7 @@ export function Composer({
     }
 
     return (
-      <div className="flex items-center gap-2 pl-2">
+      <div className="flex items-center gap-1.5 pl-1">
         {uploadedFiles.map((file, index) => {
           const theme = getFileTheme(file.name, file.mimeType);
           const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
@@ -484,13 +488,13 @@ export function Composer({
           if (isImage && file.dataUrl) {
             return (
               <div key={file.id} className="relative group">
-                <div
-                  className={cn(
-                    "relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer",
-                    SILVER_HAIRLINE,
-                    "border-[#c7c7c7]/55 dark:border-white/10",
-                    SILVER_HOVER_BORDER_SOFT,
-                    "transition-colors duration-150"
+                  <div
+                    className={cn(
+                      "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
+                      SILVER_HAIRLINE,
+                      "border-[#c7c7c7]/55 dark:border-white/10",
+                      SILVER_HOVER_BORDER_SOFT,
+                      "transition-colors duration-150"
                   )}
                   onClick={() => setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl! })}
                   data-testid={`preview-image-${index}`}
@@ -502,7 +506,7 @@ export function Composer({
                   />
                   {(file.status === "uploading" || file.status === "processing") && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <Loader2 className="h-4 w-4 text-white animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
                     </div>
                   )}
                 </div>
@@ -526,26 +530,26 @@ export function Composer({
                 <TooltipTrigger asChild>
                   <div
                     className={cn(
-                      "relative group flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 cursor-pointer",
-                      file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
-                      file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800",
+                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200 cursor-pointer",
+                      file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border-[0.5px] border-blue-200 dark:border-blue-800",
+                      file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border-[0.5px] border-yellow-200 dark:border-yellow-800",
                       file.status === "ready" && cn(
                         "bg-white/30 dark:bg-white/5 hover:bg-white/40 dark:hover:bg-white/6",
                         SILVER_HAIRLINE,
-                        "border-[#c7c7c7]/50 dark:border-white/10",
+                        "border-[#c7c7c7]/45 dark:border-white/10",
                         SILVER_HOVER_BORDER_SOFT
                       ),
-                      file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                      file.status === "error" && "bg-red-50 dark:bg-red-950/30 border-[0.5px] border-red-200 dark:border-red-800"
                     )}
                   >
                     <div className={cn(
-                      "flex items-center justify-center w-7 h-7 rounded shrink-0",
+                      "flex items-center justify-center w-6 h-6 rounded shrink-0",
                       theme.bgColor
                     )}>
                       {file.status === "uploading" || file.status === "processing" ? (
-                        <Loader2 className="h-4 w-4 text-white animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
                       ) : (
-                        <span className="text-white text-xs font-bold">
+                        <span className="text-white text-[11px] font-bold leading-none">
                           {theme.icon}
                         </span>
                       )}
@@ -865,9 +869,9 @@ export function Composer({
   const containerClass = isDocumentMode
     ? cn(
       "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
-      isDraggingOver && "ring-2 ring-[#c7c7c7]/35 dark:ring-white/12 rounded-2xl"
+      isDraggingOver && cn("ring-2 rounded-2xl", SILVER_RING_SOFT)
     )
-    : "shrink-0 w-full px-4 pb-3 pt-2 bg-background";
+    : "shrink-0 w-full px-4 pb-2.5 pt-1.5 bg-background";
 
   const inputContainerClass = cn(
     isDocumentMode
@@ -880,7 +884,7 @@ export function Composer({
         "border-[#c7c7c7]/55 dark:border-white/10",
         SILVER_HOVER_BORDER_SOFT,
         // Shape & Spacing
-        "rounded-[22px] px-4 py-2",
+        "rounded-[22px] px-3 py-1.5",
         // Elevated Shadow
         SILVER_CONTAINER_SHADOW,
         // Focus State (minimal silver)
@@ -897,7 +901,7 @@ export function Composer({
         "border-[#c7c7c7]/55 dark:border-white/10",
         SILVER_HOVER_BORDER_SOFT,
         // Shape & Spacing
-        "rounded-[22px] px-4 py-2",
+        "rounded-[22px] px-3 py-1.5",
         // Elevated Shadow
         SILVER_CONTAINER_SHADOW,
         // Focus State (minimal silver)
@@ -905,7 +909,7 @@ export function Composer({
       ),
     // Keep these highlights in document mode too
     selectedDocText && "border-primary/20",
-    isDraggingOver && "border-[#bdbdbd]/85 bg-white/80 ring-4 ring-[#c7c7c7]/15 dark:bg-white/5 dark:ring-white/10"
+    isDraggingOver && cn("border-[#bdbdbd]/85 bg-white/80 ring-2 dark:bg-white/5", SILVER_RING_SOFT)
   );
 
   return (
@@ -918,7 +922,13 @@ export function Composer({
       onDrop={handleDrop}
     >
       {isDraggingOver && (
-        <div className="absolute inset-0 z-50 bg-white/55 dark:bg-zinc-900/35 backdrop-blur-sm rounded-2xl flex items-center justify-center border border-dashed border-[#c7c7c7]/70 dark:border-white/20 pointer-events-none">
+        <div
+          className={cn(
+            "absolute inset-0 z-50 bg-white/55 dark:bg-zinc-900/35 backdrop-blur-sm rounded-2xl flex items-center justify-center pointer-events-none",
+            SILVER_HAIRLINE_DASHED,
+            "border-[#c7c7c7]/70 dark:border-white/20"
+          )}
+        >
           <div className="flex flex-col items-center gap-2 text-zinc-700 dark:text-zinc-200">
             <Upload className="h-8 w-8" />
             <span className="text-sm font-medium">Suelta los archivos aquí</span>
@@ -1058,7 +1068,7 @@ export function Composer({
               SILVER_HAIRLINE,
               "border-[#c7c7c7]/80 dark:border-white/20",
               SILVER_HOVER_BORDER_INNER,
-              "px-4 py-1.5",
+              "px-3 py-1",
               "transition-colors duration-150",
               "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
             )}
@@ -1188,7 +1198,7 @@ export function Composer({
 
               {/* Keyboard shortcut hint */}
               <span className="hidden sm:flex items-center text-[10px] text-muted-foreground/70">
-                <kbd className="px-1 py-0.5 rounded bg-muted/50 text-[9px] font-mono">⌘K</kbd>
+                <kbd className={SILVER_KBD}>⌘K</kbd>
                 <span className="ml-1">comandos</span>
               </span>
 

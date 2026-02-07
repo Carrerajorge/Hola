@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 // Keep these as simple class strings so components stay flexible.
 
 export const SILVER_HAIRLINE = "border-[0.5px] border-solid";
+export const SILVER_HAIRLINE_DASHED = "border-[0.5px] border-dashed";
 
 export const SILVER_BORDER_STRONG = "border-[#c7c7c7]/70 dark:border-white/20";
 export const SILVER_BORDER_SOFT = "border-[#c7c7c7]/55 dark:border-white/10";
@@ -14,6 +15,8 @@ export const SILVER_HOVER_BORDER_SOFT = "hover:border-[#bdbdbd]/70 dark:hover:bo
 export const SILVER_HOVER_BORDER_INNER = "hover:border-[#bdbdbd]/85 dark:hover:border-white/25";
 
 export const SILVER_GLASS_BG = "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl";
+
+export const SILVER_RING_SOFT = "ring-[#c7c7c7]/35 dark:ring-white/12";
 
 export const SILVER_FOCUS_RING = cn(
   "focus-visible:ring-0",
@@ -31,6 +34,14 @@ export const SILVER_CONTAINER_FOCUS = cn(
 export const SILVER_CONTAINER_SHADOW = cn(
   "shadow-[0_10px_30px_rgba(0,0,0,0.03)]",
   "hover:shadow-[0_10px_30px_rgba(0,0,0,0.05)]"
+);
+
+export const SILVER_KBD = cn(
+  SILVER_HAIRLINE,
+  "border-[#c7c7c7]/45 dark:border-white/12",
+  "bg-white/30 dark:bg-white/5",
+  "text-zinc-600 dark:text-white/60",
+  "rounded-md px-1 py-0.5 text-[9px] font-mono"
 );
 
 export const SILVER_ICON_BUTTON_BASE = cn(
@@ -59,4 +70,3 @@ export const SILVER_ICON_BUTTON_DANGER_TONE = cn(
   "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
   "text-zinc-700 hover:text-red-600 dark:text-white/70 dark:hover:text-red-300"
 );
-

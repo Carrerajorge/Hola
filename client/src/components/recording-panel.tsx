@@ -199,12 +199,19 @@ export function RecordingPanel({
       {showStopButton ? (
         <Button
           onClick={handleStop}
+          variant="ghost"
           size="icon"
-          className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50 focus-visible:ring-2 focus-visible:ring-white/50"
+          className={cn(
+            "h-9 w-9 sm:h-8 sm:w-8",
+            SILVER_ICON_BUTTON_BASE,
+            "border-red-300/60 hover:border-red-400 dark:border-red-300/30 dark:hover:border-red-300/50",
+            "bg-white/35 hover:bg-red-50 dark:bg-white/5 dark:hover:bg-red-950/30",
+            "text-red-600 hover:text-red-700 dark:text-red-300 dark:hover:text-red-200"
+          )}
           aria-label={isAgentRunning ? "Stop agent" : "Stop AI response"}
           data-testid="button-stop-chat"
         >
-          <Square className="h-5 w-5 fill-current" aria-hidden="true" />
+          <Square className="h-4 w-4" aria-hidden="true" />
         </Button>
       ) : hasContent ? (
         <motion.div
