@@ -562,9 +562,16 @@ export function Sidebar({
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0">
             <span className="text-sm font-semibold leading-none liquid-text-gradient">{appName}</span>
-            <span className="text-[10px] text-muted-foreground">{appDescription}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] text-muted-foreground truncate">{appDescription}</span>
+              {isAdmin && platformSettings.maintenance_mode ? (
+                <span className="shrink-0 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium">
+                  Mantenimiento
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8 liquid-button" onClick={onToggle}>
