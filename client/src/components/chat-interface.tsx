@@ -1500,29 +1500,46 @@ export function ChatInterface({
     };
   }, []);
 
+  const trimSpeechSegment = (value: string) => (value || "").replace(/^[ \t]+|[ \t]+$/g, "");
+
   const buildDictationText = (base: string, interim: string) => {
     const b = base || "";
-    const i = (interim || "").trim();
+    const i = trimSpeechSegment(interim);
     if (!i) return b;
     if (!b) return i;
     if (/[\s\n]$/.test(b)) return b + i;
+    if (/^\n/.test(i)) return b + i;
     if (/^[¿¡,.;:!?]/.test(i)) return b + i;
     return b + " " + i;
   };
 
   const appendDictationSegment = (base: string, segment: string) => {
-    const seg = (segment || "").trim();
+    const seg = trimSpeechSegment(segment);
     if (!seg) return base || "";
     const b = base || "";
     if (!b) return seg;
     if (/[\s\n]$/.test(b)) return b + seg;
+    if (/^\n/.test(seg)) return b + seg;
     if (/^[¿¡,.;:!?]/.test(seg)) return b + seg;
     return b + " " + seg;
   };
 
   const normalizeFinalDictationSegment = (segment: string) => {
-    const s = (segment || "").trim();
+    const s = trimSpeechSegment(segment);
     if (!s) return "";
+
+    const structureCommands: Array<{ re: RegExp; replacement: string }> = [
+      { re: /\b(nueva l[ií]nea|salto de l[ií]nea|nuevo rengl[oó]n)\s*$/i, replacement: "\n" },
+      { re: /\b(nuevo p[aá]rrafo)\s*$/i, replacement: "\n\n" },
+    ];
+
+    for (const cmd of structureCommands) {
+      const m = s.match(cmd.re);
+      if (!m) continue;
+      const idx = m.index ?? 0;
+      const before = s.slice(0, idx).replace(/[ \t]+$/g, "");
+      return before ? before + cmd.replacement : cmd.replacement;
+    }
 
     const commands: Array<{ re: RegExp; punctuation: string }> = [
       { re: /\b(punto y coma)\s*$/i, punctuation: ";" },
@@ -1537,7 +1554,7 @@ export function ChatInterface({
       const m = s.match(cmd.re);
       if (!m) continue;
       const idx = m.index ?? 0;
-      const before = s.slice(0, idx).trimEnd();
+      const before = s.slice(0, idx).replace(/[ \t]+$/g, "");
       return before ? before + cmd.punctuation : cmd.punctuation;
     }
 
