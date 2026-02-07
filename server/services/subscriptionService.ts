@@ -13,6 +13,7 @@ import {
   resolveUserIdFromStripeCustomerId,
   upsertPaymentFromStripeInvoice,
 } from "./paymentIngestionService";
+import { recordStripeInvoicePaymentSucceeded } from "./invoiceAutomationService";
 
 import { createRequire } from 'module';
 
@@ -632,8 +633,15 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
 
   try {
     if (subscriptionId) {
-      const stripe = getStripeClient();
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      let subscription: any = null;
+      try {
+        const stripe = getStripeClient();
+        subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      } catch (err) {
+        // Best-effort: we can still record the payment and invoice from the webhook payload.
+        console.error("[Stripe] Failed to retrieve subscription for invoice.payment_succeeded:", err);
+      }
+
       userId = subscription?.metadata?.userId || null;
       planName = getPlanFromPriceId(subscription?.items?.data?.[0]?.price?.id);
 
@@ -641,30 +649,34 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
         await updateUserSubscription(userId, {
           status: "active",
           currentPeriodEnd: new Date(
-            ((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000
+            ((subscription as any)?.current_period_end ?? (subscription as any)?.currentPeriodEnd ?? 0) * 1000
           ),
         });
 
-        // For recurring payments (not first payment), send notification
+        // For recurring payments (not first payment), notify admin (best-effort).
         if (invoice?.billing_reason === "subscription_cycle") {
-          const [user] = await db.select().from(users).where(eq(users.id, userId));
-          if (user) {
-            await notifyAdminOfPurchase({
-              userId,
-              userEmail: user.email || "unknown",
-              userName:
-                (user as any).displayName ||
-                (user as any).name ||
-                user.fullName ||
-                [user.firstName, user.lastName].filter(Boolean).join(" ") ||
-                undefined,
-              plan: planName || "go",
-              amount: invoice?.amount_paid || subscription?.items?.data?.[0]?.price?.unit_amount || 0,
-              currency: invoice?.currency || "usd",
-              timestamp: new Date(),
-              stripePaymentId: invoice?.id,
-              intentId: invoice?.payment_intent,
-            });
+          try {
+            const [user] = await db.select().from(users).where(eq(users.id, userId));
+            if (user) {
+              await notifyAdminOfPurchase({
+                userId,
+                userEmail: user.email || "unknown",
+                userName:
+                  (user as any).displayName ||
+                  (user as any).name ||
+                  user.fullName ||
+                  [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                  undefined,
+                plan: planName || "go",
+                amount: invoice?.amount_paid || subscription?.items?.data?.[0]?.price?.unit_amount || 0,
+                currency: invoice?.currency || "usd",
+                timestamp: new Date(),
+                stripePaymentId: invoice?.id,
+                intentId: invoice?.payment_intent,
+              });
+            }
+          } catch (err) {
+            console.error("[Stripe] Failed to notify admin of recurring purchase:", err);
           }
         }
       }
@@ -675,12 +687,23 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
     }
 
     await upsertPaymentFromStripeInvoice({ invoice, status: "completed", userId, plan: planName });
+
+    // Create/update invoice record and send email (idempotent). If email fails, throw to trigger webhook retries.
+    if (userId) {
+      const [dbUser] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+      await recordStripeInvoicePaymentSucceeded({
+        userId,
+        userEmail: dbUser?.email || invoice?.customer_email || null,
+        stripeInvoice: invoice as any,
+      });
+    }
     
     if (eventId) {
       markEventProcessed(eventId);
     }
   } catch (error) {
     console.error("Error handling payment succeeded:", error);
+    throw error;
   }
 }
 
