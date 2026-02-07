@@ -6095,13 +6095,13 @@ IMPORTANTE:
                   >
                     {activeGpt
                       ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                      : selectedProject
-                        ? (
-                          <span>
-                            <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
-                          </span>
-                        )
-                        : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                        : selectedProject
+                          ? (
+                            <span>
+                              <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                            </span>
+                          )
+                        : `Soy ${document.title || "ILIAGPT"}, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho mas.`
                     }
                   </motion.p>
                   {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
