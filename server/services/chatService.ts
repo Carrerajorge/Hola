@@ -1344,7 +1344,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           const pipelineResponse = await multiIntentPipeline.execute(
             lastUserMessage.content,
             {
-              userId: conversationId,
+              userId: userId || conversationId || "anonymous",
               conversationId,
               messages: messages.map(m => ({ role: m.role, content: m.content })),
               onProgress: onAgentProgress
@@ -2031,7 +2031,7 @@ REGLAS OBLIGATORIAS:
           model: MODELS.TEXT,
           temperature: 0.2,
           topP: 1,
-          userId: conversationId,
+          userId: userId || conversationId || "anonymous",
           requestId: `figma_${Date.now()}`,
         }
       );
@@ -2199,7 +2199,7 @@ REGLAS OBLIGATORIAS:
         model: model || MODELS.TEXT,
         temperature,
         topP,
-        userId: conversationId,
+        userId: userId || conversationId || "anonymous",
         requestId: `chat_${Date.now()}`,
       }
     );

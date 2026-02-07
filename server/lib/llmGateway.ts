@@ -8,6 +8,7 @@ import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityS
 import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import type { InsertApiLog } from "@shared/schema";
+import { getUserId as getCorrelationUserId } from "../middleware/correlationContext";
 
 import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
 import type { ZodSchema } from "zod";
@@ -164,6 +165,50 @@ function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | 
   return null;
 }
 
+function clampText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen);
+}
+
+function safeToString(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function getLastUserMessagePreview(messages: ChatCompletionMessageParam[], maxLen = 800): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as any;
+    if (msg?.role !== "user") continue;
+    const content = safeToString(msg.content);
+    const trimmed = content.trim();
+    if (!trimmed) return null;
+    return clampText(trimmed, maxLen);
+  }
+  return null;
+}
+
+function estimateTokensFromText(text: string): number {
+  if (!text) return 0;
+  // Rough heuristic: ~4 characters per token for English-ish text.
+  return Math.max(0, Math.ceil(text.length / 4));
+}
+
+function estimateTokensFromMessages(messages: ChatCompletionMessageParam[]): number {
+  try {
+    return estimateTokensFromText(JSON.stringify(messages));
+  } catch {
+    let combined = "";
+    for (const msg of messages as any[]) {
+      combined += safeToString(msg?.content);
+    }
+    return estimateTokensFromText(combined);
+  }
+}
+
 class LLMGateway {
   private xaiClient: OpenAI;
 
@@ -232,28 +277,46 @@ class LLMGateway {
     statusCode: number;
     tokensIn?: number;
     tokensOut?: number;
+    requestPreview?: string | null;
+    responsePreview?: string | null;
     errorMessage?: string;
     userId?: string;
   }): void {
+    const effectiveUserId = logData.userId ?? getCorrelationUserId();
+
     const apiLog: InsertApiLog = {
-      userId: logData.userId || null,
+      userId: effectiveUserId || null,
       endpoint: logData.endpoint,
       method: "POST",
       statusCode: logData.statusCode,
       latencyMs: logData.latencyMs,
-      tokensIn: logData.tokensIn || null,
-      tokensOut: logData.tokensOut || null,
+      tokensIn: logData.tokensIn ?? null,
+      tokensOut: logData.tokensOut ?? null,
       model: logData.model,
       provider: logData.provider,
-      requestPreview: null,
-      responsePreview: null,
-      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 200) : null,
+      requestPreview: logData.requestPreview ? clampText(logData.requestPreview, 2000) : null,
+      responsePreview: logData.responsePreview ? clampText(logData.responsePreview, 2000) : null,
+      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 500) : null,
       ipAddress: null,
       userAgent: null,
     };
 
-    storage.createApiLog(apiLog).catch((err) => {
-      console.error("[LLMGateway] Failed to persist API log:", err.message);
+    storage.createApiLog(apiLog).catch((err: any) => {
+      const errMsg = err?.message || String(err);
+
+      // If we attempted to attach a userId that doesn't exist in `users`, the FK can reject the log.
+      // We still want to keep the operational log, so retry without userId (best-effort).
+      const isForeignKeyViolation =
+        err?.code === "23503" || /foreign key/i.test(errMsg) || /violates foreign key/i.test(errMsg);
+
+      if (apiLog.userId && isForeignKeyViolation) {
+        storage.createApiLog({ ...apiLog, userId: null }).catch((retryErr: any) => {
+          console.error("[LLMGateway] Failed to persist API log (retry without userId):", retryErr?.message || String(retryErr));
+        });
+        return;
+      }
+
+      console.error("[LLMGateway] Failed to persist API log:", errMsg);
     });
   }
 
@@ -494,14 +557,15 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const requestId = options.requestId || this.generateRequestId();
     const startTime = Date.now();
-    const userId = options.userId || "anonymous";
+    const userId = options.userId || getCorrelationUserId() || "anonymous";
+    const effectiveOptions: LLMRequestOptions = { ...options, userId };
     const enableFallback = options.enableFallback !== false;
     const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
 
     this.metrics.totalRequests++;
 
     // Check cache first
-    const cacheKey = this.getCacheKey(messages, options);
+    const cacheKey = this.getCacheKey(messages, effectiveOptions);
     if (cacheKey) {
       const cached = this.requestCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -512,7 +576,7 @@ class LLMGateway {
     }
 
     // Check for duplicate in-flight request
-    const contentHash = this.generateContentHash(messages, options);
+    const contentHash = this.generateContentHash(messages, effectiveOptions);
     const inFlight = this.getInFlightRequest(contentHash);
     if (inFlight) {
       this.metrics.deduplicatedRequests++;
@@ -526,12 +590,12 @@ class LLMGateway {
     }
 
     // Truncate context
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(messages, effectiveOptions.maxTokens ? effectiveOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS);
 
     // Create the request promise
     const requestPromise = this.executeWithFallback(
       truncatedMessages,
-      { ...options, requestId, timeout },
+      { ...effectiveOptions, requestId, timeout },
       startTime,
       enableFallback
     );
@@ -719,6 +783,8 @@ class LLMGateway {
         statusCode: 200,
         tokensIn: usage?.prompt_tokens,
         tokensOut: usage?.completion_tokens,
+        requestPreview: getLastUserMessagePreview(messages),
+        responsePreview: content,
         userId: options.userId,
       });
 
@@ -765,6 +831,7 @@ class LLMGateway {
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
+        requestPreview: getLastUserMessagePreview(messages),
         userId: options.userId,
       });
 
@@ -809,6 +876,7 @@ class LLMGateway {
         latencyMs,
         statusCode: error.status || 500,
         errorMessage: error.message,
+        requestPreview: getLastUserMessagePreview(messages),
         userId: options.userId,
       });
 
@@ -852,6 +920,8 @@ class LLMGateway {
       statusCode: 200,
       tokensIn: usageRecord.promptTokens,
       tokensOut: usageRecord.completionTokens,
+      requestPreview: getLastUserMessagePreview(messages),
+      responsePreview: response.content,
       userId: options.userId,
     });
 
@@ -892,11 +962,12 @@ class LLMGateway {
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
     const requestId = options.requestId || this.generateRequestId();
-    const userId = options.userId || "anonymous";
-    const enableFallback = options.enableFallback !== false;
+    const userId = options.userId || getCorrelationUserId() || "anonymous";
+    const effectiveOptions: LLMRequestOptions = { ...options, userId };
+    const enableFallback = effectiveOptions.enableFallback !== false;
     let sequenceId = 0;
     let accumulatedContent = "";
-    let currentProvider: "xai" | "gemini" = this.selectProvider(options);
+    let currentProvider: "xai" | "gemini" = this.selectProvider(effectiveOptions);
 
     this.metrics.totalRequests++;
 
@@ -904,7 +975,11 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(
+      messages,
+      effectiveOptions.maxTokens ? effectiveOptions.maxTokens * 2 : MAX_CONTEXT_TOKENS
+    );
+    const requestPreview = getLastUserMessagePreview(truncatedMessages);
 
     // Check for existing checkpoint (recovery)
     const existingCheckpoint = this.streamCheckpoints.get(requestId);
@@ -923,10 +998,17 @@ class LLMGateway {
         continue;
       }
 
+      const attemptStartTime = Date.now();
+      const endpoint = provider === "xai" ? "/chat/completions" : "/generateContent";
+      const detectedModelProvider = detectProviderFromModel(effectiveOptions.model);
+      const model = provider === "xai"
+        ? (detectedModelProvider === "xai" ? (effectiveOptions.model || MODELS.TEXT) : MODELS.TEXT)
+        : (detectedModelProvider === "gemini" ? (effectiveOptions.model || GEMINI_MODELS.FLASH_PREVIEW) : GEMINI_MODELS.FLASH_PREVIEW);
+
       try {
         const stream = provider === "xai"
-          ? this.streamXai(truncatedMessages, options, requestId)
-          : this.streamGemini(truncatedMessages, options, requestId);
+          ? this.streamXai(truncatedMessages, effectiveOptions, requestId, model)
+          : this.streamGemini(truncatedMessages, effectiveOptions, requestId, model);
 
         for await (const chunk of stream) {
           accumulatedContent += chunk.content;
@@ -955,10 +1037,61 @@ class LLMGateway {
           if (chunk.done) {
             this.streamCheckpoints.delete(requestId);
             getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
+
+            const latencyMs = Date.now() - attemptStartTime;
+            const tokensIn = estimateTokensFromMessages(truncatedMessages);
+            const tokensOut = estimateTokensFromText(accumulatedContent);
+
+            recordConnectorUsage(provider, latencyMs, true);
+            this.recordTokenUsage({
+              requestId,
+              userId,
+              provider,
+              model,
+              promptTokens: tokensIn,
+              completionTokens: tokensOut,
+              totalTokens: tokensIn + tokensOut,
+              timestamp: Date.now(),
+              latencyMs,
+              cached: false,
+              fromFallback: false,
+            });
+            this.persistApiLog({
+              provider,
+              model,
+              endpoint,
+              latencyMs,
+              statusCode: 200,
+              tokensIn,
+              tokensOut,
+              requestPreview,
+              responsePreview: accumulatedContent,
+              userId: effectiveOptions.userId,
+            });
+
             return;
           }
         }
       } catch (error: any) {
+        const latencyMs = Date.now() - attemptStartTime;
+        const tokensIn = estimateTokensFromMessages(truncatedMessages);
+        const tokensOut = estimateTokensFromText(accumulatedContent);
+
+        recordConnectorUsage(provider, latencyMs, false);
+        this.persistApiLog({
+          provider,
+          model,
+          endpoint,
+          latencyMs,
+          statusCode: error?.status || 500,
+          tokensIn,
+          tokensOut,
+          requestPreview,
+          responsePreview: accumulatedContent,
+          errorMessage: error?.message,
+          userId: effectiveOptions.userId,
+        });
+
         // Save checkpoint before failing
         this.streamCheckpoints.set(requestId, {
           requestId,
@@ -1090,10 +1223,9 @@ class LLMGateway {
   private async * streamXai(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
-    requestId: string
+    requestId: string,
+    model: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = options.model || MODELS.TEXT;
-
     const stream = await this.xaiClient.chat.completions.create({
       model,
       messages,
@@ -1128,9 +1260,9 @@ class LLMGateway {
   private async * streamGemini(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
-    requestId: string
+    requestId: string,
+    model: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-    const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
     const stream = geminiStreamChat(geminiMessages, {

@@ -1355,7 +1355,8 @@ const shellCommandTool: ToolDefinition = {
     }
 
     const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
+      // Use /bin/bash for portability (macOS does not ship /usr/bin/bash).
+      return spawn("/bin/bash", ["-lc", cmd], {
         cwd: workspaceDir,
         env: { ...process.env, HOME: workspaceDir },
         shell: false,
