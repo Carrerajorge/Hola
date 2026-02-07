@@ -307,6 +307,35 @@ export function createStripeRouter() {
 
       const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000';
       const protocol = domain.includes('localhost') ? 'http' : 'https';
+
+      // Prefer configured public base URL for Stripe redirects (avoids wrong host like michat.iliagpt.com)
+      const configuredBaseUrl = (process.env.BASE_URL || process.env.APP_URL || '').trim();
+      const baseUrl = (configuredBaseUrl || `${protocol}://${domain}`).replace(/\/$/, '');
+
+      const withQueryParam = (inputUrl: string, key: string, value: string) => {
+        const u = new URL(inputUrl);
+        u.searchParams.set(key, value);
+        return u.toString();
+      };
+
+      // If the request has a same-origin referer, use it as the return target.
+      // This improves UX when the user hits back/cancel in Stripe.
+      const refererHeader = req.headers.referer;
+      let successUrl = withQueryParam(`${baseUrl}/`, 'subscription', 'success');
+      let cancelUrl = withQueryParam(`${baseUrl}/`, 'subscription', 'cancelled');
+
+      if (typeof refererHeader === 'string' && refererHeader.length > 0) {
+        try {
+          const refUrl = new URL(refererHeader);
+          const baseHost = new URL(baseUrl).host;
+          if (refUrl.host === baseHost) {
+            successUrl = withQueryParam(refUrl.toString(), 'subscription', 'success');
+            cancelUrl = withQueryParam(refUrl.toString(), 'subscription', 'cancelled');
+          }
+        } catch {
+          // ignore invalid referer
+        }
+      }
       
       // Extract tracking info from request
       const ipAddress = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip || '';
@@ -322,8 +351,8 @@ export function createStripeRouter() {
           payment_method_types: ['card'],
           line_items: [{ price: priceId, quantity: 1 }],
           mode: 'subscription',
-          success_url: `${protocol}://${domain}/?subscription=success`,
-          cancel_url: `${protocol}://${domain}/?subscription=cancelled`,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
           metadata: { 
             userId,
             ipAddress: ipAddress.substring(0, 50),
