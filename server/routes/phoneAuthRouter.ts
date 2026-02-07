@@ -4,6 +4,7 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import { authStorage } from "../replit_integrations/auth/storage";
 
 export const phoneAuthRouter = Router();
 
@@ -207,18 +208,29 @@ phoneAuthRouter.post("/verify", async (req, res) => {
     }
     
     // Create session
-    (req as any).login(user, (err: any) => {
+    (req as any).login(user, async (err: any) => {
       if (err) {
         console.error("[PhoneAuth] Login error:", err);
         return res.status(500).json({ success: false, message: "Error al iniciar sesión" });
       }
+
+      try {
+        await authStorage.updateUserLogin(user.id, {
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.headers["user-agent"] || null
+        });
+      } catch {}
       
-      storage.createAuditLog({
-        action: "login_phone",
-        resource: "auth",
-        userId: user.id,
-        details: { phone: normalizedPhone.slice(-4) }
-      });
+      try {
+        await storage.createAuditLog({
+          action: "login_phone",
+          resource: "auth",
+          userId: user.id,
+          details: { phone: normalizedPhone.slice(-4) },
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.headers["user-agent"] || null
+        });
+      } catch {}
       
       res.json({ 
         success: true, 

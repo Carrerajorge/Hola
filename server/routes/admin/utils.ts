@@ -5,6 +5,7 @@ import { db } from "../../db";
 import { users, excelDocuments } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 // SECURITY: Admin email moved to environment variable
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
@@ -79,10 +80,12 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         }
 
         if (!isAdmin) {
-            await storage.createAuditLog({
-                action: "admin_access_denied",
+            await auditLog(req, {
+                action: AuditActions.ADMIN_DENIED,
                 resource: "admin_panel",
-                details: { email: userEmail, userId, path: req.path }
+                details: { email: userEmail, userId, path: req.path },
+                category: "admin",
+                severity: "warning",
             });
             return res.status(403).json({ error: "Admin access restricted" });
         }

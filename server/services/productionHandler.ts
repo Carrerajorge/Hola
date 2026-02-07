@@ -16,6 +16,7 @@ import {
     type ProductionEvent,
     type ProductionResult,
     type Artifact,
+    type DocumentIntent,
 } from '../agent/production';
 
 // ============================================================================
@@ -56,6 +57,15 @@ const SEARCH_FIRST_PATTERNS = [
     /encontrar\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
     /dame\s+\d+\s*(art[ií]culos?|papers?|estudios?|citas?)/i,
     /necesito\s+\d+\s*(art[ií]culos?|papers?|estudios?|referencias?)/i,
+
+    // Singular: "buscarme un artículo/paper/estudio"
+    /buscame\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /buscarme\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /busca\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /buscar\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /encuentra(?:me)?\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /dame\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
+    /necesito\s+(un|una)\s+(art[ií]culo|paper|estudio)\b/i,
     
     // "articulos cientificos de/sobre"
     /art[ií]culos?\s+cient[ií]ficos?\s+(de|sobre|en|d)\s*/i,
@@ -268,6 +278,13 @@ export async function handleProductionRequest(
     });
 
     try {
+        const pipelineIntent: DocumentIntent =
+            intentResult.intent === 'CREATE_PRESENTATION'
+                ? 'presentation'
+                : intentResult.intent === 'CREATE_SPREADSHEET'
+                    ? 'analysis'
+                    : 'report';
+
         // Execute production pipeline
         const result = await startProductionPipeline(
             message,
@@ -282,6 +299,14 @@ export async function handleProductionRequest(
                     message: event.message,
                     timestamp: event.timestamp,
                 });
+            },
+            {
+                // If the user explicitly selected a doc tool or intent router classified this as CREATE_*,
+                // do not allow the production router to downgrade to CHAT.
+                forceProduction: true,
+                deliverables,
+                intent: pipelineIntent,
+                topic: intentResult.slots.topic || message,
             }
         );
 
@@ -344,15 +369,21 @@ export async function handleProductionRequest(
     } catch (error: any) {
         console.error('[ProductionHandler] Pipeline error:', error);
 
+        const rawMessage = error?.message || 'Unknown error';
+        const userMessage =
+            rawMessage === 'Message does not require production mode'
+                ? 'Tu solicitud no requiere producción documental. Si necesitas un archivo, especifica el formato (Word/PDF/Excel/PPT) o selecciona la herramienta correspondiente.'
+                : rawMessage;
+
         writeSse(res, 'production_error', {
             runId,
-            error: error.message,
+            error: userMessage,
             timestamp: Date.now(),
         });
 
         // Send error as chat content
         writeSse(res, 'chunk', {
-            content: `❌ **Error en la producción documental**\n\n${error.message}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`,
+            content: `❌ **Error en la producción documental**\n\n${userMessage}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`,
             sequenceId: 1,
             requestId: runId,
             runId,

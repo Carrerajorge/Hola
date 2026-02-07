@@ -1375,18 +1375,19 @@ const shellCommandTool: ToolDefinition = {
       }
     };
 
-    if (sandboxMode === "runner") {
-      return await runWithRunner();
-    }
+	    if (sandboxMode === "runner") {
+	      return await runWithRunner();
+	    }
 
-    const runWithHost = () => {
-      return spawn("/usr/bin/bash", ["-lc", cmd], {
-        cwd: workspaceDir,
-        env: { ...process.env, HOME: workspaceDir },
-        shell: false,
-        windowsHide: true,
-      });
-    };
+	    const runWithHost = () => {
+	      // Prefer /bin/bash for portability (macOS doesn't have /usr/bin/bash).
+	      return spawn("/bin/bash", ["-lc", cmd], {
+	        cwd: workspaceDir,
+	        env: { ...process.env, HOME: workspaceDir },
+	        shell: false,
+	        windowsHide: true,
+	      });
+	    };
 
     const runWithDocker = () => {
       // Hardening defaults (v1): no network, drop caps, no new privileges.

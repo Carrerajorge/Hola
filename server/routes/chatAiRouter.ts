@@ -32,7 +32,8 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
 import { v4 as uuidv4 } from "uuid";
 import type { Response } from "express";
-import type { AuthenticatedRequest } from "../types/express";
+import { getUserId, type AuthenticatedRequest } from "../types/express";
+import { auditLog } from "../services/auditLogger";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
@@ -198,8 +199,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = getUserId(req);
 
       // CONTEXT FIX: Augment client messages with server-side history
       const messages = await conversationMemoryManager.augmentWithHistory(
@@ -787,8 +787,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         });
       }
 
-      const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = getUserId(req);
 
       // GPT Session Contract Resolution for streaming
       // Priority: session_id (reuse existing) > gptId (create new)
@@ -1508,23 +1507,22 @@ ${attachmentContext}`;
         }).catch(() => { });
       }
 
-      if (userId) {
-        try {
-          await storage.createAuditLog({
-            userId,
-            action: "chat_stream",
-            resource: "chats",
-            resourceId: conversationId || null,
-            details: {
-              messageCount: messages.length,
-              requestId,
-              runId: claimedRun?.id,
-              streaming: true
-            }
-          });
-        } catch (auditError) {
-          console.error("Failed to create audit log:", auditError);
-        }
+      try {
+        await auditLog(req, {
+          action: "chat_stream",
+          resource: "chats",
+          resourceId: conversationId || undefined,
+          details: {
+            messageCount: messages.length,
+            requestId,
+            runId: claimedRun?.id,
+            streaming: true,
+          },
+          category: "user",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
       }
 
     } catch (error: any) {
@@ -2155,8 +2153,7 @@ ${documentText}`;
         ];
 
         // Call LLM with strict DATA_MODE (no tools, no image generation)
-        const user = (req as AuthenticatedRequest).user;
-        const userId = user?.claims?.sub;
+        const userId = getUserId(req);
 
         const streamGenerator = llmGateway.streamChat(llmMessages, {
           userId: userId || conversationId || "anonymous",

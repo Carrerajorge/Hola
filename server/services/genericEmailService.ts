@@ -22,7 +22,7 @@ interface EmailResult {
 }
 
 const APP_NAME = "IliaGPT";
-const APP_URL = process.env.APP_URL || "https://iliagpt.com";
+const APP_URL = process.env.APP_URL || process.env.BASE_URL || "https://iliagpt.com";
 const DEFAULT_FROM = process.env.EMAIL_FROM || `${APP_NAME} <noreply@iliagpt.com>`;
 
 /**
@@ -202,12 +202,15 @@ export async function sendMagicLinkEmail(to: string, magicLinkUrl: string): Prom
  */
 export async function sendPaymentEmail(to: string, options: {
     invoiceId: string;
-    amount: number;
+    amount: number | string;
     currency?: string;
     status: "paid" | "pending" | "failed";
     invoiceUrl?: string;
 }): Promise<EmailResult> {
-    const { invoiceId, amount, currency = "USD", status, invoiceUrl } = options;
+    const { invoiceId, amount: rawAmount, currency: rawCurrency = "USD", status, invoiceUrl } = options;
+
+    const currency = String(rawCurrency || "USD").trim().toUpperCase();
+    const amount = parseAmount(rawAmount);
     
     const statusLabels: Record<string, { emoji: string; text: string; color: string }> = {
         paid: { emoji: "✅", text: "Pagado", color: "#27ae60" },
@@ -264,3 +267,28 @@ export default {
     sendMagicLinkEmail,
     sendPaymentEmail
 };
+
+function parseAmount(value: number | string): number {
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    const raw = String(value || "").trim();
+    if (!raw) return 0;
+
+    // Strip currency symbols and whitespace, keep digits, separators, and minus sign
+    const cleaned = raw.replace(/[^0-9.,-]/g, "");
+    if (!cleaned) return 0;
+
+    // If both '.' and ',' exist, assume ',' is thousands separator (e.g. "1,234.56")
+    if (cleaned.includes(".") && cleaned.includes(",")) {
+        const normalized = cleaned.replace(/,/g, "");
+        const n = Number.parseFloat(normalized);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    // If only ',' exists, treat it as decimal separator (e.g. "123,45")
+    const normalized = cleaned.replace(/,/g, ".");
+    const n = Number.parseFloat(normalized);
+    return Number.isFinite(n) ? n : 0;
+}

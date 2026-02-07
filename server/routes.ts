@@ -12,6 +12,7 @@ import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { authStorage } from "./replit_integrations/auth/storage";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";
@@ -84,6 +85,7 @@ import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
 import { apiKeysRouter } from "./routes/apiKeysRouter";
 import { memoryRouter } from "./routes/memoryRouter";
+import { auditLog, AuditActions } from "./services/auditLogger";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
@@ -248,15 +250,61 @@ export async function registerRoutes(
     app.get("/api/auth/google/callback",
       passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
       (req, res, next) => {
+        const authedUser: any = (req as any).user;
+        const authedUserId = authedUser?.claims?.sub || authedUser?.id || null;
+        const authedEmail = authedUser?.claims?.email || authedUser?.email || null;
+
         if (req.session) {
-          req.session.save((err) => {
+          if (authedUserId) {
+            // Robust fallback for environments where Passport session payload is flaky.
+            (req.session as any).authUserId = authedUserId;
+          }
+          req.session.save(async (err) => {
             if (err) {
               return next(err);
+            }
+            if (authedUserId) {
+              try {
+                await authStorage.updateUserLogin(authedUserId, {
+                  ipAddress: req.ip || req.socket.remoteAddress || null,
+                  userAgent: req.headers["user-agent"] || null
+                });
+              } catch {}
+              try {
+                await auditLog(req, {
+                  action: AuditActions.AUTH_LOGIN,
+                  resource: "auth",
+                  resourceId: authedUserId,
+                  details: { provider: "google", email: authedEmail },
+                  category: "auth",
+                  severity: "info",
+                });
+              } catch {}
             }
             res.redirect("/?auth=success");
           });
           return;
         }
+        // No session object - still record the login event.
+        (async () => {
+          if (!authedUserId) return;
+          try {
+            await authStorage.updateUserLogin(authedUserId, {
+              ipAddress: req.ip || req.socket.remoteAddress || null,
+              userAgent: req.headers["user-agent"] || null
+            });
+          } catch {}
+          try {
+            await auditLog(req, {
+              action: AuditActions.AUTH_LOGIN,
+              resource: "auth",
+              resourceId: authedUserId,
+              details: { provider: "google", email: authedEmail },
+              category: "auth",
+              severity: "info",
+            });
+          } catch {}
+        })();
         res.redirect("/?auth=success");
       }
     );
@@ -273,15 +321,59 @@ export async function registerRoutes(
     app.get("/api/auth/microsoft/callback",
       passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
       (req, res, next) => {
+        const authedUser: any = (req as any).user;
+        const authedUserId = authedUser?.claims?.sub || authedUser?.id || null;
+        const authedEmail = authedUser?.claims?.email || authedUser?.email || null;
+
         if (req.session) {
-          req.session.save((err) => {
+          if (authedUserId) {
+            (req.session as any).authUserId = authedUserId;
+          }
+          req.session.save(async (err) => {
             if (err) {
               return next(err);
+            }
+            if (authedUserId) {
+              try {
+                await authStorage.updateUserLogin(authedUserId, {
+                  ipAddress: req.ip || req.socket.remoteAddress || null,
+                  userAgent: req.headers["user-agent"] || null
+                });
+              } catch {}
+              try {
+                await auditLog(req, {
+                  action: AuditActions.AUTH_LOGIN,
+                  resource: "auth",
+                  resourceId: authedUserId,
+                  details: { provider: "microsoft", email: authedEmail },
+                  category: "auth",
+                  severity: "info",
+                });
+              } catch {}
             }
             res.redirect("/?auth=success");
           });
           return;
         }
+        (async () => {
+          if (!authedUserId) return;
+          try {
+            await authStorage.updateUserLogin(authedUserId, {
+              ipAddress: req.ip || req.socket.remoteAddress || null,
+              userAgent: req.headers["user-agent"] || null
+            });
+          } catch {}
+          try {
+            await auditLog(req, {
+              action: AuditActions.AUTH_LOGIN,
+              resource: "auth",
+              resourceId: authedUserId,
+              details: { provider: "microsoft", email: authedEmail },
+              category: "auth",
+              severity: "info",
+            });
+          } catch {}
+        })();
         res.redirect("/?auth=success");
       }
     );
@@ -297,15 +389,59 @@ export async function registerRoutes(
     app.get("/api/auth/auth0/callback",
       passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
       (req, res, next) => {
+        const authedUser: any = (req as any).user;
+        const authedUserId = authedUser?.claims?.sub || authedUser?.id || null;
+        const authedEmail = authedUser?.claims?.email || authedUser?.email || null;
+
         if (req.session) {
-          req.session.save((err) => {
+          if (authedUserId) {
+            (req.session as any).authUserId = authedUserId;
+          }
+          req.session.save(async (err) => {
             if (err) {
               return next(err);
+            }
+            if (authedUserId) {
+              try {
+                await authStorage.updateUserLogin(authedUserId, {
+                  ipAddress: req.ip || req.socket.remoteAddress || null,
+                  userAgent: req.headers["user-agent"] || null
+                });
+              } catch {}
+              try {
+                await auditLog(req, {
+                  action: AuditActions.AUTH_LOGIN,
+                  resource: "auth",
+                  resourceId: authedUserId,
+                  details: { provider: "auth0", email: authedEmail },
+                  category: "auth",
+                  severity: "info",
+                });
+              } catch {}
             }
             res.redirect("/?auth=success");
           });
           return;
         }
+        (async () => {
+          if (!authedUserId) return;
+          try {
+            await authStorage.updateUserLogin(authedUserId, {
+              ipAddress: req.ip || req.socket.remoteAddress || null,
+              userAgent: req.headers["user-agent"] || null
+            });
+          } catch {}
+          try {
+            await auditLog(req, {
+              action: AuditActions.AUTH_LOGIN,
+              resource: "auth",
+              resourceId: authedUserId,
+              details: { provider: "auth0", email: authedEmail },
+              category: "auth",
+              severity: "info",
+            });
+          } catch {}
+        })();
         res.redirect("/?auth=success");
       }
     );

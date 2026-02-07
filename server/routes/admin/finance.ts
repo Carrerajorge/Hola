@@ -177,7 +177,100 @@ financeRouter.get("/invoices", async (req, res) => {
 
 financeRouter.post("/invoices", async (req, res) => {
     try {
-        const invoice = await storage.createInvoice(req.body);
+        const body = req.body || {};
+        const invoiceNumber = String(body.invoiceNumber || "").trim();
+        const amount = String(body.amount || "").trim();
+        const userEmail = String(body.userEmail || "").trim();
+
+        if (!invoiceNumber || !amount) {
+            return res.status(400).json({ error: "invoiceNumber and amount are required" });
+        }
+
+        let resolvedUserId: string | null = body.userId ? String(body.userId).trim() : null;
+        let resolvedEmail: string | null = null;
+        if (!resolvedUserId && userEmail) {
+            const user = await storage.getUserByEmail(userEmail);
+            if (!user) {
+                return res.status(400).json({ error: "User not found for provided email" });
+            }
+            resolvedUserId = user.id;
+            resolvedEmail = user.email || null;
+        }
+
+        let invoice;
+        try {
+            invoice = await storage.createInvoice({
+                invoiceNumber,
+                amount,
+                userId: resolvedUserId,
+                currency: body.currency ? String(body.currency).trim().toUpperCase() : "EUR",
+            });
+        } catch (e: any) {
+            // Unique index: invoices_user_invoice_number_unique_idx
+            if (e?.code === "23505" && resolvedUserId) {
+                const existing = await storage
+                    .getInvoices()
+                    .then((rows) => rows.find((r) => r.userId === resolvedUserId && r.invoiceNumber === invoiceNumber));
+                if (existing) {
+                    return res.json(existing);
+                }
+                return res.status(409).json({ error: "Invoice already exists" });
+            }
+            throw e;
+        }
+
+        await auditLog(req, {
+            action: AuditActions.INVOICE_CREATED,
+            resource: "invoices",
+            resourceId: invoice.id,
+            details: {
+                invoiceNumber: invoice.invoiceNumber,
+                amount: invoice.amount,
+                currency: invoice.currency,
+                userId: invoice.userId || null,
+                createdBy: (req as any).user?.email,
+            },
+            category: "admin",
+            severity: "info",
+        });
+
+        // Auto-send invoice email if tied to a user with an email address.
+        if (invoice.userId) {
+            const user = resolvedEmail ? { email: resolvedEmail } : await storage.getUser(invoice.userId);
+            if (user?.email) {
+                const baseUrl = process.env.BASE_URL || process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+                const invoiceUrl = invoice.pdfPath
+                    ? (invoice.pdfPath.startsWith("http://") || invoice.pdfPath.startsWith("https://"))
+                        ? invoice.pdfPath
+                        : `${baseUrl}${invoice.pdfPath.startsWith("/") ? "" : "/"}${invoice.pdfPath}`
+                    : undefined;
+
+                const emailResult = await sendPaymentEmail(user.email, {
+                    invoiceId: invoice.invoiceNumber || invoice.id,
+                    amount: invoice.amount || "0",
+                    currency: invoice.currency || "EUR",
+                    status: (invoice.status as "paid" | "pending" | "failed") || "pending",
+                    invoiceUrl,
+                });
+
+                await auditLog(req, {
+                    action: AuditActions.INVOICE_SENT,
+                    resource: "invoices",
+                    resourceId: invoice.id,
+                    details: {
+                        userId: invoice.userId,
+                        recipientEmail: user.email,
+                        emailSent: emailResult.success,
+                        messageId: emailResult.messageId,
+                        error: emailResult.error,
+                        sentBy: (req as any).user?.email,
+                    },
+                    category: "admin",
+                    severity: emailResult.success ? "info" : "warning",
+                });
+            }
+        }
+
         res.json(invoice);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -237,18 +330,28 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
         }
 
         // Get user email
+        if (!invoice.userId) {
+            return res.status(400).json({ error: "Invoice is not linked to a user" });
+        }
         const user = await storage.getUser(invoice.userId);
         if (!user?.email) {
             return res.status(400).json({ error: "User has no email address" });
         }
 
+        const baseUrl = process.env.BASE_URL || process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+        const invoiceUrl = invoice.pdfPath
+            ? (invoice.pdfPath.startsWith("http://") || invoice.pdfPath.startsWith("https://"))
+                ? invoice.pdfPath
+                : `${baseUrl}${invoice.pdfPath.startsWith("/") ? "" : "/"}${invoice.pdfPath}`
+            : undefined;
+
         // Send email
         const emailResult = await sendPaymentEmail(user.email, {
-            invoiceId: invoice.id,
-            amount: invoice.amount || 0,
-            currency: invoice.currency || "USD",
+            invoiceId: invoice.invoiceNumber || invoice.id,
+            amount: invoice.amount || "0",
+            currency: invoice.currency || "EUR",
             status: (invoice.status as "paid" | "pending" | "failed") || "pending",
-            invoiceUrl: `${process.env.APP_URL || "https://iliagpt.com"}/billing/invoices/${invoice.id}`
+            invoiceUrl
         });
 
         await auditLog(req, {

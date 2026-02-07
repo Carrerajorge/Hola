@@ -17,6 +17,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { requestTracerMiddleware } from "./lib/requestTracer";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
+import { updateContext } from "./middleware/correlationContext";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
@@ -34,6 +35,7 @@ import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { getUserId as getAuthenticatedUserId } from "./types/express";
 
 initTracing();
 
@@ -170,6 +172,14 @@ export function log(message: string, source = "express") {
 
   // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
   await setupAuth(app);
+
+  // Ensure CorrelationContext has the authenticated userId (req.user can be populated by Passport/session).
+  app.use((req, _res, next) => {
+    const userId = getAuthenticatedUserId(req);
+    if (userId) updateContext({ userId });
+    next();
+  });
+
   registerAuthRoutes(app);
 
   // CSRF Protection for API (validates header)

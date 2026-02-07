@@ -1999,7 +1999,7 @@ function PaymentsSection() {
 function InvoicesSection() {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
+  const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userEmail: "" });
 
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ["/api/admin/finance/invoices"],
@@ -2056,6 +2056,14 @@ function InvoicesSection() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Cliente (email)</Label>
+                <Input
+                  placeholder="cliente@empresa.com"
+                  value={newInvoice.userEmail}
+                  onChange={(e) => setNewInvoice({ ...newInvoice, userEmail: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Importe</Label>
                 <Input 
                   placeholder="99.00" 
@@ -2066,7 +2074,7 @@ function InvoicesSection() {
               <Button 
                 className="w-full" 
                 onClick={() => createInvoiceMutation.mutate(newInvoice)}
-                disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+                disabled={!newInvoice.invoiceNumber || !newInvoice.userEmail || !newInvoice.amount}
               >
                 Crear factura
               </Button>
@@ -2097,7 +2105,19 @@ function InvoicesSection() {
                 <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
                   {invoice.status === "paid" ? "Pagada" : "Pendiente"}
                 </Badge>
-                <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  data-testid={`button-download-invoice-${invoice.id}`}
+                  onClick={() => {
+                    if (invoice.pdfPath) {
+                      window.open(invoice.pdfPath, "_blank");
+                    }
+                  }}
+                  disabled={!invoice.pdfPath}
+                  title={invoice.pdfPath ? "Descargar" : "Sin PDF disponible"}
+                >
                   <Download className="h-3 w-3" />
                 </Button>
               </div>
@@ -2525,7 +2545,7 @@ function SecuritySection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
-  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+  const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2558,6 +2578,7 @@ function SecuritySection() {
         page: auditPage.toString(),
         limit: "20",
         ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.actor && { actor: auditFilters.actor }),
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
@@ -2681,14 +2702,50 @@ function SecuritySection() {
     return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
   };
 
-  const getSeverityBadge = (action: string) => {
-    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-    const warningActions = ["warning", "update", "delete"];
-    
-    if (criticalActions.some(a => action?.includes(a))) {
+  const getActorLabel = (log: any) => {
+    const details = (log?.details || {}) as any;
+    const email = details.actorEmail || details.email;
+    if (email) return String(email);
+
+    const userId = log?.userId;
+    if (userId) {
+      const id = String(userId);
+      if (id.startsWith("anon_")) return "Anonymous";
+      return id;
+    }
+
+    return "System";
+  };
+
+  const getSeverityBadge = (log: any) => {
+    const action = String(log?.action || "");
+    const details = (log?.details || {}) as any;
+
+    let severity: string | null =
+      typeof details.severity === "string" ? details.severity.toLowerCase() : null;
+
+    // Derive severity from HTTP status if available.
+    if (!severity && typeof details.statusCode === "number") {
+      severity =
+        details.statusCode >= 500 ? "error" :
+        details.statusCode >= 400 ? "warning" :
+        "info";
+    }
+
+    // Fallback heuristics based on action string.
+    if (!severity) {
+      const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied", "access_denied"];
+      const warningActions = ["warning", "update", "delete", "disable", "enable"];
+
+      if (criticalActions.some(a => action.includes(a))) severity = "critical";
+      else if (warningActions.some(a => action.includes(a))) severity = "warning";
+      else severity = "info";
+    }
+
+    if (severity === "critical" || severity === "error") {
       return <Badge variant="destructive" className="text-xs">Critical</Badge>;
     }
-    if (warningActions.some(a => action?.includes(a))) {
+    if (severity === "warning") {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
@@ -2981,10 +3038,11 @@ function SecuritySection() {
                 recentLogs.map((log: any) => (
                   <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      {getSeverityBadge(log.action)}
+                      {getSeverityBadge(log)}
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -3186,6 +3244,16 @@ function SecuritySection() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">User:</Label>
+              <Input 
+                data-testid="filter-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-44"
+                value={auditFilters.actor}
+                onChange={(e) => setAuditFilters({ ...auditFilters, actor: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
               <Input 
                 data-testid="filter-date-from"
@@ -3209,7 +3277,7 @@ function SecuritySection() {
               variant="outline" 
               size="sm" 
               onClick={() => {
-                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
               }}
               data-testid="button-clear-filters"
@@ -3223,6 +3291,7 @@ function SecuritySection() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
@@ -3232,7 +3301,7 @@ function SecuritySection() {
               <tbody>
                 {auditLogsData?.data?.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
                       No audit logs found matching your filters.
                     </td>
                   </tr>
@@ -3242,10 +3311,11 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
-                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                      <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
                   ))
                 )}
@@ -3293,7 +3363,17 @@ function ReportsSection() {
   const [reportFormat, setReportFormat] = useState<string>("json");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [generateParams, setGenerateParams] = useState<Record<string, any>>({});
   const [historyPage, setHistoryPage] = useState(1);
+  const [historyQ, setHistoryQ] = useState("");
+  const [historyStatus, setHistoryStatus] = useState<string>("all");
+  const [historyType, setHistoryType] = useState<string>("all");
+  const [historyFormat, setHistoryFormat] = useState<string>("all");
+  const [historyDateFrom, setHistoryDateFrom] = useState("");
+  const [historyDateTo, setHistoryDateTo] = useState("");
+
+  const [previewReportId, setPreviewReportId] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ["/api/admin/reports/templates"],
@@ -3303,13 +3383,60 @@ function ReportsSection() {
     }
   });
 
-  const { data: generatedReportsData, isLoading: reportsLoading, refetch: refetchReports } = useQuery({
-    queryKey: ["/api/admin/reports/generated", historyPage],
+  const selectedTemplateObj = (templates || []).find((t: any) => t.id === selectedTemplate) || null;
+  const selectedTemplateType = selectedTemplateObj?.type || "";
+
+  useEffect(() => {
+    // Reset template-specific filters when switching templates to avoid cross-contamination.
+    setGenerateParams({});
+  }, [selectedTemplate]);
+
+  const { data: filterOptionsData } = useQuery({
+    queryKey: ["/api/admin/reports/filter-options", selectedTemplateType],
+    enabled: !!selectedTemplateType,
     queryFn: async () => {
-      const res = await fetch(`/api/admin/reports/generated?page=${historyPage}&limit=20`, { credentials: "include" });
+      const res = await fetch(`/api/admin/reports/filter-options?type=${encodeURIComponent(selectedTemplateType)}`, { credentials: "include" });
+      return res.json();
+    }
+  });
+
+  const filterOptions = filterOptionsData?.options || {};
+
+  const { data: generatedReportsData, isLoading: reportsLoading, refetch: refetchReports } = useQuery({
+    queryKey: [
+      "/api/admin/reports/generated",
+      historyPage,
+      historyQ,
+      historyStatus,
+      historyType,
+      historyFormat,
+      historyDateFrom,
+      historyDateTo
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("page", String(historyPage));
+      params.set("limit", "20");
+      if (historyQ.trim()) params.set("q", historyQ.trim());
+      if (historyStatus !== "all") params.set("status", historyStatus);
+      if (historyType !== "all") params.set("type", historyType);
+      if (historyFormat !== "all") params.set("format", historyFormat);
+      if (historyDateFrom) params.set("dateFrom", historyDateFrom);
+      if (historyDateTo) params.set("dateTo", historyDateTo);
+
+      const res = await fetch(`/api/admin/reports/generated?${params.toString()}`, { credentials: "include" });
       return res.json();
     },
     refetchInterval: 5000
+  });
+
+  const { data: previewData, isLoading: previewLoading } = useQuery({
+    queryKey: ["/api/admin/reports/preview", previewReportId],
+    enabled: !!previewReportId && previewOpen,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/reports/preview/${previewReportId}?limit=25`, { credentials: "include" });
+      return res.json();
+    }
   });
 
   const generateReportMutation = useMutation({
@@ -3325,6 +3452,7 @@ function ReportsSection() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
       setActiveTab("history");
+      toast.success("Report generation started");
     }
   });
 
@@ -3335,8 +3463,24 @@ function ReportsSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
+      toast.success("Report deleted");
+    },
+    onError: () => {
+      toast.error("Failed to delete report");
     }
   });
+
+  const retryReport = (report: any) => {
+    if (!report?.templateId) {
+      toast.error("This report has no template attached");
+      return;
+    }
+    generateReportMutation.mutate({
+      templateId: report.templateId,
+      format: report.format || "json",
+      parameters: report.parameters || {}
+    });
+  };
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -3368,6 +3512,14 @@ function ReportsSection() {
     }
   };
 
+  const getReportError = (report: any): string | null => {
+    const err =
+      report?.resultSummary?.aggregates?.error ||
+      report?.resultSummary?.error ||
+      report?.error;
+    return typeof err === "string" && err.trim() ? err : null;
+  };
+
   const handleGenerateFromTemplate = (templateId: string) => {
     setSelectedTemplate(templateId);
     setActiveTab("generate");
@@ -3375,15 +3527,31 @@ function ReportsSection() {
 
   const handleSubmitGenerate = () => {
     if (!selectedTemplate) return;
+    const params: Record<string, any> = { dateFrom, dateTo };
+    Object.entries(generateParams || {}).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      if (typeof v === "string") {
+        const s = v.trim();
+        if (!s || s === "all") return;
+        params[k] = s;
+        return;
+      }
+      params[k] = v;
+    });
     generateReportMutation.mutate({
       templateId: selectedTemplate,
       format: reportFormat,
-      parameters: { dateFrom, dateTo }
+      parameters: params
     });
   };
 
   const handleDownload = (reportId: string) => {
     window.open(`/api/admin/reports/download/${reportId}`, "_blank");
+  };
+
+  const handlePreview = (reportId: string) => {
+    setPreviewReportId(reportId);
+    setPreviewOpen(true);
   };
 
   if (templatesLoading) {
@@ -3392,12 +3560,77 @@ function ReportsSection() {
 
   const generatedReports = generatedReportsData?.data || [];
   const pagination = generatedReportsData?.pagination || { page: 1, totalPages: 1, total: 0 };
+  const reportTypes = Array.from(new Set((templates || []).map((t: any) => t.type))).filter(Boolean);
+  const dateRangeInvalid = !!(dateFrom && dateTo && dateFrom > dateTo);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Reports Center</h2>
       </div>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-3xl" data-testid="dialog-report-preview">
+          <DialogHeader>
+            <DialogTitle>Report Preview</DialogTitle>
+          </DialogHeader>
+
+          {!previewReportId ? (
+            <div className="text-sm text-muted-foreground">Select a report to preview.</div>
+          ) : previewLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : previewData?.error ? (
+            <div className="text-sm text-destructive">{previewData.error}</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={getTypeBadgeVariant(previewData.type)} className="text-xs">
+                  {String(previewData.type || "").replace(/_/g, " ")}
+                </Badge>
+                <Badge variant="outline" className="text-xs uppercase">{previewData.format}</Badge>
+                {previewData?.rowCount !== null && previewData?.rowCount !== undefined && (
+                  <Badge variant="secondary" className="text-xs">{previewData.rowCount} rows</Badge>
+                )}
+              </div>
+
+              {previewData?.tooLarge ? (
+                <div className="text-sm text-muted-foreground">{previewData.message}</div>
+              ) : previewData?.preview ? (
+                <div className="rounded-lg border overflow-auto max-h-[420px]">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b">
+                      <tr>
+                        {(previewData.columns || []).map((c: string) => (
+                          <th key={c} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(previewData.preview || []).map((row: any, idx: number) => (
+                        <tr key={idx} className="border-b last:border-0">
+                          {(previewData.columns || []).map((c: string) => (
+                            <td key={c} className="px-3 py-2 whitespace-nowrap">
+                              {row?.[c] === null || row?.[c] === undefined ? "" : typeof row?.[c] === "object" ? JSON.stringify(row?.[c]) : String(row?.[c])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : previewData?.previewText ? (
+                <div className="rounded-lg border bg-muted/30 p-3 max-h-[420px] overflow-auto">
+                  <pre className="text-xs font-mono whitespace-pre-wrap">{previewData.previewText}</pre>
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No preview available.</div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
@@ -3484,6 +3717,81 @@ function ReportsSection() {
                   />
                 </div>
               </div>
+              {dateRangeInvalid && (
+                <div className="text-sm text-destructive" data-testid="reports-generate-date-error">
+                  Date range is invalid: Date From must be before Date To.
+                </div>
+              )}
+
+              {selectedTemplateObj?.filters?.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Filters (Optional)</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {selectedTemplateObj.filters.map((f: any) => {
+                      const key = String(f?.key || "");
+                      const label = String(f?.label || key);
+                      const type = String(f?.type || "string");
+                      if (!key) return null;
+
+                      if (type === "select") {
+                        const opts = (filterOptions?.[key] || []) as string[];
+                        return (
+                          <div key={key} className="space-y-2">
+                            <Label>{label}</Label>
+                            <Select
+                              value={generateParams?.[key] ?? "all"}
+                              onValueChange={(v) => setGenerateParams((p) => ({ ...(p || {}), [key]: v }))}
+                            >
+                              <SelectTrigger data-testid={`reports-generate-filter-${key}`}>
+                                <SelectValue placeholder={`Select ${label}...`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                {opts.map((o) => (
+                                  <SelectItem key={o} value={String(o)}>{String(o)}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      }
+
+                      if (type === "boolean") {
+                        return (
+                          <div key={key} className="space-y-2">
+                            <Label>{label}</Label>
+                            <Select
+                              value={generateParams?.[key] ?? "all"}
+                              onValueChange={(v) => setGenerateParams((p) => ({ ...(p || {}), [key]: v }))}
+                            >
+                              <SelectTrigger data-testid={`reports-generate-filter-${key}`}>
+                                <SelectValue placeholder={`Select ${label}...`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                <SelectItem value="true">Yes</SelectItem>
+                                <SelectItem value="false">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={key} className="space-y-2">
+                          <Label>{label}</Label>
+                          <Input
+                            value={generateParams?.[key] ?? ""}
+                            onChange={(e) => setGenerateParams((p) => ({ ...(p || {}), [key]: e.target.value }))}
+                            placeholder={label}
+                            data-testid={`reports-generate-filter-${key}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label>Export Format</Label>
@@ -3502,7 +3810,7 @@ function ReportsSection() {
               <Button 
                 className="w-full" 
                 onClick={handleSubmitGenerate}
-                disabled={!selectedTemplate || generateReportMutation.isPending}
+                disabled={!selectedTemplate || generateReportMutation.isPending || dateRangeInvalid}
                 data-testid="button-submit-generate"
               >
                 {generateReportMutation.isPending ? (
@@ -3528,17 +3836,109 @@ function ReportsSection() {
                 <CardTitle>Generated Reports</CardTitle>
                 <CardDescription>View and download previously generated reports</CardDescription>
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => refetchReports()}
-                data-testid="button-refresh-history"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchReports()}
+                  data-testid="button-refresh-history"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
+              <div className="flex flex-col gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="h-4 w-4 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" />
+                    <Input
+                      value={historyQ}
+                      onChange={(e) => { setHistoryQ(e.target.value); setHistoryPage(1); }}
+                      placeholder="Search by name or ID..."
+                      className="h-9 w-64 pl-8"
+                      data-testid="reports-history-search"
+                    />
+                  </div>
+
+                  <Select value={historyStatus} onValueChange={(v) => { setHistoryStatus(v); setHistoryPage(1); }}>
+                    <SelectTrigger className="h-9 w-40" data-testid="reports-history-status">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All status</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={historyType} onValueChange={(v) => { setHistoryType(v); setHistoryPage(1); }}>
+                    <SelectTrigger className="h-9 w-48" data-testid="reports-history-type">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      {reportTypes.map((t: any) => (
+                        <SelectItem key={t} value={t}>{String(t).replace(/_/g, " ")}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={historyFormat} onValueChange={(v) => { setHistoryFormat(v); setHistoryPage(1); }}>
+                    <SelectTrigger className="h-9 w-36" data-testid="reports-history-format">
+                      <SelectValue placeholder="Format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="json">JSON</SelectItem>
+                      <SelectItem value="csv">CSV</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">From</Label>
+                    <Input
+                      type="date"
+                      value={historyDateFrom}
+                      onChange={(e) => { setHistoryDateFrom(e.target.value); setHistoryPage(1); }}
+                      className="h-9 w-40"
+                      data-testid="reports-history-date-from"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">To</Label>
+                    <Input
+                      type="date"
+                      value={historyDateTo}
+                      onChange={(e) => { setHistoryDateTo(e.target.value); setHistoryPage(1); }}
+                      className="h-9 w-40"
+                      data-testid="reports-history-date-to"
+                    />
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => {
+                      setHistoryQ("");
+                      setHistoryStatus("all");
+                      setHistoryType("all");
+                      setHistoryFormat("all");
+                      setHistoryDateFrom("");
+                      setHistoryDateTo("");
+                      setHistoryPage(1);
+                    }}
+                    data-testid="reports-history-clear"
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+
               {reportsLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -3552,30 +3952,64 @@ function ReportsSection() {
                   <table className="w-full">
                     <thead className="border-b bg-muted/50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-sm font-medium">Name</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">Type</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Report</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">Status</th>
-                        <th className="px-4 py-3 text-left text-sm font-medium">Format</th>
                         <th className="px-4 py-3 text-left text-sm font-medium">Created</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">By</th>
                         <th className="px-4 py-3 text-right text-sm font-medium">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {generatedReports.map((report: any) => (
                         <tr key={report.id} className="border-b last:border-0" data-testid={`row-report-${report.id}`}>
-                          <td className="px-4 py-3 text-sm font-medium">{report.name}</td>
-                          <td className="px-4 py-3 text-sm">
-                            <Badge variant={getTypeBadgeVariant(report.type)} className="text-xs">
-                              {report.type.replace(/_/g, " ")}
-                            </Badge>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col">
+                              <div className="text-sm font-medium">{report.name}</div>
+                              <div className="flex flex-wrap items-center gap-2 mt-1">
+                                <Badge variant={getTypeBadgeVariant(report.type)} className="text-xs">
+                                  {String(report.type || "").replace(/_/g, " ")}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground uppercase">{report.format}</span>
+                                {report?.resultSummary?.rowCount !== undefined && report?.resultSummary?.rowCount !== null && (
+                                  <span className="text-xs text-muted-foreground">{report.resultSummary.rowCount} rows</span>
+                                )}
+                                <span className="text-xs text-muted-foreground font-mono">{report.id}</span>
+                              </div>
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-sm">{getStatusBadge(report.status)}</td>
-                          <td className="px-4 py-3 text-sm uppercase">{report.format}</td>
+                          <td className="px-4 py-3 align-top">
+                            <div className="flex flex-col">
+                              <div>{getStatusBadge(report.status)}</div>
+                              {report.status === "completed" && report.completedAt && (
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  Completed {format(new Date(report.completedAt), "MMM dd, yyyy HH:mm")}
+                                </div>
+                              )}
+                              {report.status === "failed" && getReportError(report) && (
+                                <div className="text-xs text-destructive mt-1 max-w-[420px] truncate" title={getReportError(report) || ""}>
+                                  {getReportError(report)}
+                                </div>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-sm text-muted-foreground">
                             {report.createdAt ? format(new Date(report.createdAt), "MMM dd, yyyy HH:mm") : "-"}
                           </td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {report.generatedByEmail || report.generatedByName || report.generatedBy || "-"}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2"
+                                onClick={() => handlePreview(report.id)}
+                                data-testid={`button-preview-${report.id}`}
+                                title="Preview"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
                               {report.status === "completed" && (
                                 <Button 
                                   variant="ghost" 
@@ -3583,8 +4017,33 @@ function ReportsSection() {
                                   className="h-8 px-2"
                                   onClick={() => handleDownload(report.id)}
                                   data-testid={`button-download-${report.id}`}
+                                  title="Download"
                                 >
                                   <Download className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {report.status === "completed" && report.format === "json" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  onClick={() => window.open(`/api/admin/reports/generate-pdf/${report.id}`, "_blank")}
+                                  title="Print/PDF"
+                                  data-testid={`button-pdf-${report.id}`}
+                                >
+                                  <FileText className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {report.status === "failed" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 px-2"
+                                  onClick={() => retryReport(report)}
+                                  title="Retry"
+                                  data-testid={`button-retry-${report.id}`}
+                                >
+                                  <RefreshCw className="h-4 w-4" />
                                 </Button>
                               )}
                               <Button 
@@ -3593,6 +4052,7 @@ function ReportsSection() {
                                 className="h-8 px-2 text-destructive hover:text-destructive"
                                 onClick={() => deleteReportMutation.mutate(report.id)}
                                 data-testid={`button-delete-${report.id}`}
+                                title="Delete"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

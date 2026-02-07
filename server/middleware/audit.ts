@@ -83,6 +83,31 @@ export const globalAuditMiddleware = async (req: Request, res: Response, next: N
 
             // We use a safe substring of URL as resource identifier
             const resource = req.baseUrl + req.path;
+            const statusCode = res.statusCode;
+            const severity =
+                statusCode >= 500 ? "error" :
+                statusCode >= 400 ? "warning" :
+                "info";
+
+            const category =
+                resource.startsWith("/api/admin") ? "admin" :
+                resource.startsWith("/api/auth") ? "auth" :
+                resource.startsWith("/api/stripe") ? "payment" :
+                resource.startsWith("/api/payments") ? "payment" :
+                resource.startsWith("/api/invoices") ? "payment" :
+                resource.startsWith("/api/chats") || resource.startsWith("/api/chat") ? "chat" :
+                "user";
+
+            const anyReq = req as any;
+            const actorEmail =
+                anyReq.user?.claims?.email ||
+                anyReq.user?.email ||
+                anyReq.session?.passport?.user?.claims?.email ||
+                anyReq.session?.passport?.user?.email ||
+                null;
+            const actorRole = anyReq.user?.role || anyReq.session?.passport?.user?.role || null;
+            const requestId = anyReq.requestId || (req.headers["x-request-id"] as string) || null;
+            const sessionId = anyReq.sessionID || null;
 
             await db.insert(auditLogs).values({
                 userId: userId || null,
@@ -91,7 +116,13 @@ export const globalAuditMiddleware = async (req: Request, res: Response, next: N
                 details: {
                     method: req.method,
                     url: req.originalUrl,
-                    statusCode: res.statusCode,
+                    statusCode,
+                    severity,
+                    category,
+                    actorEmail,
+                    actorRole,
+                    requestId,
+                    sessionId,
                 },
                 ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
                 userAgent,
