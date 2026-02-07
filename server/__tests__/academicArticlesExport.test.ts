@@ -16,7 +16,7 @@ describe("academicArticlesExport", () => {
     expect(plan.region.latam).toBe(true);
     expect(plan.region.spain).toBe(true);
     expect(plan.topicQuery.toLowerCase()).toContain("economía circular");
-    expect(plan.sources).toEqual(["scopus", "scielo", "redalyc"]);
+    expect(plan.sources).toEqual(["scopus", "openalex", "scielo", "redalyc"]);
     expect(plan.affilCountries || []).toContain("Spain");
     expect(plan.affilCountries || []).toContain("Mexico");
   });
@@ -63,4 +63,3 @@ describe("academicArticlesExport", () => {
     ]);
   });
 });
-

@@ -35,9 +35,125 @@ export interface RedalycSearchResult {
 // Redalyc API endpoints
 const REDALYC_API_BASE = "https://www.redalyc.org/api/search/";
 const REDALYC_OAI = "https://www.redalyc.org/exportarcita";
+const REDALYC_SERVICE_BASE = "https://www.redalyc.org/service/r2020/getArticles";
 
 // Rate limiting
 const REQUEST_DELAY_MS = 400;
+const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; IliaGPT/1.0)").trim();
+
+const DOI_REGEX = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stripHtml(text: string): string {
+    return (text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizeDoi(raw: string | undefined): string | undefined {
+    const v = (raw || "").trim();
+    if (!v) return undefined;
+    const m = v.match(DOI_REGEX);
+    const doi = (m?.[0] || "")
+        .replace(/^https?:\/\/doi\.org\//i, "")
+        .replace(/^doi:\s*/i, "")
+        .replace(/[),.;]+$/g, "")
+        .trim();
+    return doi || undefined;
+}
+
+function normalizeLanguageLabel(lang: string | undefined): string {
+    const l = (lang || "").trim();
+    if (!l) return "es";
+    const lower = l.toLowerCase();
+    const map: Record<string, string> = {
+        es: "Spanish",
+        spa: "Spanish",
+        español: "Spanish",
+        espanol: "Spanish",
+        spanish: "Spanish",
+        pt: "Portuguese",
+        por: "Portuguese",
+        portugués: "Portuguese",
+        portugues: "Portuguese",
+        portuguese: "Portuguese",
+        en: "English",
+        eng: "English",
+        inglés: "English",
+        ingles: "English",
+        english: "English",
+    };
+    return map[lower] || l;
+}
+
+function pickRedalycLangSegment(text: string, prefer: Array<"es" | "pt" | "en"> = ["es", "pt", "en"]): string {
+    const raw = stripHtml(text || "");
+    if (!raw) return "";
+    const parts = raw.split(">>>").map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0) return "";
+
+    // Some fields prefix with "es:" / "pt:" / "en:".
+    const byLang: Record<string, string> = {};
+    for (const p of parts) {
+        const m = p.match(/^(es|pt|en)\s*:\s*(.+)$/i);
+        if (m) {
+            byLang[m[1].toLowerCase()] = m[2].trim();
+        }
+    }
+
+    for (const lang of prefer) {
+        const v = byLang[lang];
+        if (v) return v;
+    }
+
+    // No lang markers: return the first segment.
+    return parts[0];
+}
+
+function parseRedalycKeywords(text: string): string[] {
+    const raw = stripHtml(text || "");
+    if (!raw) return [];
+    const parts = raw.split(">>>").map((p) => p.trim()).filter(Boolean);
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const p0 of parts) {
+        const p = p0.replace(/^(es|pt|en)\s*:\s*/i, "").trim();
+        const tokens = p
+            .split(/[;,]/g)
+            .map((t) => t.trim().replace(/\.+$/g, ""))
+            .filter(Boolean);
+        for (const t of tokens) {
+            const key = t.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(t);
+        }
+    }
+    return out;
+}
+
+function parseAuthorsFromServiceRow(row: any): string[] {
+    const a1 = (row?.apellidoNombre || "").trim();
+    if (a1) {
+        return a1
+            .split(">>>")
+            .map((x: string) => x.trim())
+            .filter(Boolean);
+    }
+    const a2 = (row?.autores || "").trim();
+    if (a2) {
+        return a2
+            .split(/[;,]/g)
+            .map((x: string) => x.trim())
+            .filter(Boolean);
+    }
+    return [];
+}
 
 /**
  * Search Redalyc for articles
@@ -167,46 +283,120 @@ async function searchRedalycWeb(
         endYear?: number;
     } = {}
 ): Promise<RedalycSearchResult> {
-    const { maxResults = 25 } = options;
+    const { maxResults = 25, startYear, endYear } = options;
     const startTime = Date.now();
 
-    console.log(`[Redalyc] Using web search fallback for: "${query}"`);
+    console.log(`[Redalyc] Using service fallback for: "${query}"`);
 
     try {
-        // Use Redalyc's search page
-        const searchUrl = `https://www.redalyc.org/busquedaWeb.oa?q=${encodeURIComponent(query)}&c=1`;
-
-        const response = await fetch(searchUrl, {
-            headers: {
-                "Accept": "text/html,application/xhtml+xml",
-                "User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0)",
-            },
-        });
-
-        if (!response.ok) {
-            console.error(`[Redalyc] Web search failed: ${response.status}`);
-            return {
-                articles: [],
-                totalResults: 0,
-                query,
-                searchTime: Date.now() - startTime
-            };
+        const baseQuery = (query || "").trim();
+        if (!baseQuery) {
+            return { articles: [], totalResults: 0, query, searchTime: Date.now() - startTime };
         }
 
-        const html = await response.text();
-        const articles = parseRedalycHTML(html, maxResults);
+        const yearFilter = startYear && endYear ? `${Math.min(startYear, endYear)}-${Math.max(startYear, endYear)}` : "";
+        const segment = yearFilter
+            ? `${baseQuery}<<<${yearFilter}<<<${""}<<<${""}<<<${""}`
+            : baseQuery;
 
-        console.log(`[Redalyc] Parsed ${articles.length} articles from web`);
+        const pageSize = Math.min(50, Math.max(5, maxResults));
+        const articles: RedalycArticle[] = [];
+        let totalResults = 0;
+
+        // Country mapping is returned as "filtros" with numeric codes.
+        let countryMap: Record<string, string> | null = null;
+
+        for (let page = 1; articles.length < maxResults; page++) {
+            const url = `${REDALYC_SERVICE_BASE}/${encodeURIComponent(segment)}/${page}/${pageSize}/1/default/`;
+            const response = await fetch(url, {
+                headers: {
+                    // Do NOT send "Accept: application/json" (Redalyc returns 406 in some cases).
+                    "User-Agent": USER_AGENT,
+                },
+            });
+
+            if (!response.ok) {
+                const txt = await response.text().catch(() => "");
+                console.error(`[Redalyc] Service failed: ${response.status} ${txt?.slice(0, 200) || ""}`.trim());
+                break;
+            }
+
+            const txt = await response.text();
+            const data = JSON.parse(txt || "{}");
+
+            if (!totalResults) {
+                totalResults = parseInt(String(data.totalResultados || "0"), 10) || 0;
+            }
+
+            if (!countryMap) {
+                const filtros = Array.isArray(data.filtros) ? data.filtros : [];
+                const fPais = filtros.find((f: any) => String(f?.nombre || "").toLowerCase().includes("pa"));
+                const elems = Array.isArray(fPais?.elementos) ? fPais.elementos : [];
+                const m: Record<string, string> = {};
+                for (const e of elems) {
+                    const k = String(e?.clave || "").trim();
+                    const v = String(e?.nombre || "").trim();
+                    if (k && v) m[k] = v;
+                }
+                countryMap = m;
+            }
+
+            const rows = Array.isArray(data.resultados) ? data.resultados : [];
+            if (rows.length === 0) break;
+
+            for (const row of rows) {
+                const id = String(row?.cveArticulo || row?.id || "").trim();
+                const title = stripHtml(String(row?.titulo || ""));
+                const year = String(row?.anioArticulo || row?.anoEdcNum || "").trim();
+                const journal = stripHtml(String(row?.nomRevista || ""));
+                if (!id || !title) continue;
+
+                const y = parseInt(year, 10);
+                if (startYear && Number.isFinite(y) && y < startYear) continue;
+                if (endYear && Number.isFinite(y) && y > endYear) continue;
+
+                const doi = normalizeDoi(String(row?.doiTitulo || row?.doi || ""));
+                const keywords = parseRedalycKeywords(String(row?.palabras || ""));
+                const abstract = pickRedalycLangSegment(String(row?.resumen || ""), ["es", "pt", "en"]);
+                const countryCode = String(row?.paisRevista || "").trim();
+                const country = (countryMap && countryCode && countryMap[countryCode]) ? countryMap[countryCode] : "";
+
+                articles.push({
+                    redalyc_id: id,
+                    title,
+                    authors: parseAuthorsFromServiceRow(row),
+                    year: year || "",
+                    journal: journal || "",
+                    abstract,
+                    keywords,
+                    doi: doi || undefined,
+                    volume: String(row?.volRevNum || "").trim() || undefined,
+                    issue: String(row?.numRevNum || "").trim() || undefined,
+                    pages: String(row?.paginas || "").trim() || undefined,
+                    language: normalizeLanguageLabel(String(row?.idiomaArticulo || "")),
+                    institution: stripHtml(String(row?.nomInstitucionRev || "")) || undefined,
+                    country: country || undefined,
+                    url: `https://www.redalyc.org/articulo.oa?id=${id}`,
+                });
+
+                if (articles.length >= maxResults) break;
+            }
+
+            await sleep(REQUEST_DELAY_MS);
+
+            // Stop early if we reached the end.
+            if (totalResults && page * pageSize >= totalResults) break;
+        }
 
         return {
-            articles,
-            totalResults: articles.length,
+            articles: articles.slice(0, maxResults),
+            totalResults: totalResults || articles.length,
             query,
-            searchTime: Date.now() - startTime
+            searchTime: Date.now() - startTime,
         };
 
     } catch (error: any) {
-        console.error(`[Redalyc] Web search error: ${error.message}`);
+        console.error(`[Redalyc] Service search error: ${error.message}`);
         return {
             articles: [],
             totalResults: 0,
