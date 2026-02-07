@@ -147,6 +147,32 @@ function isToolAllowedByFeatureFlags(toolName: string, flags: UserFeatureFlags):
   return true;
 }
 
+function userExplicitlyRequestsWebSearch(text: string): boolean {
+  const t = String(text || "").trim();
+  if (!t) return false;
+
+  const patterns = [
+    // Explicit web/internet requests
+    /busca\s+(en\s+)?(internet|la\s+web|online)/i,
+    /consulta\s+(fuentes?\s+)?(externas?|internet|web)/i,
+    /compara\s+(con\s+)?(informaci[oó]n\s+)?(p[uú]blica|de\s+internet|externa)/i,
+    /search\s+(the\s+)?(web|internet|online)/i,
+    /look\s+up\s+(on\s+)?(the\s+)?(web|internet)/i,
+    /find\s+(on\s+)?(the\s+)?(web|internet)/i,
+
+    // "Simple search" intents commonly used by users as direct web requests
+    /[uú]ltimas?\s+noticias/i,
+    /dame\s+\\d*\\s*noticias/i,
+    /noticias\\s+(de|sobre|del)/i,
+    /precio\\s+(de|del|actual)/i,
+    /clima\\s+(en|de)/i,
+    /investiga\\s+(sobre|acerca|de)/i,
+    /informaci[oó]n\\s+(sobre|de|del|acerca)/i,
+  ];
+
+  return patterns.some((p) => p.test(t));
+}
+
 function getAvailableToolDescriptions() {
   if (_cachedTools) return _cachedTools;
 
@@ -217,6 +243,8 @@ export class AgentOrchestrator extends EventEmitter {
   private abortController: AbortController;
   private userMessage: string;
   private attachments: any[];
+  private explicitWebSearch: boolean = false;
+  private explicitConnectorSearch: boolean = false;
 
   // Confirmation workflow
   private pendingConfirmation: null | {
@@ -824,6 +852,8 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
   async generatePlan(userMessage: string, attachments?: any[]): Promise<AgentPlan> {
     this.userMessage = userMessage;
     this.attachments = attachments || [];
+    this.explicitWebSearch = userExplicitlyRequestsWebSearch(userMessage);
+    this.explicitConnectorSearch = String(userMessage || "").toLowerCase().includes("@gmail");
     this.status = "planning";
     this.emitProgress();
 
@@ -898,10 +928,16 @@ No uses markdown ni emojis.${userProfileLine ? `\n${userProfileLine}` : ""}${cus
 
     const userSettings = await getUserSettingsCached(this.userId);
     const featureFlags = getUserFeatureFlagsFromSettings(userSettings);
+    // Explicit user requests can override "auto" toggles (mirrors chat service semantics).
+    const planningFeatureFlags: UserFeatureFlags = {
+      ...featureFlags,
+      webSearchAuto: featureFlags.webSearchAuto || this.explicitWebSearch,
+      connectorSearchAuto: featureFlags.connectorSearchAuto || this.explicitConnectorSearch,
+    };
 
     const toolDescriptions = getAvailableToolDescriptionsForContext({
       userPlan: this.userPlan,
-      featureFlags,
+      featureFlags: planningFeatureFlags,
     }).map(
       (t) => `- ${t.name}: ${t.description}\n  Input: ${t.inputSchema}`
     ).join("\n");
