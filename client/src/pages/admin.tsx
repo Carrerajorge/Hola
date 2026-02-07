@@ -2569,7 +2569,7 @@ function PaymentsSection() {
 function InvoicesSection() {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
+  const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userEmail: "" });
 
   const { data: invoicesData, isLoading } = useQuery({
     queryKey: ["/api/admin/finance/invoices"],
@@ -2589,11 +2589,28 @@ function InvoicesSection() {
         body: JSON.stringify(invoice),
         credentials: "include"
       });
-      return res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(String((data as any)?.error || "Failed to create invoice"));
+      }
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/invoices"] });
       setShowAddModal(false);
+      setNewInvoice({ invoiceNumber: "", amount: "", userEmail: "" });
+
+      const emailStatus = String(data?.email?.status || "").toLowerCase();
+      if (emailStatus === "sent") {
+        toast.success("Factura creada y enviada por correo");
+      } else if (emailStatus === "failed") {
+        toast.error(`Factura creada, pero fallo el email: ${String(data?.email?.error || "unknown")}`);
+      } else {
+        toast.success("Factura creada");
+      }
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Failed to create invoice"));
     }
   });
 
@@ -2626,6 +2643,14 @@ function InvoicesSection() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Cliente (email)</Label>
+                <Input
+                  placeholder="cliente@empresa.com"
+                  value={newInvoice.userEmail}
+                  onChange={(e) => setNewInvoice({ ...newInvoice, userEmail: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Importe</Label>
                 <Input 
                   placeholder="99.00" 
@@ -2636,7 +2661,7 @@ function InvoicesSection() {
               <Button 
                 className="w-full" 
                 onClick={() => createInvoiceMutation.mutate(newInvoice)}
-                disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+                disabled={!newInvoice.invoiceNumber || !newInvoice.userEmail || !newInvoice.amount}
               >
                 Crear factura
               </Button>
@@ -2658,8 +2683,8 @@ function InvoicesSection() {
           invoices.map((invoice: any) => (
             <div key={invoice.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
               <span className="font-mono text-xs">{invoice.invoiceNumber}</span>
-              <span>{invoice.userId || "N/A"}</span>
-              <span className="font-medium">€{invoice.amount}</span>
+              <span>{invoice.userEmail || invoice.userId || "N/A"}</span>
+              <span className="font-medium">{String(invoice.currency || "EUR").toUpperCase()} {invoice.amount}</span>
               <span className="text-muted-foreground">
                 {invoice.createdAt ? format(new Date(invoice.createdAt), "dd MMM yyyy") : "-"}
               </span>
@@ -2667,7 +2692,19 @@ function InvoicesSection() {
                 <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
                   {invoice.status === "paid" ? "Pagada" : "Pendiente"}
                 </Badge>
-                <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  data-testid={`button-download-invoice-${invoice.id}`}
+                  onClick={() => {
+                    if (invoice.pdfPath) {
+                      window.open(invoice.pdfPath, "_blank");
+                    }
+                  }}
+                  disabled={!invoice.pdfPath}
+                  title={invoice.pdfPath ? "Descargar" : "Sin PDF disponible"}
+                >
                   <Download className="h-3 w-3" />
                 </Button>
               </div>
