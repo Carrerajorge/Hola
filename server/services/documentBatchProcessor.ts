@@ -5,6 +5,7 @@ import { XlsxParser } from "../parsers/xlsxParser";
 import { PptxParser } from "../parsers/pptxParser";
 import { TextParser } from "../parsers/textParser";
 import { CsvParser } from "../parsers/csvParser";
+import { ImageParser } from "../parsers/imageParser";
 import type { DetectedFileType, FileParser, ParsedResult } from "../parsers/base";
 import { runParserInSandbox, SandboxErrorCode, type SandboxOptions } from "../lib/parserSandbox";
 import { detectMime, type MimeDetectionResult } from "../lib/mimeDetector";
@@ -25,6 +26,9 @@ export interface DocumentChunk {
   location: { page?: number; sheet?: string; slide?: number; row?: number; cell?: string };
   content: string;
   offsets: { start: number; end: number };
+  context?: {
+    headingPath?: string[];
+  };
 }
 
 export interface DocumentProcessingStats {
@@ -81,6 +85,7 @@ export class DocumentBatchProcessor {
   private pptxParser: PptxParser;
   private textParser: TextParser;
   private csvParser: CsvParser;
+  private imageParser: ImageParser;
   private mimeTypeMap: Record<string, ParserConfig>;
   private chunkIndex: Map<string, DocumentChunk>;
   private parserRegistry: ParserRegistry;
@@ -95,6 +100,7 @@ export class DocumentBatchProcessor {
     this.pptxParser = new PptxParser();
     this.textParser = new TextParser();
     this.csvParser = new CsvParser();
+    this.imageParser = new ImageParser();
     this.chunkIndex = new Map();
     this.sandboxOptions = options?.sandboxOptions || DEFAULT_SANDBOX_OPTIONS;
     this.enableSecurityChecks = options?.enableSecurityChecks ?? true;
@@ -114,6 +120,13 @@ export class DocumentBatchProcessor {
       "application/csv": { parser: this.csvParser, docType: "CSV", ext: "csv" },
       "text/html": { parser: this.textParser, docType: "HTML", ext: "html" },
       "application/json": { parser: this.textParser, docType: "JSON", ext: "json" },
+      "image/png": { parser: this.imageParser, docType: "Image", ext: "png" },
+      "image/jpeg": { parser: this.imageParser, docType: "Image", ext: "jpg" },
+      "image/jpg": { parser: this.imageParser, docType: "Image", ext: "jpg" },
+      "image/gif": { parser: this.imageParser, docType: "Image", ext: "gif" },
+      "image/webp": { parser: this.imageParser, docType: "Image", ext: "webp" },
+      "image/bmp": { parser: this.imageParser, docType: "Image", ext: "bmp" },
+      "image/tiff": { parser: this.imageParser, docType: "Image", ext: "tiff" },
     };
 
     this.parserRegistry = createParserRegistry({
@@ -169,6 +182,12 @@ export class DocumentBatchProcessor {
       ["text/plain", "text/markdown", "text/md", "text/html", "application/json"],
       this.textParser,
       100
+    );
+
+    this.parserRegistry.registerParser(
+      ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp", "image/tiff"],
+      this.imageParser,
+      10
     );
 
     this.parserRegistry.setFallbackParser(this.textParser);
@@ -624,6 +643,7 @@ export class DocumentBatchProcessor {
             filename,
             location: { page: pageNum + 1 },
             content: subChunk.content,
+            context: subChunk.context,
             offsets: { start: offset + subChunk.start, end: offset + subChunk.end },
           });
         }
@@ -645,6 +665,7 @@ export class DocumentBatchProcessor {
         filename,
         location: { page: i + 1 },
         content: subChunk.content,
+        context: subChunk.context,
         offsets: { start: subChunk.start, end: subChunk.end },
       });
     }
@@ -652,46 +673,154 @@ export class DocumentBatchProcessor {
     return chunks;
   }
 
+  private parseMarkdownHeading(block: string): { level: number; title: string } | null {
+    const firstLine = (block || "").split("\n")[0]?.trim() || "";
+    const match = firstLine.match(/^(#{1,6})\s+(.+)$/);
+    if (!match) return null;
+    const level = match[1].length;
+    const title = match[2].trim();
+    if (!title) return null;
+    return { level, title };
+  }
+
+  private updateHeadingStack(
+    stack: Array<{ level: number; title: string }>,
+    heading: { level: number; title: string }
+  ): Array<{ level: number; title: string }> {
+    const next = [...stack];
+    while (next.length > 0 && next[next.length - 1].level >= heading.level) {
+      next.pop();
+    }
+    next.push(heading);
+    return next;
+  }
+
+  private isMarkdownTableBlock(block: string): boolean {
+    const lines = (block || "").trim().split("\n");
+    if (lines.length < 2) return false;
+    const header = lines[0] || "";
+    const separator = lines[1] || "";
+    if (!header.includes("|") || !separator.includes("|")) return false;
+    // Alignment row: pipes + dashes (optionally with colons), e.g. "| --- | :---: |".
+    const s = separator.trim();
+    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(s);
+  }
+
+  private splitMarkdownTableBlock(block: string, chunkSize: number): string[] {
+    const lines = (block || "").trim().split("\n");
+    if (lines.length <= 2) return [block.trim()];
+
+    const headerLines = lines.slice(0, 2);
+    const dataLines = lines.slice(2);
+    const headerText = headerLines.join("\n");
+    const budget = Math.max(200, chunkSize - headerText.length - 2);
+
+    const chunks: string[] = [];
+    let current: string[] = [];
+    let currentLen = 0;
+
+    for (const line of dataLines) {
+      const nextLen = currentLen + line.length + 1;
+      if (current.length > 0 && nextLen > budget) {
+        chunks.push([...headerLines, ...current].join("\n").trim());
+        current = [];
+        currentLen = 0;
+      }
+      current.push(line);
+      currentLen += line.length + 1;
+    }
+
+    if (current.length > 0) {
+      chunks.push([...headerLines, ...current].join("\n").trim());
+    }
+
+    return chunks.length > 0 ? chunks : [block.trim()];
+  }
+
   private splitIntoChunks(
     text: string,
     chunkSize: number,
     overlap: number
-  ): Array<{ content: string; start: number; end: number }> {
-    const chunks: Array<{ content: string; start: number; end: number }> = [];
-    const paragraphs = text.split(/\n\n+/);
-    let currentChunk = '';
+  ): Array<{ content: string; start: number; end: number; context?: { headingPath?: string[] } }> {
+    const chunks: Array<{ content: string; start: number; end: number; context?: { headingPath?: string[] } }> = [];
+    const paragraphs = (text || "").split(/\n\n+/);
+
+    let currentChunk = "";
     let chunkStart = 0;
     let currentPos = 0;
+    let headingStack: Array<{ level: number; title: string }> = [];
+    let currentHeadingPath: string[] = [];
+    let chunkHeadingPath: string[] | undefined = undefined;
 
-    for (const para of paragraphs) {
-      if (currentChunk.length + para.length + 2 > chunkSize && currentChunk) {
-        chunks.push({
-          content: currentChunk.trim(),
-          start: chunkStart,
-          end: currentPos,
-        });
-
-        const overlapText = currentChunk.slice(-overlap);
-        currentChunk = overlapText + '\n\n' + para;
-        chunkStart = currentPos - overlap;
-      } else {
-        if (currentChunk) {
-          currentChunk += '\n\n' + para;
-        } else {
-          currentChunk = para;
-          chunkStart = currentPos;
-        }
-      }
-      currentPos += para.length + 2;
-    }
-
-    if (currentChunk.trim()) {
+    const flush = (endPos: number) => {
+      if (!currentChunk.trim()) return;
       chunks.push({
         content: currentChunk.trim(),
         start: chunkStart,
-        end: currentPos,
+        end: endPos,
+        context: chunkHeadingPath && chunkHeadingPath.length > 0 ? { headingPath: [...chunkHeadingPath] } : undefined,
       });
+      currentChunk = "";
+      chunkHeadingPath = undefined;
+    };
+
+    for (const paraRaw of paragraphs) {
+      const para = paraRaw;
+      const heading = this.parseMarkdownHeading(para);
+      if (heading) {
+        // Heading starts a new logical section: flush previous chunk without overlap.
+        flush(currentPos);
+        headingStack = this.updateHeadingStack(headingStack, heading);
+        currentHeadingPath = headingStack.map(h => h.title);
+      }
+
+      // Split large markdown tables while repeating headers.
+      if (this.isMarkdownTableBlock(para) && para.length > chunkSize) {
+        flush(currentPos);
+        const tableChunks = this.splitMarkdownTableBlock(para, chunkSize);
+
+        let localOffset = 0;
+        for (const tableChunk of tableChunks) {
+          const start = currentPos + localOffset;
+          const end = start + tableChunk.length;
+          localOffset += tableChunk.length + 1;
+          chunks.push({
+            content: tableChunk.trim(),
+            start,
+            end,
+            context: currentHeadingPath.length > 0 ? { headingPath: [...currentHeadingPath] } : undefined,
+          });
+        }
+
+        currentPos += para.length + 2;
+        continue;
+      }
+
+      // If the paragraph is a heading, include it as the start of the next chunk so context is preserved.
+      const paraToAppend = para;
+
+      if (currentChunk.length + paraToAppend.length + 2 > chunkSize && currentChunk) {
+        // Overlap only on size-based splits (not section splits).
+        const overlapText = overlap > 0 ? currentChunk.slice(-overlap) : "";
+        flush(currentPos);
+
+        currentChunk = overlapText ? `${overlapText}\n\n${paraToAppend}` : paraToAppend;
+        chunkStart = Math.max(0, currentPos - overlap);
+        chunkHeadingPath = currentHeadingPath.length > 0 ? [...currentHeadingPath] : undefined;
+      } else {
+        if (!currentChunk) {
+          chunkStart = currentPos;
+          chunkHeadingPath = currentHeadingPath.length > 0 ? [...currentHeadingPath] : undefined;
+          currentChunk = paraToAppend;
+        } else {
+          currentChunk += "\n\n" + paraToAppend;
+        }
+      }
+
+      currentPos += para.length + 2;
     }
+
+    flush(currentPos);
 
     return chunks;
   }
@@ -734,6 +863,14 @@ export class DocumentBatchProcessor {
       if (locationStr) {
         parts.push(`\n[${locationStr}]`);
       }
+
+      const headingPath = chunk.context?.headingPath?.length
+        ? chunk.context.headingPath.join(" > ")
+        : "";
+      if (headingPath) {
+        parts.push(`\n[section:${headingPath}]`);
+      }
+
       parts.push(chunk.content);
     }
 
@@ -836,6 +973,14 @@ export class DocumentBatchProcessor {
       'html': 'text/html',
       'htm': 'text/html',
       'json': 'application/json',
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'tif': 'image/tiff',
+      'tiff': 'image/tiff',
     };
     return extMap[ext] || null;
   }

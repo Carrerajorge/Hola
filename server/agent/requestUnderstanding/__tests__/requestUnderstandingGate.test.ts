@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { requestUnderstandingAgent } from "../requestUnderstandingAgent";
+import { requestUnderstandingAgent, requestUnderstandingFallbackBrief } from "../requestUnderstandingAgent";
 import { llmGateway } from "../../../lib/llmGateway";
 
 // Mock llmGateway.chat to produce deterministic structured JSON
@@ -38,5 +38,15 @@ describe("RequestUnderstandingAgent", () => {
       const brief = await requestUnderstandingAgent.buildBrief({ text: `hola ${i}` });
       expect(brief.deliverable.format.length).toBeGreaterThan(0);
     }
+  });
+
+  test("fallback blocks when referencing previous doc without base text", () => {
+    const brief = requestUnderstandingFallbackBrief({
+      text: "Mejora el documento anterior, por favor.",
+    });
+    expect(brief.blocker.is_blocked).toBe(true);
+    expect((brief.blocker.question || "").length).toBeGreaterThan(10);
+    expect(brief.subtasks.length).toBeGreaterThanOrEqual(2);
+    expect(brief.subtasks.length).toBeLessThanOrEqual(5);
   });
 });

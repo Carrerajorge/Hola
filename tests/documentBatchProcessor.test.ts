@@ -123,6 +123,52 @@ describe('DocumentBatchProcessor Integration Tests', () => {
       expect(result.unifiedContext).toContain('company');
       expect(result.unifiedContext).toContain('employees');
     });
+
+    it('should carry markdown heading context and repeat table headers when splitting', async () => {
+      const rows = Array.from({ length: 260 }, (_, i) => `| item${i} | value${i} |`).join('\n');
+      const md = `# Titulo Principal
+
+Intro.
+
+## Seccion A
+
+Antes de la tabla.
+
+| Col1 | Col2 |
+| --- | --- |
+${rows}
+
+Despues de la tabla.`;
+
+      mockGetObjectEntityBuffer.mockResolvedValue(Buffer.from(md, 'utf-8'));
+
+      const attachments: SimpleAttachment[] = [
+        {
+          name: 'sample.md',
+          mimeType: 'text/markdown',
+          storagePath: 'uploads/sample.md',
+        },
+      ];
+
+      const result = await processor.processBatch(attachments);
+
+      expect(result.processedFiles).toBe(1);
+      expect(result.failedFiles).toHaveLength(0);
+      expect(result.chunks.length).toBeGreaterThan(1);
+
+      const tableChunks = result.chunks.filter(c => c.content.includes('| Col1 | Col2 |'));
+      expect(tableChunks.length).toBeGreaterThan(1);
+      tableChunks.forEach(c => {
+        expect(c.content).toContain('| --- | --- |');
+      });
+
+      const anyWithSection = result.chunks.find(c =>
+        c.content.includes('item0') && (c as any).context?.headingPath?.includes('Seccion A')
+      );
+      expect(anyWithSection).toBeTruthy();
+
+      expect(result.unifiedContext).toContain('[section:Titulo Principal > Seccion A]');
+    });
   });
 
   describe('Multiple files processing', () => {
