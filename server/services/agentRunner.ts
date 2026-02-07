@@ -342,6 +342,12 @@ export class AgentRunner extends EventEmitter {
         observations: this.state!.observations.slice(-3),
       };
 
+      // Lightweight summary of older steps to maintain context without token bloat
+      const olderHistory = this.state!.history.slice(0, -3);
+      const contextSummary = olderHistory.length > 0 
+        ? "Resumen de pasos anteriores (ya ejecutados):\n" + olderHistory.map(s => `- [Paso ${s.stepIndex}] ${s.tool}: ${s.success ? "Éxito" : "Fallo"}`).join("\n")
+        : "";
+
       // Get all available tools from the registry
       const availableTools = defaultToolRegistry.listToolsWithInfo();
       const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
@@ -351,8 +357,11 @@ export class AgentRunner extends EventEmitter {
 Objetivo: ${context.objective}
 Plan: ${context.plan.join(" → ")}
 Paso actual: ${context.currentStep + 1}/${this.config.maxSteps}
-Acciones previas: ${JSON.stringify(context.previousActions)}
-Observaciones: ${context.observations.join("\n---\n")}
+
+${contextSummary}
+
+Acciones recientes (últimas 3): ${JSON.stringify(context.previousActions)}
+Observaciones recientes: ${context.observations.join("\n---\n")}
 
 Herramientas disponibles:
 ${toolsDescription}
