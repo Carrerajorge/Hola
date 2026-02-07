@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { chatService, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "../services/ChatServiceV2";
+import { auditLog } from "../services/auditLogger";
 import { llmGateway } from "../lib/llmGateway";
 import { getOrCreateSession, getEnforcedModel, getSessionById, type GptSessionContract } from "../services/gptSessionService";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
@@ -419,26 +420,25 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         });
       }
 
-      if (userId) {
-        try {
-          await storage.createAuditLog({
-            userId,
-            action: "chat_query",
-            resource: "chats",
-            resourceId: conversationId || null,
-            details: {
-              messageCount: messages.length,
-              useRag,
-              documentMode: documentMode || false,
-              hasImages: !!images && images.length > 0,
-              gptId: gptSessionContract?.gptId || gptConfig?.id || null,
-              configVersion: gptSessionContract?.configVersion || null,
-              tokens: response.usage?.totalTokens || 0
-            }
-          });
-        } catch (auditError) {
-          console.error("Failed to create audit log:", auditError);
-        }
+      try {
+        await auditLog(req, {
+          action: "chat_query",
+          resource: "chats",
+          resourceId: conversationId || undefined,
+          details: {
+            messageCount: messages.length,
+            useRag,
+            documentMode: documentMode || false,
+            hasImages: !!images && images.length > 0,
+            gptId: gptSessionContract?.gptId || gptConfig?.id || null,
+            configVersion: gptSessionContract?.configVersion || null,
+            tokens: response.usage?.totalTokens || 0
+          },
+          category: "user",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
       }
 
       // Add GPT session metadata to response if contract-based session is active
@@ -795,27 +795,33 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           normalized_text: userMessageText
         };
 
-        try {
-          const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+        // If the user is clearly asking to search (and not asking for an output artifact),
+        // do not force production just because a docTool is selected.
+        if (!isProductionIntent(syntheticIntent, userMessageText)) {
+          console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: message does not require production, continuing normal chat flow`);
+        } else {
+          try {
+            const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
+            const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
-	          await handleProductionRequest(
-	            {
-	              message: userMessageText,
-	              userId: effectiveUserId,
-	              chatId: effectiveChatId,
-	              intentResult: syntheticIntent,
-	              locale: 'es',
-	              requestId,
-	            },
-	            res
-	          );
+            await handleProductionRequest(
+              {
+                message: userMessageText,
+                userId: effectiveUserId,
+                chatId: effectiveChatId,
+                intentResult: syntheticIntent,
+                locale: 'es',
+                requestId,
+              },
+              res
+            );
 
-          // Production handler completed, exit early
-          return;
-        } catch (productionError: any) {
-          console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
-          // Continue to normal chat flow if production fails
+            // Production handler completed, exit early
+            return;
+          } catch (productionError: any) {
+            console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
+            // Continue to normal chat flow if production fails
+          }
         }
       }
 
@@ -1680,23 +1686,22 @@ ${attachmentContext}`;
         }).catch(() => { });
       }
 
-      if (userId) {
-        try {
-          await storage.createAuditLog({
-            userId,
-            action: "chat_stream",
-            resource: "chats",
-            resourceId: conversationId || null,
-            details: {
-              messageCount: messages.length,
-              requestId,
-              runId: claimedRun?.id,
-              streaming: true
-            }
-          });
-        } catch (auditError) {
-          console.error("Failed to create audit log:", auditError);
-        }
+      try {
+        await auditLog(req, {
+          action: "chat_stream",
+          resource: "chats",
+          resourceId: conversationId || undefined,
+          details: {
+            messageCount: messages.length,
+            requestId,
+            runId: claimedRun?.id,
+            streaming: true
+          },
+          category: "user",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
       }
 
     } catch (error: any) {

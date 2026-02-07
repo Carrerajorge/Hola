@@ -5,13 +5,16 @@
 
 import { Request } from "express";
 import { storage } from "../storage";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 export interface AuditContext {
-  userId?: string;
+  userId?: string | null;
+  actorEmail?: string | null;
+  actorRole?: string | null;
   ipAddress?: string;
   userAgent?: string;
-  sessionId?: string;
-  requestId?: string;
+  sessionId?: string | null;
+  requestId?: string | null;
 }
 
 export interface AuditLogOptions {
@@ -27,7 +30,21 @@ export interface AuditLogOptions {
  * Extract audit context from Express request
  */
 export function extractAuditContext(req: Request): AuditContext {
-  const userId = (req as any).user?.id || (req as any).userId || null;
+  const anyReq = req as any;
+  const userId = getSecureUserId(req);
+  const actorEmail =
+    anyReq.user?.claims?.email ||
+    anyReq.user?.email ||
+    anyReq.session?.passport?.user?.claims?.email ||
+    anyReq.session?.passport?.user?.email ||
+    anyReq.user?.profile?.emails?.[0]?.value ||
+    null;
+  const actorRole =
+    anyReq.user?.role ||
+    anyReq.user?.claims?.role ||
+    anyReq.session?.passport?.user?.role ||
+    anyReq.session?.passport?.user?.claims?.role ||
+    null;
   const ipAddress = 
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
     (req.headers["x-real-ip"] as string) ||
@@ -35,11 +52,13 @@ export function extractAuditContext(req: Request): AuditContext {
     req.ip ||
     "unknown";
   const userAgent = req.headers["user-agent"] || "unknown";
-  const sessionId = req.cookies?.sessionId || (req as any).sessionID || null;
-  const requestId = (req as any).requestId || req.headers["x-request-id"] as string || null;
+  const sessionId = anyReq.sessionID || req.cookies?.sessionId || null;
+  const requestId = anyReq.requestId || (req.headers["x-request-id"] as string) || null;
 
   return {
     userId,
+    actorEmail,
+    actorRole,
     ipAddress,
     userAgent,
     sessionId,
@@ -55,19 +74,25 @@ export async function createAuditLogEntry(
   options: AuditLogOptions
 ): Promise<void> {
   try {
+    const mergedDetails: Record<string, any> = { ...(options.details || {}) };
+
+    // Persist actor identity in details for fast UI rendering without joins.
+    if (context.actorEmail && mergedDetails.actorEmail == null) mergedDetails.actorEmail = context.actorEmail;
+    if (context.actorRole && mergedDetails.actorRole == null) mergedDetails.actorRole = context.actorRole;
+
     await storage.createAuditLog({
-      userId: context.userId,
+      userId: context.userId || null,
       action: options.action,
       resource: options.resource,
       resourceId: options.resourceId,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
       details: {
-        ...options.details,
-        severity: options.severity || "info",
-        category: options.category || "system",
-        sessionId: context.sessionId,
-        requestId: context.requestId,
+        ...mergedDetails,
+        severity: options.severity || mergedDetails.severity || "info",
+        category: options.category || mergedDetails.category || "system",
+        sessionId: context.sessionId ?? mergedDetails.sessionId,
+        requestId: context.requestId ?? mergedDetails.requestId,
         timestamp: new Date().toISOString(),
       },
     });
