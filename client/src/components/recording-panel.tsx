@@ -183,7 +183,7 @@ export function RecordingPanel({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {isDictationSupported ? "Dictar texto" : "Dictado no disponible en este navegador"}
+          {isDictationSupported ? "Dictar texto (Ctrl/Cmd+Shift+M)" : "Dictado no disponible en este navegador"}
         </TooltipContent>
       </Tooltip>
 
