@@ -11,6 +11,7 @@ import { detectMime, type MimeDetectionResult } from "../lib/mimeDetector";
 import { validateZipDocument } from "../lib/zipBombGuard";
 import { ParserRegistry, createParserRegistry } from "../lib/parserRegistry";
 import { validateAttachmentSecurity, type SecurityValidationResult, type SecurityViolation, SecurityViolationType } from "../lib/pareSecurityGuard";
+import { withRetry } from "../lib/retryUtility";
 
 export interface SimpleAttachment {
   name: string;
@@ -424,7 +425,17 @@ export class DocumentBatchProcessor {
     }
 
     try {
-      return await this.objectStorageService.getObjectEntityBuffer(storagePath);
+      return await withRetry(
+        () => this.objectStorageService.getObjectEntityBuffer(storagePath),
+        {
+          maxAttempts: 5,
+          initialDelayMs: 150,
+          maxDelayMs: 1500,
+          backoffMultiplier: 2,
+          jitter: true,
+          retryCondition: (err) => err instanceof ObjectNotFoundError,
+        }
+      );
     } catch (error) {
       if (error instanceof ObjectNotFoundError) {
         throw new Error(`File not found: ${storagePath}`);

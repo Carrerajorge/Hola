@@ -15,7 +15,8 @@ import { pareMetrics } from "../lib/pareMetrics";
 import { AuditTrailCollector, type AuditBatchSummary } from "../lib/pareAuditTrail";
 import { createChunkStore } from "../lib/pareChunkStore";
 import { normalizeDocument } from "../services/structuredDocumentNormalizer";
-import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
+import { withRetry } from "../lib/retryUtility";
+import { ObjectStorageService, ObjectNotFoundError } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
 import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
@@ -1745,7 +1746,17 @@ ${attachmentContext}`;
             // Download file from object storage using storagePath
             if (att.storagePath) {
               try {
-                buffer = await objectStorageService.getObjectEntityBuffer(att.storagePath);
+                buffer = await withRetry(
+                  () => objectStorageService.getObjectEntityBuffer(att.storagePath),
+                  {
+                    maxAttempts: 5,
+                    initialDelayMs: 150,
+                    maxDelayMs: 1500,
+                    backoffMultiplier: 2,
+                    jitter: true,
+                    retryCondition: (err) => err instanceof ObjectNotFoundError,
+                  }
+                );
                 console.log(`[Analyze] Downloaded ${filename} from storage: ${buffer.length} bytes`);
               } catch (downloadError: any) {
                 // LOCAL FALLBACK: Try reading from local uploads/ directory
