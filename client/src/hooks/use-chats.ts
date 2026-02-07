@@ -917,8 +917,43 @@ export function useChats() {
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    // Track whether message was actually added (for requestId cleanup)
-    
+    // If first message comes in while the chat is still pending, force-create the chat
+    // so we get a real chatId and can flush the queued messages.
+    if (isPending && message.role === "user" && !isCreatingChat) {
+      chatCreationInProgress.add(chatId);
+
+      const queue = pendingMessageQueue.get(chatId) || [];
+      queue.push(message);
+      pendingMessageQueue.set(chatId, queue);
+
+      try {
+        console.error("[CRITICAL] About to POST /api/chats - forced pending creation");
+        const res = await fetch("/api/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
+          body: JSON.stringify({ title })
+        });
+        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
+
+        if (!res.ok) return undefined;
+
+        const newChat = await res.json();
+        const realChatId = newChat.id;
+
+        pendingToRealIdMap.set(chatId, realChatId);
+
+        setChats(prev => prev.map(chat => (chat.id === chatId ? { ...chat, id: realChatId } : chat)));
+        setActiveChatId(realChatId);
+
+        return await flushPendingMessages(chatId, realChatId);
+      } catch (error) {
+        console.error("Error creating chat on first message (forced):", error);
+        return undefined;
+      } finally {
+        chatCreationInProgress.delete(chatId);
+      }
+    }
 
     // Check if message already exists in chat (by ID) and add if not
     setChats(prev => {
@@ -967,82 +1002,8 @@ export function useChats() {
     });
 
     // If message wasn't added (duplicate), don't proceed with persistence
-    
 
-    if (isPending && message.role === "user" && !isCreatingChat) {
-      chatCreationInProgress.add(chatId);
-      const queue = pendingMessageQueue.get(chatId) || [];
-      queue.push(message);
-      pendingMessageQueue.set(chatId, queue);
-
-      try {
-        console.error("[CRITICAL] About to POST /api/chats - this is the server call");
-        console.log("[addMessage] Creating new chat via POST /api/chats");
-        const res = await fetch("/api/chats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({ title })
-        });
-        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
-        console.log("[addMessage] POST /api/chats response:", res.status, res.ok);
-
-        if (res.ok) {
-          const newChat = await res.json();
-          const realChatId = newChat.id;
-          console.log("[addMessage] Chat created with id:", realChatId);
-
-          pendingToRealIdMap.set(chatId, realChatId);
-
-          setChats(prev => prev.map(chat => {
-            if (chat.id === chatId) {
-              return { ...chat, id: realChatId };
-            }
-            return chat;
-          }));
-          setActiveChatId(realChatId);
-
-          console.log("[addMessage] Calling flushPendingMessages");
-          const flushResult = await flushPendingMessages(chatId, realChatId);
-          console.log("[addMessage] flushPendingMessages result:", flushResult);
-          // Always return the flush result (even if undefined) to prevent falling through
-          return flushResult;
-        } else {
-          // Server creation failed - keep messages in local-only mode (visible in UI)
-          // Mark requestIds as complete to prevent re-processing but keep messages visible
-          const queuedMsgs = pendingMessageQueue.get(chatId) || [];
-          queuedMsgs.forEach(msg => {
-            if (msg.requestId) markRequestComplete(msg.requestId);
-          });
-          pendingMessageQueue.delete(chatId);
-          // Resolve pending promises with undefined (no run)
-          const resolvers = pendingFlushResolvers.get(chatId) || [];
-          for (const resolve of resolvers) {
-            resolve(undefined);
-          }
-          pendingFlushResolvers.delete(chatId);
-          console.warn("Chat creation failed, operating in local-only mode");
-          return undefined;
-        }
-      } catch (error) {
-        console.error("Error creating chat on first message:", error);
-        // Keep messages in local-only mode on error
-        const queuedMsgs = pendingMessageQueue.get(chatId) || [];
-        queuedMsgs.forEach(msg => {
-          if (msg.requestId) markRequestComplete(msg.requestId);
-        });
-        pendingMessageQueue.delete(chatId);
-        // Resolve pending promises with undefined (no run)
-        const resolvers = pendingFlushResolvers.get(chatId) || [];
-        for (const resolve of resolvers) {
-          resolve(undefined);
-        }
-        pendingFlushResolvers.delete(chatId);
-        return undefined;
-      } finally {
-        chatCreationInProgress.delete(chatId);
-      }
-    } else if (isPending || isCreatingChat) {
+    if (isPending || isCreatingChat) {
       const queueKey = chatCreationInProgress.has(chatId) ? chatId : resolvedChatId;
       const queue = pendingMessageQueue.get(queueKey) || [];
       queue.push(message);
