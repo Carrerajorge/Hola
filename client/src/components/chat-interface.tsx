@@ -2616,7 +2616,10 @@ export function ChatInterface({
 
       const doUpload = async (): Promise<void> => {
         try {
-          const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+          const urlRes = await fetch("/api/objects/upload", {
+            method: "POST",
+            headers: { ...getAnonUserIdHeader() },
+          });
           const { uploadURL, storagePath } = await urlRes.json();
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
@@ -6126,6 +6129,7 @@ IMPORTANTE:
       <VoiceChatMode
         open={isVoiceChatOpen}
         onClose={() => setIsVoiceChatOpen(false)}
+        model={selectedModel}
       />
       {/* Image Lightbox Modal */}
       {lightboxImage && (
