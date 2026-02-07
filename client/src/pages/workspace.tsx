@@ -165,22 +165,21 @@ function WorkspaceContent() {
     setAiProcessSteps([]);
   };
 
-  const handleSendNewChatMessage = useCallback((message: Message) => {
+  const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
     setNewChatStableKey((prev) => prev || stableKey);
     setIsNewChatMode(false);
-    addMessage(pendingId, message);
+    // IMPORTANT: return the promise so ChatInterface can await it and continue the flow
+    return await addMessage(pendingId, message);
   }, [createChat, addMessage]);
 
   const handleSendMessage = useCallback(async (message: Message) => {
     const targetChatId = activeChat?.id || pendingChatIdRef.current;
     if (targetChatId) {
       return await addMessage(targetChatId, message);
-    } else {
-      handleSendNewChatMessage(message);
-      return undefined;
     }
+    return await handleSendNewChatMessage(message);
   }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
 
   const chatInterfaceKey = useMemo(() => {
