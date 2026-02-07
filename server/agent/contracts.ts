@@ -262,6 +262,10 @@ export const RunResponseSchema = z.object({
   })),
   summary: z.string().optional(),
   error: z.string().optional(),
+  // Optional debug/UX helpers (present for in-memory runs; empty for historical runs).
+  eventStream: z.array(z.any()).optional(),
+  todoList: z.array(z.any()).optional(),
+  workspaceFiles: z.record(z.string()).optional(),
   currentStepIndex: z.number(),
   totalSteps: z.number(),
   completedSteps: z.number(),

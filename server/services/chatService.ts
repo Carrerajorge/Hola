@@ -584,7 +584,10 @@ export async function handleChatRequest(
   if (lastUserMessage) {
     // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
     // Skip Gmail detection when user has attached a document (attachmentContext contains the file)
-    if (!documentMode && !figmaMode && !attachmentContext && userId && detectEmailIntent(lastUserMessage.content)) {
+    const hasExplicitGmailMention = lastUserMessage.content.toLowerCase().includes("@gmail");
+    const allowConnectorSearch = featureFlags.connectorSearchAuto || hasExplicitGmailMention;
+
+    if (!documentMode && !figmaMode && !attachmentContext && userId && allowConnectorSearch && detectEmailIntent(lastUserMessage.content)) {
       try {
         const emailResult = await handleEmailChatRequest(userId, lastUserMessage.content);
         if (emailResult.handled && emailResult.response) {
@@ -1553,7 +1556,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   // Web search: either forced by simple query OR gated by webSearchAuto feature flag
   // GATED: Only allowed when no attachments OR user explicitly requests web
   // Intent-aware: also triggers if intent engine detected a search/research intent
-  const shouldSearchWeb = forceWebSearch || featureFlags.webSearchAuto || intentSuggestsSearch;
+  const shouldSearchWeb = forceWebSearch || userExplicitlyRequestsWeb || featureFlags.webSearchAuto;
   if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && shouldSearchWeb) {
     const academicPolicyCheck = await enforcePolicyCheck("academic_search", "google_scholar");
     if (!academicPolicyCheck.allowed) {

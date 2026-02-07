@@ -82,6 +82,7 @@ import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
+import { getHealthStatus as getDbHealthStatus } from "./db";
 import { templatesRouter } from "./routes/templatesRouter";
 import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
@@ -441,9 +442,64 @@ export async function registerRoutes(
   app.use("/health", healthRouter);
   app.use("/health/pare", createPareHealthRouter());
   
-  // Simple API health check
+  // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
+    const mem = process.memoryUsage();
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || process.env.APP_VERSION || "unknown",
+      node: {
+        version: process.version,
+        platform: process.platform,
+        arch: process.arch,
+      },
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+      },
+      uptime: process.uptime(),
+    });
+  });
+
+  // Liveness probe (must be fast and never depend on downstreams)
+  app.get("/api/health/live", (_req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Readiness probe (best-effort dependency summary, no hard DB query on each call)
+  app.get("/api/health/ready", (_req: Request, res: Response) => {
+    const db = getDbHealthStatus();
+    const mem = process.memoryUsage();
+
+    const dbReady = db.status === "HEALTHY";
+    const status = dbReady ? "ready" : "degraded";
+    const httpStatus = dbReady ? 200 : 503;
+
+    res.status(httpStatus).json({
+      status,
+      checks: {
+        database: {
+          status: db.status,
+          latencyMs: db.latencyMs,
+          lastCheck: db.lastCheck ? db.lastCheck.toISOString() : null,
+          consecutiveFailures: db.consecutiveFailures,
+        },
+        memory: {
+          status: "ok",
+          rss: mem.rss,
+          heapUsed: mem.heapUsed,
+          heapTotal: mem.heapTotal,
+        },
+        uptime: {
+          status: "ok",
+          seconds: process.uptime(),
+        },
+      },
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // API Documentation

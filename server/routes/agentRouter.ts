@@ -11,7 +11,10 @@ import { browserSessionManager, SessionEvent } from "../agent/browser";
 export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, event: SessionEvent) => void) {
   const router = Router();
 
-  router.post("/agent/runs", async (req, res) => {
+  // Legacy agent run endpoints (pre agentModeRuns + SSE event bus).
+  // Kept for backwards compatibility but moved under /api/agent-legacy/* to avoid
+  // shadowing the canonical /api/agent/* routes (see server/routes/agentRoutes.ts).
+  router.post("/agent-legacy/runs", async (req, res) => {
     try {
       let { chatId, message, attachments } = req.body;
 
@@ -111,7 +114,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
   });
 
   // Get active runs for a specific chat
-  router.get("/agent/runs/chat/:chatId", async (req, res) => {
+  router.get("/agent-legacy/runs/chat/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
 
@@ -187,7 +190,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     }
   });
 
-  router.get("/agent/runs/:id", async (req, res) => {
+  router.get("/agent-legacy/runs/:id", async (req, res) => {
     try {
       const progress = agentManager.getRunStatus(req.params.id);
 
@@ -293,7 +296,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     }
   });
 
-  router.post("/agent/runs/:id/cancel", async (req, res) => {
+  router.post("/agent-legacy/runs/:id/cancel", async (req, res) => {
     try {
       let success = await agentManager.cancelRun(req.params.id);
       if (!success) {

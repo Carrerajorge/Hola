@@ -115,6 +115,7 @@ import { MessageFeedback } from "@/components/message-feedback";
 import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
@@ -371,6 +372,7 @@ export function ChatInterface({
   selectedProjectId
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettingsContext();
   const {
     projects,
     getProject
@@ -508,6 +510,33 @@ export function ChatInterface({
   const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Keep UI state consistent with Settings toggles (disable features when turned off).
+  useEffect(() => {
+    if (!settings.webSearch && selectedTool === "web") {
+      setSelectedTool(null);
+    }
+  }, [settings.webSearch, selectedTool]);
+
+  useEffect(() => {
+    if (!settings.voiceMode) {
+      if (isVoiceChatOpen) setIsVoiceChatOpen(false);
+      if (isRecording || isPaused) stopVoiceRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.voiceMode]);
+
+  useEffect(() => {
+    if (!settings.canvas) {
+      if (activeDocEditor) {
+        void closeDocEditor();
+      } else if (selectedDocTool) {
+        setSelectedDocTool(null);
+      }
+      if (minimizedDocument) setMinimizedDocument(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.canvas]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -826,7 +855,7 @@ export function ChatInterface({
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
-  const [isGmailActive, setIsGmailActive] = useState(true);
+  const isGmailActive = !!settings.connectorSearch;
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");

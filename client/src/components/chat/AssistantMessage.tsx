@@ -37,6 +37,7 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SourcesPanel } from "@/components/sources-panel";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 
 import {
     parseDocumentBlocks,
@@ -116,6 +117,7 @@ export const AssistantMessage = memo(function AssistantMessage({
     const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
     const superAgentState = useSuperAgentRun(message.id);
     const { settings: platformSettings } = usePlatformSettings();
+    const { settings } = useSettingsContext();
 
     const parsedContent = useMemo(() => {
         if (!message.content || message.isThinking) {
@@ -258,6 +260,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                                 <CodeExecutionBlock
                                     code={block.content.trim()}
                                     language="python"
+                                    autoRun={settings.codeInterpreter}
                                 />
                             </div>
                         ) : block.content?.trim() ? (

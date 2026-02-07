@@ -163,7 +163,12 @@ export class ContextOrchestrator extends EventEmitter {
     async initialize(): Promise<void> {
         if (this.initialized) return;
 
-        if (this.config.l1Enabled) {
+        const isTestEnv =
+            process.env.NODE_ENV === "test" ||
+            !!process.env.VITEST_WORKER_ID ||
+            !!process.env.VITEST_POOL_ID;
+
+        if (this.config.l1Enabled && !isTestEnv) {
             try {
                 this.redis = createClient({ url: this.config.redisUrl });
                 this.redis.on("error", (err) => {
@@ -175,6 +180,9 @@ export class ContextOrchestrator extends EventEmitter {
                 console.warn("[ContextOrchestrator] Redis unavailable, falling back to L0 only:", error);
                 this.redis = null;
             }
+        } else if (this.config.l1Enabled && isTestEnv) {
+            // Avoid long connection timeouts in unit/integration tests.
+            this.redis = null;
         }
 
         this.initialized = true;

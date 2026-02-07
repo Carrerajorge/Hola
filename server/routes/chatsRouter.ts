@@ -21,8 +21,10 @@ export function createChatsRouter() {
         return res.json([]);
       }
 
+      // Hide archived and deleted chats from the main list; they are managed via dedicated endpoints.
       const chatList = await storage.getChats(userId);
-      res.json(chatList);
+      const visibleChats = chatList.filter((chat) => chat.archived !== "true" && !chat.deletedAt);
+      res.json(visibleChats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -112,6 +114,9 @@ export function createChatsRouter() {
     try {
       const { title, messages } = req.body;
       const userId = getOrCreateSecureUserId(req);
+      const chatHistoryEnabled = userId && !userId.startsWith("anon_")
+        ? (await storage.getUserSettings(userId))?.privacySettings?.chatHistoryEnabled ?? true
+        : true;
 
       // If messages provided with requestIds, check if any already exist (reconciliation scenario)
       if (messages && Array.isArray(messages) && messages.length > 0) {
@@ -140,11 +145,18 @@ export function createChatsRouter() {
             attachments: msg.attachments
           }))
         );
+        if (!chatHistoryEnabled) {
+          // Store the chat transiently (accessible by id) but hide it from history listings.
+          await storage.softDeleteChat(result.chat.id);
+        }
         return res.json({ ...result.chat, messages: result.messages });
       }
 
       // Simple chat creation without messages
       const chat = await storage.createChat({ title: title || "New Chat", userId });
+      if (!chatHistoryEnabled) {
+        await storage.softDeleteChat(chat.id);
+      }
       res.json(chat);
     } catch (error: any) {
       // Handle duplicate key constraint gracefully

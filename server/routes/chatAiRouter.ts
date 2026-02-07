@@ -27,6 +27,11 @@ import { answerFirstEnforcer } from "../services/answerFirstEnforcer";
 import { academicSearchService } from "../services/academicSearchService";
 import { isProductionIntent, handleProductionRequest, getDeliverables } from "../services/productionHandler";
 import type { z } from "zod";
+import { getUserId } from "../types/express";
+import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
+import { handleEmailChatRequest } from "../services/gmailChatIntegration";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -199,8 +204,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = effectiveUserId;
 
       // CONTEXT FIX: Augment client messages with server-side history
       const messages = await conversationMemoryManager.augmentWithHistory(
@@ -439,24 +443,98 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       console.log("[VoiceChat] Processing voice input:", message);
 
+      const userId = getOrCreateSecureUserId(req);
+      let featureFlags = {
+        voiceEnabled: true,
+        voiceAdvanced: false,
+        memoryEnabled: false,
+        recordingHistoryEnabled: false,
+      };
+      let responseStyle: string = "default";
+      let customInstructions: string = "";
+      let userProfile: any = null;
+
+      try {
+        const userSettings = await storage.getUserSettings(userId);
+        featureFlags = {
+          voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
+          voiceAdvanced: userSettings?.featureFlags?.voiceAdvanced ?? false,
+          memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
+          recordingHistoryEnabled: userSettings?.featureFlags?.recordingHistoryEnabled ?? false,
+        };
+        responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
+        customInstructions = userSettings?.responsePreferences?.customInstructions || "";
+        userProfile = userSettings?.userProfile || null;
+      } catch (e) {
+        console.warn("[VoiceChat] Failed to load user settings:", (e as any)?.message || e);
+      }
+
+      if (!featureFlags.voiceEnabled) {
+        return res.status(403).json({
+          error: "Voice mode is disabled in your settings",
+          code: "VOICE_DISABLED",
+        });
+      }
+
+      const voiceStyleLine =
+        responseStyle === "formal"
+          ? "Usa un tono formal y profesional."
+          : responseStyle === "casual"
+            ? "Usa un tono casual y amigable."
+            : responseStyle === "concise"
+              ? "Sé muy conciso y ve directo al punto."
+              : "Usa un tono neutro y claro.";
+
+      const userProfileLine =
+        userProfile && (userProfile.nickname || userProfile.occupation)
+          ? `Usuario: ${userProfile.nickname ? userProfile.nickname : "N/A"}${userProfile.occupation ? ` (${userProfile.occupation})` : ""}.`
+          : "";
+
       const result = await llmGateway.chat([
         {
           role: "system",
           content: `Eres Sira, un asistente de voz amigable y conversacional. 
 Responde de manera natural y concisa, como si estuvieras hablando directamente con el usuario.
-Mantén las respuestas cortas (2-3 oraciones máximo) para que sean fáciles de escuchar.
-Usa un tono cálido y conversacional en español.
-No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída en voz alta.`
+${featureFlags.voiceAdvanced ? "Puedes dar respuestas un poco más completas (hasta 5 oraciones) cuando haga falta." : "Mantén las respuestas cortas (2-3 oraciones máximo) para que sean fáciles de escuchar."}
+Usa un tono cálido y conversacional en español. ${voiceStyleLine}
+No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída en voz alta.${userProfileLine ? `\n${userProfileLine}` : ""}${customInstructions ? `\n\nInstrucciones personalizadas del usuario:\n${customInstructions}` : ""}`
         },
         {
           role: "user",
           content: message
         }
       ], {
-        model: "grok-3-fast",
+        model: featureFlags.voiceAdvanced ? "grok-4-fast-non-reasoning" : "grok-3-fast",
         temperature: 0.7,
-        maxTokens: 150,
+        maxTokens: featureFlags.voiceAdvanced ? 250 : 150,
       });
+
+      // Best-effort: store voice interactions depending on user settings.
+      if (userId && (featureFlags.memoryEnabled || featureFlags.recordingHistoryEnabled)) {
+        void (async () => {
+          try {
+            await ensureUserRowExists(userId);
+            await semanticMemoryStore.initialize();
+
+            if (featureFlags.recordingHistoryEnabled) {
+              const stamp = new Date().toISOString();
+              const convo = `(${stamp}) Voz: Usuario dijo: "${message}". Asistente respondió: "${result.content}".`;
+              await semanticMemoryStore.remember(userId, convo, "conversation", {
+                source: "voice_chat",
+                confidence: 0.7,
+              });
+            }
+
+            if (featureFlags.memoryEnabled) {
+              await semanticMemoryStore.extractFromConversation(userId, [
+                { role: "user", content: message },
+              ]);
+            }
+          } catch (e) {
+            console.warn("[VoiceChat] Failed to store memory:", (e as any)?.message || e);
+          }
+        })();
+      }
 
       res.json({
         success: true,
@@ -581,6 +659,30 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
     try {
       const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const effectiveUserId = getOrCreateSecureUserId(req);
+
+      let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+      try {
+        userSettings = await storage.getUserSettings(effectiveUserId);
+      } catch (e) {
+        console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
+      }
+
+      const featureFlags = {
+        memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
+        recordingHistoryEnabled: userSettings?.featureFlags?.recordingHistoryEnabled ?? false,
+        webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true,
+        codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
+        canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
+        voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
+        voiceAdvanced: userSettings?.featureFlags?.voiceAdvanced ?? false,
+        connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
+      };
+
+      const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
+      const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
+      const userProfile = userSettings?.userProfile || null;
+      const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
 
       // DEBUG: Log all incoming request parameters for docTool verification
       console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}, forceWebSearch: ${forceWebSearch}`);
@@ -589,56 +691,26 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      // WEB SEARCH MODE: If forceWebSearch is true, perform web search first
-      if (forceWebSearch || webSearchAuto) {
-        console.log(`[Stream] 🌐 WEB SEARCH MODE ACTIVATED`);
-        const lastUserMessage = [...clientMessages].reverse().find((m: any) => m.role === 'user');
-        const searchQuery = lastUserMessage?.content || '';
-        
-        if (searchQuery) {
-          try {
-            const { searchWeb } = await import('../services/webSearch');
-            const searchResults = await searchWeb(searchQuery, 5);
-            
-            if (searchResults.results.length > 0) {
-              // Format search results as context
-              const searchContext = searchResults.results
-                .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
-                .join('\n\n');
-              
-              // Add search results as system context
-              const systemMessage = {
-                role: 'system',
-                content: `El usuario ha solicitado búsqueda web. Aquí están los resultados de búsqueda para "${searchQuery}":\n\n${searchContext}\n\nUsa esta información para responder al usuario de forma útil y citando las fuentes cuando sea apropiado.`
-              };
-              
-              clientMessages.unshift(systemMessage);
-              console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
-            }
-          } catch (searchError) {
-            console.error('[Stream] Web search error:', searchError);
-            // Continue without web search results
-          }
-        }
-      }
-
-      // AUTOMATIC ACADEMIC/WEB SEARCH: Always detect if message needs search and add results
+      // Web/Academic search is gated by user settings (webSearchAuto) unless explicitly requested.
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = lastUserMsg?.content || '';
-      
-      // Store webSources for SSE response
+
       let detectedWebSources: any[] = [];
-      
-      // Always try to detect search needs, regardless of forceWebSearch/webSearchAuto flags
-      if (userQuery) {
+
+      const requestedWebSearch = !!forceWebSearch || !!webSearchAuto;
+      const allowAutoSearch = featureFlags.webSearchAuto && !requestedWebSearch && !hasAnyAttachments;
+      const shouldSearch = requestedWebSearch || allowAutoSearch;
+
+      if (shouldSearch && userQuery) {
         try {
           const { needsAcademicSearch, needsWebSearch, searchWeb } = await import('../services/webSearch');
           const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
-          
-          // Check for academic search patterns
-          if (needsAcademicSearch(userQuery)) {
-            console.log(`[Stream] 🎓 ACADEMIC SEARCH DETECTED for: "${userQuery.slice(0, 50)}..."`);
-            
+
+          const doAcademic = needsAcademicSearch(userQuery);
+          const doWeb = requestedWebSearch ? !doAcademic : needsWebSearch(userQuery);
+
+          if (doAcademic) {
+            console.log(`[Stream] 🎓 Academic search ${requestedWebSearch ? "requested" : "auto"} for: "${userQuery.slice(0, 60)}..."`);
             try {
               const engineResult = await academicEngineV3.search({
                 query: userQuery,
@@ -647,20 +719,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 yearTo: new Date().getFullYear(),
                 sources: ["scielo", "openalex", "semantic_scholar", "crossref", "core", "pubmed", "arxiv", "doaj"]
               });
-              
+
               if (engineResult.papers.length > 0) {
-                const academicContext = engineResult.papers.slice(0, 10).map((paper, i) => 
+                const academicContext = engineResult.papers.slice(0, 10).map((paper, i) =>
                   `[${i + 1}] ${paper.title}\nAutores: ${paper.authors.map(a => a.name).join(', ') || 'No disponible'}\nAño: ${paper.year || 'N/A'}\nJournal: ${paper.journal || 'N/A'}\nDOI: ${paper.doi || 'N/A'}\nURL: ${paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : 'N/A')}\nResumen: ${(paper.abstract || '').substring(0, 300)}...\nCita APA: ${generateAPACitation(paper)}`
                 ).join('\n\n');
-                
-                const systemMessage = {
+
+                clientMessages.unshift({
                   role: 'system',
                   content: `ARTÍCULOS ACADÉMICOS ENCONTRADOS (${engineResult.papers.length} resultados de ${engineResult.sources.map(s => s.name).join(', ')}):\n\n${academicContext}\n\nUSA ESTOS ARTÍCULOS para responder al usuario. Incluye citas APA y URLs para cada referencia.`
-                };
-                
-                clientMessages.unshift(systemMessage);
-                
-                // Convert papers to webSources format for frontend cards
+                });
+
                 detectedWebSources = engineResult.papers.slice(0, 10).map(paper => ({
                   url: paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : ''),
                   title: paper.title,
@@ -671,33 +740,27 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   siteName: paper.journal || engineResult.sources[0]?.name || 'Academic Source',
                   publishedDate: paper.year ? `${paper.year}` : null
                 }));
-                
-                console.log(`[Stream] 🎓 Academic search found ${engineResult.papers.length} papers from ${engineResult.sources.length} sources`);
+
+                console.log(`[Stream] 🎓 Academic search found ${engineResult.papers.length} papers`);
               }
             } catch (academicError) {
               console.error('[Stream] Academic search error:', academicError);
             }
-          }
-          // Check for web search patterns (news, current events, etc)
-          else if (needsWebSearch(userQuery)) {
-            console.log(`[Stream] 🌐 WEB SEARCH DETECTED for: "${userQuery.slice(0, 50)}..."`);
-            
+          } else if (doWeb) {
+            console.log(`[Stream] 🌐 Web search ${requestedWebSearch ? "requested" : "auto"} for: "${userQuery.slice(0, 60)}..."`);
             try {
-              const searchResults = await searchWeb(userQuery, 10);
-              
+              const searchResults = await searchWeb(userQuery, requestedWebSearch ? 10 : 10);
+
               if (searchResults.results.length > 0) {
                 const searchContext = searchResults.results
                   .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
                   .join('\n\n');
-                
-                const systemMessage = {
+
+                clientMessages.unshift({
                   role: 'system',
                   content: `RESULTADOS DE BÚSQUEDA WEB para "${userQuery}":\n\n${searchContext}\n\nUsa esta información actualizada para responder al usuario, citando las fuentes cuando sea apropiado.`
-                };
-                
-                clientMessages.unshift(systemMessage);
-                
-                // Store webSources for frontend cards
+                });
+
                 detectedWebSources = searchResults.results.map((r: any) => ({
                   url: r.url,
                   title: r.title,
@@ -708,7 +771,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   siteName: r.siteName || new URL(r.url).hostname.replace('www.', ''),
                   publishedDate: r.publishedDate || null
                 }));
-                
+
                 console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
               }
             } catch (webError) {
@@ -730,7 +793,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       console.log(`[Stream API] Context augmented: ${clientMessages.length} client msgs -> ${messages.length} total`);
 
       // DOC TOOL PRODUCTION MODE: When Word/Excel/PPT tool is selected, activate production directly
-      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+      if (featureFlags.canvasEnabled && docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
         console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: docTool=${docTool} - activating production mode directly`);
 
         const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
@@ -755,7 +818,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         };
 
         try {
-          const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
           const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
           await handleProductionRequest(
@@ -789,8 +851,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         });
       }
 
-      const user = (req as AuthenticatedRequest).user;
-      const userId = user?.claims?.sub;
+      const userId = effectiveUserId;
 
       // GPT Session Contract Resolution for streaming
       // Priority: session_id (reuse existing) > gptId (create new)
@@ -860,17 +921,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
           // PRODUCTION MODE INTERCEPT - Check immediately after intent detection
           // Pass userMessageText to detect if user wants to search for articles first
-          if (isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
+          if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
-              const effectiveUserId = (req as AuthenticatedRequest).user?.claims?.sub || 'anonymous';
               const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
               await handleProductionRequest(
                 {
                   message: userMessageText,
-                  userId: effectiveUserId,
+                  userId: userId,
                   chatId: effectiveChatId,
                   intentResult,
                   locale: intentResult.language_detected || 'es',
@@ -1029,8 +1089,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         console.log(`🔥🔥🔥 [Stream] PRODUCTION CHECK END 🔥🔥🔥\n\n`);
 
         // Pass userMessageText to detect if user wants to search for articles first
-        if (isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
-          const effectiveUserId = user?.claims?.sub || 'anonymous';
+        if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
           const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 
           console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
@@ -1039,7 +1098,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             await handleProductionRequest(
               {
                 message: userMessageText,
-                userId: effectiveUserId,
+                userId: userId,
                 chatId: effectiveChatId,
                 intentResult,
                 locale: intentResult.language_detected || 'es',
@@ -1237,6 +1296,72 @@ CONTENIDO DE LOS DOCUMENTOS:
 ${attachmentContext}`;
       }
 
+      // Apply user personalization (style, custom instructions, profile) and semantic memory.
+      const userProfileContext = userProfile && (userProfile.nickname || userProfile.occupation || userProfile.bio)
+        ? `\n\nInformación del usuario:${userProfile.nickname ? `\n- Nombre/Apodo: ${userProfile.nickname}` : ''}${userProfile.occupation ? `\n- Ocupación: ${userProfile.occupation}` : ''}${userProfile.bio ? `\n- Bio: ${userProfile.bio}` : ''}`
+        : '';
+
+      const customInstructionsSection = customInstructions
+        ? `\n\nInstrucciones personalizadas del usuario:\n${customInstructions}`
+        : '';
+
+      const responseStyleModifier = responseStyle !== 'default'
+        ? `\n\nEstilo de respuesta preferido: ${responseStyle === 'formal' ? 'formal y profesional' :
+          responseStyle === 'casual' ? 'casual y amigable' :
+            responseStyle === 'concise' ? 'muy conciso y breve' : ''
+        }`
+        : '';
+
+      let semanticMemoryContext: string | null = null;
+      if ((featureFlags.memoryEnabled || featureFlags.recordingHistoryEnabled) && userId && userMessageText) {
+        try {
+          await semanticMemoryStore.initialize();
+          const types: Array<"fact" | "preference" | "conversation" | "instruction" | "note"> = [];
+          if (featureFlags.memoryEnabled) {
+            types.push("fact", "preference", "instruction", "note");
+          }
+          if (featureFlags.recordingHistoryEnabled) {
+            types.push("conversation");
+          }
+
+          if (types.length > 0) {
+            const results = await semanticMemoryStore.search(userId, userMessageText, {
+              limit: 10,
+              minScore: 0.4,
+              types,
+              hybridSearch: true,
+            });
+
+            if (results.length > 0) {
+              const lines: string[] = ["[Memoria relevante]"];
+              let tokenBudget = 350;
+              for (const r of results) {
+                const line = `• [${r.chunk.type}] ${r.chunk.content}`;
+                const estTokens = Math.ceil(line.length / 4);
+                if (tokenBudget - estTokens < 0) break;
+                tokenBudget -= estTokens;
+                lines.push(line);
+              }
+              semanticMemoryContext = lines.length > 1 ? lines.join("\n") : null;
+            }
+          }
+        } catch (e) {
+          console.warn("[Stream] Failed to load semantic memory:", (e as any)?.message || e);
+        }
+      }
+
+      // If code interpreter is enabled and the user is asking for a chart, force python output.
+      const wantsChart = /\b(gr[aá]fic[oa]|chart|plot|visualiz|histograma|diagrama de barras|pie chart|scatter|l[ií]nea|barras)\b/i.test(userMessageText || "");
+      const codeInterpreterPrompt = (wantsChart && featureFlags.codeInterpreterEnabled)
+        ? `\n\n⚠️ CODE INTERPRETER ACTIVO ⚠️\nEl usuario ha solicitado una gráfica/visualización. Responde con un bloque \`\`\`python\`\`\` ejecutable (matplotlib) y NO con una descripción en texto.`
+        : '';
+
+      // Current date/time context for real-time awareness
+      const now = new Date();
+      const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
+
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}`;
+
       const systemMessage = {
         role: "system" as const,
         content: systemContent
@@ -1394,6 +1519,22 @@ ${attachmentContext}`;
             console.error(`[Stream] Failed to persist conversationDocument for ${att.name} (run):`, docError);
           }
         }
+      }
+
+      // Best-effort: extract semantic memories from the user's latest message.
+      // This is gated by the user's "allowMemories" setting (featureFlags.memoryEnabled).
+      if (userId && featureFlags.memoryEnabled && userMessageText) {
+        void (async () => {
+          try {
+            await ensureUserRowExists(userId);
+            await semanticMemoryStore.initialize();
+            await semanticMemoryStore.extractFromConversation(userId, [
+              { role: "user", content: userMessageText }
+            ]);
+          } catch (e) {
+            console.warn("[Stream] Failed to extract/store semantic memory:", (e as any)?.message || e);
+          }
+        })();
       }
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)

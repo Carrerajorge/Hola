@@ -157,6 +157,12 @@ export const userProfileSchema = z.object({
     nickname: z.string().default(''),
     occupation: z.string().default(''),
     bio: z.string().default(''),
+    // Builder profile (public-facing metadata for GPTs)
+    showName: z.boolean().default(true),
+    linkedInUrl: z.string().default(''),
+    githubUrl: z.string().default(''),
+    websiteDomain: z.string().default(''),
+    receiveEmailComments: z.boolean().default(false),
 });
 
 export const featureFlagsSchema = z.object({
@@ -173,6 +179,8 @@ export const featureFlagsSchema = z.object({
 export const privacySettingsSchema = z.object({
     trainingOptIn: z.boolean().default(false),
     remoteBrowserDataAccess: z.boolean().default(false),
+    analyticsTracking: z.boolean().default(true),
+    chatHistoryEnabled: z.boolean().default(true),
 });
 
 export const userSettings = pgTable("user_settings", {

@@ -16,6 +16,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:agentic": "vitest run tests/agentic",
+    "test:agentic:integration": "bash ./scripts/test-agentic-integration.sh",
     "test:all": "bash ./scripts/test-all.sh",
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list",
     "test:e2e": "npx playwright test --reporter=html"

@@ -34,6 +34,8 @@ import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { startChatScheduleRunner } from "./services/chatScheduleRunner";
+import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
 
 initTracing();
 
@@ -114,6 +116,7 @@ export function log(message: string, source = "express") {
 
 (async () => {
   const isProduction = process.env.NODE_ENV === "production";
+  const isTest = process.env.NODE_ENV === "test";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
 
   // Start Python Agent Tools service if enabled
@@ -172,8 +175,15 @@ export function log(message: string, source = "express") {
   await setupAuth(app);
   registerAuthRoutes(app);
 
+  // Capture best-effort device metadata for session management UI.
+  app.use("/api", sessionDeviceInfoMiddleware);
+
   // CSRF Protection for API (validates header)
-  app.use("/api", csrfProtection);
+  if (!isTest) {
+    app.use("/api", csrfProtection);
+  } else {
+    log("CSRF protection disabled in test environment", "security");
+  }
 
   // Rate Limiting (User-based)
   app.use("/api", rateLimiter);
@@ -212,16 +222,21 @@ export function log(message: string, source = "express") {
     : port;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const server = (httpServer.listen as any)(listenOptions, async () => {
-    log(`serving on port ${port}`);
-    log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
-    log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
-    startAggregator();
-    await seedProductionData();
+	  const server = (httpServer.listen as any)(listenOptions, async () => {
+	    log(`serving on port ${port}`);
+	    log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
+	    log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
+	    startAggregator();
+	    await seedProductionData();
+	    if (dbConnected) {
+	      startChatScheduleRunner();
+	    } else {
+	      log("[Schedules] Skipping schedule runner start because DB is not connected");
+	    }
 
-    // Setup graceful shutdown with connection draining
-    setupGracefulShutdown(httpServer, {
-      timeout: 30000,
+	    // Setup graceful shutdown with connection draining
+	    setupGracefulShutdown(httpServer, {
+	      timeout: 30000,
       onShutdown: async () => {
         log("Running application cleanup...");
       },

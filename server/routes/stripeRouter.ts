@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
 import { db } from "../db";
-import { apiLogs, invoices, payments, users } from "@shared/schema";
-import { and, eq, gte, lt, or, sql } from "drizzle-orm";
+import { apiLogs, billingCreditGrants, invoices, payments, users } from "@shared/schema";
+import { and, eq, gte, gt, lt, or, sql } from "drizzle-orm";
 import { withRetry } from "../lib/retryUtility";
 import { z } from "zod";
 import { sendEmail } from "../services/genericEmailService";
@@ -16,10 +16,21 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
   price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
 
-const BILLING_MANAGER_ROLES = new Set(["admin", "superadmin", "team_admin"]);
+const BILLING_MANAGER_ROLES = new Set([
+  "admin",
+  "superadmin",
+  "team_admin",
+  "workspace_owner",
+  "workspace_admin",
+  "billing_manager",
+  "owner",
+]);
 const BILLING_CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
 const billingContactCooldown = new Map<string, number>();
 const billingContactIpCooldown = new Map<string, number>();
+
+// Credits: 1 USD => 100,000 credits (tokens). $5 minimum top-up.
+const CREDITS_PER_USD = 100_000;
 
 function requireStripeProductSeedingEnabled(_req: any, res: any, next: any) {
   const flag = String(process.env.ALLOW_STRIPE_PRODUCT_SEEDING || "").trim().toLowerCase();
@@ -283,7 +294,9 @@ export function createStripeRouter() {
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const stripe = await getUncachableStripeClient();
@@ -534,6 +547,67 @@ export function createStripeRouter() {
               else if (amount === 2500) plan = "business";
 
               await usageQuotaService.updateUserPlan(userId, plan);
+            } else if (String(session?.metadata?.kind || "") === "credits_topup") {
+              // Credits top-up (one-time payment)
+              const now = new Date();
+              const amountMinorRaw = typeof session?.amount_total === "number" ? session.amount_total : 0;
+              const currency = typeof session?.currency === "string" ? session.currency : "usd";
+              const amountUsd = Math.round(amountMinorRaw / 100);
+              const creditsFromAmount = Math.max(0, amountUsd) * CREDITS_PER_USD;
+              const creditsRaw = Number(session?.metadata?.creditsGranted || session?.metadata?.credits || 0);
+              const creditsGranted = Number.isFinite(creditsRaw) && creditsRaw > 0 ? Math.floor(creditsRaw) : creditsFromAmount;
+
+              if (creditsGranted > 0) {
+                const checkoutSessionId = typeof session?.id === "string" ? session.id : null;
+                const paymentIntentId =
+                  typeof session?.payment_intent === "string"
+                    ? session.payment_intent
+                    : (typeof session?.payment_intent === "object" && typeof session.payment_intent?.id === "string")
+                      ? session.payment_intent.id
+                      : null;
+
+                if (checkoutSessionId) {
+                  const [existing] = await db
+                    .select({ id: billingCreditGrants.id })
+                    .from(billingCreditGrants)
+                    .where(eq(billingCreditGrants.stripeCheckoutSessionId, checkoutSessionId))
+                    .limit(1);
+
+                  if (!existing) {
+                    const expiresAt = addMonths(now, 12);
+                    await db.insert(billingCreditGrants).values({
+                      userId,
+                      creditsGranted,
+                      creditsRemaining: creditsGranted,
+                      currency,
+                      amountMinor: amountMinorRaw,
+                      stripeCheckoutSessionId: checkoutSessionId,
+                      stripePaymentIntentId: paymentIntentId,
+                      createdAt: now,
+                      expiresAt,
+                      metadata: { source: "stripe_checkout", kind: "credits_topup" },
+                    });
+
+                    // Maintain legacy aggregate on users for convenience (best-effort).
+                    await db
+                      .update(users)
+                      .set({
+                        creditsBalance: sql<number>`COALESCE(${users.creditsBalance}, 0) + ${creditsGranted}`,
+                        updatedAt: new Date(),
+                      })
+                      .where(eq(users.id, userId));
+
+	                    await auditLog(req as any, {
+	                      action: "billing.credits_topup_completed",
+	                      resource: "billing_credit_grants",
+	                      resourceId: checkoutSessionId,
+	                      details: { userId, creditsGranted, amountMinor: amountMinorRaw, currency, expiresAt: expiresAt.toISOString() },
+	                      category: "system",
+	                      severity: "info",
+	                    });
+                  }
+                }
+              }
             }
           }
           break;
@@ -629,20 +703,20 @@ export function createStripeRouter() {
               await db.update(invoices).set({ status: "refunded" }).where(eq(invoices.stripeInvoiceId, stripeInvoiceId));
             }
 
-            await auditLog(req as any, {
-              action: AuditActions.PAYMENT_REFUNDED,
-              resource: "payments",
-              resourceId: stripeInvoiceId || chargeId || null,
-              details: {
-                stripeChargeId: chargeId,
-                stripePaymentIntentId: paymentIntentId,
-                stripeInvoiceId,
-                amountRefunded: charge?.amount_refunded ?? null,
-                currency: charge?.currency ?? null,
-              },
-              category: "billing",
-              severity: "warning",
-            });
+	            await auditLog(req as any, {
+	              action: AuditActions.PAYMENT_REFUNDED,
+	              resource: "payments",
+	              resourceId: stripeInvoiceId || chargeId || null,
+	              details: {
+	                stripeChargeId: chargeId,
+	                stripePaymentIntentId: paymentIntentId,
+	                stripeInvoiceId,
+	                amountRefunded: charge?.amount_refunded ?? null,
+	                currency: charge?.currency ?? null,
+	              },
+	              category: "system",
+	              severity: "warning",
+	            });
           }
           break;
         }
@@ -690,23 +764,23 @@ export function createStripeRouter() {
               await db.update(invoices).set({ status: "disputed" }).where(eq(invoices.stripeInvoiceId, stripeInvoiceId));
             }
 
-            await auditLog(req as any, {
-              action: AuditActions.PAYMENT_DISPUTED,
-              resource: "payments",
-              resourceId: stripeInvoiceId || chargeId,
-              details: {
-                stripeChargeId: chargeId,
-                stripeInvoiceId,
-                stripePaymentIntentId: paymentIntentId,
-                stripeDisputeId: dispute?.id ?? null,
-                reason: dispute?.reason ?? null,
-                amount: dispute?.amount ?? null,
-                currency: dispute?.currency ?? null,
-                status: dispute?.status ?? null,
-              },
-              category: "billing",
-              severity: "critical",
-            });
+	            await auditLog(req as any, {
+	              action: AuditActions.PAYMENT_DISPUTED,
+	              resource: "payments",
+	              resourceId: stripeInvoiceId || chargeId,
+	              details: {
+	                stripeChargeId: chargeId,
+	                stripeInvoiceId,
+	                stripePaymentIntentId: paymentIntentId,
+	                stripeDisputeId: dispute?.id ?? null,
+	                reason: dispute?.reason ?? null,
+	                amount: dispute?.amount ?? null,
+	                currency: dispute?.currency ?? null,
+	                status: dispute?.status ?? null,
+	              },
+	              category: "system",
+	              severity: "critical",
+	            });
           }
           break;
         }
@@ -778,7 +852,12 @@ export function createStripeRouter() {
       }
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
-      const subscriptionStatus = dbUser?.subscriptionStatus || null;
+      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
+      const inferredStatus =
+        subscriptionStatusRaw ||
+        ((dbUser as any)?.stripeSubscriptionId ? "active" : null) ||
+        ((dbUser as any)?.plan && (dbUser as any).plan !== "free" ? "active" : null);
+      const subscriptionStatus = inferredStatus;
       const subscriptionPeriodEnd = dbUser?.subscriptionPeriodEnd || null;
 
       const now = Date.now();
@@ -790,10 +869,41 @@ export function createStripeRouter() {
         !!periodEndMs &&
         periodEndMs > now;
 
+      const [{ monthsPaid = 0 } = { monthsPaid: 0 }] = await db
+        .select({
+          monthsPaid: sql<number>`COALESCE(COUNT(*), 0)`,
+        })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.userId, userId),
+            eq(payments.method, "stripe"),
+            eq(payments.status, "completed"),
+            sql`${payments.description} ILIKE '%subscription%'`
+          )
+        );
+
+      const nowDate = new Date();
+      const [{ extraCredits = 0 } = { extraCredits: 0 }] = await db
+        .select({
+          extraCredits: sql<number>`COALESCE(SUM(${billingCreditGrants.creditsRemaining}), 0)`,
+        })
+        .from(billingCreditGrants)
+        .where(
+          and(
+            eq(billingCreditGrants.userId, userId),
+            gt(billingCreditGrants.creditsRemaining, 0),
+            gt(billingCreditGrants.expiresAt, nowDate)
+          )
+        );
+
       res.json({
         subscriptionStatus,
         subscriptionPeriodEnd,
         willDeactivate,
+        plan: (dbUser as any)?.plan || "free",
+        monthsPaid,
+        extraCredits,
       });
     } catch (error: any) {
       console.error("Billing status error:", error);
@@ -814,11 +924,15 @@ export function createStripeRouter() {
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const now = new Date();
-      const anchorEnd = dbUser.subscriptionPeriodEnd ? new Date(dbUser.subscriptionPeriodEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const anchorEnd = dbUser.subscriptionPeriodEnd
+        ? new Date(dbUser.subscriptionPeriodEnd)
+        : new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
       const cycleEnd = addMonths(anchorEnd, offsetMonths);
       const cycleStart = addMonths(cycleEnd, -1);
@@ -856,6 +970,32 @@ export function createStripeRouter() {
 
       const percentUsed = limitTokens ? Math.min(100, (totalTokens / limitTokens) * 100) : null;
 
+      const [{ extraCredits = 0 } = { extraCredits: 0 }] = await db
+        .select({
+          extraCredits: sql<number>`COALESCE(SUM(${billingCreditGrants.creditsRemaining}), 0)`,
+        })
+        .from(billingCreditGrants)
+        .where(
+          and(
+            eq(billingCreditGrants.userId, userId),
+            gt(billingCreditGrants.creditsRemaining, 0),
+            gt(billingCreditGrants.expiresAt, now)
+          )
+        );
+
+      const [{ nextExpiry = null } = { nextExpiry: null }] = await db
+        .select({
+          nextExpiry: sql<Date | null>`MIN(${billingCreditGrants.expiresAt})`,
+        })
+        .from(billingCreditGrants)
+        .where(
+          and(
+            eq(billingCreditGrants.userId, userId),
+            gt(billingCreditGrants.creditsRemaining, 0),
+            gt(billingCreditGrants.expiresAt, now)
+          )
+        );
+
       res.json({
         cycleStart: cycleStart.toISOString(),
         cycleEnd: cycleEnd.toISOString(),
@@ -864,10 +1004,142 @@ export function createStripeRouter() {
         totalRequests,
         limitTokens,
         percentUsed,
+        extraCredits,
+        extraCreditsNextExpiry: nextExpiry ? new Date(nextExpiry).toISOString() : null,
       });
     } catch (error: any) {
       console.error("Billing credit usage error:", error);
       res.status(500).json({ error: "Failed to get credit usage" });
+    }
+  });
+
+  router.post("/api/billing/credits/checkout", async (req, res) => {
+    try {
+      const userId = getEffectiveUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const parsedBody = z
+        .object({
+          amountUsd: z.number().int().min(5).max(5000),
+        })
+        .safeParse(req.body);
+      if (!parsedBody.success) {
+        return res.status(400).json({ error: "Invalid request body", code: "INVALID_BODY" });
+      }
+
+      const amountUsd = parsedBody.data.amountUsd;
+      if (amountUsd % 5 !== 0) {
+        return res.status(400).json({ error: "El mínimo es $5 y debe ser múltiplo de 5", code: "INVALID_AMOUNT" });
+      }
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      if (!dbUser) {
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      const canManageBilling = canManageBillingForDbUser(dbUser);
+      if (!canManageBilling) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+
+      let customerId = dbUser.stripeCustomerId;
+      if (!customerId) {
+        const customer = await withRetry(
+          () =>
+            stripe.customers.create({
+              email: dbUser.email || undefined,
+              metadata: { userId },
+            }),
+          { maxAttempts: 3, initialDelayMs: 1000 }
+        );
+        customerId = customer.id;
+
+        await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, userId));
+      }
+
+      const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || "localhost:5000";
+      const protocol = domain.includes("localhost") ? "http" : "https";
+      const configuredBaseUrl = (process.env.BASE_URL || process.env.APP_URL || "").trim();
+	      const baseUrl = (configuredBaseUrl || `${protocol}://${domain}`).replace(/\/$/, "");
+
+      const withQueryParam = (inputUrl: string, key: string, value: string) => {
+        const u = new URL(inputUrl);
+        u.searchParams.set(key, value);
+        return u.toString();
+      };
+
+      let successUrl = withQueryParam(`${baseUrl}/workspace-settings?section=billing`, "credits", "success");
+      let cancelUrl = withQueryParam(`${baseUrl}/workspace-settings?section=billing`, "credits", "cancelled");
+
+      const refererHeader = req.headers.referer;
+      if (typeof refererHeader === "string" && refererHeader.length > 0) {
+        try {
+          const refUrl = new URL(refererHeader);
+          const baseHost = new URL(baseUrl).host;
+          if (refUrl.host === baseHost) {
+            successUrl = withQueryParam(refUrl.toString(), "credits", "success");
+            cancelUrl = withQueryParam(refUrl.toString(), "credits", "cancelled");
+          }
+        } catch {
+          // ignore invalid referer
+        }
+      }
+
+      const amountMinor = amountUsd * 100;
+      const creditsGranted = amountUsd * CREDITS_PER_USD;
+
+      const session = await withRetry(
+        () =>
+          stripe.checkout.sessions.create({
+            customer: customerId,
+            payment_method_types: ["card"],
+            mode: "payment",
+            invoice_creation: { enabled: true },
+            line_items: [
+              {
+                price_data: {
+                  currency: "usd",
+                  unit_amount: amountMinor,
+                  product_data: {
+                    name: "ILIAGPT Creditos",
+                    description: `Top-up de ${creditsGranted.toLocaleString()} creditos (validos 12 meses)`,
+                    metadata: { kind: "credits_topup" },
+                  },
+                },
+                quantity: 1,
+              },
+            ],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata: {
+              userId,
+              kind: "credits_topup",
+              amountUsd: String(amountUsd),
+              creditsGranted: String(creditsGranted),
+            },
+          }),
+        { maxAttempts: 3, initialDelayMs: 1000 }
+      );
+
+	      await auditLog(req as any, {
+	        action: "billing.credits_topup_checkout_created",
+	        resource: "stripe.checkout_session",
+	        resourceId: session.id,
+	        details: { userId, amountUsd, amountMinor, creditsGranted },
+	        category: "user",
+	        severity: "info",
+	      });
+
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error("Credits checkout error:", error);
+      res.status(500).json({ error: "Failed to create credits checkout session" });
     }
   });
 
@@ -880,7 +1152,9 @@ export function createStripeRouter() {
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const prefs = (dbUser as any).preferences || {};
@@ -1183,18 +1457,7 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      const actorRole = getActorRole(req);
-      if (actorRole && !isBillingManagerRole(actorRole) && !isAdminEmail(getActorEmail(req))) {
-        await auditLog(req, {
-          action: AuditActions.SECURITY_ALERT,
-          resource: "billing.invoices",
-          resourceId: userId,
-          details: { reason: "permission_denied", role: actorRole, actorEmail: getActorEmail(req) || null },
-          category: "security",
-          severity: "warning",
-        });
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
-      }
+      // Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const parsedQuery = z
         .object({
@@ -1208,7 +1471,9 @@ export function createStripeRouter() {
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const canManageBilling = canManageBillingForDbUser(dbUser);
@@ -1288,22 +1553,13 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      const actorRole = getActorRole(req);
-      if (actorRole && !isBillingManagerRole(actorRole) && !isAdminEmail(getActorEmail(req))) {
-        await auditLog(req, {
-          action: AuditActions.SECURITY_ALERT,
-          resource: "stripe.billing_portal",
-          resourceId: userId,
-          details: { reason: "permission_denied", role: actorRole, actorEmail: getActorEmail(req) || null },
-          category: "security",
-          severity: "warning",
-        });
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
-      }
+      // Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
-        return res.status(404).json({ error: "User not found" });
+        // Avoid leaking user existence details and keep behavior consistent in environments
+        // where user provisioning is async.
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const canManageBilling = canManageBillingForDbUser(dbUser);

@@ -447,8 +447,12 @@ export function createGptRouter() {
       }
 
       let creator = null;
+      let creatorSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
       if (gpt.creatorId) {
         creator = await storage.getUser(gpt.creatorId);
+        if (creator) {
+          creatorSettings = await storage.getUserSettings(creator.id);
+        }
       }
 
       const conversationCount = await storage.getGptConversationCount(req.params.id);
@@ -459,12 +463,22 @@ export function createGptRouter() {
         relatedGpts = allCreatorGpts.filter(g => g.id !== gpt.id).slice(0, 10);
       }
 
+      const creatorProfile = creatorSettings?.userProfile ?? null;
+
       res.json({
         gpt,
         creator: creator ? {
           id: creator.id,
-          name: creator.fullName || creator.username || creator.email?.split('@')[0] || 'Usuario',
-          avatar: creator.profileImageUrl
+          name: creatorProfile?.showName === false
+            ? (creatorProfile?.nickname || 'Creador')
+            : (creator.fullName || creator.username || creator.email?.split('@')[0] || 'Usuario'),
+          avatar: creator.profileImageUrl,
+          links: {
+            website: creatorProfile?.websiteDomain || null,
+            linkedIn: creatorProfile?.linkedInUrl || null,
+            github: creatorProfile?.githubUrl || null,
+          },
+          receiveEmailComments: creatorProfile?.receiveEmailComments ?? false,
         } : null,
         conversationCount,
         relatedGpts

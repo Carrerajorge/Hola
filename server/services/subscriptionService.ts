@@ -317,8 +317,8 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionI
     }
     
     return {
-      plan: (user.plan as SubscriptionInfo["plan"]) || "free",
-      status: (user.status as SubscriptionInfo["status"]) || "inactive",
+      plan: ((user.subscriptionPlan || user.plan) as SubscriptionInfo["plan"]) || "free",
+      status: ((user.subscriptionStatus || "inactive") as SubscriptionInfo["status"]) || "inactive",
       currentPeriodEnd: user.subscriptionPeriodEnd ? new Date(user.subscriptionPeriodEnd) : undefined,
       stripeCustomerId: user.stripeCustomerId || undefined,
       stripeSubscriptionId: user.stripeSubscriptionId || undefined,
@@ -334,16 +334,32 @@ export async function updateUserSubscription(
   subscription: Partial<SubscriptionInfo>
 ): Promise<boolean> {
   try {
-    await db.update(users)
-      .set({
-        plan: subscription.plan,
-        status: subscription.status,
-        subscriptionPeriodEnd: subscription.currentPeriodEnd,
-        stripeCustomerId: subscription.stripeCustomerId,
-        stripeSubscriptionId: subscription.stripeSubscriptionId,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
+    // NOTE: `users.status` is reserved for account state (active/inactive/etc).
+    // Use `subscriptionStatus`/`subscriptionPlan` for billing state.
+    const patch: Record<string, any> = { updatedAt: new Date() };
+
+    if ("plan" in subscription && subscription.plan) {
+      patch.plan = subscription.plan;
+      patch.subscriptionPlan = subscription.plan;
+    }
+
+    if ("status" in subscription && subscription.status) {
+      patch.subscriptionStatus = subscription.status;
+    }
+
+    if ("currentPeriodEnd" in subscription) {
+      patch.subscriptionPeriodEnd = subscription.currentPeriodEnd || null;
+    }
+
+    if ("stripeCustomerId" in subscription) {
+      patch.stripeCustomerId = subscription.stripeCustomerId || null;
+    }
+
+    if ("stripeSubscriptionId" in subscription) {
+      patch.stripeSubscriptionId = subscription.stripeSubscriptionId || null;
+    }
+
+    await db.update(users).set(patch).where(eq(users.id, userId));
     
     return true;
   } catch (error) {

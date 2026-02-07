@@ -16,6 +16,7 @@ Downloads/
 .local/
 generated_reports/
 Shimmer
+.codex/
 
 # Test artifacts / reports
 test_results/
@@ -23,6 +24,7 @@ test-results/
 playwright-report/
 e2e-reports/
 coverage/
+test_fixtures/large-10k-rows.xlsx
 test_output.docx
 test_excel_output.xlsx
 

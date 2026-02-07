@@ -20,9 +20,79 @@ import { randomUUID } from "crypto";
 import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
+import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
+
+type AutoConfirmPolicy = "always" | "ask" | "never";
+
+type ConcurrencyState = { active: number; queue: Array<() => void> };
+const concurrencyByKey = new Map<string, ConcurrencyState>();
+
+const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+};
+
+const normalizeAutoConfirmPolicy = (value: unknown): AutoConfirmPolicy => {
+  const v = String(value ?? "").toLowerCase().trim();
+  if (v === "always" || v === "ask" || v === "never") return v;
+  return "ask";
+};
+
+async function acquireConcurrencySlot(
+  key: string,
+  limit: number,
+  signal?: AbortSignal
+): Promise<() => void> {
+  const state = concurrencyByKey.get(key) || { active: 0, queue: [] };
+  if (!concurrencyByKey.has(key)) concurrencyByKey.set(key, state);
+
+  const release = () => {
+    const s = concurrencyByKey.get(key);
+    if (!s) return;
+    s.active = Math.max(0, s.active - 1);
+    const next = s.queue.shift();
+    if (next) next();
+    if (s.active === 0 && s.queue.length === 0) {
+      concurrencyByKey.delete(key);
+    }
+  };
+
+  if (signal?.aborted) {
+    throw new Error("ABORTED");
+  }
+
+  if (state.active < limit) {
+    state.active++;
+    return release;
+  }
+
+  return new Promise<() => void>((resolve, reject) => {
+    const grant = () => {
+      if (signal?.aborted) {
+        reject(new Error("ABORTED"));
+        return;
+      }
+      state.active++;
+      resolve(release);
+    };
+
+    const onAbort = () => {
+      const idx = state.queue.indexOf(grant);
+      if (idx >= 0) state.queue.splice(idx, 1);
+      if (state.active === 0 && state.queue.length === 0) {
+        concurrencyByKey.delete(key);
+      }
+      reject(new Error("ABORTED"));
+    };
+
+    state.queue.push(grant);
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
+}
 
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
@@ -48,6 +118,10 @@ export interface ToolContext {
   userPlan?: "free" | "pro" | "admin";
   isConfirmed?: boolean;
   signal?: AbortSignal;
+  // Wiring from IntegrationPolicy (Settings -> Apps -> Advanced)
+  autoConfirmPolicy?: AutoConfirmPolicy;
+  sandboxMode?: boolean;
+  maxParallelCalls?: number;
 
   /**
    * Optional streaming hook for long-running tools (e.g. shell_command).
@@ -154,8 +228,8 @@ export class ToolRegistry {
     return this.list().filter(t => allowedTools.includes(t.name));
   }
 
-  async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
-    const tool = this.tools.get(name);
+	async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
+    let tool = this.tools.get(name);
     const startTime = Date.now();
     const logs: ToolLog[] = [];
     
@@ -195,6 +269,13 @@ export class ToolRegistry {
       return walk(value);
     };
 
+    const idempotencyKey =
+      typeof input?.idempotencyKey === "string"
+        ? input.idempotencyKey
+        : typeof input?.idempotency_key === "string"
+          ? input.idempotency_key
+          : undefined;
+
     const persistToolCallLog = (params: {
       status: string;
       providerId?: string;
@@ -222,6 +303,7 @@ export class ToolRegistry {
             errorCode: params.errorCode,
             errorMessage: params.errorMessage,
             latencyMs: Math.max(0, Math.round(params.latencyMs ?? (Date.now() - startTime))),
+            idempotencyKey,
           });
 
           // Best-effort gap tracking: if the tool was requested but does not exist, log it as a capability gap.
@@ -274,30 +356,216 @@ export class ToolRegistry {
         },
       }, { status: "cancelled" });
     }
+
+    const integrationPolicy = await getIntegrationPolicyCached(context.userId);
+    const enabledTools = integrationPolicy?.enabledTools || [];
+    const disabledTools = new Set(integrationPolicy?.disabledTools || []);
+
+    if (disabledTools.has(name) || (enabledTools.length > 0 && !enabledTools.includes(name))) {
+      addLog("warn", `Tool blocked by integration policy: ${name}`);
+      return trackAndReturn(
+        {
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
+          error: {
+            code: "TOOL_DISABLED",
+            message: `Tool "${name}" is disabled by policy`,
+            retryable: false,
+          },
+        },
+        { status: "denied", providerId: "integration_policy" }
+      );
+    }
+
+    const autoConfirmPolicy = normalizeAutoConfirmPolicy(
+      context.autoConfirmPolicy ?? integrationPolicy?.autoConfirmPolicy
+    );
+    const sandboxMode = context.sandboxMode ?? integrationPolicy?.sandboxMode === "true";
+    const maxParallelCalls = clampInt(
+      context.maxParallelCalls ?? integrationPolicy?.maxParallelCalls,
+      3,
+      1,
+      10
+    );
+
+    const effectiveContext: ToolContext = {
+      ...context,
+      autoConfirmPolicy,
+      sandboxMode,
+      maxParallelCalls,
+      isConfirmed: context.isConfirmed === true || autoConfirmPolicy === "always",
+    };
+
+    const concurrencyKey = `${effectiveContext.userId}:${effectiveContext.runId}`;
     
     if (!tool) {
       // Try sandbox tools as fallback with proper adaptation
       if (sandboxToolRegistry.has(name)) {
         addLog("info", `Using sandbox tool: ${name}`);
-        
-	        // Check abort signal before sandbox execution
-	        if (context.signal?.aborted) {
-	          return trackAndReturn({
-	            success: false,
-	            output: null,
-	            artifacts: [],
-	            previews: [],
-	            logs,
-	            metrics: { durationMs: Date.now() - startTime },
-	            error: {
-	              code: "ABORTED",
-	              message: "Tool execution was cancelled before sandbox tool",
-	              retryable: false,
-	            },
-	          }, { status: "cancelled", providerId: "sandbox" });
-	        }
-        
+
+        const sandboxPolicyContext: PolicyContext = {
+          userId: context.userId,
+          userPlan: context.userPlan || "free",
+          toolName: name,
+          isConfirmed: effectiveContext.isConfirmed,
+        };
+
+        const sandboxPolicyCheck = policyEngine.checkAccess(sandboxPolicyContext);
+        if (!sandboxPolicyCheck.allowed) {
+          addLog("warn", `Policy denied sandbox tool execution: ${sandboxPolicyCheck.reason}`);
+          const denialCode = sandboxPolicyCheck.requiresConfirmation
+            ? effectiveContext.autoConfirmPolicy === "never"
+              ? "ACCESS_DENIED"
+              : "REQUIRES_CONFIRMATION"
+            : "ACCESS_DENIED";
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: denialCode,
+                message: sandboxPolicyCheck.reason || "Access denied",
+                retryable: false,
+              },
+            },
+            { status: "denied", providerId: "sandbox" }
+          );
+        }
+
+        // Enforce network access policy for tools that require network.
+        if (
+          sandboxPolicyCheck.policy.capabilities.includes("requires_network") &&
+          context.userId &&
+          context.userId !== "anonymous" &&
+          !context.userId.startsWith("anon_")
+        ) {
+          try {
+            const { getNetworkAccessPolicyForUser } = await import("../services/networkAccessPolicyService");
+            const net = await getNetworkAccessPolicyForUser(context.userId);
+            if (!net.effectiveNetworkAccessEnabled) {
+              addLog("warn", `Network access disabled by policy (lockedByOrg=${net.lockedByOrg})`);
+              return trackAndReturn(
+                {
+                  success: false,
+                  output: null,
+                  artifacts: [],
+                  previews: [],
+                  logs,
+                  metrics: { durationMs: Date.now() - startTime },
+                  error: {
+                    code: "NETWORK_DISABLED",
+                    message: net.lockedByOrg
+                      ? "Network access is disabled by your organization policy"
+                      : "Network access is disabled for your user",
+                    retryable: false,
+                    details: { lockedByOrg: net.lockedByOrg, orgId: net.orgId },
+                  },
+                },
+                { status: "denied", providerId: "network_policy" }
+              );
+            }
+          } catch (err: any) {
+            // Best-effort: if DB/env isn't configured, don't block tool usage.
+            addLog("debug", "Network access policy check skipped (unavailable)", err?.message || err);
+          }
+        }
+
+        let releaseSlot: (() => void) | undefined;
         try {
+          releaseSlot = await acquireConcurrencySlot(concurrencyKey, maxParallelCalls, effectiveContext.signal);
+        } catch (err: any) {
+          addLog("info", "Tool execution aborted while waiting for concurrency slot");
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: "ABORTED",
+                message: "Tool execution was cancelled",
+                retryable: false,
+              },
+            },
+            { status: "cancelled", providerId: "sandbox" }
+          );
+        }
+
+        try {
+          // Check abort signal before sandbox execution
+          if (effectiveContext.signal?.aborted) {
+            return trackAndReturn(
+              {
+                success: false,
+                output: null,
+                artifacts: [],
+                previews: [],
+                logs,
+                metrics: { durationMs: Date.now() - startTime },
+                error: {
+                  code: "ABORTED",
+                  message: "Tool execution was cancelled before sandbox tool",
+                  retryable: false,
+                },
+              },
+              { status: "cancelled", providerId: "sandbox" }
+            );
+          }
+
+          // Guardrails: sandbox shell can execute arbitrary commands. Require confirmation
+          // for dangerous command patterns (same policy as shell_command).
+          if (name === "shell") {
+            const cmd = String(
+              input?.command || input?.cmd || input?.shell || input?.exec || input?.run || ""
+            ).trim();
+            if (cmd) {
+              const { getDangerousShellMatch } = await import("./security/shellCommandPolicy");
+              const matchedDanger = getDangerousShellMatch(cmd);
+              if (matchedDanger && effectiveContext.isConfirmed !== true) {
+                const denialCode =
+                  effectiveContext.autoConfirmPolicy === "never"
+                    ? "ACCESS_DENIED"
+                    : "REQUIRES_CONFIRMATION";
+                return trackAndReturn(
+                  {
+                    success: false,
+                    output: { command: cmd },
+                    artifacts: [],
+                    previews: [
+                      {
+                        type: "text",
+                        title: "Confirmation required",
+                        content: `This command is considered high-risk and requires explicit confirmation before execution:\n\n${cmd}`,
+                      },
+                    ],
+                    logs,
+                    metrics: { durationMs: Date.now() - startTime },
+                    error: {
+                      code: denialCode,
+                      message:
+                        denialCode === "ACCESS_DENIED"
+                          ? "Blocked by settings: auto-confirm policy is set to 'never'."
+                          : `Command requires confirmation (${matchedDanger.reason}). Confirm to proceed.`,
+                      retryable: false,
+                      details: { reason: matchedDanger.reason },
+                    },
+                  },
+                  { status: "denied", providerId: "sandbox" }
+                );
+              }
+            }
+          }
+
           const sandboxResult = await sandboxToolRegistry.execute(name, input);
           const artifacts: ToolArtifact[] = [];
           const previews: ToolPreview[] = [];
@@ -399,7 +667,9 @@ export class ToolRegistry {
 	              retryable: false,
 	            },
 	          }, { providerId: "sandbox" });
-	        }
+	        } finally {
+            releaseSlot?.();
+          }
 	      }
 	      
 	      return trackAndReturn({
@@ -421,13 +691,18 @@ export class ToolRegistry {
       userId: context.userId,
       userPlan: context.userPlan || "free",
       toolName: name,
-      isConfirmed: context.isConfirmed,
+      isConfirmed: effectiveContext.isConfirmed,
     };
 
     const policyCheck = policyEngine.checkAccess(policyContext);
     
 	    if (!policyCheck.allowed) {
 	      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
+        const denialCode = policyCheck.requiresConfirmation
+          ? effectiveContext.autoConfirmPolicy === "never"
+            ? "ACCESS_DENIED"
+            : "REQUIRES_CONFIRMATION"
+          : "ACCESS_DENIED";
 	      return trackAndReturn({
 	        success: false,
 	        output: null,
@@ -436,13 +711,52 @@ export class ToolRegistry {
 	        logs,
 	        metrics: { durationMs: Date.now() - startTime },
 	        error: {
-	          code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
+	          code: denialCode,
 	          message: policyCheck.reason || "Access denied",
 	          retryable: false,
 	        },
 	      }, { status: "denied" });
 	    }
 
+    // Enforce network access policy for tools that require network.
+    if (
+      policyCheck.policy.capabilities.includes("requires_network") &&
+      context.userId &&
+      context.userId !== "anonymous" &&
+      !context.userId.startsWith("anon_")
+    ) {
+      try {
+        const { getNetworkAccessPolicyForUser } = await import("../services/networkAccessPolicyService");
+        const net = await getNetworkAccessPolicyForUser(context.userId);
+        if (!net.effectiveNetworkAccessEnabled) {
+          addLog("warn", `Network access disabled by policy (lockedByOrg=${net.lockedByOrg})`);
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: "NETWORK_DISABLED",
+                message: net.lockedByOrg
+                  ? "Network access is disabled by your organization policy"
+                  : "Network access is disabled for your user",
+                retryable: false,
+                details: { lockedByOrg: net.lockedByOrg, orgId: net.orgId },
+              },
+            },
+            { status: "denied", providerId: "network_policy" }
+          );
+        }
+      } catch (err: any) {
+        // Best-effort: if DB/env isn't configured, don't block tool usage.
+        addLog("debug", "Network access policy check skipped (unavailable)", err?.message || err);
+      }
+    }
+
+    let releaseSlot: (() => void) | undefined;
     try {
       let validatedInput: unknown;
       try {
@@ -470,10 +784,31 @@ export class ToolRegistry {
 	      }
 
       addLog("info", `Executing tool: ${name}`);
+      try {
+        releaseSlot = await acquireConcurrencySlot(concurrencyKey, maxParallelCalls, effectiveContext.signal);
+      } catch (err: any) {
+        addLog("info", "Tool execution aborted while waiting for concurrency slot");
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "ABORTED",
+              message: "Tool execution was cancelled",
+              retryable: false,
+            },
+          },
+          { status: "cancelled" }
+        );
+      }
 
       const executionResult = await executionEngine.execute(
         name,
-        () => tool.execute(validatedInput, context),
+        () => tool.execute(validatedInput, effectiveContext),
         {
           maxRetries: policyCheck.policy.maxRetries,
           timeoutMs: policyCheck.policy.maxExecutionTimeMs,
@@ -488,19 +823,52 @@ export class ToolRegistry {
       );
 
       if (executionResult.success && executionResult.data) {
-        const result = executionResult.data;
+        const denyRequiresConfirmation =
+          executionResult.data?.error?.code === "REQUIRES_CONFIRMATION" &&
+          effectiveContext.autoConfirmPolicy === "never";
+
+        const result = denyRequiresConfirmation
+          ? ({
+              ...executionResult.data,
+              success: false,
+              error: {
+                code: "ACCESS_DENIED",
+                message:
+                  "Blocked by settings: auto-confirm policy is set to 'never'.",
+                retryable: false,
+                details: executionResult.data?.error?.details,
+              },
+            } as ToolResult)
+          : executionResult.data;
         addLog("info", `Tool completed successfully in ${executionResult.metrics.totalDurationMs}ms`);
         
         metricsCollector.record({
           toolName: name,
           latencyMs: executionResult.metrics.totalDurationMs,
-          success: true,
+          success: result.success,
+          errorCode: result.success ? undefined : result.error?.code,
           timestamp: new Date(),
         });
         
         const validatedOutput = ToolOutputSchema.safeParse(result);
         if (!validatedOutput.success) {
           addLog("warn", `Tool output validation failed: ${validatedOutput.error.message}`);
+          if (process.env.AGENTIC_STRICT_TOOL_OUTPUT_VALIDATION === "true") {
+            return trackAndReturn({
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: executionResult.metrics.totalDurationMs },
+              error: {
+                code: "CONTRACT_VIOLATION",
+                message: "Tool returned an invalid result shape",
+                retryable: false,
+                details: validatedOutput.error.flatten(),
+              },
+            });
+          }
         }
         
 	        return trackAndReturn({
@@ -514,7 +882,7 @@ export class ToolRegistry {
 	            ...result.metrics,
 	          },
 	          error: result.error,
-	        });
+	        }, denyRequiresConfirmation ? { status: "denied" } : undefined);
 	      } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
         
@@ -566,7 +934,9 @@ export class ToolRegistry {
 	          retryable: false,
 	        },
 	      });
-	    }
+	    } finally {
+        releaseSlot?.();
+      }
 	  }
 
   createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string): ToolArtifact {
@@ -1231,11 +1601,16 @@ const shellCommandTool: ToolDefinition = {
 
     // Sandbox mode: host | docker | runner.
     // Stable default: in production, default to runner (docker-isolated service).
-    const sandboxMode = getShellSandboxMode();
+    let sandboxMode = getShellSandboxMode();
     const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
 
     const runnerUrl = process.env.SHELL_COMMAND_RUNNER_URL || "http://sandbox-runner:8080";
     const runnerToken = process.env.SHELL_COMMAND_RUNNER_TOKEN || process.env.SANDBOX_RUNNER_TOKEN || "";
+
+    // User-driven sandbox preference: when enabled, prefer the runner if configured.
+    if (context.sandboxMode === true && sandboxMode === "host" && runnerToken) {
+      sandboxMode = "runner";
+    }
 
     const runWithRunner = async (): Promise<ToolResult> => {
       if (!runnerToken) {
