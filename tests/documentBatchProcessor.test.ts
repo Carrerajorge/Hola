@@ -425,9 +425,14 @@ describe('DocumentBatchProcessor Integration Tests', () => {
     it('should continue processing other files when one fails', async () => {
       const txtBuffer = loadFixture('sample.txt');
 
-      mockGetObjectEntityBuffer
-        .mockRejectedValueOnce(new MockObjectNotFoundError('File not found'))
-        .mockResolvedValueOnce(txtBuffer);
+      // Use path-based behavior instead of call-order. The processor retries on ObjectNotFoundError,
+      // so `mockRejectedValueOnce` can accidentally succeed on retry and break this test.
+      mockGetObjectEntityBuffer.mockImplementation(async (storagePath: string) => {
+        if (storagePath.includes('missing.txt')) {
+          throw new Error('File not found');
+        }
+        return txtBuffer;
+      });
 
       const attachments: SimpleAttachment[] = [
         {

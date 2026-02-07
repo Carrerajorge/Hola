@@ -7,6 +7,49 @@ import { sanitizeMessageContent } from "../lib/markdownSanitizer";
 export function createChatsRouter() {
   const router = Router();
 
+  const normalizeAttachments = async (attachments: any): Promise<any[] | null> => {
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) return null;
+
+    const fileIds = Array.from(new Set(
+      attachments
+        .map((a: any) => a?.fileId)
+        .filter((id: any) => typeof id === "string" && id.length > 0)
+    ));
+
+    const filesById = new Map<string, { storagePath: string }>();
+    if (fileIds.length > 0) {
+      const records = await Promise.all(fileIds.map(async (id) => {
+        try {
+          const file = await storage.getFile(id);
+          return file?.storagePath ? { id, storagePath: file.storagePath } : null;
+        } catch {
+          return null;
+        }
+      }));
+      for (const rec of records) {
+        if (rec) filesById.set(rec.id, { storagePath: rec.storagePath });
+      }
+    }
+
+    return attachments
+      .filter((a: any) => a && typeof a === "object")
+      .map((a: any) => {
+        const out = { ...a };
+
+        if (!out.storagePath && typeof out.fileId === "string") {
+          const file = filesById.get(out.fileId);
+          if (file?.storagePath) out.storagePath = file.storagePath;
+        }
+
+        // For images, ensure we persist a stable renderable URL if possible.
+        if (out.type === "image" && !out.imageUrl && out.storagePath) {
+          out.imageUrl = out.storagePath;
+        }
+
+        return out;
+      });
+  };
+
   router.get("/chats", async (req, res) => {
     try {
       const userId = getSecureUserId(req);
@@ -123,9 +166,16 @@ export function createChatsRouter() {
         }
 
         // Create chat with messages atomically using transaction
+        const normalizedMessages = await Promise.all(
+          messages.map(async (msg: any) => ({
+            ...msg,
+            attachments: await normalizeAttachments(msg.attachments),
+          }))
+        );
+
         const result = await storage.createChatWithMessages(
           { title: title || "New Chat", userId },
-          messages.map((msg: any) => ({
+          normalizedMessages.map((msg: any) => ({
             role: msg.role,
             content: msg.content,
             requestId: msg.requestId,
@@ -434,6 +484,8 @@ export function createChatsRouter() {
       // SAINITIZATION: Prevent XSS
       const sanitizedContent = sanitizeMessageContent(content);
 
+      const normalizedAttachments = await normalizeAttachments(attachments);
+
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
         // Check if a run with this clientRequestId already exists
@@ -460,7 +512,7 @@ export function createChatsRouter() {
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
-            attachments: attachments || null,
+            attachments: normalizedAttachments,
             sources: sources || null,
             figmaDiagram: figmaDiagram || null,
             googleFormPreview: googleFormPreview || null,
@@ -494,7 +546,7 @@ export function createChatsRouter() {
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
-        attachments: attachments || null,
+        attachments: normalizedAttachments,
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
         googleFormPreview: googleFormPreview || null,

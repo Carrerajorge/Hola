@@ -438,16 +438,15 @@ export function ChatInterface({
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const [uploadedFiles, _setUploadedFiles] = useState<UploadedFile[]>([]);
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
-  // Keep `uploadedFilesRef` in sync immediately (not one render later) so send/analysis
-  // logic doesn't read stale attachment metadata right after an upload promise resolves.
+  // Keep `uploadedFilesRef` in sync synchronously at call time (not when React later flushes state).
+  // This avoids races where submit/analysis reads stale attachment metadata right after an upload finishes.
   const setUploadedFiles = useCallback((updater: React.SetStateAction<UploadedFile[]>) => {
-    _setUploadedFiles((prev) => {
-      const next = typeof updater === "function"
-        ? (updater as (p: UploadedFile[]) => UploadedFile[])(prev)
-        : updater;
-      uploadedFilesRef.current = next;
-      return next;
-    });
+    const base = uploadedFilesRef.current;
+    const next = typeof updater === "function"
+      ? (updater as (p: UploadedFile[]) => UploadedFile[])(base)
+      : updater;
+    uploadedFilesRef.current = next;
+    _setUploadedFiles(next);
   }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -1449,60 +1448,285 @@ export function ChatInterface({
     }
   }, []);
 
-  const startVoiceRecording = () => {
+  type DictationRuntime = {
+    shouldBeActive: boolean;
+    stopRequested: boolean;
+    baseText: string;
+    interimText: string;
+    lastAppliedText: string;
+    lastInterimApplyAt: number;
+    interimApplyTimer: ReturnType<typeof setTimeout> | null;
+    restartTimer: ReturnType<typeof setTimeout> | null;
+    restartAttempts: number;
+    lastErrorToastAt: number;
+  };
+
+  const dictationRef = useRef<DictationRuntime>({
+    shouldBeActive: false,
+    stopRequested: false,
+    baseText: "",
+    interimText: "",
+    lastAppliedText: "",
+    lastInterimApplyAt: 0,
+    interimApplyTimer: null,
+    restartTimer: null,
+    restartAttempts: 0,
+    lastErrorToastAt: 0,
+  });
+
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    return () => {
+      const d = dictationRef.current;
+      d.shouldBeActive = false;
+      d.stopRequested = true;
+      if (d.interimApplyTimer) clearTimeout(d.interimApplyTimer);
+      if (d.restartTimer) clearTimeout(d.restartTimer);
+      d.interimApplyTimer = null;
+      d.restartTimer = null;
+    };
+  }, []);
+
+  const buildDictationText = (base: string, interim: string) => {
+    const b = base || "";
+    const i = (interim || "").trim();
+    if (!i) return b;
+    if (!b) return i;
+    if (/[\s\n]$/.test(b)) return b + i;
+    if (/^[¿¡,.;:!?]/.test(i)) return b + i;
+    return b + " " + i;
+  };
+
+  const appendDictationSegment = (base: string, segment: string) => {
+    const seg = (segment || "").trim();
+    if (!seg) return base || "";
+    const b = base || "";
+    if (!b) return seg;
+    if (/[\s\n]$/.test(b)) return b + seg;
+    if (/^[¿¡,.;:!?]/.test(seg)) return b + seg;
+    return b + " " + seg;
+  };
+
+  const clearDictationTimers = () => {
+    const d = dictationRef.current;
+    if (d.interimApplyTimer) {
+      clearTimeout(d.interimApplyTimer);
+      d.interimApplyTimer = null;
+    }
+    if (d.restartTimer) {
+      clearTimeout(d.restartTimer);
+      d.restartTimer = null;
+    }
+  };
+
+  const applyDictationToInput = (force = false) => {
+    const d = dictationRef.current;
+    const next = buildDictationText(d.baseText, d.interimText);
+    if (!force && next === d.lastAppliedText) return;
+    d.lastAppliedText = next;
+    setInput(next);
+  };
+
+  const scheduleInterimApply = () => {
+    const d = dictationRef.current;
+    const now = performance.now();
+    const minIntervalMs = 90;
+    const elapsed = now - d.lastInterimApplyAt;
+
+    if (elapsed >= minIntervalMs) {
+      d.lastInterimApplyAt = now;
+      applyDictationToInput(false);
+      return;
+    }
+
+    if (d.interimApplyTimer) return;
+
+    d.interimApplyTimer = setTimeout(() => {
+      d.interimApplyTimer = null;
+      d.lastInterimApplyAt = performance.now();
+      applyDictationToInput(false);
+    }, Math.max(0, minIntervalMs - elapsed));
+  };
+
+  const commitInterimToBase = () => {
+    const d = dictationRef.current;
+    d.baseText = buildDictationText(d.baseText, d.interimText);
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+  };
+
+  const maybeToastSpeechError = (title: string, description: string) => {
+    const d = dictationRef.current;
+    const now = Date.now();
+    const minIntervalMs = 3000;
+    if (now - d.lastErrorToastAt < minIntervalMs) return;
+    d.lastErrorToastAt = now;
+    toast({ title, description, variant: "destructive" });
+  };
+
+  const scheduleRecognitionRestart = (reason: string, baseDelayMs = 250) => {
+    const d = dictationRef.current;
+    if (!d.shouldBeActive || d.stopRequested || isPausedRef.current) return;
+    if (d.restartTimer) return;
+
+    const delay = Math.min(2000, baseDelayMs * Math.pow(1.6, d.restartAttempts));
+
+    d.restartTimer = setTimeout(() => {
+      d.restartTimer = null;
+      if (!d.shouldBeActive || d.stopRequested || isPausedRef.current) return;
+
+      d.restartAttempts = Math.min(d.restartAttempts + 1, 20);
+      startRecognition(`restart:${reason}`);
+    }, delay);
+  };
+
+  const startRecognition = (reason: string = "user") => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
+      maybeToastSpeechError(
+        "Dictado no disponible",
+        "Tu navegador no soporta reconocimiento de voz. Usa Chrome, Edge o Safari."
+      );
       return;
+    }
+
+    // Stop previous instance to avoid multiple listeners running simultaneously.
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.onresult = null;
+        speechRecognitionRef.current.onerror = null;
+        speechRecognitionRef.current.onend = null;
+        speechRecognitionRef.current.onstart = null;
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      speechRecognitionRef.current = null;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'es-ES';
-
-    let finalTranscript = '';
-    let interimTranscript = '';
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setRecordingTime(0);
-      setIsPaused(false);
-      finalTranscript = input;
-    };
+    recognition.maxAlternatives = 1;
+    recognition.lang = "es-ES";
 
     recognition.onresult = (event: any) => {
-      interimTranscript = '';
+      const d = dictationRef.current;
+      let newFinal = "";
+      let newInterim = "";
+
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+        const result = event.results[i];
+        const part = result?.[0]?.transcript ?? "";
+        if (result.isFinal) {
+          newFinal = appendDictationSegment(newFinal, part);
         } else {
-          interimTranscript = transcript;
+          newInterim = appendDictationSegment(newInterim, part);
         }
       }
-      setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+
+      if (newFinal) {
+        d.baseText = appendDictationSegment(d.baseText, newFinal);
+        d.interimText = (newInterim || "").trim();
+        d.restartAttempts = 0;
+        applyDictationToInput(true);
+      } else {
+        d.interimText = (newInterim || "").trim();
+        scheduleInterimApply();
+      }
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      setIsRecording(false);
-      setRecordingTime(0);
-      setIsPaused(false);
-      speechRecognitionRef.current = null;
+      const error = String(event?.error || "");
+      const d = dictationRef.current;
+
+      // User-initiated stops can surface as "aborted" - ignore them.
+      if (error === "aborted" && (d.stopRequested || isPausedRef.current)) return;
+
+      // Recoverable errors: keep dictation active and restart.
+      if (error === "no-speech" || error === "network") {
+        scheduleRecognitionRestart(error, error === "network" ? 600 : 300);
+        return;
+      }
+
+      if (error === "not-allowed" || error === "service-not-allowed") {
+        maybeToastSpeechError(
+          "Permiso de micrófono",
+          "Permite el acceso al micrófono para usar Dictar texto."
+        );
+        stopVoiceRecording();
+        return;
+      }
+
+      if (error === "audio-capture") {
+        maybeToastSpeechError(
+          "Micrófono no disponible",
+          "No se detectó un micrófono. Revisa permisos o conecta uno e inténtalo de nuevo."
+        );
+        stopVoiceRecording();
+        return;
+      }
+
+      maybeToastSpeechError("Error de dictado", `Reconocimiento de voz: ${error || "error"}`);
+      stopVoiceRecording();
     };
 
     recognition.onend = () => {
-      // Don't auto-reset if paused - user might resume
-      if (!isPaused) {
-        setIsRecording(false);
-        speechRecognitionRef.current = null;
-      }
+      const d = dictationRef.current;
+
+      // If paused or explicitly stopped, don't restart.
+      if (isPausedRef.current || d.stopRequested || !d.shouldBeActive) return;
+
+      // Commit anything shown on screen so we don't lose it.
+      commitInterimToBase();
+      applyDictationToInput(true);
+
+      // Chrome can end sessions even in continuous mode; keep it alive.
+      scheduleRecognitionRestart(reason || "end", 250);
     };
 
     speechRecognitionRef.current = recognition;
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch {
+      // start() can throw if called too quickly after stop(); retry with backoff.
+      scheduleRecognitionRestart("start-failed", 300);
+    }
+  };
+
+  const startVoiceRecording = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      maybeToastSpeechError(
+        "Dictado no disponible",
+        "Tu navegador no soporta reconocimiento de voz. Usa Chrome, Edge o Safari."
+      );
+      return;
+    }
+
+    const d = dictationRef.current;
+    d.shouldBeActive = true;
+    d.stopRequested = false;
+    d.restartAttempts = 0;
+    clearDictationTimers();
+
+    d.baseText = currentTextRef.current || "";
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+    d.lastInterimApplyAt = 0;
+
+    isPausedRef.current = false;
+    setIsPaused(false);
+    setIsRecording(true);
+    setRecordingTime(0);
+
+    startRecognition("user");
   };
 
   const toggleVoiceRecording = () => {
@@ -1514,66 +1738,64 @@ export function ChatInterface({
   };
 
   const pauseVoiceRecording = () => {
-    if (speechRecognitionRef.current && isRecording) {
-      speechRecognitionRef.current.stop();
-      setIsPaused(true);
+    if (!isRecording || isPausedRef.current) return;
+
+    commitInterimToBase();
+    applyDictationToInput(true);
+    clearDictationTimers();
+
+    isPausedRef.current = true;
+    setIsPaused(true);
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
     }
   };
 
   const resumeVoiceRecording = () => {
-    if (isPaused) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) return;
+    if (!isRecording || !isPausedRef.current) return;
 
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'es-ES';
+    const d = dictationRef.current;
+    d.shouldBeActive = true;
+    d.stopRequested = false;
+    d.restartAttempts = 0;
+    clearDictationTimers();
 
-      let currentInput = input;
+    d.baseText = currentTextRef.current || "";
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+    d.lastInterimApplyAt = 0;
 
-      recognition.onstart = () => {
-        setIsPaused(false);
-      };
+    isPausedRef.current = false;
+    setIsPaused(false);
 
-      recognition.onresult = (event: any) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            currentInput += (currentInput ? ' ' : '') + transcript;
-          } else {
-            interimTranscript = transcript;
-          }
-        }
-        setInput(currentInput + (interimTranscript ? ' ' + interimTranscript : ''));
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsRecording(false);
-        setRecordingTime(0);
-        setIsPaused(false);
-        speechRecognitionRef.current = null;
-      };
-
-      recognition.onend = () => {
-        if (!isPaused) {
-          setIsRecording(false);
-          speechRecognitionRef.current = null;
-        }
-      };
-
-      speechRecognitionRef.current = recognition;
-      recognition.start();
-    }
+    startRecognition("resume");
   };
 
   const stopVoiceRecording = () => {
+    const d = dictationRef.current;
+    d.baseText = currentTextRef.current || buildDictationText(d.baseText, d.interimText);
+    d.interimText = "";
+    d.lastAppliedText = d.baseText;
+
+    d.shouldBeActive = false;
+    d.stopRequested = true;
+    clearDictationTimers();
+
     if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
       speechRecognitionRef.current = null;
     }
+
+    isPausedRef.current = false;
     setIsRecording(false);
     setRecordingTime(0);
     setIsPaused(false);
@@ -1585,8 +1807,14 @@ export function ChatInterface({
   };
 
   const sendVoiceRecording = () => {
+    commitInterimToBase();
+    const finalText = dictationRef.current.baseText;
+    currentTextRef.current = finalText;
+    setInput(finalText);
+
     stopVoiceRecording();
-    if (input.trim() || uploadedFiles.length > 0) {
+
+    if (finalText.trim() || uploadedFiles.length > 0) {
       handleSubmit();
     }
   };
@@ -2571,6 +2799,8 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    // Read from ref so dictation (and other async input updates) can't race the state closure.
+    const input = currentTextRef.current;
     // EMERGENCY DEBUG - REMOVE AFTER FIX
     console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
     
@@ -2696,7 +2926,12 @@ export function ChatInterface({
       const status = String(f.status || "");
       if (status !== "ready" && status !== "processing") return false;
       // Ensure we have a reference we can persist/use server-side.
-      return Boolean(f.storagePath || f.spreadsheetData?.uploadId);
+      // - storagePath: direct object storage reference (preferred)
+      // - spreadsheetData.uploadId: spreadsheet analyzer uses its own upload session
+      // - serverFileId: analysis backend can resolve storagePath from fileId (avoids race where storagePath hasn't flushed yet)
+      const id = String(f.id || "");
+      const serverFileId = id.length > 0 && !id.startsWith("temp-");
+      return Boolean(f.storagePath || f.spreadsheetData?.uploadId || serverFileId);
     });
 
     // Don't submit while files are still uploading (processing is allowed; server can read via storagePath).
@@ -2857,7 +3092,8 @@ export function ChatInterface({
             return "word";
           })() as "word" | "excel" | "ppt" | "pdf",
           mimeType: f.type,
-          imageUrl: String(f.type || "").startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
+          // Persist only a stable server-backed URL; avoid base64 blobs in chat history.
+          imageUrl: String(f.type || "").startsWith("image/") ? f.storagePath : undefined,
           storagePath: f.storagePath,
           fileId: f.id,
           size: f.size,
@@ -3701,7 +3937,8 @@ export function ChatInterface({
           return "word"; // default to word for text/docs
         })() as "word" | "excel" | "ppt" | "pdf",
         mimeType: f.type,
-        imageUrl: f.type.startsWith("image/") ? (f.storagePath || f.dataUrl) : undefined,
+        // Persist only a stable server-backed URL; avoid base64 blobs in chat history.
+        imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
         storagePath: f.storagePath,
         fileId: f.id,
         size: f.size,

@@ -227,14 +227,15 @@ describe("PARE Schema Validation", () => {
           {
             name: "test.pdf",
             mimeType: "application/pdf",
-            type: "unknown",
+            // Not part of the schema enum (legacy variants like "unknown" are allowed and canonicalized server-side).
+            type: "bogus",
             url: "https://example.com/test.pdf",
           },
         ],
       };
       const result = validateAnalyzeRequest(request);
       expect(result.success).toBe(false);
-      expect(result.errors?.some((e) => e.message.includes("'document', 'image', or 'file'"))).toBe(true);
+      expect(result.errors?.some((e) => e.message.includes("Attachment type must be one of"))).toBe(true);
     });
 
     it("should reject attachment without content, url, storagePath, or fileId", () => {

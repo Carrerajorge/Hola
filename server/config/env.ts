@@ -2,6 +2,8 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 dotenv.config();
+// Backward compatible aliases for xAI keys used across different parts of the codebase.
+process.env.XAI_API_KEY = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
 
 const boolish = z
   .preprocess((v) => {
