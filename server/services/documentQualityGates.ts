@@ -42,6 +42,12 @@ export const DOC_WARNING_CODES = {
   DEEP_HEADING: "DOC_W005",
   MULTIPLE_TITLES: "DOC_W006",
   TOC_LATE: "DOC_W007",
+  EMPTY_PARAGRAPH: "DOC_W008",
+  SHORT_CONTENT: "DOC_W009",
+  HEADING_SKIP: "DOC_W010",
+  CONSECUTIVE_HEADINGS: "DOC_W011",
+  PLACEHOLDER_TEXT: "DOC_W012",
+  NO_CONTENT_AFTER_HEADING: "DOC_W013",
 } as const;
 
 // Error codes for ExcelSpec validation
@@ -69,6 +75,10 @@ export const EXCEL_WARNING_CODES = {
   DUPLICATE_SHEET_NAMES: "EXCEL_W005",
   TABLE_OVERLAP: "EXCEL_W006",
   FORMULA_LIKE_TEXT: "EXCEL_W007",
+  EMPTY_TABLE_DATA: "EXCEL_W008",
+  UNIFORM_DATA: "EXCEL_W009",
+  MISSING_CHART_TITLE: "EXCEL_W010",
+  SHEET_NO_TABLES: "EXCEL_W011",
 } as const;
 
 // Limits for DoS protection
@@ -477,6 +487,127 @@ export function validateDocSpec(spec: DocSpec): QualityReport {
     );
   }
 
+  // === Advanced Content Quality Validations ===
+
+  // Check for empty paragraphs (more than 2 consecutive)
+  let consecutiveEmpty = 0;
+  blocks.forEach((block, index) => {
+    if (block.type === "paragraph" && (!block.text || block.text.trim() === "")) {
+      consecutiveEmpty++;
+      if (consecutiveEmpty > 2) {
+        issues.push(
+          createIssue(
+            DOC_WARNING_CODES.EMPTY_PARAGRAPH,
+            `Multiple consecutive empty paragraphs at block ${index + 1}, consider using page_break instead`,
+            `blocks[${index}]`,
+            "warning"
+          )
+        );
+      }
+    } else {
+      consecutiveEmpty = 0;
+    }
+  });
+
+  // Check for paragraphs with very short content (possible placeholder)
+  blocks.forEach((block, index) => {
+    if (block.type === "paragraph" && block.text && block.text.trim().length > 0 && block.text.trim().length < 10) {
+      // Skip blocks that are clearly intentional short text (dates, names, addresses in letters)
+      const text = block.text.trim().toLowerCase();
+      const isIntentionalShort = /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(text) || // dates
+        /^(re:|ref:|cc:|bcc:)/i.test(text) || // letter refs
+        index < 5; // header area
+      if (!isIntentionalShort) {
+        issues.push(
+          createIssue(
+            DOC_WARNING_CODES.SHORT_CONTENT,
+            `Block ${index + 1} has very short content ("${block.text.trim().substring(0, 30)}"), may need more detail`,
+            `blocks[${index}]`,
+            "info"
+          )
+        );
+      }
+    }
+  });
+
+  // Check for heading level skips (e.g., h1 -> h3 without h2)
+  let lastHeadingLevel = 0;
+  blocks.forEach((block, index) => {
+    if (block.type === "heading") {
+      if (lastHeadingLevel > 0 && block.level > lastHeadingLevel + 1) {
+        issues.push(
+          createIssue(
+            DOC_WARNING_CODES.HEADING_SKIP,
+            `Heading at block ${index + 1} skips from level ${lastHeadingLevel} to ${block.level}`,
+            `blocks[${index}].level`,
+            "warning"
+          )
+        );
+      }
+      lastHeadingLevel = block.level;
+    }
+  });
+
+  // Check for consecutive headings without content between them
+  for (let i = 0; i < blocks.length - 1; i++) {
+    if (blocks[i].type === "heading" && blocks[i + 1].type === "heading") {
+      issues.push(
+        createIssue(
+          DOC_WARNING_CODES.CONSECUTIVE_HEADINGS,
+          `Consecutive headings at blocks ${i + 1} and ${i + 2} with no content between them`,
+          `blocks[${i}]`,
+          "warning"
+        )
+      );
+    }
+  }
+
+  // Check for placeholder/Lorem ipsum text
+  const PLACEHOLDER_PATTERNS = [
+    /lorem ipsum/i,
+    /\[insert.*here\]/i,
+    /\[your.*here\]/i,
+    /\[placeholder\]/i,
+    /xxx+/i,
+    /TODO:/i,
+    /FIXME:/i,
+    /TBD/,
+  ];
+  blocks.forEach((block, index) => {
+    const text = block.type === "paragraph" ? block.text :
+                 block.type === "heading" ? block.text :
+                 block.type === "title" ? block.text : null;
+    if (text) {
+      for (const pattern of PLACEHOLDER_PATTERNS) {
+        if (pattern.test(text)) {
+          issues.push(
+            createIssue(
+              DOC_WARNING_CODES.PLACEHOLDER_TEXT,
+              `Block ${index + 1} contains placeholder text matching "${pattern.source}"`,
+              `blocks[${index}]`,
+              "warning"
+            )
+          );
+          break;
+        }
+      }
+    }
+  });
+
+  // Check that headings are followed by content
+  for (let i = 0; i < blocks.length; i++) {
+    if (blocks[i].type === "heading" && i === blocks.length - 1) {
+      issues.push(
+        createIssue(
+          DOC_WARNING_CODES.NO_CONTENT_AFTER_HEADING,
+          `Heading "${(blocks[i] as any).text?.substring(0, 40) || ''}" is the last block with no content after it`,
+          `blocks[${i}]`,
+          "warning"
+        )
+      );
+    }
+  }
+
   return buildReport(issues);
 }
 
@@ -840,6 +971,70 @@ function validateSheet(sheet: SheetSpec, sheetIndex: number, issues: ValidationI
       }
     });
   });
+
+  // === Advanced Excel Quality Validations ===
+
+  // Check for tables with no data rows
+  tables.forEach((table, tableIndex) => {
+    const tablePath = `${sheetPath}.tables[${tableIndex}]`;
+    if (!table.rows || table.rows.length === 0) {
+      issues.push(
+        createIssue(
+          EXCEL_WARNING_CODES.EMPTY_TABLE_DATA,
+          `Table ${tableIndex + 1} in sheet "${sheet.name}" has headers but no data rows`,
+          `${tablePath}.rows`,
+          "warning"
+        )
+      );
+    }
+  });
+
+  // Check for uniform/suspicious data (all rows identical)
+  tables.forEach((table, tableIndex) => {
+    const tablePath = `${sheetPath}.tables[${tableIndex}]`;
+    const rows = table.rows || [];
+    if (rows.length >= 3) {
+      const firstRowStr = JSON.stringify(rows[0]);
+      const allSame = rows.every(row => JSON.stringify(row) === firstRowStr);
+      if (allSame) {
+        issues.push(
+          createIssue(
+            EXCEL_WARNING_CODES.UNIFORM_DATA,
+            `All ${rows.length} rows in table ${tableIndex + 1} are identical - likely placeholder data`,
+            `${tablePath}.rows`,
+            "warning"
+          )
+        );
+      }
+    }
+  });
+
+  // Check for charts without titles
+  const charts = sheet.charts || [];
+  charts.forEach((chart, chartIndex) => {
+    if (!chart.title || chart.title.trim() === "") {
+      issues.push(
+        createIssue(
+          EXCEL_WARNING_CODES.MISSING_CHART_TITLE,
+          `Chart ${chartIndex + 1} in sheet "${sheet.name}" has no title`,
+          `${sheetPath}.charts[${chartIndex}].title`,
+          "info"
+        )
+      );
+    }
+  });
+
+  // Check for sheets with no tables (empty sheets)
+  if (tables.length === 0 && charts.length === 0) {
+    issues.push(
+      createIssue(
+        EXCEL_WARNING_CODES.SHEET_NO_TABLES,
+        `Sheet "${sheet.name}" has no tables or charts`,
+        sheetPath,
+        "warning"
+      )
+    );
+  }
 }
 
 function buildReport(issues: ValidationIssue[]): QualityReport {

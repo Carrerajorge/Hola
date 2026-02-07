@@ -64,6 +64,7 @@ interface ParserConfig {
 
 const CHUNK_SIZE = 1500;
 const CHUNK_OVERLAP = 200;
+const DEFAULT_CONCURRENCY = 3; // Process up to 3 documents in parallel
 
 const ZIP_BASED_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'];
 
@@ -174,8 +175,189 @@ export class DocumentBatchProcessor {
     this.parserRegistry.setFallbackParser(this.textParser);
   }
 
-  async processBatch(attachments: SimpleAttachment[]): Promise<BatchProcessingResult> {
-    console.log(`[DocumentBatchProcessor] Starting batch processing of ${attachments.length} attachments (security checks: ${this.enableSecurityChecks})`);
+  /**
+   * Process a single attachment and return its result.
+   * Extracted to enable parallel execution.
+   */
+  private async processSingleAttachment(
+    attachment: SimpleAttachment,
+    index: number
+  ): Promise<{
+    chunks: DocumentChunk[];
+    stat: DocumentProcessingStats;
+    failed?: { filename: string; error: string };
+  }> {
+    const docId = this.generateDocId(attachment.name, index);
+    const fileStartTime = Date.now();
+    const securityChecks = {
+      mimeValidation: false,
+      zipBombCheck: false,
+      pathTraversalCheck: false,
+      dangerousFormatCheck: false,
+      sandboxed: false,
+    };
+    let securityViolations: SecurityViolation[] = [];
+
+    try {
+      let normalized: string;
+      let parsed: ParsedResult;
+      let buffer: Buffer;
+      let bytesRead = 0;
+
+      const binaryFormats = ['pdf', 'xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'];
+      const ext = this.getExtensionFromFileName(attachment.name);
+      const isBinaryFormat = binaryFormats.includes(ext);
+
+      if (isBinaryFormat || !attachment.content || attachment.content.trim().length === 0) {
+        if (!attachment.storagePath) {
+          throw new Error(`No storage path provided for binary file: ${attachment.name}`);
+        }
+        buffer = await this.fetchDocument(attachment.storagePath);
+        bytesRead = buffer.length;
+
+        let mimeDetectionResult: MimeDetectionResult | undefined;
+
+        if (this.enableSecurityChecks) {
+          const securityResult = await validateAttachmentSecurity({
+            filename: attachment.name,
+            buffer,
+            providedMimeType: attachment.mimeType,
+          });
+
+          securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
+          securityChecks.zipBombCheck = securityResult.checksPerformed.zipBombCheck;
+          securityChecks.pathTraversalCheck = securityResult.checksPerformed.pathTraversalCheck;
+          securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
+          securityViolations = securityResult.violations;
+          mimeDetectionResult = securityResult.mimeDetection;
+
+          if (!securityResult.safe) {
+            const criticalViolations = securityResult.violations.filter(v =>
+              v.severity === 'critical' || v.severity === 'high'
+            );
+
+            if (criticalViolations.length > 0) {
+              const violationMessages = criticalViolations.map(v => v.message).join('; ');
+              throw new Error(`Security violation: ${violationMessages}`);
+            }
+          }
+        } else {
+          mimeDetectionResult = detectMime(buffer, attachment.name, attachment.mimeType);
+          securityChecks.mimeValidation = true;
+        }
+
+        const detectedMimeType = mimeDetectionResult?.detectedMime ||
+          this.detectMimeFromFilename(attachment.name, attachment.mimeType);
+
+        const parserConfig = this.selectParser(detectedMimeType);
+
+        if (!parserConfig) {
+          throw new Error(`Unsupported MIME type: ${detectedMimeType} for file ${attachment.name}`);
+        }
+
+        parsed = await this.extractContentWithSandbox(
+          buffer,
+          parserConfig,
+          attachment.name,
+          securityChecks
+        );
+        normalized = this.normalizeContent(parsed.text);
+      } else {
+        bytesRead = Buffer.byteLength(attachment.content, 'utf8');
+        buffer = Buffer.from(attachment.content, 'utf8');
+
+        if (this.enableSecurityChecks) {
+          const securityResult = await validateAttachmentSecurity({
+            filename: attachment.name,
+            buffer,
+            providedMimeType: attachment.mimeType,
+          });
+
+          securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
+          securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
+          securityViolations = securityResult.violations;
+
+          if (!securityResult.safe) {
+            const criticalViolations = securityResult.violations.filter(v =>
+              v.severity === 'critical' || v.severity === 'high'
+            );
+
+            if (criticalViolations.length > 0) {
+              const violationMessages = criticalViolations.map(v => v.message).join('; ');
+              throw new Error(`Security violation: ${violationMessages}`);
+            }
+          }
+        }
+
+        const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
+        const parserConfig = this.selectParser(mimeType);
+
+        if (!parserConfig) {
+          throw new Error(`Unsupported MIME type: ${mimeType} for file ${attachment.name}`);
+        }
+
+        if (ext === 'csv' && this.csvParser) {
+          parsed = await this.csvParser.parse(buffer, attachment.name);
+          normalized = this.normalizeContent(parsed.text);
+        } else {
+          normalized = this.normalizeContent(attachment.content);
+          parsed = { text: normalized, metadata: { parser_used: parserConfig.parser.name } };
+        }
+      }
+
+      const parserConfig = this.selectParser(this.detectMimeFromFilename(attachment.name, attachment.mimeType));
+      const docType = parserConfig?.docType || "Text";
+
+      const chunks = this.chunkDocument(normalized, docId, attachment.name, docType, parsed.metadata);
+
+      const parseTimeMs = Date.now() - fileStartTime;
+      const tokensExtracted = this.estimateTokens(normalized);
+
+      console.log(`[DocumentBatchProcessor] Processed ${attachment.name}: ${chunks.length} chunks, ${tokensExtracted} tokens`);
+
+      return {
+        chunks,
+        stat: {
+          filename: attachment.name,
+          bytesRead,
+          pagesProcessed: parsed.metadata?.pages || parsed.metadata?.slideCount || parsed.metadata?.sheetCount || 1,
+          tokensExtracted,
+          parseTimeMs,
+          chunkCount: chunks.length,
+          status: 'success',
+          securityChecks,
+          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
+        },
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[DocumentBatchProcessor] Failed to process ${attachment.name}:`, errorMessage);
+
+      const isSecurityViolation = errorMessage.includes('Security violation') ||
+        securityViolations.some(v => v.severity === 'critical' || v.severity === 'high');
+
+      return {
+        chunks: [],
+        stat: {
+          filename: attachment.name,
+          bytesRead: 0,
+          pagesProcessed: 0,
+          tokensExtracted: 0,
+          parseTimeMs: Date.now() - fileStartTime,
+          chunkCount: 0,
+          status: isSecurityViolation ? 'security_violation' : 'failed',
+          error: errorMessage,
+          securityChecks,
+          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
+        },
+        failed: { filename: attachment.name, error: errorMessage },
+      };
+    }
+  }
+
+  async processBatch(attachments: SimpleAttachment[], concurrency?: number): Promise<BatchProcessingResult> {
+    const maxConcurrent = concurrency || DEFAULT_CONCURRENCY;
+    console.log(`[DocumentBatchProcessor] Starting parallel batch processing of ${attachments.length} attachments (concurrency: ${maxConcurrent}, security checks: ${this.enableSecurityChecks})`);
     const startTime = Date.now();
 
     const result: BatchProcessingResult = {
@@ -190,177 +372,35 @@ export class DocumentBatchProcessor {
 
     this.chunkIndex.clear();
 
-    for (let i = 0; i < attachments.length; i++) {
-      const attachment = attachments[i];
-      const docId = this.generateDocId(attachment.name, i);
-      const fileStartTime = Date.now();
-      const securityChecks = {
-        mimeValidation: false,
-        zipBombCheck: false,
-        pathTraversalCheck: false,
-        dangerousFormatCheck: false,
-        sandboxed: false,
-      };
-      let securityViolations: SecurityViolation[] = [];
+    // Process attachments in parallel batches
+    for (let batchStart = 0; batchStart < attachments.length; batchStart += maxConcurrent) {
+      const batch = attachments.slice(batchStart, batchStart + maxConcurrent);
+      const batchPromises = batch.map((attachment, i) =>
+        this.processSingleAttachment(attachment, batchStart + i)
+      );
 
-      try {
-        let normalized: string;
-        let parsed: ParsedResult;
-        let buffer: Buffer;
-        let bytesRead = 0;
-        
-        const binaryFormats = ['pdf', 'xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'];
-        const ext = this.getExtensionFromFileName(attachment.name);
-        const isBinaryFormat = binaryFormats.includes(ext);
-        
-        if (isBinaryFormat || !attachment.content || attachment.content.trim().length === 0) {
-          if (!attachment.storagePath) {
-            throw new Error(`No storage path provided for binary file: ${attachment.name}`);
-          }
-          buffer = await this.fetchDocument(attachment.storagePath);
-          bytesRead = buffer.length;
+      const batchResults = await Promise.allSettled(batchPromises);
 
-          let mimeDetectionResult: MimeDetectionResult | undefined;
-          
-          if (this.enableSecurityChecks) {
-            const securityResult = await validateAttachmentSecurity({
-              filename: attachment.name,
-              buffer,
-              providedMimeType: attachment.mimeType,
-            });
-            
-            securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
-            securityChecks.zipBombCheck = securityResult.checksPerformed.zipBombCheck;
-            securityChecks.pathTraversalCheck = securityResult.checksPerformed.pathTraversalCheck;
-            securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
-            securityViolations = securityResult.violations;
-            mimeDetectionResult = securityResult.mimeDetection;
-            
-            if (!securityResult.safe) {
-              const criticalViolations = securityResult.violations.filter(v => 
-                v.severity === 'critical' || v.severity === 'high'
-              );
-              
-              if (criticalViolations.length > 0) {
-                const violationMessages = criticalViolations.map(v => v.message).join('; ');
-                throw new Error(`Security violation: ${violationMessages}`);
-              }
-            }
+      for (const settled of batchResults) {
+        if (settled.status === 'fulfilled') {
+          const { chunks, stat, failed } = settled.value;
+          result.stats.push(stat);
+
+          if (failed) {
+            result.failedFiles.push(failed);
           } else {
-            mimeDetectionResult = detectMime(buffer, attachment.name, attachment.mimeType);
-            securityChecks.mimeValidation = true;
+            this.indexChunks(chunks);
+            result.chunks.push(...chunks);
+            result.processedFiles++;
+            result.totalTokens += stat.tokensExtracted;
           }
-
-          const detectedMimeType = mimeDetectionResult?.detectedMime || 
-            this.detectMimeFromFilename(attachment.name, attachment.mimeType);
-          
-          const parserConfig = this.selectParser(detectedMimeType);
-          
-          if (!parserConfig) {
-            throw new Error(`Unsupported MIME type: ${detectedMimeType} for file ${attachment.name}`);
-          }
-
-          parsed = await this.extractContentWithSandbox(
-            buffer, 
-            parserConfig, 
-            attachment.name,
-            securityChecks
-          );
-          normalized = this.normalizeContent(parsed.text);
         } else {
-          bytesRead = Buffer.byteLength(attachment.content, 'utf8');
-          buffer = Buffer.from(attachment.content, 'utf8');
-          
-          if (this.enableSecurityChecks) {
-            const securityResult = await validateAttachmentSecurity({
-              filename: attachment.name,
-              buffer,
-              providedMimeType: attachment.mimeType,
-            });
-            
-            securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
-            securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
-            securityViolations = securityResult.violations;
-            
-            if (!securityResult.safe) {
-              const criticalViolations = securityResult.violations.filter(v => 
-                v.severity === 'critical' || v.severity === 'high'
-              );
-              
-              if (criticalViolations.length > 0) {
-                const violationMessages = criticalViolations.map(v => v.message).join('; ');
-                throw new Error(`Security violation: ${violationMessages}`);
-              }
-            }
-          }
-          
-          const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
-          const parserConfig = this.selectParser(mimeType);
-          
-          if (!parserConfig) {
-            throw new Error(`Unsupported MIME type: ${mimeType} for file ${attachment.name}`);
-          }
-          
-          if (ext === 'csv' && this.csvParser) {
-            parsed = await this.csvParser.parse(buffer, attachment.name);
-            normalized = this.normalizeContent(parsed.text);
-          } else {
-            normalized = this.normalizeContent(attachment.content);
-            parsed = { text: normalized, metadata: { parser_used: parserConfig.parser.name } };
-          }
+          // Unexpected rejection (should not happen since processSingleAttachment catches errors)
+          result.failedFiles.push({
+            filename: 'unknown',
+            error: settled.reason?.message || 'Unexpected error',
+          });
         }
-        
-        const parserConfig = this.selectParser(this.detectMimeFromFilename(attachment.name, attachment.mimeType));
-        const docType = parserConfig?.docType || "Text";
-        
-        const chunks = this.chunkDocument(normalized, docId, attachment.name, docType, parsed.metadata);
-        
-        this.indexChunks(chunks);
-        result.chunks.push(...chunks);
-
-        const parseTimeMs = Date.now() - fileStartTime;
-        const tokensExtracted = this.estimateTokens(normalized);
-
-        result.stats.push({
-          filename: attachment.name,
-          bytesRead,
-          pagesProcessed: parsed.metadata?.pages || parsed.metadata?.slideCount || parsed.metadata?.sheetCount || 1,
-          tokensExtracted,
-          parseTimeMs,
-          chunkCount: chunks.length,
-          status: 'success',
-          securityChecks,
-          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
-        });
-
-        result.processedFiles++;
-        result.totalTokens += tokensExtracted;
-
-        console.log(`[DocumentBatchProcessor] Processed ${attachment.name}: ${chunks.length} chunks, ${tokensExtracted} tokens`);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[DocumentBatchProcessor] Failed to process ${attachment.name}:`, errorMessage);
-
-        result.failedFiles.push({
-          filename: attachment.name,
-          error: errorMessage,
-        });
-
-        const isSecurityViolation = errorMessage.includes('Security violation') || 
-          securityViolations.some(v => v.severity === 'critical' || v.severity === 'high');
-        
-        result.stats.push({
-          filename: attachment.name,
-          bytesRead: 0,
-          pagesProcessed: 0,
-          tokensExtracted: 0,
-          parseTimeMs: Date.now() - fileStartTime,
-          chunkCount: 0,
-          status: isSecurityViolation ? 'security_violation' : 'failed',
-          error: errorMessage,
-          securityChecks,
-          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
-        });
       }
     }
 

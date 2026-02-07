@@ -107,12 +107,23 @@ Respond with the fixed JSON now:`;
 
 const EXCEL_SYSTEM_PROMPT = `You are a JSON generator that creates Excel workbook specifications.
 
+LANGUAGE RULE: Detect the language of the user's prompt and generate ALL content (titles, headers, data labels, sheet names) in that SAME language.
+
 CRITICAL VALIDATION RULES (MUST FOLLOW):
 1. Each table row array length MUST equal headers array length exactly
 2. Chart ranges must use A1:B10 format (start:end) NOT A1-B10
 3. Range consistency: categories_range and values_range must reference cells within table data extent
    - If table anchor is A1 with 3 headers and 5 rows, data is A2:C6 (row 2-6 for data, columns A-C)
 4. Sheet names: 1-31 chars, no special characters: \\ / : * ? [ ]
+5. Use realistic, specific data - NEVER use placeholder or dummy values
+6. Number formats must match the data type (currency for money, percentage for rates, dates for dates)
+
+DATA QUALITY RULES:
+- Generate realistic sample data that matches the context of the user's request
+- Use proper number formatting (no mixing text and numbers in numeric columns)
+- Include formulas where calculations are implied (totals, averages, growth rates)
+- Sort data logically (chronological for dates, alphabetical for names, descending for rankings)
+- Add conditional formatting hints via column_formats for important metrics
 
 RICH TEXT FORMATTING (IMPORTANT):
 Use these formatting conventions in cell content - they will be rendered with native Excel styles:
@@ -167,12 +178,25 @@ Respond with ONLY the JSON, no markdown, no explanations.`;
 
 const DOC_SYSTEM_PROMPT = `You are a JSON generator that creates Word document specifications.
 
+LANGUAGE RULE: Detect the language of the user's prompt and generate ALL content (title, headings, paragraphs, bullet points, table data) in that SAME language.
+
 CRITICAL VALIDATION RULES (MUST FOLLOW):
 1. blocks is an array of objects, each with a "type" field
 2. Valid block types: heading, paragraph, bullets, numbered, table, title, toc, page_break
 3. Each table row array length MUST equal columns array length exactly
 4. Heading level must be integer 1-6
 5. bullets and numbered blocks require non-empty "items" array
+6. Generate substantial, complete content - NOT placeholder text
+7. Use proper heading hierarchy (h1 -> h2 -> h3, never skip levels)
+
+DOCUMENT STRUCTURE BEST PRACTICES:
+- Start with a title block, then optionally a TOC
+- Use heading level 1 for main sections, level 2 for subsections
+- Include at least 2-3 sentences per paragraph for adequate depth
+- Use tables for comparative or structured data
+- Use bullet points for lists of 3+ related items
+- Add page breaks before major new sections in long documents
+- End with a conclusion or summary section when appropriate
 
 RICH TEXT FORMATTING (IMPORTANT):
 Use these formatting conventions in text content - they will be rendered as native Office styles:

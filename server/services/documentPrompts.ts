@@ -279,17 +279,57 @@ Example valid response:
 
 Respond with ONLY the JSON, no markdown, no explanations.`;
 
+// ============== Language & Locale Awareness ==============
+
+const LANGUAGE_INSTRUCTIONS = `
+LANGUAGE DETECTION AND ADAPTATION:
+- ALWAYS detect the language of the user's prompt
+- Generate ALL document content in the SAME language as the user's prompt
+- If the user writes in Spanish, ALL text content must be in Spanish
+- If the user writes in English, ALL text content must be in English
+- If the user writes in French, ALL text content must be in French
+- Adapt cultural norms (date formats, address formats, salutation styles) to match the detected language/region
+- For CVs: adapt section names, skill descriptions, and achievements to the target language
+- For Reports: adapt headings, executive summary, and analysis language
+- For Letters: adapt salutation, closing, and tone to match cultural expectations
+
+EXAMPLES:
+- User prompt in Spanish: "Crea un CV para un ingeniero de software" -> ALL content in Spanish
+- User prompt in English: "Create a CV for a software engineer" -> ALL content in English
+`;
+
+// ============== Content Quality Enhancement ==============
+
+const CONTENT_QUALITY_RULES = `
+CONTENT QUALITY REQUIREMENTS:
+1. NO PLACEHOLDER TEXT - Never use "Lorem ipsum", "[Insert here]", or generic filler content
+2. REALISTIC DATA - Generate plausible, specific data that matches the context
+3. CONSISTENT TONE - Maintain a consistent professional tone throughout the document
+4. LOGICAL FLOW - Ensure sections follow a logical progression
+5. NO REPETITION - Avoid repeating the same phrases or ideas across sections
+6. SPECIFICITY - Use specific numbers, dates, and details rather than vague descriptions
+7. PROPER FORMATTING - Use appropriate formatting for the document type (bold for emphasis, tables for data)
+8. COMPLETE SENTENCES - Every text block should contain complete, well-formed sentences
+9. GRAMMAR - Ensure perfect grammar in the target language
+10. CONCISENESS - Be thorough but concise; avoid unnecessary verbosity
+`;
+
 export function getDocumentSystemPrompt(docType: 'cv' | 'report' | 'letter'): string {
-  switch (docType) {
-    case 'cv':
-      return CV_SYSTEM_PROMPT;
-    case 'report':
-      return REPORT_SYSTEM_PROMPT;
-    case 'letter':
-      return LETTER_SYSTEM_PROMPT;
-    default:
-      throw new Error(`Unknown document type: ${docType}`);
-  }
+  const basePrompt = (() => {
+    switch (docType) {
+      case 'cv':
+        return CV_SYSTEM_PROMPT;
+      case 'report':
+        return REPORT_SYSTEM_PROMPT;
+      case 'letter':
+        return LETTER_SYSTEM_PROMPT;
+      default:
+        throw new Error(`Unknown document type: ${docType}`);
+    }
+  })();
+
+  // Inject language detection and quality rules into every prompt
+  return `${basePrompt}\n\n${LANGUAGE_INSTRUCTIONS}\n\n${CONTENT_QUALITY_RULES}`;
 }
 
 export function getDocumentJsonSchema(docType: 'cv' | 'report' | 'letter'): object {

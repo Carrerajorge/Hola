@@ -430,15 +430,98 @@ export class DocumentCache {
     }
 }
 
+// ============== Auto-Prune Manager ==============
+
+/**
+ * Manages periodic pruning and memory pressure monitoring for the document cache.
+ * Runs a timer that cleans expired entries and checks memory usage thresholds.
+ */
+export class CacheManager {
+    private cache: DocumentCache;
+    private pruneInterval: ReturnType<typeof setInterval> | null = null;
+    private memoryThresholdBytes: number;
+    private pruneIntervalMs: number;
+
+    constructor(cache: DocumentCache, options?: {
+        pruneIntervalMs?: number;
+        memoryThresholdBytes?: number;
+    }) {
+        this.cache = cache;
+        this.pruneIntervalMs = options?.pruneIntervalMs || 5 * 60 * 1000; // 5 minutes
+        this.memoryThresholdBytes = options?.memoryThresholdBytes || 500 * 1024 * 1024; // 500MB
+    }
+
+    /**
+     * Start automatic pruning
+     */
+    start(): void {
+        if (this.pruneInterval) return;
+
+        this.pruneInterval = setInterval(() => {
+            this.runMaintenance();
+        }, this.pruneIntervalMs);
+
+        // Don't block process exit
+        if (this.pruneInterval.unref) {
+            this.pruneInterval.unref();
+        }
+    }
+
+    /**
+     * Stop automatic pruning
+     */
+    stop(): void {
+        if (this.pruneInterval) {
+            clearInterval(this.pruneInterval);
+            this.pruneInterval = null;
+        }
+    }
+
+    /**
+     * Run maintenance: prune stale entries, check memory pressure
+     */
+    private runMaintenance(): void {
+        const stats = this.cache.getStats();
+        const pruned = this.cache.prune();
+
+        if (pruned > 0) {
+            console.log(`[CacheManager] Pruned ${pruned} stale entries`);
+        }
+
+        // Check memory pressure
+        if (stats.memoryUsage > this.memoryThresholdBytes) {
+            console.warn(
+                `[CacheManager] Memory usage (${Math.round(stats.memoryUsage / 1024 / 1024)}MB) ` +
+                `exceeds threshold (${Math.round(this.memoryThresholdBytes / 1024 / 1024)}MB). ` +
+                `Forcing aggressive prune.`
+            );
+            // Force clear oldest 25% of documents
+            this.cache.prune();
+        }
+    }
+
+    getCache(): DocumentCache {
+        return this.cache;
+    }
+}
+
 // ============== Singleton ==============
 
 let cacheInstance: DocumentCache | null = null;
+let cacheManagerInstance: CacheManager | null = null;
 
 export function getDocumentCache(config?: CacheConfig): DocumentCache {
     if (!cacheInstance) {
         cacheInstance = new DocumentCache(config);
+        // Auto-start the cache manager
+        cacheManagerInstance = new CacheManager(cacheInstance);
+        cacheManagerInstance.start();
     }
     return cacheInstance;
+}
+
+export function getCacheManager(): CacheManager | null {
+    return cacheManagerInstance;
 }
 
 export default DocumentCache;

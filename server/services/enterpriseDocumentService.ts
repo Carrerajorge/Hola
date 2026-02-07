@@ -18,6 +18,7 @@ import {
 } from "docx";
 import ExcelJS from "exceljs";
 import type { Workbook, Worksheet, Style } from "exceljs";
+import PDFDocument from "pdfkit";
 
 // ============================================
 // TYPES & INTERFACES
@@ -997,23 +998,108 @@ export class EnterpriseDocumentService {
 
   private async generatePDF(request: DocumentRequest): Promise<DocumentResult> {
     try {
-      // Generate DOCX first, then convert (basic approach)
-      // In production, use a proper PDF library like PDFKit
-      const docxResult = await this.wordGenerator.generate(request);
-      
-      if (!docxResult.success) {
-        return docxResult;
-      }
+      const theme = DOCUMENT_THEMES[this.themeName] || DOCUMENT_THEMES.professional;
+      const pageSize = request.options?.pageSize === "letter" ? "LETTER" as const
+        : request.options?.pageSize === "legal" ? "LEGAL" as const
+        : undefined; // default A4
+      const isLandscape = request.options?.orientation === "landscape";
 
-      // For now, return DOCX with PDF metadata
-      // TODO: Implement proper PDF generation with PDFKit
+      const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        const doc = new PDFDocument({
+          size: pageSize || "A4",
+          layout: isLandscape ? "landscape" : "portrait",
+          margins: { top: 72, bottom: 72, left: 72, right: 72 },
+          info: {
+            Title: request.title,
+            Author: request.author || "ILIAGPT",
+            Subject: request.subtitle || "",
+            Creator: "ILIAGPT Enterprise Document Generator",
+          },
+          bufferPages: true,
+        });
+
+        doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+
+        const primaryColor = `#${theme.colors.primary}`;
+        const textColor = `#${theme.colors.text}`;
+        const mutedColor = `#${theme.colors.muted}`;
+        const accentColor = `#${theme.colors.accent}`;
+
+        // --- Cover / Title ---
+        doc.fontSize(28).fillColor(primaryColor).text(request.title, {
+          align: "center",
+        });
+        if (request.subtitle) {
+          doc.moveDown(0.5);
+          doc.fontSize(16).fillColor(mutedColor).text(request.subtitle, {
+            align: "center",
+          });
+        }
+        if (request.author) {
+          doc.moveDown(0.3);
+          doc.fontSize(12).fillColor(mutedColor).text(`Author: ${request.author}`, {
+            align: "center",
+          });
+        }
+        doc.moveDown(0.3);
+        doc.fontSize(10).fillColor(mutedColor).text(
+          new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+          { align: "center" }
+        );
+
+        // Separator line
+        doc.moveDown(1);
+        const lineY = doc.y;
+        doc.strokeColor(accentColor).lineWidth(2)
+          .moveTo(72, lineY).lineTo(doc.page.width - 72, lineY).stroke();
+        doc.moveDown(1);
+
+        // --- Table of contents (simple) ---
+        if (request.options?.includeTableOfContents && request.sections.length > 0) {
+          doc.fontSize(18).fillColor(primaryColor).text("Table of Contents", {
+            align: "left",
+          });
+          doc.moveDown(0.5);
+          for (const section of request.sections) {
+            const indent = (section.level - 1) * 20;
+            doc.fontSize(11).fillColor(accentColor).text(
+              `${"  ".repeat(section.level - 1)}${section.title}`,
+              72 + indent, undefined, { continued: false }
+            );
+          }
+          doc.addPage();
+        }
+
+        // --- Sections ---
+        for (const section of request.sections) {
+          this.renderPdfSection(doc, section, theme);
+        }
+
+        // --- Page numbers ---
+        if (request.options?.includePageNumbers) {
+          const pages = doc.bufferedPageRange();
+          for (let i = pages.start; i < pages.start + pages.count; i++) {
+            doc.switchToPage(i);
+            doc.fontSize(9).fillColor(mutedColor).text(
+              `Page ${i + 1} of ${pages.count}`,
+              0, doc.page.height - 50,
+              { align: "center", width: doc.page.width }
+            );
+          }
+        }
+
+        doc.end();
+      });
+
       return {
         success: true,
-        buffer: docxResult.buffer,
+        buffer: pdfBuffer,
         filename: `${this.sanitizeFilename(request.title)}.pdf`,
         mimeType: "application/pdf",
-        sizeBytes: docxResult.sizeBytes,
-        error: "PDF generation pending - returning DOCX. Install PDFKit for native PDF.",
+        sizeBytes: pdfBuffer.length,
       };
     } catch (error: any) {
       return {
@@ -1024,6 +1110,139 @@ export class EnterpriseDocumentService {
         error: error.message,
       };
     }
+  }
+
+  private renderPdfSection(
+    doc: PDFKit.PDFDocument,
+    section: DocumentSection,
+    theme: DocumentTheme
+  ): void {
+    const primaryColor = `#${theme.colors.primary}`;
+    const textColor = `#${theme.colors.text}`;
+    const mutedColor = `#${theme.colors.muted}`;
+    const accentColor = `#${theme.colors.accent}`;
+
+    const headingSizes: Record<number, number> = { 1: 22, 2: 18, 3: 14 };
+    const fontSize = headingSizes[section.level] || 14;
+
+    // Heading
+    doc.fontSize(fontSize).fillColor(primaryColor).text(section.title);
+    if (section.level === 1) {
+      const y = doc.y + 2;
+      doc.strokeColor(accentColor).lineWidth(1)
+        .moveTo(72, y).lineTo(doc.page.width - 72, y).stroke();
+    }
+    doc.moveDown(0.4);
+
+    // Body content
+    if (section.content) {
+      doc.fontSize(11).fillColor(textColor).text(section.content, {
+        align: "justify",
+        lineGap: 3,
+      });
+      doc.moveDown(0.5);
+    }
+
+    // Lists
+    if (section.lists) {
+      for (const list of section.lists) {
+        for (let i = 0; i < list.items.length; i++) {
+          const prefix = list.type === "numbered" ? `${i + 1}. ` : "\u2022 ";
+          doc.fontSize(11).fillColor(textColor).text(`${prefix}${list.items[i]}`, {
+            indent: 20,
+          });
+        }
+        doc.moveDown(0.3);
+      }
+    }
+
+    // Tables
+    if (section.tables) {
+      for (const table of section.tables) {
+        this.renderPdfTable(doc, table, theme);
+      }
+    }
+
+    // Subsections
+    if (section.subsections) {
+      for (const sub of section.subsections) {
+        this.renderPdfSection(doc, sub, theme);
+      }
+    }
+
+    doc.moveDown(0.5);
+  }
+
+  private renderPdfTable(
+    doc: PDFKit.PDFDocument,
+    table: TableData,
+    theme: DocumentTheme
+  ): void {
+    if (!table.headers.length) return;
+
+    const pageWidth = doc.page.width - 144; // margins
+    const colCount = table.headers.length;
+    const colWidth = pageWidth / colCount;
+    const startX = 72;
+    const rowHeight = 22;
+    let y = doc.y;
+
+    // Check if table fits on current page, add new page if needed
+    const estimatedHeight = (table.rows.length + 1) * rowHeight + 30;
+    if (y + estimatedHeight > doc.page.height - 72) {
+      doc.addPage();
+      y = doc.y;
+    }
+
+    // Caption
+    if (table.caption) {
+      doc.fontSize(10).fillColor(`#${theme.colors.muted}`).text(table.caption, {
+        align: "center",
+      });
+      y = doc.y + 4;
+    }
+
+    // Header row
+    doc.rect(startX, y, pageWidth, rowHeight).fill(`#${theme.colors.primary}`);
+    for (let i = 0; i < colCount; i++) {
+      doc.fontSize(10).fillColor("#FFFFFF").text(
+        table.headers[i],
+        startX + i * colWidth + 4,
+        y + 5,
+        { width: colWidth - 8, height: rowHeight, ellipsis: true }
+      );
+    }
+    y += rowHeight;
+
+    // Data rows
+    for (let r = 0; r < table.rows.length; r++) {
+      const row = table.rows[r];
+      const bgColor = r % 2 === 0 ? "#FFFFFF" : "#F7FAFC";
+      doc.rect(startX, y, pageWidth, rowHeight).fill(bgColor);
+
+      for (let c = 0; c < colCount; c++) {
+        doc.fontSize(10).fillColor(`#${theme.colors.text}`).text(
+          row[c] || "",
+          startX + c * colWidth + 4,
+          y + 5,
+          { width: colWidth - 8, height: rowHeight, ellipsis: true }
+        );
+      }
+      y += rowHeight;
+
+      // Page break for long tables
+      if (y > doc.page.height - 72) {
+        doc.addPage();
+        y = doc.y;
+      }
+    }
+
+    // Border
+    doc.rect(startX, doc.y === y ? y - (table.rows.length + 1) * rowHeight : y - table.rows.length * rowHeight, pageWidth, (table.rows.length + 1) * rowHeight)
+      .strokeColor(`#${theme.colors.muted}`).lineWidth(0.5).stroke();
+
+    doc.y = y + 10;
+    doc.moveDown(0.5);
   }
 
   private sanitizeFilename(name: string): string {
