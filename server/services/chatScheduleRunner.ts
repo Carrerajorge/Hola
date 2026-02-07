@@ -186,7 +186,7 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
   // Enforce quotas so scheduled runs can't bypass plan limits.
   const hasTokenQuota = await usageQuotaService.hasTokenQuota(schedule.userId);
   if (!hasTokenQuota) {
-    await disableSchedule(schedule, "Has excedido tu límite de tokens. Actualiza tu plan para continuar.");
+    await disableSchedule(schedule, "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.");
     return;
   }
 
@@ -297,11 +297,12 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
 
   // Keep RAG/search features consistent: scheduled messages should be ingested like normal chat traffic.
   if (inserted.userMsgId) {
+    const userMessageId = inserted.userMsgId;
     queueMicrotask(() => {
       knowledgeBaseService
         .ingestChatMessage({
           chatId: schedule.chatId,
-          messageId: inserted.userMsgId,
+          messageId: userMessageId,
           role: "user",
           content: prompt,
         })
@@ -311,11 +312,12 @@ async function executeSchedule(schedule: typeof chatSchedules.$inferSelect, plan
     });
   }
   if (inserted.assistantMsgId) {
+    const assistantMessageId = inserted.assistantMsgId;
     queueMicrotask(() => {
       knowledgeBaseService
         .ingestChatMessage({
           chatId: schedule.chatId,
-          messageId: inserted.assistantMsgId,
+          messageId: assistantMessageId,
           role: "assistant",
           content: assistantContent,
         })

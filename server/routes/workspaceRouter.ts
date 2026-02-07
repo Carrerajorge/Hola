@@ -530,7 +530,8 @@ export function createWorkspaceRouter() {
       }
 
       const roles = await listRolesForOrg(actor.orgId);
-      const roleName = roles.find((r) => r.roleKey === String(invite.role || ""))?.name || String(invite.role || "team_member");
+      const inviteRoleKey = normalizeRoleKey(String(invite.role || "")) || "team_member";
+      const roleName = roles.find((r) => r.roleKey === inviteRoleKey)?.name || inviteRoleKey;
 
       const magicLinkUrl = getMagicLinkUrl(magic.token);
       const inviterName =

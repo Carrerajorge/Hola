@@ -218,13 +218,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       if (userId) {
         // 1. Token Quota Check (Read-only)
-        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
-        if (!hasTokenQuota) {
-          return res.status(402).json({
-            error: "Has excedido tu límite de tokens. Actualiza tu plan para continuar.",
-            code: "TOKEN_QUOTA_EXCEEDED"
-          });
-        }
+	        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
+	        if (!hasTokenQuota) {
+	          return res.status(402).json({
+	            error: "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.",
+	            code: "TOKEN_QUOTA_EXCEEDED"
+	          });
+	        }
 
         // 2. Daily Request Limit Check (Increments)
         const usageCheck = await usageQuotaService.checkAndIncrementUsage(userId);

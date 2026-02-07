@@ -26,6 +26,19 @@ type ExistingSchedule = {
 
 type ChatOption = { id: string; title: string };
 
+async function getApiErrorMessage(res: Response): Promise<string> {
+  const ct = res.headers.get("content-type") || "";
+  try {
+    if (ct.includes("application/json")) {
+      const json = await res.json();
+      return String(json?.error || json?.message || JSON.stringify(json));
+    }
+  } catch {
+    // ignore
+  }
+  return (await res.text()) || res.statusText;
+}
+
 const WEEKDAYS: Array<{ id: number; label: string }> = [
   { id: 1, label: "Lun" },
   { id: 2, label: "Mar" },
@@ -178,8 +191,7 @@ export function ScheduleDialog(props: {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const text = (await res.text()) || res.statusText;
-        throw new Error(text);
+        throw new Error(await getApiErrorMessage(res));
       }
       return res.json();
     },

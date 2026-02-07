@@ -767,6 +767,10 @@ export default function WorkspaceSettingsPage() {
     const roleMatch = rolesByKey.get(roleKey);
     if (roleMatch?.isCustom) return roleMatch.name;
     switch (roleKey) {
+      case "superadmin":
+        return "Superadmin";
+      case "admin":
+        return "Admin del sistema";
       case "workspace_owner":
       case "owner":
       case "team_admin":
@@ -774,6 +778,12 @@ export default function WorkspaceSettingsPage() {
         return "Administrador";
       case "billing_manager":
         return "Facturación";
+      case "guest":
+        return "Invitado";
+      case "free":
+        return "Usuario gratuito";
+      case "pro":
+        return "Usuario Pro";
       case "workspace_viewer":
         return "Lector";
       case "workspace_member":
@@ -1368,8 +1378,10 @@ export default function WorkspaceSettingsPage() {
                         const displayName = getMemberDisplayName(member);
                         const initials = getInitials(displayName);
                         const isSelf = String(member.id) === currentUserId;
-                        const canEditRole = canManageMembers && !isSelf;
                         const roleValue = member.role || "team_member";
+                        const roleKeyLower = String(roleValue || "").toLowerCase().trim();
+                        const isSystemAdminTarget = roleKeyLower === "admin" || roleKeyLower === "superadmin";
+                        const canEditRole = canManageMembers && !isSelf && (!isSystemAdminTarget || isAdmin);
 
                         return (
                           <div key={member.id} className="grid grid-cols-3 gap-4 px-4 py-3 items-center">

@@ -21,6 +21,7 @@ import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
+import { getUserSettingsCached } from "../services/userSettingsCache";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
@@ -407,6 +408,122 @@ export class ToolRegistry {
       normalizedUserId && normalizedUserId !== "anonymous"
         ? `user:${normalizedUserId}`
         : `run:${effectiveContext.runId}`;
+
+    // User Settings Feature Gates (Privacy/Safety toggles)
+    // These are user-controlled switches from Configuraciones > Personalización.
+    // They must be enforced server-side to prevent accidental tool usage.
+    try {
+      const userSettings = await getUserSettingsCached(context.userId);
+      const featureFlags = {
+        webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true,
+        codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
+        canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
+        connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
+      };
+
+      const isWebTool = new Set([
+        "web_search",
+        "browse_url",
+        "web_search_retrieve",
+        // Sandbox aliases
+        "search",
+        "browser",
+        "research",
+      ]).has(name);
+
+      const isCanvasTool = new Set([
+        "generate_document",
+        // Sandbox aliases
+        "document",
+        "slides",
+      ]).has(name);
+
+      const isConnectorTool = name.startsWith("gmail_") || name.startsWith("whatsapp_");
+
+      if (!featureFlags.webSearchAuto && isWebTool) {
+        addLog("warn", `Tool blocked: web search disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "WEB_SEARCH_DISABLED",
+              message: "Web search is disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      if (!featureFlags.canvasEnabled && isCanvasTool) {
+        addLog("warn", `Tool blocked: canvas disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CANVAS_DISABLED",
+              message: "Canvas features are disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      if (!featureFlags.connectorSearchAuto && isConnectorTool) {
+        addLog("warn", `Tool blocked: connector search disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CONNECTOR_SEARCH_DISABLED",
+              message: "Connector search is disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      // Deny any code-executing tool when code interpreter is disabled.
+      if (!featureFlags.codeInterpreterEnabled && policyEngine.hasCapability(name, "executes_code")) {
+        addLog("warn", `Tool blocked: code interpreter disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CODE_INTERPRETER_DISABLED",
+              message: "Code interpreter is disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+    } catch (e: any) {
+      // Best-effort: if settings can't be loaded, don't block tools.
+      addLog("debug", "User settings feature-gate check skipped (unavailable)", e?.message || e);
+    }
     
     if (!tool) {
       // Try sandbox tools as fallback with proper adaptation

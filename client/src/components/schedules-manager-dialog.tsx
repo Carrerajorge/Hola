@@ -49,6 +49,19 @@ type ScheduleRow = {
   chatTitle?: string | null;
 };
 
+async function getApiErrorMessage(res: Response): Promise<string> {
+  const ct = res.headers.get("content-type") || "";
+  try {
+    if (ct.includes("application/json")) {
+      const json = await res.json();
+      return String(json?.error || json?.message || JSON.stringify(json));
+    }
+  } catch {
+    // ignore
+  }
+  return (await res.text()) || res.statusText;
+}
+
 function scheduleTypeLabel(t: ScheduleType): string {
   if (t === "once") return "Una vez";
   if (t === "daily") return "Diario";
@@ -96,7 +109,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
       const res = await fetch(`/api/users/${userId}/schedules`, {
         credentials: "include",
       });
-      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      if (!res.ok) throw new Error(await getApiErrorMessage(res));
       return res.json();
     },
     enabled: !!userId && isAuthenticated && open,
@@ -114,7 +127,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         credentials: "include",
         body: JSON.stringify({ isActive: row.isActive }),
       });
-      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      if (!res.ok) throw new Error(await getApiErrorMessage(res));
       return res.json();
     },
     onSuccess: () => {
@@ -131,7 +144,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         method: "POST",
         credentials: "include",
       });
-      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      if (!res.ok) throw new Error(await getApiErrorMessage(res));
       return res.json();
     },
     onSuccess: () => {
@@ -149,7 +162,7 @@ export function SchedulesManagerDialog(props: { open: boolean; onOpenChange: (op
         method: "DELETE",
         credentials: "include",
       });
-      if (!res.ok) throw new Error((await res.text()) || res.statusText);
+      if (!res.ok) throw new Error(await getApiErrorMessage(res));
       return res.json();
     },
     onSuccess: () => {
