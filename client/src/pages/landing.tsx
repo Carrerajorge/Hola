@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
+import { Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
 export default function LandingPage() {
@@ -60,17 +60,17 @@ export default function LandingPage() {
   };
 
   const features = [
-    { icon: Sparkles, label: "Adjuntar", color: "from-purple-500 to-pink-500" },
-    { icon: Search, label: "Buscar", color: "from-blue-500 to-cyan-500" },
-    { icon: BookOpen, label: "Estudiemos", color: "from-emerald-500 to-teal-500" },
-    { icon: Image, label: "Crear imagen", color: "from-orange-500 to-amber-500" },
-    { icon: Mic, label: "Voz", color: "from-rose-500 to-pink-500" },
+    { icon: Sparkles, label: "Adjuntar" },
+    { icon: Search, label: "Buscar" },
+    { icon: BookOpen, label: "Estudiemos" },
+    { icon: Image, label: "Crear imagen" },
+    { icon: Mic, label: "Voz" },
   ];
 
   return (
     <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white">
         <div className="flex items-center gap-2">
           {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
           <Button
@@ -84,20 +84,18 @@ export default function LandingPage() {
           >
             <Menu className="h-5 w-5" />
           </Button>
-
-
-          <IliaGPTLogo size={32} className="shadow-sm" />
-          <span className="font-semibold tracking-wide text-zinc-900">ILIAGPT</span>
+          <IliaGPTLogo size={32} />
+          <span className="font-semibold tracking-tight text-zinc-950">ILIAGPT</span>
           <ChevronDown className="h-4 w-4 text-zinc-500" />
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-amber-700 hover:text-amber-600 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
+          <span onClick={() => setLocation("/about")} className="text-zinc-700 hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="text-zinc-700 hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Aprender</span>
+          <span onClick={() => setLocation("/business")} className="text-zinc-700 hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="text-zinc-700 hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="text-zinc-950 font-medium hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="text-zinc-700 hover:text-zinc-950 transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -111,7 +109,7 @@ export default function LandingPage() {
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-black/20 text-zinc-900 hover:bg-black/5 hover:border-amber-400/60 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-black/20 text-zinc-950 bg-white hover:bg-zinc-50 hover:border-black/30 transition-colors duration-200"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
@@ -142,7 +140,7 @@ export default function LandingPage() {
         {/* Drawer */}
         <div
           className={
-            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white/90 backdrop-blur-xl shadow-2xl " +
+            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white shadow-xl " +
             "transition-transform duration-200 ease-out " +
             (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
           }
@@ -165,8 +163,8 @@ export default function LandingPage() {
                 className={
                   "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
                   (item.label === "Imágenes"
-                    ? "text-amber-700 hover:text-amber-600 hover:bg-black/5"
-                    : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
+                    ? "text-zinc-950 font-medium hover:bg-zinc-50"
+                    : "text-zinc-800 hover:text-zinc-950 hover:bg-zinc-50")
                 }
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -186,10 +184,10 @@ export default function LandingPage() {
         <div className="w-full max-w-3xl space-y-10">
           {/* Hero Title */}
           <div className="text-center fade-in-up">
-            <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-zinc-950">¿Con qué puedo ayudarte?</span>
+            <h1 className="text-4xl md:text-6xl font-semibold tracking-tight leading-[1.06] text-zinc-950 mb-4">
+              ¿Con qué puedo ayudarte?
             </h1>
-            <p className="text-lg text-zinc-600 max-w-xl mx-auto">
+            <p className="text-lg text-zinc-600 max-w-xl mx-auto leading-relaxed">
               El asistente de IA más inteligente para crear, investigar y aprender
             </p>
           </div>
@@ -197,19 +195,16 @@ export default function LandingPage() {
           {/* Search Input */}
           <div className="space-y-6 fade-in-up fade-in-up-delay-1">
             <div className="relative">
-              <div className="glass-luxe rounded-2xl p-1">
+              <div className="glass-luxe rounded-2xl p-1 focus-within:ring-2 focus-within:ring-black/10 focus-within:ring-offset-2 focus-within:ring-offset-white">
                 <Input
                   placeholder="Pregunta lo que quieras..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400 
-                    focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="h-14 md:h-16 px-5 md:px-6 text-base md:text-lg bg-transparent border-0 text-zinc-950 placeholder:text-zinc-400 focus-visible:ring-0 focus-visible:ring-offset-0"
                   data-testid="input-landing-search"
                 />
               </div>
-              {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-amber-200/60 via-yellow-100/50 to-amber-200/60 blur-xl opacity-70" />
             </div>
 
             {/* Feature Buttons */}
@@ -218,9 +213,7 @@ export default function LandingPage() {
                 <Button
                   key={feature.label}
                   variant="outline"
-                  className={`rounded-full gap-2 text-sm border-black/10 bg-white/70 text-zinc-900
-                    hover:bg-white hover:border-amber-300/60 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg fade-in-up`}
+                  className={`rounded-full gap-2 text-sm border-black/15 bg-white text-zinc-950 hover:bg-zinc-50 hover:border-black/25 transition-colors duration-200 fade-in-up`}
                   style={{ animationDelay: `${(index + 2) * 100}ms` }}
                   onClick={() => setLocation("/login")}
                   data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
@@ -238,7 +231,7 @@ export default function LandingPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full"
+                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-950 hover:bg-zinc-50 rounded-full"
                 onClick={() => setShowPromo(false)}
                 data-testid="button-close-promo"
               >
@@ -247,9 +240,9 @@ export default function LandingPage() {
 
               <div className="flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-5 w-5 text-amber-400" />
-                    <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Nuevo</span>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-950 mb-4">
+                    <Sparkles className="h-4 w-4" />
+                    Nuevo
                   </div>
                   <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
                   <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
@@ -268,20 +261,17 @@ export default function LandingPage() {
                 {/* Style Cards */}
                 <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:items-center md:gap-4">
                   {[
-                    { emoji: "🎨", label: "Boceto", gradient: "from-amber-500/30 to-orange-500/30" },
-                    { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/30 to-green-500/30" },
-                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/30 to-violet-500/30" },
-                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-500/30 to-rose-500/30" },
+                    { emoji: "🎨", label: "Boceto" },
+                    { emoji: "🎄", label: "Festivo" },
+                    { emoji: "🎭", label: "Dramático" },
+                    { emoji: "🧸", label: "Peluche" },
                   ].map((style) => (
                     <div
                       key={style.label}
                       className="flex flex-col items-center gap-2 min-w-[70px] cursor-pointer group"
                       onClick={() => setLocation("/login")}
                     >
-                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
-                        flex items-center justify-center border border-black/10
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-amber-400/60
-                        group-hover:shadow-lg`}>
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-zinc-50 flex items-center justify-center border border-black/10 transition-colors duration-200 group-hover:bg-white group-hover:border-black/20">
                         <span className="text-2xl">{style.emoji}</span>
                       </div>
                       <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
@@ -311,7 +301,7 @@ export default function LandingPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white/70 backdrop-blur-md">
+      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white">
         Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
         <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
         {" "}y reconoces que leíste nuestra{" "}
