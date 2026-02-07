@@ -90,7 +90,7 @@ import {
 import * as crypto from "crypto";
 import { randomUUID } from "crypto";
 import { db, dbRead } from "./db";
-import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
+import { eq, sql, desc, and, isNull, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { knowledgeBaseService } from "./services/knowledgeBase";
 
 export interface IStorage {
@@ -203,7 +203,7 @@ export interface IStorage {
   // Admin: AI Models
   createAiModel(model: InsertAiModel): Promise<AiModel>;
   getAiModels(): Promise<AiModel[]>;
-  getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }>;
+  getAiModelsFiltered(filters: { provider?: string; providers?: string[]; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }>;
   getAiModelById(id: string): Promise<AiModel | undefined>;
   getAiModelByModelId(modelId: string, provider: string): Promise<AiModel | undefined>;
   updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined>;
@@ -1223,12 +1223,18 @@ export class MemStorage implements IStorage {
     return dbRead.select().from(aiModels).orderBy(desc(aiModels.createdAt));
   }
 
-  async getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
-    const { provider, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
+  async getAiModelsFiltered(filters: { provider?: string; providers?: string[]; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
+    const { provider, providers, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
     const conditions = [];
 
     if (provider) {
       conditions.push(eq(aiModels.provider, provider.toLowerCase()));
+    }
+    if (providers && providers.length > 0) {
+      const normalizedProviders = providers.map((p) => String(p).toLowerCase().trim()).filter(Boolean);
+      if (normalizedProviders.length > 0) {
+        conditions.push(inArray(aiModels.provider, normalizedProviders));
+      }
     }
     if (type) {
       conditions.push(eq(aiModels.modelType, type));
