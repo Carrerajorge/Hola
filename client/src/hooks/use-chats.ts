@@ -917,8 +917,9 @@ export function useChats() {
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    // Track whether message was actually added (for requestId cleanup)
-      if (isPending && message.role === "user" && !isCreatingChat) {
+    // If first message comes in while the chat is still pending, force-create the chat
+    // so we get a real chatId and can flush the queued messages.
+    if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
 
       const queue = pendingMessageQueue.get(chatId) || [];
@@ -1001,10 +1002,8 @@ export function useChats() {
     });
 
     // If message wasn't added (duplicate), don't proceed with persistence
-    
 
- 
- else if (isPending || isCreatingChat) {
+    if (isPending || isCreatingChat) {
       const queueKey = chatCreationInProgress.has(chatId) ? chatId : resolvedChatId;
       const queue = pendingMessageQueue.get(queueKey) || [];
       queue.push(message);
