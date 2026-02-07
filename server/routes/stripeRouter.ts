@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { getUncachableStripeClient, getStripePublishableKey } from "../stripeClient";
 import { db } from "../db";
-import { apiLogs, users } from "@shared/schema";
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { apiLogs, invoices, payments, users } from "@shared/schema";
+import { and, eq, gte, lt, or, sql } from "drizzle-orm";
 import { withRetry } from "../lib/retryUtility";
 import { z } from "zod";
 import { sendEmail } from "../services/genericEmailService";
@@ -592,6 +592,172 @@ export function createStripeRouter() {
         case 'invoice.payment_failed': {
           const invoice = event.data.object as any;
           await subscriptionService.handlePaymentFailed(invoice, event.id);
+          break;
+        }
+
+        case 'charge.refunded': {
+          const charge = event.data.object as any;
+          const chargeId = typeof charge?.id === "string" ? charge.id : null;
+          const paymentIntentId =
+            typeof charge?.payment_intent === "string"
+              ? charge.payment_intent
+              : (typeof charge?.payment_intent === "object" && typeof charge.payment_intent?.id === "string")
+                ? charge.payment_intent.id
+                : null;
+          const stripeInvoiceId =
+            typeof charge?.invoice === "string"
+              ? charge.invoice
+              : (typeof charge?.invoice === "object" && typeof charge.invoice?.id === "string")
+                ? charge.invoice.id
+                : null;
+
+          const conditions = [
+            chargeId ? eq(payments.stripeChargeId, chargeId) : null,
+            paymentIntentId ? eq(payments.stripePaymentIntentId, paymentIntentId) : null,
+            stripeInvoiceId ? eq(payments.stripePaymentId, stripeInvoiceId) : null,
+          ].filter(Boolean) as any[];
+
+          if (conditions.length > 0) {
+            const updateSet: Partial<typeof payments.$inferInsert> = { status: "refunded" };
+            if (chargeId) updateSet.stripeChargeId = chargeId;
+            if (paymentIntentId) updateSet.stripePaymentIntentId = paymentIntentId;
+            if (stripeInvoiceId) updateSet.stripePaymentId = stripeInvoiceId;
+
+            await db.update(payments).set(updateSet).where(or(...conditions));
+
+            if (stripeInvoiceId) {
+              await db.update(invoices).set({ status: "refunded" }).where(eq(invoices.stripeInvoiceId, stripeInvoiceId));
+            }
+
+            await auditLog(req as any, {
+              action: AuditActions.PAYMENT_REFUNDED,
+              resource: "payments",
+              resourceId: stripeInvoiceId || chargeId || null,
+              details: {
+                stripeChargeId: chargeId,
+                stripePaymentIntentId: paymentIntentId,
+                stripeInvoiceId,
+                amountRefunded: charge?.amount_refunded ?? null,
+                currency: charge?.currency ?? null,
+              },
+              category: "billing",
+              severity: "warning",
+            });
+          }
+          break;
+        }
+
+        case 'charge.dispute.created': {
+          const dispute = event.data.object as any;
+          const chargeId =
+            typeof dispute?.charge === "string"
+              ? dispute.charge
+              : (typeof dispute?.charge === "object" && typeof dispute.charge?.id === "string")
+                ? dispute.charge.id
+                : null;
+
+          if (chargeId) {
+            let stripeInvoiceId: string | null = null;
+            let paymentIntentId: string | null = null;
+            try {
+              const stripe = await getUncachableStripeClient();
+              const charge = await stripe.charges.retrieve(chargeId);
+              stripeInvoiceId =
+                typeof (charge as any)?.invoice === "string"
+                  ? (charge as any).invoice
+                  : (typeof (charge as any)?.invoice === "object" && typeof (charge as any).invoice?.id === "string")
+                    ? (charge as any).invoice.id
+                    : null;
+              paymentIntentId =
+                typeof (charge as any)?.payment_intent === "string"
+                  ? (charge as any).payment_intent
+                  : (typeof (charge as any)?.payment_intent === "object" && typeof (charge as any).payment_intent?.id === "string")
+                    ? (charge as any).payment_intent.id
+                    : null;
+            } catch (err) {
+              console.error("[Stripe] Failed to retrieve charge for dispute:", err);
+            }
+
+            const conditions = [
+              eq(payments.stripeChargeId, chargeId),
+              paymentIntentId ? eq(payments.stripePaymentIntentId, paymentIntentId) : null,
+              stripeInvoiceId ? eq(payments.stripePaymentId, stripeInvoiceId) : null,
+            ].filter(Boolean) as any[];
+
+            await db.update(payments).set({ status: "disputed", stripeChargeId: chargeId }).where(or(...conditions));
+
+            if (stripeInvoiceId) {
+              await db.update(invoices).set({ status: "disputed" }).where(eq(invoices.stripeInvoiceId, stripeInvoiceId));
+            }
+
+            await auditLog(req as any, {
+              action: AuditActions.PAYMENT_DISPUTED,
+              resource: "payments",
+              resourceId: stripeInvoiceId || chargeId,
+              details: {
+                stripeChargeId: chargeId,
+                stripeInvoiceId,
+                stripePaymentIntentId: paymentIntentId,
+                stripeDisputeId: dispute?.id ?? null,
+                reason: dispute?.reason ?? null,
+                amount: dispute?.amount ?? null,
+                currency: dispute?.currency ?? null,
+                status: dispute?.status ?? null,
+              },
+              category: "billing",
+              severity: "critical",
+            });
+          }
+          break;
+        }
+
+        case 'charge.dispute.closed': {
+          const dispute = event.data.object as any;
+          const chargeId =
+            typeof dispute?.charge === "string"
+              ? dispute.charge
+              : (typeof dispute?.charge === "object" && typeof dispute.charge?.id === "string")
+                ? dispute.charge.id
+                : null;
+
+          if (chargeId) {
+            let stripeInvoiceId: string | null = null;
+            let paymentIntentId: string | null = null;
+            try {
+              const stripe = await getUncachableStripeClient();
+              const charge = await stripe.charges.retrieve(chargeId);
+              stripeInvoiceId =
+                typeof (charge as any)?.invoice === "string"
+                  ? (charge as any).invoice
+                  : (typeof (charge as any)?.invoice === "object" && typeof (charge as any).invoice?.id === "string")
+                    ? (charge as any).invoice.id
+                    : null;
+              paymentIntentId =
+                typeof (charge as any)?.payment_intent === "string"
+                  ? (charge as any).payment_intent
+                  : (typeof (charge as any)?.payment_intent === "object" && typeof (charge as any).payment_intent?.id === "string")
+                    ? (charge as any).payment_intent.id
+                    : null;
+            } catch (err) {
+              console.error("[Stripe] Failed to retrieve charge for dispute:", err);
+            }
+
+            const disputeStatus = String(dispute?.status || "").toLowerCase();
+            const nextPaymentStatus = disputeStatus === "won" || disputeStatus === "warning_closed" ? "completed" : disputeStatus === "lost" ? "failed" : "disputed";
+
+            const conditions = [
+              eq(payments.stripeChargeId, chargeId),
+              paymentIntentId ? eq(payments.stripePaymentIntentId, paymentIntentId) : null,
+              stripeInvoiceId ? eq(payments.stripePaymentId, stripeInvoiceId) : null,
+            ].filter(Boolean) as any[];
+
+            await db.update(payments).set({ status: nextPaymentStatus }).where(or(...conditions));
+
+            if (stripeInvoiceId) {
+              const nextInvoiceStatus = nextPaymentStatus === "completed" ? "paid" : nextPaymentStatus;
+              await db.update(invoices).set({ status: nextInvoiceStatus }).where(eq(invoices.stripeInvoiceId, stripeInvoiceId));
+            }
+          }
           break;
         }
       }

@@ -153,6 +153,8 @@ export const AuditActions = {
   PAYMENT_RECEIVED: "payment.received",
   PAYMENT_FAILED: "payment.failed",
   PAYMENT_REFUNDED: "payment.refunded",
+  PAYMENT_RECONCILED: "payment.reconciled",
+  PAYMENT_DISPUTED: "payment.disputed",
   
   // Invoices
   INVOICE_CREATED: "invoice.created",

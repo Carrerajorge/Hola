@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -2228,72 +2229,921 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const [view, setView] = useState<"all" | "unmatched">("all");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [status, setStatus] = useState<string>("all");
+  const [currency, setCurrency] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "amount">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  const { data: paymentsData, isLoading } = useQuery({
-    queryKey: ["/api/admin/finance/payments"],
+  const [syncJobId, setSyncJobId] = useState<string | null>(null);
+  const [detailsPaymentId, setDetailsPaymentId] = useState<string | null>(null);
+  const [assignEmail, setAssignEmail] = useState("");
+
+  const [isHydrated, setIsHydrated] = useState(false);
+  const didInitRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    const pageParam = Number(params.get("pay_page") || "");
+    if (Number.isFinite(pageParam) && pageParam >= 1) setPage(Math.floor(pageParam));
+
+    const limitParam = Number(params.get("pay_limit") || "");
+    if (Number.isFinite(limitParam) && [20, 50, 100].includes(limitParam)) setLimit(limitParam);
+
+    const viewParam = params.get("pay_view");
+    if (viewParam === "unmatched" || viewParam === "all") setView(viewParam);
+
+    const statusParam = params.get("pay_status");
+    if (statusParam && ["all", "completed", "pending", "failed", "refunded", "disputed"].includes(statusParam)) setStatus(statusParam);
+
+    const currencyParam = params.get("pay_currency");
+    if (currencyParam) {
+      setCurrency(currencyParam.toLowerCase() === "all" ? "all" : currencyParam.toUpperCase());
+    }
+
+    const searchParam = params.get("pay_search");
+    if (typeof searchParam === "string") setSearch(searchParam);
+
+    const fromParam = params.get("pay_from");
+    if (fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam)) setDateFrom(fromParam);
+
+    const toParam = params.get("pay_to");
+    if (toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)) setDateTo(toParam);
+
+    const minParam = params.get("pay_min");
+    if (typeof minParam === "string") setMinAmount(minParam);
+
+    const maxParam = params.get("pay_max");
+    if (typeof maxParam === "string") setMaxAmount(maxParam);
+
+    const sortByParam = params.get("pay_sortBy");
+    if (sortByParam === "amount" || sortByParam === "createdAt") setSortBy(sortByParam);
+
+    const sortOrderParam = params.get("pay_sortOrder");
+    if (sortOrderParam === "asc" || sortOrderParam === "desc") setSortOrder(sortOrderParam);
+
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      return;
+    }
+    setPage(1);
+  }, [isHydrated, view, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const setOrDelete = (key: string, value: string, defaultValue?: string) => {
+      if (!value || value === defaultValue) params.delete(key);
+      else params.set(key, value);
+    };
+
+    setOrDelete("pay_page", String(page), "1");
+    setOrDelete("pay_limit", String(limit), "20");
+    setOrDelete("pay_view", view, "all");
+    setOrDelete("pay_status", status, "all");
+    setOrDelete("pay_currency", currency, "all");
+    setOrDelete("pay_search", search.trim(), "");
+    setOrDelete("pay_from", dateFrom, "");
+    setOrDelete("pay_to", dateTo, "");
+    setOrDelete("pay_min", minAmount, "");
+    setOrDelete("pay_max", maxAmount, "");
+    setOrDelete("pay_sortBy", sortBy, "createdAt");
+    setOrDelete("pay_sortOrder", sortOrder, "desc");
+
+    const qs = params.toString();
+    const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+  }, [isHydrated, page, limit, view, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
+
+  const buildPaymentsFilterParams = () => {
+    const params = new URLSearchParams();
+    if (status && status !== "all") params.set("status", status);
+    if (currency && currency !== "all") params.set("currency", currency);
+    if (search.trim()) params.set("search", search.trim());
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    if (minAmount.trim()) params.set("minAmount", minAmount.trim());
+    if (maxAmount.trim()) params.set("maxAmount", maxAmount.trim());
+    return params;
+  };
+
+  const buildPaymentsListParams = () => {
+    const params = buildPaymentsFilterParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+    if (sortBy !== "createdAt") params.set("sortBy", sortBy);
+    if (sortOrder !== "desc") params.set("sortOrder", sortOrder);
+    return params;
+  };
+
+  const formatMoney = (value: any, currency?: string | null) => {
+    const cur = String(currency || "").toUpperCase().trim();
+    const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+
+    if (!Number.isFinite(n)) {
+      return cur ? `${String(value ?? "-")} ${cur}` : String(value ?? "-");
+    }
+
+    if (cur) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(n);
+      } catch {
+        // Ignore invalid currency codes and fall back.
+      }
+    }
+
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copiado al portapapeles");
+    } catch {
+      toast.error("No se pudo copiar");
+    }
+  };
+
+  const paymentsEndpoint = view === "unmatched" ? "/api/admin/finance/payments/unmatched" : "/api/admin/finance/payments";
+
+  const {
+    data: paymentsData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: [paymentsEndpoint, page, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments", { credentials: "include" });
+      const params = buildPaymentsListParams();
+      const res = await fetch(`${paymentsEndpoint}?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to fetch payments");
+      }
       return res.json();
     }
   });
-  
-  const payments = paymentsData?.payments || paymentsData || [];
+
+  const payments = paymentsData?.payments || [];
+  const pagination = paymentsData?.pagination || { page, limit, total: payments.length, totalPages: 1 };
 
   const { data: stats } = useQuery({
-    queryKey: ["/api/admin/finance/payments/stats"],
+    queryKey: ["/api/admin/finance/payments/stats", status, currency, search, dateFrom, dateTo, minAmount, maxAmount],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments/stats", { credentials: "include" });
-      return res.json();
+      const params = buildPaymentsFilterParams();
+      const qs = params.toString();
+      const res = await fetch(`/api/admin/finance/payments/stats${qs ? `?${qs}` : ""}`, { credentials: "include" });
+      return await res.json();
+    }
+  });
+
+  const syncStripeMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = { maxInvoices: 200, async: true };
+      if (dateFrom) payload.dateFrom = dateFrom;
+      if (dateTo) payload.dateTo = dateTo;
+
+      const res = await fetch("/api/admin/finance/payments/sync-stripe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || "Stripe sync failed");
+      }
+      return body;
+    },
+    onSuccess: (data) => {
+      if (data?.async && data?.jobId) {
+        setSyncJobId(String(data.jobId));
+        toast.success("Sincronización en cola. Mostrando progreso...");
+        return;
+      }
+
+      const created = Number(data?.created || 0);
+      const updated = Number(data?.updated || 0);
+      const errors = Number(data?.errors || 0);
+      const unmatched = Array.isArray(data?.unmatchedInvoiceIds) ? data.unmatchedInvoiceIds.length : 0;
+
+      const parts = [
+        `Stripe sincronizado: ${data?.synced || 0} pagos`,
+        created || updated ? `(${created} creados, ${updated} actualizados)` : null,
+        errors ? `${errors} errores` : null,
+        unmatched ? `${unmatched} sin usuario` : null,
+      ].filter(Boolean);
+
+      toast.success(parts.join(" • "));
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Stripe sync failed"));
+    }
+  });
+
+  const { data: syncJob } = useQuery({
+    queryKey: ["/api/admin/finance/payments/sync-stripe/jobs", syncJobId],
+    enabled: !!syncJobId,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/finance/payments/sync-stripe/jobs/${syncJobId}`, { credentials: "include" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to fetch sync job");
+      return body;
+    },
+    refetchInterval: (q) => {
+      const state = (q as any)?.state;
+      if (!state) return 2000;
+      if (state === "completed" || state === "failed") return false;
+      return 2000;
+    },
+  });
+
+  useEffect(() => {
+    if (!syncJobId) return;
+    const state = (syncJob as any)?.state;
+    if (state === "completed") {
+      const result = (syncJob as any)?.returnvalue;
+      const created = Number(result?.created || 0);
+      const updated = Number(result?.updated || 0);
+      const errors = Number(result?.errors || 0);
+      const unmatched = Array.isArray(result?.unmatchedInvoiceIds) ? result.unmatchedInvoiceIds.length : 0;
+      const parts = [
+        `Stripe sincronizado: ${result?.synced || 0} pagos`,
+        created || updated ? `(${created} creados, ${updated} actualizados)` : null,
+        errors ? `${errors} errores` : null,
+        unmatched ? `${unmatched} sin usuario` : null,
+      ].filter(Boolean);
+      toast.success(parts.join(" • "));
+      setSyncJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+    } else if (state === "failed") {
+      toast.error(String((syncJob as any)?.failedReason || "Stripe sync failed"));
+      setSyncJobId(null);
+    }
+  }, [syncJobId, syncJob, queryClient]);
+
+  const { data: paymentDetails, isLoading: isDetailsLoading } = useQuery({
+    queryKey: ["/api/admin/finance/payments/detail", detailsPaymentId],
+    enabled: !!detailsPaymentId,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/finance/payments/${detailsPaymentId}`, { credentials: "include" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to fetch payment");
+      return body;
+    }
+  });
+
+  const assignUserMutation = useMutation({
+    mutationFn: async () => {
+      if (!detailsPaymentId) throw new Error("Missing payment id");
+      const email = assignEmail.trim();
+      if (!email) throw new Error("Ingresa un email");
+
+      const res = await fetch(`/api/admin/finance/payments/${detailsPaymentId}/assign-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to assign payment");
+      return body;
+    },
+    onSuccess: () => {
+      toast.success("Pago conciliado con el usuario");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/detail", detailsPaymentId] });
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Failed to assign payment"));
     }
   });
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-medium">Payments</h2>
+            <p className="text-xs text-muted-foreground">
+              Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
+            </p>
+            <Tabs value={view} onValueChange={(v) => setView(v as any)} className="mt-2">
+              <TabsList>
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="unmatched">Sin usuario</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Actualizar
+            </Button>
+            <Button variant="outline" size="sm" disabled>
+              <Download className="h-4 w-4 mr-2" />
+              Exportar
+            </Button>
+            <Button size="sm" disabled>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Sincronizar Stripe
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-7 w-28" />
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <Skeleton className="h-9 w-full max-w-[420px]" />
+            <Skeleton className="h-9 w-full max-w-[520px]" />
+          </div>
+        </div>
+
+        <TableSkeleton rows={6} columns={6} />
+      </div>
+    );
   }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar los pagos</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
+  const statsCurrencies: string[] = stats?.currencies || (stats?.byCurrency ? Object.keys(stats.byCurrency) : []);
+  const primaryCurrency: string | null =
+    stats?.primaryCurrency || (statsCurrencies.length === 1 ? statsCurrencies[0] : null);
+
+  const renderStatsAmount = (key: "total" | "thisMonth" | "pendingTotal") => {
+    if (!stats) return "-";
+
+    if (primaryCurrency) {
+      return (
+        <p className="text-xl font-semibold tabular-nums" data-testid={key === "total" ? "text-total-payments" : undefined}>
+          {formatMoney(stats?.[key] || "0", primaryCurrency)}
+        </p>
+      );
+    }
+
+    if (statsCurrencies.length > 1 && stats?.byCurrency) {
+      return (
+        <div className="space-y-0.5">
+          {statsCurrencies.slice(0, 3).map((cur) => (
+            <p key={cur} className="text-sm font-semibold tabular-nums">
+              {cur} {formatMoney(stats.byCurrency?.[cur]?.[key] || "0", cur)}
+            </p>
+          ))}
+          {statsCurrencies.length > 3 && (
+            <p className="text-xs text-muted-foreground">+{statsCurrencies.length - 3} monedas</p>
+          )}
+        </div>
+      );
+    }
+
+    return <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.[key] || "0", "EUR")}</p>;
+  };
+
+  const buildExportUrl = (format: "csv" | "xlsx") => {
+    const params = buildPaymentsFilterParams();
+    if (sortBy !== "createdAt") params.set("sortBy", sortBy);
+    if (sortOrder !== "desc") params.set("sortOrder", sortOrder);
+    params.set("format", format);
+    return `/api/admin/finance/payments/export?${params.toString()}`;
+  };
+
+  const exportCsvUrl = buildExportUrl("csv");
+  const exportXlsxUrl = buildExportUrl("xlsx");
+
+  const toggleSort = (next: "createdAt" | "amount") => {
+    if (sortBy !== next) {
+      setSortBy(next);
+      setSortOrder("desc");
+      return;
+    }
+    setSortOrder((o) => (o === "desc" ? "asc" : "desc"));
+  };
+
+  const renderStatusBadge = (s: string) => {
+    const st = String(s || "").toLowerCase();
+    if (st === "completed") return <Badge>Completado</Badge>;
+    if (st === "pending") return <Badge variant="secondary">Pendiente</Badge>;
+    if (st === "refunded") return <Badge variant="secondary" className="bg-muted text-foreground">Reembolsado</Badge>;
+    if (st === "disputed") return <Badge variant="secondary" className="bg-yellow-500/15 text-yellow-700 dark:text-yellow-300">Disputa</Badge>;
+    if (st === "failed") return <Badge variant="destructive">Fallido</Badge>;
+    return <Badge variant="secondary">{st || "N/A"}</Badge>;
+  };
+
+  const syncState = String((syncJob as any)?.state || "");
+  const syncProgress = (syncJob as any)?.progress;
+  const progressSynced = Number(syncProgress?.synced ?? 0);
+  const progressMax = Number(syncProgress?.maxInvoices ?? 0);
+  const progressPct = progressMax > 0 ? Math.min(100, Math.round((progressSynced / progressMax) * 100)) : 0;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Payments</h2>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
-          <p className="text-xl font-semibold" data-testid="text-total-payments">€{stats?.total || "0"}</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-medium">Payments</h2>
+          <p className="text-xs text-muted-foreground">
+            Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
+          </p>
+          <Tabs value={view} onValueChange={(v) => setView(v as any)} className="mt-2">
+            <TabsList>
+              <TabsTrigger value="all">Todos</TabsTrigger>
+              <TabsTrigger value="unmatched">Sin usuario</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Este mes</p>
-          <p className="text-xl font-semibold">€{stats?.thisMonth || "0"}</p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
-          <p className="text-xl font-semibold">{stats?.count || 0}</p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            data-testid="button-refresh-payments"
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
+            Actualizar
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1" disabled={view !== "all"} data-testid="button-export-payments">
+                <Download className="h-4 w-4" />
+                Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => window.open(exportCsvUrl, "_blank")}>CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.open(exportXlsxUrl, "_blank")}>Excel (.xlsx)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            size="sm"
+            onClick={() => syncStripeMutation.mutate()}
+            disabled={syncStripeMutation.isPending || !!syncJobId}
+            data-testid="button-sync-stripe"
+          >
+            <RotateCcw className={cn("h-4 w-4 mr-2", (syncStripeMutation.isPending || !!syncJobId) && "animate-spin")} />
+            {syncJobId ? "Sincronizando..." : "Sincronizar Stripe"}
+          </Button>
         </div>
       </div>
+
+      {!!syncJobId && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Sincronización Stripe en progreso</p>
+              <p className="text-xs text-muted-foreground">
+                Estado: {syncState || "..."}. Sincronizados: {progressSynced}{progressMax ? `/${progressMax}` : ""}.
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground tabular-nums">{progressPct}%</div>
+          </div>
+          <Progress value={progressPct} />
+        </div>
+      )}
+
+      {view === "all" && (
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
+            {renderStatsAmount("total")}
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Este mes</p>
+            {renderStatsAmount("thisMonth")}
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
+            <p className="text-xl font-semibold tabular-nums">{stats?.count || 0}</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Pendientes</p>
+            {renderStatsAmount("pendingTotal")}
+            <p className="text-xs text-muted-foreground mt-1">{stats?.pendingCount || 0} pagos</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Reembolsos</p>
+            <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.refundedTotal || "0", primaryCurrency || "EUR")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{stats?.refundedCount || 0} pagos</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Disputas</p>
+            <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.disputedTotal || "0", primaryCurrency || "EUR")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{stats?.disputedCount || 0} pagos</p>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por email, userId, Stripe invoice/customer/intent/charge..."
+              className="pl-9 h-9"
+              data-testid="input-search-payments"
+            />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-[160px]" data-testid="select-payment-status">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="completed">Completados</SelectItem>
+                <SelectItem value="pending">Pendientes</SelectItem>
+                <SelectItem value="failed">Fallidos</SelectItem>
+                <SelectItem value="refunded">Reembolsados</SelectItem>
+                <SelectItem value="disputed">Disputa</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={currency} onValueChange={setCurrency}>
+              <SelectTrigger className="h-9 w-[130px]" data-testid="select-payment-currency">
+                <SelectValue placeholder="Moneda" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {statsCurrencies.map((cur) => (
+                  <SelectItem key={cur} value={cur}>
+                    {cur}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={minAmount}
+              onChange={(e) => setMinAmount(e.target.value)}
+              placeholder="Min"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-min"
+            />
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={maxAmount}
+              onChange={(e) => setMaxAmount(e.target.value)}
+              placeholder="Max"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-max"
+            />
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-from"
+            />
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-to"
+            />
+            <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
+              <SelectTrigger className="h-9 w-[110px]" data-testid="select-payment-limit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">20 / pág</SelectItem>
+                <SelectItem value="50">50 / pág</SelectItem>
+                <SelectItem value="100">100 / pág</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearch("");
+                setStatus("all");
+                setCurrency("all");
+                setDateFrom("");
+                setDateTo("");
+                setMinAmount("");
+                setMaxAmount("");
+                setSortBy("createdAt");
+                setSortOrder("desc");
+              }}
+              data-testid="button-clear-payment-filters"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Limpiar
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-lg border">
-        <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
+        <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>ID</span>
           <span>Usuario</span>
-          <span>Cantidad</span>
-          <span>Fecha</span>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("amount")}
+            data-testid="button-sort-payments-amount"
+          >
+            Cantidad
+            {sortBy === "amount" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("createdAt")}
+            data-testid="button-sort-payments-date"
+          >
+            Fecha
+            {sortBy === "createdAt" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
           <span>Estado</span>
+          <span className="text-right">Stripe</span>
         </div>
         {payments.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground text-center">No hay pagos registrados</div>
+          <div className="p-6 text-sm text-muted-foreground text-center space-y-2">
+            <p>No hay pagos registrados</p>
+            <div className="flex items-center justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => syncStripeMutation.mutate()}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Sincronizar Stripe
+              </Button>
+            </div>
+          </div>
         ) : (
           payments.map((payment: any) => (
-            <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
+            <div
+              key={payment.id}
+              className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm cursor-pointer hover:bg-muted/30"
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetailsPaymentId(payment.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setDetailsPaymentId(payment.id);
+              }}
+            >
               <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
-              <span>{payment.userId || "N/A"}</span>
-              <span className="font-medium">€{payment.amount}</span>
+              <div className="min-w-0">
+                <p className="truncate">{payment.userEmail || payment.userName || payment.userId || "N/A"}</p>
+                {payment.userId && (
+                  <p className="text-xs text-muted-foreground font-mono truncate">{String(payment.userId).slice(0, 16)}</p>
+                )}
+              </div>
+              <span className="font-medium tabular-nums">{formatMoney(payment.amountValue ?? payment.amount, payment.currency)}</span>
               <span className="text-muted-foreground">
                 {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
               </span>
-              <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
-                {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
-              </Badge>
+              {renderStatusBadge(payment.status)}
+              <div className="flex justify-end">
+                {payment.stripePaymentId ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyToClipboard(String(payment.stripePaymentId));
+                    }}
+                    data-testid={`button-copy-stripe-${payment.id}`}
+                    title="Copiar Stripe ID"
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                    <span className="text-xs font-mono">{String(payment.stripePaymentId).slice(0, 12)}</span>
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">-</span>
+                )}
+              </div>
             </div>
           ))
         )}
       </div>
+
+      <Dialog
+        open={!!detailsPaymentId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailsPaymentId(null);
+            setAssignEmail("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Detalle de pago</DialogTitle>
+          </DialogHeader>
+
+          {isDetailsLoading ? (
+            <div className="space-y-4 py-2">
+              <Skeleton className="h-6 w-48" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+              <Skeleton className="h-28 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Payment ID</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs">{paymentDetails?.payment?.id}</code>
+                    {paymentDetails?.payment?.id && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyToClipboard(String(paymentDetails.payment.id))}>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div>{renderStatusBadge(paymentDetails?.payment?.status)}</div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Usuario</p>
+                  <p className="text-sm">
+                    {paymentDetails?.payment?.userEmail || paymentDetails?.payment?.userName || paymentDetails?.payment?.userId || "Sin usuario"}
+                  </p>
+                  {paymentDetails?.payment?.userId && (
+                    <p className="text-xs text-muted-foreground font-mono mt-1">{String(paymentDetails.payment.userId)}</p>
+                  )}
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Importe</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    {formatMoney(paymentDetails?.payment?.amountValue ?? paymentDetails?.payment?.amount, paymentDetails?.payment?.currency)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {paymentDetails?.payment?.createdAt ? format(new Date(paymentDetails.payment.createdAt), "dd MMM yyyy HH:mm") : "-"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-xs text-muted-foreground">Stripe</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  {[
+                    { label: "Invoice ID", value: paymentDetails?.payment?.stripePaymentId },
+                    { label: "Customer ID", value: paymentDetails?.payment?.stripeCustomerId },
+                    { label: "PaymentIntent ID", value: paymentDetails?.payment?.stripePaymentIntentId },
+                    { label: "Charge ID", value: paymentDetails?.payment?.stripeChargeId },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between gap-2 rounded-md bg-muted/40 p-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="text-xs font-mono truncate">{item.value || "-"}</p>
+                      </div>
+                      {item.value ? (
+                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyToClipboard(String(item.value))}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {!!paymentDetails?.invoices?.length && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Facturas</p>
+                  <div className="space-y-2">
+                    {paymentDetails.invoices.map((inv: any) => (
+                      <div key={inv.id} className="rounded-md border p-2 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{inv.invoiceNumber}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {String(inv.currency || "EUR").toUpperCase()} {inv.amountValue ?? inv.amount} • {inv.status}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {inv.createdAt ? format(new Date(inv.createdAt), "dd MMM yyyy") : "-"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {inv.stripeHostedInvoiceUrl && (
+                            <Button variant="outline" size="sm" className="h-7" asChild>
+                              <a href={inv.stripeHostedInvoiceUrl} target="_blank" rel="noreferrer">
+                                Ver
+                              </a>
+                            </Button>
+                          )}
+                          {(inv.stripeInvoicePdfUrl || inv.pdfPath) && (
+                            <Button variant="outline" size="sm" className="h-7" asChild>
+                              <a href={inv.stripeInvoicePdfUrl || inv.pdfPath} target="_blank" rel="noreferrer">
+                                PDF
+                              </a>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!paymentDetails?.payment?.userId && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Conciliar pago con usuario</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="email@dominio.com"
+                      value={assignEmail}
+                      onChange={(e) => setAssignEmail(e.target.value)}
+                    />
+                    <Button onClick={() => assignUserMutation.mutate()} disabled={assignUserMutation.isPending}>
+                      {assignUserMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      Asignar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground" data-testid="text-payments-pagination-info">
+            Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              data-testid="button-payments-prev-page"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page >= pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              data-testid="button-payments-next-page"
+            >
+              Siguiente
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
