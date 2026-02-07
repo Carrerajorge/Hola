@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { Trash2, Pause, Play, ArrowUp, Mic, Square, AudioLines } from "lucide-react";
+import { Trash2, Pause, Play, ArrowUp, Mic, MicOff, Square, AudioLines } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface RecordingPanelProps {
@@ -51,6 +51,9 @@ export function RecordingPanel({
 }: RecordingPanelProps) {
   // Show stop button if either AI is processing OR agent is running
   const showStopButton = aiState !== "idle" || isAgentRunning;
+  const isDictationSupported =
+    typeof window !== "undefined" &&
+    Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
   const handleStop = () => {
     if (isAgentRunning && onAgentStop) {
@@ -164,14 +167,21 @@ export function RecordingPanel({
             variant="ghost"
             onClick={onToggleRecording}
             size="icon"
-            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50"
-            aria-label="Start voice dictation"
+            disabled={!isDictationSupported}
+            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label={isDictationSupported ? "Iniciar dictado por voz" : "Dictado no disponible"}
             data-testid="button-voice-dictation"
           >
-            <Mic className="h-5 w-5" aria-hidden="true" />
+            {isDictationSupported ? (
+              <Mic className="h-5 w-5" aria-hidden="true" />
+            ) : (
+              <MicOff className="h-5 w-5" aria-hidden="true" />
+            )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Dictar texto</TooltipContent>
+        <TooltipContent>
+          {isDictationSupported ? "Dictar texto" : "Dictado no disponible en este navegador"}
+        </TooltipContent>
       </Tooltip>
 
       {showStopButton ? (

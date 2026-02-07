@@ -1076,6 +1076,13 @@ export function ChatInterface({
         setIsKeyboardShortcutsOpen(true);
       }
 
+      // Ctrl+Shift+M or Cmd+Shift+M to toggle voice dictation
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "m" || e.key === "M")) {
+        e.preventDefault();
+        toggleVoiceRecordingRef.current?.();
+        return;
+      }
+
       // Escape to cancel streaming (only when actively streaming)
       if (e.key === "Escape" && aiState !== "idle") {
         e.preventDefault();
@@ -1324,6 +1331,7 @@ export function ChatInterface({
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
+  const toggleVoiceRecordingRef = useRef<(() => void) | null>(null);
 
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
@@ -1468,6 +1476,18 @@ export function ChatInterface({
     isPausedRef.current = isPaused;
   }, [isPaused]);
 
+  // If the user edits the textarea while dictation is active, keep the dictation base in sync.
+  // This prevents dictation from "snapping back" to an older base and dropping user edits.
+  useEffect(() => {
+    if (!isRecording) return;
+    const d = dictationRef.current;
+    if (input === d.lastAppliedText) return;
+
+    d.baseText = input;
+    d.interimText = "";
+    d.lastAppliedText = input;
+  }, [input, isRecording]);
+
   useEffect(() => {
     return () => {
       const d = dictationRef.current;
@@ -1500,6 +1520,30 @@ export function ChatInterface({
     return b + " " + seg;
   };
 
+  const normalizeFinalDictationSegment = (segment: string) => {
+    const s = (segment || "").trim();
+    if (!s) return "";
+
+    const commands: Array<{ re: RegExp; punctuation: string }> = [
+      { re: /\b(punto y coma)\s*$/i, punctuation: ";" },
+      { re: /\b(dos puntos)\s*$/i, punctuation: ":" },
+      { re: /\b(punto)\s*$/i, punctuation: "." },
+      { re: /\b(coma)\s*$/i, punctuation: "," },
+      { re: /\b(signo de interrogaci[oó]n|interrogaci[oó]n)\s*$/i, punctuation: "?" },
+      { re: /\b(signo de exclamaci[oó]n|exclamaci[oó]n)\s*$/i, punctuation: "!" },
+    ];
+
+    for (const cmd of commands) {
+      const m = s.match(cmd.re);
+      if (!m) continue;
+      const idx = m.index ?? 0;
+      const before = s.slice(0, idx).trimEnd();
+      return before ? before + cmd.punctuation : cmd.punctuation;
+    }
+
+    return s;
+  };
+
   const clearDictationTimers = () => {
     const d = dictationRef.current;
     if (d.interimApplyTimer) {
@@ -1512,12 +1556,36 @@ export function ChatInterface({
     }
   };
 
+  const focusTextareaAtEnd = (force = false) => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    if (!force && typeof document !== "undefined" && document.activeElement !== el) return;
+
+    try {
+      el.focus();
+    } catch {
+      // ignore
+    }
+
+    try {
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    } catch {
+      // ignore
+    }
+  };
+
   const applyDictationToInput = (force = false) => {
     const d = dictationRef.current;
     const next = buildDictationText(d.baseText, d.interimText);
     if (!force && next === d.lastAppliedText) return;
     d.lastAppliedText = next;
     setInput(next);
+
+    if (d.shouldBeActive && !d.stopRequested && !isPausedRef.current) {
+      requestAnimationFrame(() => focusTextareaAtEnd(false));
+    }
   };
 
   const scheduleInterimApply = () => {
@@ -1543,6 +1611,21 @@ export function ChatInterface({
 
   const commitInterimToBase = () => {
     const d = dictationRef.current;
+    const current = currentTextRef.current || "";
+    const interim = (d.interimText || "").trim();
+
+    // If the user changed the textarea content (not via dictation apply), treat it as the new base.
+    if (current && current !== d.lastAppliedText) {
+      d.baseText = current;
+    }
+
+    // Avoid duplicating interim text if it's already present at the end of the base/current value.
+    if (interim && (d.baseText || "").trimEnd().endsWith(interim)) {
+      d.interimText = "";
+      d.lastAppliedText = d.baseText;
+      return;
+    }
+
     d.baseText = buildDictationText(d.baseText, d.interimText);
     d.interimText = "";
     d.lastAppliedText = d.baseText;
@@ -1602,20 +1685,25 @@ export function ChatInterface({
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
-    recognition.lang = "es-ES";
+    recognition.lang =
+      (typeof document !== "undefined" && document.documentElement?.lang) ||
+      (typeof navigator !== "undefined" && navigator.language) ||
+      "es-ES";
 
     recognition.onresult = (event: any) => {
       const d = dictationRef.current;
+      if (!d.shouldBeActive || d.stopRequested || isPausedRef.current) return;
       let newFinal = "";
       let newInterim = "";
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        const part = result?.[0]?.transcript ?? "";
+        const partRaw = result?.[0]?.transcript ?? "";
         if (result.isFinal) {
+          const part = normalizeFinalDictationSegment(partRaw);
           newFinal = appendDictationSegment(newFinal, part);
         } else {
-          newInterim = appendDictationSegment(newInterim, part);
+          newInterim = appendDictationSegment(newInterim, partRaw);
         }
       }
 
@@ -1714,6 +1802,8 @@ export function ChatInterface({
     setIsPaused(false);
     setIsRecording(true);
     setRecordingTime(0);
+    setScreenReaderAnnouncement("Dictado iniciado");
+    requestAnimationFrame(() => focusTextareaAtEnd(true));
 
     startRecognition("user");
   };
@@ -1725,6 +1815,7 @@ export function ChatInterface({
       startVoiceRecording();
     }
   };
+  toggleVoiceRecordingRef.current = toggleVoiceRecording;
 
   const pauseVoiceRecording = () => {
     if (!isRecording || isPausedRef.current) return;
@@ -1735,6 +1826,7 @@ export function ChatInterface({
 
     isPausedRef.current = true;
     setIsPaused(true);
+    setScreenReaderAnnouncement("Dictado en pausa");
 
     if (speechRecognitionRef.current) {
       try {
@@ -1761,19 +1853,23 @@ export function ChatInterface({
 
     isPausedRef.current = false;
     setIsPaused(false);
+    setScreenReaderAnnouncement("Dictado reanudado");
+    requestAnimationFrame(() => focusTextareaAtEnd(true));
 
     startRecognition("resume");
   };
 
   const stopVoiceRecording = () => {
     const d = dictationRef.current;
-    d.baseText = currentTextRef.current || buildDictationText(d.baseText, d.interimText);
-    d.interimText = "";
-    d.lastAppliedText = d.baseText;
-
     d.shouldBeActive = false;
     d.stopRequested = true;
     clearDictationTimers();
+
+    commitInterimToBase();
+    const finalText = d.baseText;
+    if (currentTextRef.current !== finalText) {
+      setInput(finalText);
+    }
 
     if (speechRecognitionRef.current) {
       try {
@@ -1788,6 +1884,7 @@ export function ChatInterface({
     setIsRecording(false);
     setRecordingTime(0);
     setIsPaused(false);
+    setScreenReaderAnnouncement("Dictado detenido");
   };
 
   const discardVoiceRecording = () => {

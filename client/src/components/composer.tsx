@@ -1033,12 +1033,20 @@ export function Composer({
                 const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
                   e.preventDefault();
-                  handleSubmitWithHistory();
+                  if (isRecording) {
+                    sendVoiceRecording();
+                  } else {
+                    handleSubmitWithHistory();
+                  }
                   return;
                 }
                 if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                   e.preventDefault();
-                  handleSubmitWithHistory();
+                  if (isRecording) {
+                    sendVoiceRecording();
+                  } else {
+                    handleSubmitWithHistory();
+                  }
                 }
               }}
               onPaste={handlePaste}
