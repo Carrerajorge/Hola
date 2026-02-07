@@ -191,7 +191,27 @@ export function createChatsRouter() {
       }
 
       const messages = await storage.getChatMessages(req.params.id);
-      res.json({ ...chat, messages, shareRole, isOwner });
+      // Also include conversationDocuments so the frontend can hydrate attachment display data
+      const conversationDocs = await storage.getConversationDocuments(req.params.id);
+      res.json({ ...chat, messages, conversationDocuments: conversationDocs, shareRole, isOwner });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Retrieve conversation documents (uploaded file references) for a chat
+  router.get("/chats/:id/conversation-documents", async (req, res) => {
+    try {
+      const userId = getSecureUserId(req);
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      const docs = await storage.getConversationDocuments(req.params.id);
+      res.json(docs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -442,17 +462,36 @@ export function createChatsRouter() {
       const sanitizedContent = sanitizeMessageContent(content);
 
       // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
-      // Strip any base64 imageUrl that might have leaked through client sanitization.
-      // Validate storagePaths. This is a safety net for data integrity.
+      // Strip all large data fields (imageUrl, content, thumbnail, dataUrl) that should not be
+      // stored in JSONB. The actual file data lives in object storage (storagePath) and
+      // conversationDocuments. Only lightweight metadata is persisted in the message JSONB.
       const sanitizedAttachments = attachments && Array.isArray(attachments)
         ? attachments.map((att: any) => {
-            const { imageUrl, ...rest } = att; // Always strip imageUrl (base64)
-            // Validate storagePath format
-            if (rest.storagePath && typeof rest.storagePath === 'string' && !rest.storagePath.startsWith('/objects/')) {
-              console.warn(`[Attachment] Invalid storagePath stripped: ${rest.storagePath}`);
-              delete rest.storagePath;
+            // Build a clean attachment with only metadata fields
+            const clean: Record<string, any> = {
+              id: att.id || att.fileId,
+              fileId: att.fileId,
+              name: att.name,
+              type: att.type,
+              mimeType: att.mimeType || att.type,
+              size: att.size,
+              storagePath: att.storagePath,
+            };
+            // Preserve spreadsheet metadata (without large preview data)
+            if (att.spreadsheetData) {
+              clean.spreadsheetData = {
+                uploadId: att.spreadsheetData.uploadId,
+                sheets: att.spreadsheetData.sheets,
+                analysisId: att.spreadsheetData.analysisId,
+                sessionId: att.spreadsheetData.sessionId,
+              };
             }
-            return rest;
+            // Validate storagePath format
+            if (clean.storagePath && typeof clean.storagePath === 'string' && !clean.storagePath.startsWith('/objects/')) {
+              console.warn(`[Attachment] Invalid storagePath stripped: ${clean.storagePath}`);
+              delete clean.storagePath;
+            }
+            return clean;
           }).filter((att: any) => att.name && att.type) // Must have at least name and type
         : null;
 
@@ -491,6 +530,27 @@ export function createChatsRouter() {
           },
           clientRequestId
         );
+
+        // Persist conversationDocuments for each attachment so files survive reload.
+        // Best-effort — failures here don't block message creation.
+        if (sanitizedAttachments && sanitizedAttachments.length > 0) {
+          for (const att of sanitizedAttachments) {
+            try {
+              await storage.createConversationDocument({
+                chatId: req.params.id,
+                messageId: message.id,
+                fileName: att.name || 'document',
+                storagePath: att.storagePath || null,
+                mimeType: att.mimeType || att.type || 'application/octet-stream',
+                fileSize: att.size || null,
+                extractedText: null, // Text extraction happens in the streaming endpoint
+                metadata: { fileId: att.fileId || att.id },
+              });
+            } catch (docErr) {
+              console.warn(`[Messages] Failed to persist conversationDocument for ${att.name}:`, docErr);
+            }
+          }
+        }
 
         if (chat.title === "New Chat") {
           const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
