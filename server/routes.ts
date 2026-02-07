@@ -78,6 +78,7 @@ import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langg
 import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
+import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { generateAnonToken } from "./lib/anonToken";
 import { recordLoginAttempt } from "./services/twoFactorAuth";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
@@ -1326,7 +1327,7 @@ export async function registerRoutes(
     try {
       const allModels = await storage.getAiModels();
       const models = allModels
-        .filter((m: any) => m.isEnabled === "true")
+        .filter((m: any) => isModelEligibleForPublic(m))
         .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
         .map((m: any) => ({
           id: m.id,
@@ -1336,6 +1337,7 @@ export async function registerRoutes(
           description: m.description,
           isEnabled: m.isEnabled,
           enabledAt: m.enabledAt,
+          enabledByAdminId: m.enabledByAdminId,
           displayOrder: m.displayOrder || 0,
           icon: m.icon,
           modelType: m.modelType,

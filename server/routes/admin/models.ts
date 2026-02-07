@@ -4,6 +4,12 @@ import { storage } from "../../storage";
 import { checkApiKeyExists } from "./utils";
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import {
+    getIntegratedModelProviderIds,
+    getSupportedModelProviderIds,
+    isModelProviderIntegrated,
+    isModelProviderSupported,
+} from "../../services/modelIntegration";
 
 export const modelsRouter = Router();
 
@@ -51,11 +57,18 @@ modelsRouter.get("/filtered", async (req, res) => {
             status,
             search,
             sortBy = "name",
-            sortOrder = "asc"
+            sortOrder = "asc",
+            scope = "all",
         } = req.query;
+
+        const scopeProviders =
+            scope === "supported" ? getSupportedModelProviderIds() :
+            scope === "integrated" ? getIntegratedModelProviderIds() :
+            undefined;
 
         const result = await storage.getAiModelsFiltered({
             provider: provider as string,
+            providers: scopeProviders,
             type: type as string,
             status: status as string,
             search: search as string,
@@ -69,6 +82,8 @@ modelsRouter.get("/filtered", async (req, res) => {
             models: result.models.map((m: any) => ({
                 ...m,
                 hasApiKey: checkApiKeyExists(m.provider),
+                isSupported: isModelProviderSupported(m.provider),
+                isIntegrated: isModelProviderIntegrated(m.provider),
             })),
             total: result.total,
             page: parseInt(page as string),
@@ -82,7 +97,12 @@ modelsRouter.get("/filtered", async (req, res) => {
 
 modelsRouter.get("/stats", async (req, res) => {
     try {
-        const allModels = await storage.getAiModels();
+        const { scope = "all" } = req.query as any;
+        const allModelsRaw = await storage.getAiModels();
+        const allModels =
+            scope === "supported" ? allModelsRaw.filter((m) => isModelProviderSupported(m.provider)) :
+            scope === "integrated" ? allModelsRaw.filter((m) => isModelProviderIntegrated(m.provider)) :
+            allModelsRaw;
         const knownStats = getModelStats();
 
         const byProvider: Record<string, number> = {};
@@ -174,6 +194,20 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
         const { isEnabled } = req.body;
         const userId = (req as AuthenticatedRequest).user?.id || null;
 
+        const existing = await storage.getAiModelById(req.params.id);
+        if (!existing) {
+            return res.status(404).json({ error: "Model not found" });
+        }
+
+        if (isEnabled) {
+            if (existing.status !== "active") {
+                return res.status(409).json({ error: "Model must be Active (Status) before enabling" });
+            }
+            if (!isModelProviderIntegrated(existing.provider)) {
+                return res.status(409).json({ error: "Provider not integrated (missing API key or unsupported)" });
+            }
+        }
+
         const updateData: any = {
             isEnabled: isEnabled ? "true" : "false",
         };
@@ -187,9 +221,7 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
         }
 
         const model = await storage.updateAiModel(req.params.id, updateData);
-        if (!model) {
-            return res.status(404).json({ error: "Model not found" });
-        }
+        if (!model) return res.status(404).json({ error: "Model not found" });
 
         await storage.createAuditLog({
             userId,

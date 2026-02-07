@@ -1518,6 +1518,7 @@ function AIModelsSection() {
   const [isSyncing, setIsSyncing] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const modelsScope: "supported" | "integrated" | "all" = "supported";
 
   const readApiError = async (res: Response): Promise<string> => {
     const raw = await res.text().catch(() => "");
@@ -1531,9 +1532,9 @@ function AIModelsSection() {
   };
 
   const { data: stats, isLoading: statsLoading, isError: statsIsError, error: statsError } = useQuery({
-    queryKey: ["/api/admin/models/stats"],
+    queryKey: ["/api/admin/models/stats", modelsScope],
     queryFn: async () => {
-      const res = await fetch("/api/admin/models/stats", { credentials: "include" });
+      const res = await fetch(`/api/admin/models/stats?scope=${modelsScope}`, { credentials: "include" });
       if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
     },
@@ -1541,13 +1542,14 @@ function AIModelsSection() {
   });
 
   const { data: modelsData, isLoading, refetch, isError: modelsIsError, error: modelsError } = useQuery({
-    queryKey: ["/api/admin/models/filtered", page, debouncedSearch, providerFilter, typeFilter, statusFilter],
+    queryKey: ["/api/admin/models/filtered", modelsScope, page, debouncedSearch, providerFilter, typeFilter, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "15" });
       if (debouncedSearch) params.append("search", debouncedSearch);
       if (providerFilter !== "all") params.append("provider", providerFilter);
       if (typeFilter !== "all") params.append("type", typeFilter);
       if (statusFilter !== "all") params.append("status", statusFilter);
+      params.append("scope", modelsScope);
       const res = await fetch(`/api/admin/models/filtered?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
@@ -1855,12 +1857,8 @@ function AIModelsSection() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="anthropic">Anthropic</SelectItem>
             <SelectItem value="google">Google</SelectItem>
             <SelectItem value="xai">xAI</SelectItem>
-            <SelectItem value="openai">OpenAI</SelectItem>
-            <SelectItem value="openrouter">OpenRouter</SelectItem>
-            <SelectItem value="perplexity">Perplexity</SelectItem>
           </SelectContent>
         </Select>
 
@@ -1982,10 +1980,17 @@ function AIModelsSection() {
                       <Switch
                         checked={model.isEnabled === "true"}
                         onCheckedChange={(checked) => toggleEnabledMutation.mutate({ id: model.id, enabled: checked })}
-                        disabled={toggleEnabledMutation.isPending || (model.hasApiKey === false && model.isEnabled !== "true")}
+                        disabled={
+                          toggleEnabledMutation.isPending ||
+                          (model.isEnabled !== "true" && (model.hasApiKey === false || model.status !== "active"))
+                        }
                         className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
                         data-testid={`switch-enabled-${model.id}`}
-                        title={model.hasApiKey === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" : undefined}
+                        title={
+                          model.isEnabled !== "true" && model.status !== "active" ? "Activa el modelo primero (Status)" :
+                          model.hasApiKey === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                          undefined
+                        }
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">

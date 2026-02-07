@@ -19,6 +19,24 @@ function getFirstQueryValue(value: unknown): string | undefined {
     return undefined;
 }
 
+function parseTimeRange(query: any): { since: Date; rangeDays: number; rangeHours: number | null } {
+    const rawHoursStr = getFirstQueryValue(query?.rangeHours)?.trim();
+    const rawHours = rawHoursStr ? Number(rawHoursStr) : Number.NaN;
+
+    if (Number.isFinite(rawHours) && rawHours > 0) {
+        const rangeHours = Math.min(24 * 365, Math.max(1, Math.floor(rawHours)));
+        const since = new Date(Date.now() - rangeHours * 60 * 60 * 1000);
+        const rangeDays = Math.max(1, Math.ceil(rangeHours / 24));
+        return { since, rangeDays, rangeHours };
+    }
+
+    const rawDaysStr = getFirstQueryValue(query?.rangeDays)?.trim();
+    const rawDays = rawDaysStr ? Number(rawDaysStr) : Number.NaN;
+    const rangeDays = Math.min(365, Math.max(1, Number.isFinite(rawDays) ? Math.floor(rawDays) : 30));
+    const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    return { since, rangeDays, rangeHours: null };
+}
+
 function parseProviderIds(providerIdQuery: unknown): string[] | null {
     const raw = getFirstQueryValue(providerIdQuery)?.trim();
     if (!raw) return DEFAULT_PROVIDER_IDS;
@@ -70,8 +88,7 @@ agentRouter.post("/reset", async (req, res) => {
 
 // GET /api/admin/agent/tools - List all registered tools
 agentRouter.get("/tools", async (req, res) => {
-    const rangeDays = Math.min(365, Math.max(1, Number(req.query.rangeDays) || 30));
-    const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    const { since, rangeDays, rangeHours } = parseTimeRange(req.query);
     const userId = (req.query.userId as string | undefined) || undefined;
     const providerIds = parseProviderIds(req.query.providerId);
     try {
@@ -130,6 +147,7 @@ agentRouter.get("/tools", async (req, res) => {
 
         res.json({
             rangeDays,
+            rangeHours,
             userId: userId || null,
             providerId: providerIds ? providerIds.join(",") : "all",
             tools: merged,
@@ -143,8 +161,7 @@ agentRouter.get("/tools", async (req, res) => {
 
 // GET /api/admin/agent/metrics - Aggregate usage metrics (from tool_call_logs)
 agentRouter.get("/metrics", async (req, res) => {
-    const rangeDays = Math.min(365, Math.max(1, Number(req.query.rangeDays) || 30));
-    const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    const { since, rangeDays, rangeHours } = parseTimeRange(req.query);
     const userId = (req.query.userId as string | undefined) || undefined;
     const providerIds = parseProviderIds(req.query.providerId);
 
@@ -180,6 +197,7 @@ agentRouter.get("/metrics", async (req, res) => {
 
         res.json({
             rangeDays,
+            rangeHours,
             userId: userId || null,
             providerId: providerIds ? providerIds.join(",") : "all",
             totalCalls,
@@ -194,6 +212,7 @@ agentRouter.get("/metrics", async (req, res) => {
         console.error("[AdminAgent] /metrics failed:", error);
         res.json({
             rangeDays,
+            rangeHours,
             userId: userId || null,
             totalCalls: 0,
             successCalls: 0,
@@ -244,8 +263,7 @@ agentRouter.get("/users", async (req, res) => {
 
 // GET /api/admin/agent/tool-calls - Recent tool call logs (for dashboards)
 agentRouter.get("/tool-calls", async (req, res) => {
-    const rangeDays = Math.min(365, Math.max(1, Number(req.query.rangeDays) || 30));
-    const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+    const { since, rangeDays, rangeHours } = parseTimeRange(req.query);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 25));
     const userId = (req.query.userId as string | undefined) || undefined;
     const toolId = (req.query.toolId as string | undefined) || undefined;
@@ -281,10 +299,10 @@ agentRouter.get("/tool-calls", async (req, res) => {
             .orderBy(desc(toolCallLogs.createdAt))
             .limit(limit);
 
-        res.json({ rangeDays, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs });
+        res.json({ rangeDays, rangeHours, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs });
     } catch (error: any) {
         console.error("[AdminAgent] /tool-calls failed:", error);
-        res.json({ rangeDays, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs: [] });
+        res.json({ rangeDays, rangeHours, userId: userId || null, providerId: providerIds ? providerIds.join(",") : "all", logs: [] });
     }
 });
 
