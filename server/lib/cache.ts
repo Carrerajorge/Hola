@@ -227,6 +227,20 @@ export class CacheService {
     getRedisClient(): Redis | null {
         return this.redis;
     }
+
+    /**
+     * Returns a Redis client only when we know it's currently connected.
+     * Useful for optional dependencies (rate limiting, caches) where we want to
+     * transparently fall back to in-memory behavior when Redis is unreachable.
+     */
+    getConnectedRedisClient(): Redis | null {
+        if (!this.redis || !this.isConnected) return null;
+        return this.redis;
+    }
+
+    isRedisConnected(): boolean {
+        return this.isConnected;
+    }
 }
 
 export const cache = new CacheService();

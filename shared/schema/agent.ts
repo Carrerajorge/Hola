@@ -294,6 +294,7 @@ export type RequestSpecHistory = typeof requestSpecHistory.$inferSelect;
 // Agentic Engine - Gap Logging
 export const agentGapLogs = pgTable("agent_gap_logs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
     userPrompt: text("user_prompt").notNull(),
     detectedIntent: text("detected_intent"),
     gapReason: text("gap_reason"),
@@ -307,6 +308,8 @@ export const agentGapLogs = pgTable("agent_gap_logs", {
 }, (table) => [
     index("agent_gap_logs_status_idx").on(table.status),
     index("agent_gap_logs_created_idx").on(table.createdAt),
+    index("agent_gap_logs_user_id_idx").on(table.userId),
+    index("agent_gap_logs_user_status_idx").on(table.userId, table.status),
     index("agent_gap_logs_signature_idx").on(table.gapSignature),
     check("agent_gap_logs_frequency_count_check", sql`${table.frequencyCount} >= 0`),
 ]);
@@ -577,6 +580,8 @@ export const TraceEventTypeSchema = z.enum([
     'replan',
     'thinking',
     'shell_output',
+    'shell_chunk',
+    'shell_exit',
     'artifact_created',
     'artifact_ready',
     'citations_added',

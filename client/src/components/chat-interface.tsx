@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
+import { useStreamingTransition } from "@/hooks/use-streaming-transition";
+import { useStreamChat } from "@/hooks/use-stream-chat";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
@@ -113,11 +115,24 @@ import { MessageFeedback } from "@/components/message-feedback";
 import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import {
+  dataImageUrlToFile,
+  extractBareUrlsFromText,
+  extractFilesFromDataTransfer,
+  extractImageUrlsFromHtml,
+  extractLinkUrlsFromHtml,
+  extractUrlsFromUriList,
+  isDataImageUrl,
+  normalizeFileForUpload,
+  normalizeHttpUrl,
+  uniq,
+} from "@/lib/attachmentIngest";
 import { useChats } from "@/hooks/use-chats";
 import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
 import { useProjects } from "@/hooks/use-projects";
@@ -233,6 +248,7 @@ interface ChatInterfaceProps {
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
+  chatTitle?: string | null;
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
@@ -326,6 +342,7 @@ export function ChatInterface({
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
+  chatTitle,
   onOpenApps,
   onUpdateMessageAttachments,
   onEditMessageAndTruncate,
@@ -357,6 +374,7 @@ export function ChatInterface({
   selectedProjectId
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettingsContext();
   const {
     projects,
     getProject
@@ -436,7 +454,19 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, setUploadedFilesState] = useState<UploadedFile[]>([]);
+  // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  const setUploadedFiles = useCallback((value: React.SetStateAction<UploadedFile[]>) => {
+    setUploadedFilesState((prev: UploadedFile[]) => {
+      const next =
+        typeof value === "function"
+          ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
+          : value;
+      uploadedFilesRef.current = next;
+      return next;
+    });
+  }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -482,6 +512,33 @@ export function ChatInterface({
   const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+
+  // Keep UI state consistent with Settings toggles (disable features when turned off).
+  useEffect(() => {
+    if (!settings.webSearch && selectedTool === "web") {
+      setSelectedTool(null);
+    }
+  }, [settings.webSearch, selectedTool]);
+
+  useEffect(() => {
+    if (!settings.voiceMode) {
+      if (isVoiceChatOpen) setIsVoiceChatOpen(false);
+      if (isRecording || isPaused) stopVoiceRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.voiceMode]);
+
+  useEffect(() => {
+    if (!settings.canvas) {
+      if (activeDocEditor) {
+        void closeDocEditor();
+      } else if (selectedDocTool) {
+        setSelectedDocTool(null);
+      }
+      if (minimizedDocument) setMinimizedDocument(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.canvas]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -800,7 +857,7 @@ export function ChatInterface({
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
-  const [isGmailActive, setIsGmailActive] = useState(true);
+  const isGmailActive = !!settings.connectorSearch;
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
@@ -856,7 +913,7 @@ export function ChatInterface({
     if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
       streamingChatIdRef.current = currentChatId;
       if (currentChatId) {
-        startRun(currentChatId);
+        startRun(currentChatId, undefined, undefined, chatTitle || undefined);
       }
     }
 
@@ -876,7 +933,7 @@ export function ChatInterface({
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId, startRun, updateStatus, completeRun]);
+  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
@@ -1325,6 +1382,27 @@ export function ChatInterface({
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
 
+  // Centralized streaming→message transition manager.
+  // Guarantees the message is visible in the DOM before streaming is cleared.
+  const streamTransition = useStreamingTransition({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
+  // All-in-one streaming hook: fetch + SSE parse + RAF throttle + atomic finalize
+  const streamChat = useStreamChat({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1400,28 +1478,20 @@ export function ChatInterface({
     // Save the partial content as a message if there's any (use ref for latest value)
     const currentContent = streamingContentRef.current;
     if (currentContent && currentContent.trim()) {
-      const partialMsg: Message = {
+      streamTransition.finalize({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: currentContent + "\n\n*[Respuesta detenida por el usuario]*",
         timestamp: new Date(),
-      };
-      onSendMessage(partialMsg);
+      });
     } else {
-      // If stopped during "thinking" phase (no content yet), show a stopped message
-      const stoppedMsg: Message = {
+      streamTransition.finalize({
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: "*[Solicitud cancelada por el usuario]*",
         timestamp: new Date(),
-      };
-      onSendMessage(stoppedMsg);
+      });
     }
-
-    // Reset states
-    streamingContentRef.current = "";
-    setAiState("idle");
-    setStreamingContent("");
   };
 
   // Keep handleStopChatRef in sync for keyboard shortcut access
@@ -1813,160 +1883,62 @@ export function ChatInterface({
     }
 
     setRegeneratingMsgIndex(null);
-    setAiState("thinking");
-    streamingContentRef.current = "";
-    setStreamingContent("");
 
-    try {
-      abortControllerRef.current = new AbortController();
+    let chatHistory = contextUpToUser.map(m => ({ role: m.role, content: m.content }));
+    if (instruction) {
+      chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
+    }
 
-      let chatHistory = contextUpToUser.map(m => ({
-        role: m.role,
-        content: m.content
-      }));
-
-      if (instruction) {
-        chatHistory = [
-          ...chatHistory,
-          { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }
-        ];
-      }
-
-      const response = await fetch("/api/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-        credentials: "include",
-        body: JSON.stringify({
-          messages: chatHistory,
-          chatId,
-          conversationId: chatId,
-          provider: selectedProvider,
-          model: selectedModel,
-        }),
-        signal: abortControllerRef.current.signal
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Error ${response.status}`);
-      }
-
-      setAiState("responding");
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
-      let currentEventType = "chunk";
-      let streamComplete = false;
-
-      while (!streamComplete) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-
-          if (trimmedLine.startsWith("event: ")) {
-            currentEventType = trimmedLine.slice(7).trim();
-          } else if (trimmedLine.startsWith("data: ")) {
-            const dataStr = trimmedLine.slice(6);
-            if (dataStr === "[DONE]") {
-              streamComplete = true;
-              continue;
+    await streamChat.stream("/api/chat/stream", {
+      chatId,
+      body: {
+        messages: chatHistory,
+        chatId,
+        conversationId: chatId,
+        provider: selectedProvider,
+        model: selectedModel,
+      },
+      onEvent: (eventType, data) => {
+        if (eventType === "production_start") {
+          setAiState("agent_working");
+          setAiProcessSteps([{
+            id: "init", step: "init",
+            title: `Iniciando producción: ${data.topic || "Documento"}`,
+            status: "pending",
+            description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+          }]);
+        } else if (eventType === "production_event") {
+          setAiProcessSteps((prev: any[]) => {
+            const newSteps = [...prev];
+            const lastStep = newSteps[newSteps.length - 1];
+            if (lastStep?.status === "pending" && data.message) {
+              lastStep.title = data.message;
+            } else {
+              newSteps.push({ id: `step-${Date.now()}`, title: data.message || "Procesando...", status: "pending", description: data.stage });
             }
-
-            try {
-              const data = JSON.parse(dataStr);
-
-              if (currentEventType === "chunk" || currentEventType === "text") {
-                const content = data.content || "";
-                if (content) {
-                  fullContent += content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
-                }
-              } else if (currentEventType === "production_start") {
-                setAiState("agent_working");
-                setAiProcessSteps([{
-                  id: "init",
-                  step: "init",
-                  title: `Iniciando producción: ${data.topic || "Documento"}`,
-                  status: "pending",
-                  description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                }]);
-              } else if (currentEventType === "production_event") {
-                setAiProcessSteps((prev: any[]) => {
-                  const newSteps = [...prev];
-                  const lastStep = newSteps[newSteps.length - 1];
-                  if (lastStep && lastStep.status === "pending" && data.message) {
-                    lastStep.title = data.message;
-                  } else {
-                    newSteps.push({
-                      id: `step-${Date.now()}`,
-                      title: data.message || "Procesando...",
-                      status: "pending",
-                      description: data.stage
-                    });
-                  }
-                  return newSteps;
-                });
-              } else if (currentEventType === "production_complete") {
-                setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-              } else if (currentEventType === "done" || currentEventType === "finish") {
-                // Determine web sources if available
-                const finalMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: fullContent,
-                  timestamp: new Date(),
-                  requestId: data.requestId || generateRequestId(),
-                  userMessageId: undefined, // Lost in regeneration context unless tracked
-                  webSources: data.webSources,
-                  artifact: data.artifact
-                };
-                onSendMessage(finalMsg);
-                streamComplete = true;
-              } else if (currentEventType === "error") {
-                throw new Error(data.message || "Stream error");
-              }
-            } catch (parseError) {
-              console.warn("SSE parse error:", parseError);
-            }
-          }
+            return newSteps;
+          });
+        } else if (eventType === "production_complete") {
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
         }
-      }
-
-      setStreamingContent("");
-      streamingContentRef.current = "";
-      setAiState("idle");
-      abortControllerRef.current = null;
-
-    } catch (error: any) {
-      if (error.name === "AbortError") return;
-      console.error("Regenerate error:", error);
-
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
+      },
+      buildFinalMessage: (content, data, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
+        role: "assistant",
+        content,
+        timestamp: new Date(),
+        requestId: data?.requestId || generateRequestId(),
+        webSources: data?.webSources,
+        artifact: data?.artifact,
+      }),
+      buildErrorMessage: (error, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
         role: "assistant",
         content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
         timestamp: new Date(),
         requestId: generateRequestId(),
-      };
-      onSendMessage(errorMsg);
-
-      streamingContentRef.current = "";
-      setStreamingContent("");
-      setAiState("idle");
-      abortControllerRef.current = null;
-    }
+      }),
+    });
   }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
@@ -2226,12 +2198,27 @@ export function ChatInterface({
 
   const MAX_FILE_SIZE_MB = 100;
   const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+  const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
 
   const processFilesForUpload = async (files: File[]) => {
-    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
-    const invalidTypeFiles = files.filter(file =>
-      !ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")
-    );
+    const normalizedFiles = files.map(normalizeFileForUpload);
+
+    // De-dupe within the same ingest action to avoid accidental duplicates.
+    const seen = new Set<string>();
+    const dedupedFiles: File[] = [];
+    for (const f of normalizedFiles) {
+      const key = `${f.name}::${f.size}::${f.type || ""}::${(f as any).lastModified || 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedFiles.push(f);
+    }
+
+    const oversizedFiles = dedupedFiles.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+    const invalidTypeFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      if (t.startsWith("image/")) return false;
+      return !ALLOWED_TYPES.includes(t);
+    });
 
     if (oversizedFiles.length > 0) {
       const names = oversizedFiles.map(f => f.name).join(", ");
@@ -2252,10 +2239,11 @@ export function ChatInterface({
       });
     }
 
-    const validFiles = files.filter(file =>
-      (ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")) &&
-      file.size <= MAX_FILE_SIZE_BYTES
-    );
+    const validFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      const typeOk = t.startsWith("image/") || ALLOWED_TYPES.includes(t);
+      return typeOk && file.size <= MAX_FILE_SIZE_BYTES;
+    });
 
     if (validFiles.length === 0) return;
 
@@ -2269,7 +2257,7 @@ export function ChatInterface({
       ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
 
       let dataUrl: string | undefined;
-      if (isImage) {
+      if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
         dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -2411,17 +2399,18 @@ export function ChatInterface({
   };
 
   const pollFileStatusFast = async (fileId: string, trackingId: string) => {
-    const maxTime = 3000;
-    const pollInterval = 200;
+    const maxTime = 5000;
+    const pollInterval = 250;
     const startTime = Date.now();
 
     const checkStatus = async (): Promise<void> => {
+      const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+      if (!stillTracked) return;
+
       if (Date.now() - startTime > maxTime) {
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        // Fall back to slower polling. Do NOT mark as ready prematurely, as that
+        // causes "attached but empty" docs and broken analysis.
+        pollFileStatus(fileId, trackingId);
         return;
       }
 
@@ -2454,77 +2443,276 @@ export function ChatInterface({
         setTimeout(checkStatus, pollInterval);
       } catch (error) {
         console.error("Polling error:", error);
-        setUploadedFiles((prev: any[]) =>
-          prev.map((f: any) => (f.id === fileId || f.id === trackingId
-            ? { ...f, id: fileId, status: "ready", content: "" }
-            : f))
-        );
+        // Network hiccup: fall back to slower polling instead of lying about readiness.
+        pollFileStatus(fileId, trackingId);
       }
     };
 
     checkStatus();
   };
 
+  const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (blob.size > maxBytes) return null;
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Failed to read blob"));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const importUrlsForUpload = (urls: string[]) => {
+    const normalized = uniq(
+      urls
+        .map((u) => normalizeHttpUrl(u) || null)
+        .filter((u): u is string => !!u)
+    ).slice(0, 10);
+    if (normalized.length === 0) return;
+
+    for (const u of normalized) {
+      const trackingId = `temp-url-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const tempFile: UploadedFile = {
+        id: trackingId,
+        name: u,
+        type: "application/octet-stream",
+        mimeType: "application/octet-stream",
+        size: 0,
+        status: "uploading",
+      };
+
+      setUploadedFiles((prev: UploadedFile[]) => [...prev, tempFile]);
+
+      const doImport = async (): Promise<void> => {
+        const response = await fetch("/api/files/import-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: u }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || `No se pudo importar (${response.status})`);
+        }
+
+        const importedType: string = data.type || data.mimeType || "application/octet-stream";
+        const importedId: string | undefined = data.id;
+        const importedName: string = data.name || u;
+        const importedSize: number = typeof data.size === "number" ? data.size : 0;
+        const importedStoragePath: string | undefined = data.storagePath;
+        const importedStatus: string =
+          data.status || (importedType.startsWith("image/") ? "ready" : "processing");
+
+        // For images, generate a data URL from same-origin storage so vision works reliably.
+        let dataUrl: string | undefined;
+        if (importedType.startsWith("image/")) {
+          if (typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:")) {
+            dataUrl = data.dataUrl;
+          } else if (importedStoragePath) {
+            const preview = await fetchUrlAsDataUrl(importedStoragePath, 15 * 1024 * 1024);
+            if (preview) dataUrl = preview;
+          }
+        }
+
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => {
+            if (f.id !== trackingId) return f;
+            return {
+              ...f,
+              id: importedId || f.id,
+              name: importedName,
+              type: importedType,
+              mimeType: importedType,
+              size: importedSize || f.size,
+              storagePath: importedStoragePath,
+              status: importedStatus,
+              dataUrl: dataUrl || f.dataUrl,
+            };
+          })
+        );
+
+        if (!importedType.startsWith("image/") && importedId && importedStatus === "processing") {
+          pollFileStatusFast(importedId, trackingId);
+        }
+      };
+
+      const promise = doImport().catch((error: any) => {
+        console.error("URL import error:", error);
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => (f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+        toast({
+          title: "No se pudo importar el enlace",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      });
+
+      pendingUploadsRef.current.set(trackingId, promise);
+      promise.finally(() => {
+        pendingUploadsRef.current.delete(trackingId);
+      });
+    }
+  };
+
   const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+    const clipboard = e.clipboardData;
+    const items = clipboard?.items;
+    if (!clipboard) return;
 
     const filesToUpload: File[] = [];
 
-    for (const item of Array.from(items) as any[]) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) {
-          const mimeType = file.type || item.type || "image/png";
-          const ext = mimeType.split("/")[1] || "png";
-          const fileName = file.name && file.name !== "image.png" && file.name !== ""
-            ? file.name
-            : `pasted-${Date.now()}.${ext}`;
-          const renamedFile = new File([file], fileName, { type: mimeType });
-          filesToUpload.push(renamedFile);
-        }
+    const itemsArray = items ? (Array.from(items) as any[]) : [];
+    for (const item of itemsArray) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile?.();
+      if (!file) continue;
+
+      const originalName = (file.name || "").trim();
+      const declaredType = (file.type || item.type || "").trim();
+
+      const isGenericImageName = !originalName || originalName === "image.png" || originalName === "image.jpg";
+      const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+      const cleanedSubtype = subtype.split("+")[0].split(".")[0];
+      const safeExt = declaredType.startsWith("image/") ? (cleanedSubtype || "png") : "bin";
+      const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+
+      const normalized = normalizeFileForUpload(new File([file], fileName, { type: declaredType || file.type }));
+      filesToUpload.push(normalized);
+    }
+
+    // Some browsers expose pasted files via clipboardData.files instead of items.
+    if (clipboard.files && clipboard.files.length > 0) {
+      for (const f of Array.from(clipboard.files)) {
+        filesToUpload.push(normalizeFileForUpload(f));
       }
     }
 
     if (filesToUpload.length > 0) {
       e.preventDefault();
       await processFilesForUpload(filesToUpload);
+      return;
     }
+
+    // Smart paste: if the clipboard content is one or more bare URLs, import them as attachments.
+    const uriList = clipboard.getData("text/uri-list");
+    const html = clipboard.getData("text/html");
+    const text = clipboard.getData("text/plain");
+
+    // Support pasting base64-encoded images (data URLs).
+    if (isDataImageUrl(text)) {
+      const mimeMatch = text.match(/^data:([^;]+);base64,/i);
+      const mime = (mimeMatch?.[1] || "image/png").toLowerCase();
+      const ext =
+        mime === "image/jpeg" || mime === "image/jpg" ? "jpg" :
+          mime === "image/webp" ? "webp" :
+            mime === "image/gif" ? "gif" :
+              mime === "image/bmp" ? "bmp" :
+                mime === "image/tiff" ? "tiff" :
+                  mime === "image/svg+xml" ? "svg" :
+                    "png";
+      const f = dataImageUrlToFile(text, `pasted-${Date.now()}.${ext}`);
+      if (f) {
+        e.preventDefault();
+        await processFilesForUpload([normalizeFileForUpload(f)]);
+        return;
+      }
+    }
+
+    const urlsFromUriList = extractUrlsFromUriList(uriList);
+    const urlsFromBareText = extractBareUrlsFromText(text);
+
+    const urls = uniq([...urlsFromUriList, ...urlsFromBareText]);
+    if (urls.length > 0) {
+      e.preventDefault();
+      importUrlsForUpload(urls);
+      return;
+    }
+
+    // HTML-only: allow importing a single copied image (common in browsers), but avoid mass-importing links
+    // when pasting rich text.
+    const htmlImageUrls = extractImageUrlsFromHtml(html);
+    if (htmlImageUrls.length === 1) {
+      const normalizedText = normalizeHttpUrl(text);
+      if (!text.trim() || normalizedText === htmlImageUrls[0]) {
+        e.preventDefault();
+        importUrlsForUpload([htmlImageUrls[0]]);
+      }
+    }
+  };
+
+  const isFileOrUrlDragEvent = (dt: DataTransfer | null | undefined): boolean => {
+    if (!dt) return false;
+    const types = Array.from(dt.types || []);
+    if (types.includes("Files") || types.includes("application/x-moz-file")) return true;
+    if (types.includes("text/uri-list") || types.includes("text/html")) return true;
+    if (dt.items && Array.from(dt.items).some((it) => (it as any).kind === "file")) return true;
+    if (dt.files && dt.files.length > 0) return true;
+    return false;
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
-    e.stopPropagation();
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
     e.preventDefault();
-    e.stopPropagation();
     dragCounterRef.current++;
-    if (e.dataTransfer?.types?.includes("Files")) {
-      setIsDraggingOver(true);
-    }
+    setIsDraggingOver(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
+    if (!isDraggingOver) return;
     e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current--;
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
     if (dragCounterRef.current === 0) {
       setIsDraggingOver(false);
     }
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     dragCounterRef.current = 0;
     setIsDraggingOver(false);
 
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
+    const dt = e.dataTransfer;
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(dt);
+    if (!isFileOrUrlDrag) return;
 
-    await processFilesForUpload(Array.from(files));
+    e.preventDefault();
+
+    const droppedFiles = await extractFilesFromDataTransfer(dt, { maxFiles: 200 });
+    if (droppedFiles.length > 0) {
+      await processFilesForUpload(droppedFiles);
+      return;
+    }
+
+    // Drop-to-import for links/images dragged from the browser.
+    const uriList = dt?.getData?.("text/uri-list") || "";
+    const html = dt?.getData?.("text/html") || "";
+    const text = dt?.getData?.("text/plain") || "";
+
+    const candidateTextUrl = normalizeHttpUrl(text);
+    const urls = uniq([
+      ...(candidateTextUrl ? [candidateTextUrl] : []),
+      ...extractUrlsFromUriList(uriList),
+      ...extractImageUrlsFromHtml(html),
+      ...extractLinkUrlsFromHtml(html),
+    ]);
+
+    if (urls.length > 0) {
+      importUrlsForUpload(urls);
+    }
   };
 
   const getFileIcon = (type: string, fileName?: string) => {
@@ -2563,71 +2751,30 @@ export function ChatInterface({
     
     // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
     if (input.trim().startsWith("!")) {
-      const cleanInput = input.trim().substring(1); // Remove the "!" prefix
-      console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
+      const cleanInput = input.trim().substring(1);
       setInput("");
-      setAiState("thinking");
-      
-      try {
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            model: "grok-3"
-          })
-        });
-        
-        if (!response.ok) {
-          console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
-          setAiState("idle");
-          return;
-        }
-        
-        // Read the stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  setStreamingContent(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-        
-        // Create the response message
-        const assistantMsg: Message = {
-          id: `emergency-${Date.now()}`,
-          role: "assistant",
-          content: fullContent || "No response received",
-          timestamp: new Date()
-        };
-        onSendMessage(assistantMsg);
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
-        return;
-      } catch (error) {
-        console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
-        setAiState("idle");
-        return;
+
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
       }
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+        },
+        buildFinalMessage: (content, _lastEvent, messageId) => ({
+          id: messageId || `emergency-${Date.now()}`,
+          role: "assistant",
+          content: content || "No response received",
+          timestamp: new Date(),
+        }),
+      });
+      return;
     }
     
     // MOCK CITATION TRIGGER FOR VERIFICATION
@@ -2666,7 +2813,7 @@ export function ChatInterface({
     }
 
     // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
+    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
@@ -2674,7 +2821,7 @@ export function ChatInterface({
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFiles.length > 0;
+    const hasFiles = uploadedFilesRef.current.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
@@ -2710,105 +2857,84 @@ export function ChatInterface({
       };
       onSendMessage(userMessage);
       
-      setAiState("thinking");
-      streamingContentRef.current = "";
-      setStreamingContent("");
-      
-      try {
-        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
-        const cleanInput = userInput.replace(/^🌐\s*/, "");
-        
-        const response = await fetch("/api/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: cleanInput }],
-            model: selectedModel || "grok-3",
-            forceWebSearch: isWebSearch,
-            webSearchAuto: isWebSearch
-          })
-        });
-        
-        if (!response.ok) {
-          console.error("[EMERGENCY BYPASS] API error:", response.status);
-          const errorMsg: Message = {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
-            timestamp: new Date()
-          };
-          onSendMessage(errorMsg);
-          setAiState("idle");
-          return;
-        }
-        
-        // Read the SSE stream
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        setAiState("responding");
-        
-        while (reader) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  fullContent += data.content;
-                  streamingContentRef.current = fullContent;
-                  setStreamingContent(fullContent);
-                }
-              } catch (e) {
-                // Ignore parse errors for incomplete JSON
-              }
-            }
-          }
-        }
-        
-        // Create assistant message with full response
-        const assistantMsg: Message = {
-          id: `assistant-${Date.now()}`,
+      // Stream the response using the all-in-one hook
+      // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
+      const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+      const cleanInput = userInput.replace(/^🌐\s*/, "");
+
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+          forceWebSearch: isWebSearch,
+          webSearchAuto: isWebSearch,
+        },
+        buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
+          id: messageId || `assistant-${Date.now()}`,
           role: "assistant",
           content: fullContent || "No se recibió respuesta del servidor.",
           timestamp: new Date(),
-          userMessageId: userMsgId
-        };
-        onSendMessage(assistantMsg);
-        streamingContentRef.current = "";
-        setStreamingContent("");
-        setAiState("idle");
-        console.error("[EMERGENCY BYPASS] Completed successfully");
-        return;
-      } catch (error) {
-        console.error("[EMERGENCY BYPASS] Error:", error);
-        const errorMsg: Message = {
-          id: `error-${Date.now()}`,
+          userMessageId: userMsgId,
+        }),
+        buildErrorMessage: (_error, messageId) => ({
+          id: messageId || `error-${Date.now()}`,
           role: "assistant",
           content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
-          timestamp: new Date()
-        };
-        onSendMessage(errorMsg);
-        setAiState("idle");
-        return;
-      }
+          timestamp: new Date(),
+        }),
+      });
+      return;
     }
 
     // Handle Agent mode - show in chat, not side panel
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const attachments = uploadedFiles.map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type,
-          spreadsheetData: f.spreadsheetData
-        }));
+        const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+
+        // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+        const attachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.type,
+            type: f.type,
+            storagePath: f.storagePath,
+            path: f.storagePath,
+            size: f.size,
+            metadata: {
+              spreadsheetData: f.spreadsheetData,
+              analysisId: f.analysisId,
+            },
+          }));
+
+        const messageAttachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            name: f.name,
+            documentType: (() => {
+              if (f.type.startsWith("image/")) return undefined;
+              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              return "word";
+            })() as "word" | "excel" | "ppt" | "pdf",
+            mimeType: f.type,
+            imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
+            storagePath: f.storagePath,
+            fileId: f.id,
+            spreadsheetData: f.spreadsheetData,
+          }));
 
         // Generate a unique message ID for tracking in the store
         const agentMessageId = `agent-${Date.now()}`;
@@ -2820,6 +2946,9 @@ export function ChatInterface({
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
+          requestId: generateRequestId(),
+          skipRun: true, // Agent mode: persist message but don't create a normal chat run
+          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
         };
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
@@ -3198,7 +3327,7 @@ export function ChatInterface({
                     streamComplete = true;
                     setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
-                    const aiMsg: Message = {
+                    streamTransition.finalize({
                       id: (Date.now() + 1).toString(),
                       role: "assistant",
                       content: fullContent,
@@ -3207,8 +3336,7 @@ export function ChatInterface({
                       userMessageId: userMsgId,
                       artifact: data.artifact,
                       webSources: data.webSources,
-                    };
-                    onSendMessage(aiMsg);
+                    });
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
                   }
@@ -3222,21 +3350,15 @@ export function ChatInterface({
         } catch (error: any) {
           if (error.name === "AbortError") return;
           console.error("[Generation] Stream Error:", error);
-          const errorMsg: Message = {
+          streamTransition.finalize({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
-          };
-          onSendMessage(errorMsg);
+          });
         }
-
-        setAiState("idle");
-        setAiProcessSteps([]);
-        setStreamingContent("");
-        streamingContentRef.current = "";
       } catch (error) {
         console.error("[handleSubmit] Top-level error:", error);
         setAiState("idle");
@@ -3594,7 +3716,7 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately
     const userInput = input;
-    const currentUploadedFiles = [...uploadedFiles];
+    const currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = Date.now().toString();
 
     // Reset UI state immediately
@@ -3655,12 +3777,21 @@ export function ChatInterface({
 
 
       const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
-      const agentAttachments = readyFiles.map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        type: f.type,
-        spreadsheetData: f.spreadsheetData
-      }));
+      const agentAttachments = readyFiles
+        .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+        .map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.type,
+          type: f.type,
+          storagePath: f.storagePath,
+          path: f.storagePath,
+          size: f.size,
+          metadata: {
+            spreadsheetData: f.spreadsheetData,
+            analysisId: f.analysisId,
+          },
+        }));
 
       const agentMessageId = `agent-${Date.now()}`;
       setCurrentAgentMessageId(agentMessageId);
@@ -3681,7 +3812,7 @@ export function ChatInterface({
           });
 
           // Optimistic message already added above! just notify parent/server if needed
-          onSendMessage(userMsg);
+          onSendMessage({ ...userMsg, skipRun: true });
 
           setSelectedTool(null);
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
@@ -3840,27 +3971,29 @@ export function ChatInterface({
       }
     }
 
-    // Send user message and get run info for SSE streaming
+    // Send user message — fire-and-forget (don't block stream start)
     try {
-      console.log("[handleSubmit] ABOUT TO CALL onSendMessage");
-      
-      // Add timeout to detect stuck promises
-      const messageResultPromise = onSendMessage(userMsg);
-      const timeoutPromise = new Promise<undefined>((_, reject) => 
-        setTimeout(() => reject(new Error("onSendMessage timeout after 10s")), 10000)
-      );
-      
-      let messageResult;
-      try {
-        messageResult = await Promise.race([messageResultPromise, timeoutPromise]);
-      } catch (timeoutError: any) {
-        console.error("[handleSubmit] onSendMessage failed or timed out:", timeoutError);
-        // Fallback: call stream directly without waiting for run
-        messageResult = undefined;
-      }
-      
-      console.log("[handleSubmit] messageResult:", messageResult);
-      const runInfo = messageResult?.run;
+      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+
+      // Fire-and-forget: persist user message in background.
+      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
+      onSendMessage(userMsg);
+
+      // Start image detection early (runs in parallel with intent checks below).
+      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+      const isImageTool = selectedTool === "image";
+      const imageDetectPromise: Promise<boolean> = (
+        !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles
+      )
+        ? fetch("/api/image/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userInput })
+          })
+            .then(r => r.json())
+            .then(d => !!d.isImageRequest)
+            .catch(() => false)
+        : Promise.resolve(!!isImageTool);
 
       // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
       const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -3869,9 +4002,9 @@ export function ChatInterface({
       // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
       if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
         // Create file context from uploaded files
-        if (uploadedFiles.length > 0) {
+        if (currentUploadedFiles.length > 0) {
           // Add file context if files are present
-          const fileContext = uploadedFiles
+          const fileContext = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => ({
               name: f.name,
@@ -4023,30 +4156,13 @@ export function ChatInterface({
       try {
         abortControllerRef.current = new AbortController();
 
-        // Check if this is an image generation request (manual tool selection or auto-detect)
-        const isImageTool = selectedTool === "image";
-        let shouldGenerateImage = isImageTool;
-
-        // CRITICAL FIX: When files are attached, NEVER auto-detect image generation
-        // Files indicate document analysis intent, not image generation
-        // Auto-detect image requests ONLY if no tool is selected AND no files attached
-        if (!isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles) {
-          try {
-            const detectRes = await fetch("/api/image/detect", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ message: userInput })
-            });
-            const detectData = await detectRes.json();
-            shouldGenerateImage = detectData.isImageRequest;
-          } catch (e) {
-            console.error("Image detection error:", e);
-          }
-        }
+        // Await the image detection that was started in parallel above.
+        // By now it has had time to run during intent checks (~0ms extra wait).
+        let shouldGenerateImage = await imageDetectPromise;
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
-          console.log(`[ChatInterface] Files attached (${uploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+          console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
         }
 
         // Generate image if needed
@@ -4138,7 +4254,7 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
-          const fileContents = uploadedFiles
+          const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
             .join("\n\n");
@@ -4153,7 +4269,7 @@ export function ChatInterface({
           }));
 
           // Extract image data URLs from current files
-          const imageDataUrls = uploadedFiles
+          const imageDataUrls = currentUploadedFiles
             .filter(f => f.type.startsWith("image/") && f.dataUrl)
             .map(f => f.dataUrl as string);
 
@@ -4244,8 +4360,10 @@ IMPORTANTE:
           const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
-          // Use SSE streaming if we have run info, otherwise fall back to legacy fetch
-          if (runInfo && chatId) {
+          // Always use SSE streaming — generate an effective chatId if needed.
+          // Previously gated on `runInfo && chatId` which required awaiting onSendMessage.
+          const effectiveStreamChatId = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+          if (effectiveStreamChatId) {
             // SSE streaming mode - real-time streaming from server
             setAiState("responding");
 
@@ -4295,7 +4413,7 @@ IMPORTANTE:
             };
 
             // Build attachments array for streaming endpoint
-            const streamAttachments = uploadedFiles
+            const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
                 type: f.type.startsWith("image/") ? "image" as const :
@@ -4312,7 +4430,7 @@ IMPORTANTE:
               }));
 
             // Robust document detection using both mimeType AND file extension
-            const hasDocumentAttachments = uploadedFiles
+            const hasDocumentAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .some(f => isDocumentFile(f.type, f.name));
 
@@ -4369,9 +4487,8 @@ IMPORTANTE:
               credentials: "include",
               body: JSON.stringify({
                 messages: finalChatHistory,
-                conversationId: chatId,
-                runId: runInfo.id,
-                chatId: chatId,
+                conversationId: effectiveStreamChatId,
+                chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null
@@ -4568,19 +4685,18 @@ IMPORTANTE:
                 console.error('[ChatInterface] Error finalizing document:', err);
               }
 
-              const confirmMsg: Message = {
+              streamTransition.finalize({
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
                 content: "✓ Documento generado correctamente",
                 timestamp: new Date(),
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
-              };
-              await onSendMessage(confirmMsg);
+              });
             } else {
               // Normal chat mode - create final assistant message
               const uncertainty = detectUncertainty(fullContent);
-              const aiMsg: Message = {
+              streamTransition.finalize({
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
                 content: fullContent,
@@ -4589,15 +4705,10 @@ IMPORTANTE:
                 userMessageId: userMsgId,
                 confidence: uncertainty.confidence,
                 uncertaintyReason: uncertainty.reason,
-                webSources: streamWebSources, // Include captured webSources for NewsCards
-              };
-              await onSendMessage(aiMsg);
+                webSources: streamWebSources,
+              });
             }
 
-            streamingContentRef.current = "";
-            setStreamingContent("");
-            setAiState("idle");
-            setAiProcessSteps([]);
             agent.complete();
             abortControllerRef.current = null;
 
@@ -4804,7 +4915,8 @@ IMPORTANTE:
                     streamIntervalRef.current = null;
                   }
 
-                  const aiMsg: Message = {
+                  const uncertainty = detectUncertainty(fullContent);
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: fullContent,
@@ -4813,15 +4925,9 @@ IMPORTANTE:
                     userMessageId: userMsgId,
                     figmaDiagram,
                     webSources: responseWebSources,
-                    confidence: detectUncertainty(fullContent).confidence,
-                    uncertaintyReason: detectUncertainty(fullContent).reason,
-                  };
-                  onSendMessage(aiMsg);
-
-                  streamingContentRef.current = "";
-                  setStreamingContent("");
-                  setAiState("idle");
-                  setAiProcessSteps([]);
+                    confidence: uncertainty.confidence,
+                    uncertaintyReason: uncertainty.reason,
+                  });
                   // Only reset doc tool if there's no active document editor
                   if (!activeDocEditorRef.current) {
                     setSelectedDocTool(null);
@@ -4848,31 +4954,25 @@ IMPORTANTE:
               console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
               try {
                 await docInsertContentRef.current(fullContent);
-                const confirmMsg: Message = {
+                streamTransition.finalize({
                   id: (Date.now() + 1).toString(),
                   role: "assistant",
                   content: "✓ Datos generados en la hoja de cálculo",
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
-                };
-                onSendMessage(confirmMsg);
+                });
               } catch (err) {
                 console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
-                const aiMsg: Message = {
+                streamTransition.finalize({
                   id: (Date.now() + 1).toString(),
                   role: "assistant",
                   content: fullContent,
                   timestamp: new Date(),
                   requestId: generateRequestId(),
                   userMessageId: userMsgId,
-                };
-                onSendMessage(aiMsg);
+                });
               }
-              streamingContentRef.current = "";
-              setStreamingContent("");
-              setAiState("idle");
-              setAiProcessSteps([]);
               agent.complete();
               abortControllerRef.current = null;
               return;
@@ -4925,18 +5025,17 @@ IMPORTANTE:
                     console.error('[ChatInterface] Error finalizing document (legacy):', err);
                   }
 
-                  const confirmMsg: Message = {
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: "✓ Documento generado correctamente",
                     timestamp: new Date(),
                     requestId: generateRequestId(),
                     userMessageId: userMsgId,
-                  };
-                  onSendMessage(confirmMsg);
+                  });
                 } else {
                   const uncertainty = detectUncertainty(fullContent);
-                  const aiMsg: Message = {
+                  streamTransition.finalize({
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
                     content: fullContent,
@@ -4948,14 +5047,9 @@ IMPORTANTE:
                     webSources: responseWebSources,
                     confidence: uncertainty.confidence,
                     uncertaintyReason: uncertainty.reason,
-                  };
-                  onSendMessage(aiMsg);
+                  });
                 }
 
-                streamingContentRef.current = "";
-                setStreamingContent("");
-                setAiState("idle");
-                setAiProcessSteps([]);
                 agent.complete();
                 abortControllerRef.current = null;
               }
@@ -5112,6 +5206,7 @@ IMPORTANTE:
                     pendingGeneratedImage={pendingGeneratedImage}
                     latestGeneratedImageRef={latestGeneratedImageRef}
                     streamingContent={streamingContent}
+                    streamingMsgId={streamChat.nextMessageIdRef.current}
                     aiState={aiState}
                     regeneratingMsgIndex={regeneratingMsgIndex}
                     handleCopyMessage={handleCopyMessage}

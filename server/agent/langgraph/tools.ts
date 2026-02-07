@@ -108,7 +108,7 @@ export const searchTool = tool(
   },
   {
     name: "search",
-    description: "Performs web search using multiple sources with intelligent fallback (SearXNG, Brave, DuckDuckGo). Returns search results with titles, snippets, and URLs.",
+    description: "Performs web search using multiple sources with intelligent fallback (SearXNG, Brave, DuckDuckGo). Useful for research, fact-checking, price comparisons, and tracking. Returns results with titles, snippets, and URLs.",
     schema: z.object({
       query: z.string().describe("Search query"),
       maxResults: z.number().optional().default(10).describe("Maximum number of results"),
@@ -219,7 +219,7 @@ export const scheduleTool = tool(
   },
   {
     name: "schedule",
-    description: "Creates and manages schedules, timelines, and calendar events.",
+    description: "Creates and manages schedules and calendar events (meetings, reminders, focus blocks). Useful for detecting conflicts and suggesting optimal time slots.",
     schema: z.object({
       action: z.enum(["create", "list", "update"]).describe("Action to perform"),
       title: z.string().optional().describe("Event title"),
@@ -302,7 +302,7 @@ export const pythonTool = tool(
   },
   {
     name: "python",
-    description: "Executes Python code in a sandboxed environment. Use for data analysis, calculations, and scripting.",
+    description: "Executes Python code in a sandboxed environment. Use for data analysis, statistics, machine learning (predictions/forecasting), and real-time/stream processing prototypes.",
     schema: z.object({
       code: z.string().describe("Python code to execute"),
       timeout: z.number().optional().default(60000).describe("Timeout in milliseconds"),

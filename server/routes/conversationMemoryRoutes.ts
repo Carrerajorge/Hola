@@ -64,11 +64,12 @@ router.get("/chats/:chatId/state", async (req: Request, res: Response, next: Nex
     const forceRefresh = req.query.refresh === "true";
     const userId = (req as AuthenticatedRequest).user?.id;
 
-    const state = await conversationStateService.hydrateState(chatId, userId, { forceRefresh });
-
-    if (!state) {
-      return res.status(404).json({ error: "Conversation state not found" });
-    }
+    // The frontend expects this endpoint to exist and to return a state object.
+    // If no state exists yet, create it (idempotent) so the UI doesn't get stuck in a 404 loop.
+    const state = forceRefresh
+      ? await conversationStateService.getOrCreateState(chatId, userId)
+      : (await conversationStateService.hydrateState(chatId, userId, { forceRefresh })) ||
+        (await conversationStateService.getOrCreateState(chatId, userId));
 
     res.json(state);
   } catch (error: any) {

@@ -17,7 +17,7 @@ import type { AnalysisResult, ArgumentNode, KeyFinding } from './analysisAgent';
 
 const xaiClient = new OpenAI({
     baseURL: 'https://api.x.ai/v1',
-    apiKey: process.env.XAI_API_KEY,
+    apiKey: process.env.XAI_API_KEY || "missing",
 });
 
 const MODEL = 'grok-4-1-fast-non-reasoning';

@@ -5,6 +5,7 @@ export type StreamingStatus = 'idle' | 'started' | 'streaming' | 'completed' | '
 
 export interface StreamingRun {
   chatId: string;
+  chatTitle?: string;
   runId: string;
   requestId?: string;
   status: StreamingStatus;
@@ -31,7 +32,7 @@ interface StreamingState {
   notifications: BackgroundNotification[];
 
   // Run management
-  startRun: (chatId: string, runId?: string, requestId?: string) => void;
+  startRun: (chatId: string, runId?: string, requestId?: string, chatTitle?: string) => void;
   updateStatus: (chatId: string, status: StreamingStatus) => void;
   appendContent: (chatId: string, chunk: string, seq: number) => boolean;
   getContent: (chatId: string) => string;
@@ -60,12 +61,13 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
   pendingBadges: {},
   notifications: [],
 
-  startRun: (chatId: string, runId?: string, requestId?: string) => {
+  startRun: (chatId: string, runId?: string, requestId?: string, chatTitle?: string) => {
     const id = runId || `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     set((state) => {
       const newRuns = new Map(state.runs);
       newRuns.set(chatId, {
         chatId,
+        chatTitle,
         runId: id,
         requestId,
         status: 'started',
@@ -128,6 +130,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
         ...run,
         status: 'completed',
         completedAt: Date.now(),
+        chatTitle: chatTitle || run.chatTitle,
       });
 
       const isBackground = chatId !== activeChatId;
@@ -142,7 +145,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
           {
             id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             chatId,
-            chatTitle: chatTitle || 'Chat',
+            chatTitle: chatTitle || run.chatTitle || 'Chat',
             preview: run.content.slice(0, 100),
             type: 'completed' as const,
             timestamp: Date.now(),
@@ -166,6 +169,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
         status: 'failed',
         completedAt: Date.now(),
         error,
+        chatTitle: chatTitle || run.chatTitle,
       });
 
       const isBackground = chatId !== activeChatId;
@@ -179,7 +183,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
           {
             id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             chatId,
-            chatTitle: chatTitle || 'Chat',
+            chatTitle: chatTitle || run.chatTitle || 'Chat',
             preview: `Error: ${error.slice(0, 80)}`,
             type: 'failed' as const,
             timestamp: Date.now(),
@@ -318,4 +322,3 @@ export function useChatStreamContent(chatId: string | null | undefined): string 
     return state.runs.get(chatId)?.content || '';
   });
 }
-

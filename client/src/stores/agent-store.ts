@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { pollingManager } from "@/lib/polling-manager";
 
 export type AgentRunStatus = 'idle' | 'starting' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'replanning';
 
@@ -211,13 +212,12 @@ export const useAgentStore = create<AgentStore>()(
             return;
           }
 
-          setTimeout(async () => {
+          setTimeout(() => {
             const currentState = useAgentStore.getState();
             if (Date.now() < currentState.skipHydrationUntil) {
               return;
             }
 
-            const { pollingManager } = await import('@/lib/polling-manager');
             Object.entries(state.runs).forEach(([messageId, run]) => {
               if (run.runId && ['starting', 'queued', 'planning', 'running'].includes(run.status)) {
                 pollingManager.handleHydratedRun(messageId, run.runId, run.status);

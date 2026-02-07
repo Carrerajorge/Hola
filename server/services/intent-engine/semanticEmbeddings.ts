@@ -2,11 +2,19 @@ import { GoogleGenAI } from "@google/genai";
 import type { IntentType } from "../../../shared/schemas/intent";
 import { logStructured } from "./telemetry";
 
-// Only initialize AI if we have a valid key
-const hasGeminiKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
+const isTestEnv =
+  process.env.NODE_ENV === "test" ||
+  !!process.env.VITEST_WORKER_ID ||
+  !!process.env.VITEST_POOL_ID;
+
+// Only initialize AI if we have a valid key AND we're not in tests (avoid network flakiness/timeouts)
+const hasGeminiKey =
+  !isTestEnv && !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
 const ai = hasGeminiKey ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! }) : null;
 
-const EMBEDDING_MODEL = "text-embedding-004";
+// NOTE: In some Gemini projects/keys, `text-embedding-004` is not available.
+// Use env override so production can select an available embedding model.
+const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
 const EMBEDDING_DIMENSIONS = 768;
 const BATCH_SIZE = 100;
 const RATE_LIMIT_DELAY_MS = 100;
@@ -986,22 +994,26 @@ function insertIntoIndex(
   text: string,
   embedding: number[]
 ): void {
+  // IMPORTANT: we must add the new node to `indexedExamples` before creating back-links.
+  // Otherwise we can temporarily store neighbor references to an index that doesn't exist yet,
+  // and traversal can hit `indexedExamples[newIdx] === undefined` (reading '.layer').
   const newIdx = indexedExamples.length;
   const layer = Math.min(selectLayerForNewNode(), DEFAULT_HNSW_CONFIG.maxLayers - 1);
-  
+
   const newExample: IndexedExample = {
     intent,
     text,
     embedding,
     layer,
-    neighbors: []
+    neighbors: [],
   };
-  
-  if (indexedExamples.length === 0) {
-    indexedExamples.push(newExample);
+
+  indexedExamples.push(newExample);
+
+  if (newIdx === 0) {
     return;
   }
-  
+
   let entryPoint = 0;
   for (let l = DEFAULT_HNSW_CONFIG.maxLayers - 1; l > layer; l--) {
     const results = searchLayerGreedy(embedding, entryPoint, 1, l);
@@ -1009,21 +1021,23 @@ function insertIntoIndex(
       entryPoint = results[0];
     }
   }
-  
+
   for (let l = layer; l >= 0; l--) {
     const candidates = searchLayerGreedy(
-      embedding, 
-      entryPoint, 
+      embedding,
+      entryPoint,
       DEFAULT_HNSW_CONFIG.efConstruction,
       l
     );
-    
+
     const neighbors = selectNeighbors(embedding, candidates, DEFAULT_HNSW_CONFIG.M);
-    
+
     for (const neighborIdx of neighbors) {
       newExample.neighbors.push(neighborIdx);
-      
+
       const neighbor = indexedExamples[neighborIdx];
+      if (!neighbor) continue;
+
       if (!neighbor.neighbors.includes(newIdx)) {
         if (neighbor.neighbors.length < DEFAULT_HNSW_CONFIG.M * 2) {
           neighbor.neighbors.push(newIdx);
@@ -1037,13 +1051,11 @@ function insertIntoIndex(
         }
       }
     }
-    
+
     if (candidates.length > 0) {
       entryPoint = candidates[0];
     }
   }
-  
-  indexedExamples.push(newExample);
 }
 
 export async function initializeEmbeddingIndex(): Promise<void> {

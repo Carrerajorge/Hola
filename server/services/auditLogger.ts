@@ -5,13 +5,16 @@
 
 import { Request } from "express";
 import { storage } from "../storage";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 export interface AuditContext {
-  userId?: string;
+  userId?: string | null;
+  actorEmail?: string | null;
+  actorRole?: string | null;
   ipAddress?: string;
   userAgent?: string;
-  sessionId?: string;
-  requestId?: string;
+  sessionId?: string | null;
+  requestId?: string | null;
 }
 
 export interface AuditLogOptions {
@@ -27,7 +30,23 @@ export interface AuditLogOptions {
  * Extract audit context from Express request
  */
 export function extractAuditContext(req: Request): AuditContext {
-  const userId = (req as any).user?.id || (req as any).userId || null;
+  const userId = getSecureUserId(req);
+
+  const anyReq = req as any;
+  const actorEmail =
+    anyReq.user?.claims?.email ||
+    anyReq.user?.email ||
+    anyReq.session?.passport?.user?.claims?.email ||
+    anyReq.session?.passport?.user?.email ||
+    anyReq.user?.profile?.emails?.[0]?.value ||
+    null;
+  const actorRole =
+    anyReq.user?.role ||
+    anyReq.user?.claims?.role ||
+    anyReq.session?.passport?.user?.role ||
+    anyReq.session?.passport?.user?.claims?.role ||
+    null;
+
   const ipAddress = 
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
     (req.headers["x-real-ip"] as string) ||
@@ -35,11 +54,13 @@ export function extractAuditContext(req: Request): AuditContext {
     req.ip ||
     "unknown";
   const userAgent = req.headers["user-agent"] || "unknown";
-  const sessionId = req.cookies?.sessionId || (req as any).sessionID || null;
-  const requestId = (req as any).requestId || req.headers["x-request-id"] as string || null;
+  const sessionId = anyReq.sessionID || anyReq.cookies?.sessionId || null;
+  const requestId = anyReq.requestId || (req.headers["x-request-id"] as string) || null;
 
   return {
     userId,
+    actorEmail,
+    actorRole,
     ipAddress,
     userAgent,
     sessionId,
@@ -63,6 +84,8 @@ export async function createAuditLogEntry(
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
       details: {
+        actorEmail: context.actorEmail,
+        actorRole: context.actorRole,
         ...options.details,
         severity: options.severity || "info",
         category: options.category || "system",
@@ -124,11 +147,14 @@ export const AuditActions = {
   CHAT_DELETED: "chat.deleted",
   CHAT_FLAGGED: "chat.flagged",
   CHAT_EXPORTED: "chat.exported",
+  CHAT_STREAM: "chat.stream",
   
   // Payments
   PAYMENT_RECEIVED: "payment.received",
   PAYMENT_FAILED: "payment.failed",
   PAYMENT_REFUNDED: "payment.refunded",
+  PAYMENT_RECONCILED: "payment.reconciled",
+  PAYMENT_DISPUTED: "payment.disputed",
   
   // Invoices
   INVOICE_CREATED: "invoice.created",
@@ -140,6 +166,8 @@ export const AuditActions = {
   SECURITY_POLICY_CREATED: "security.policy_created",
   SECURITY_POLICY_UPDATED: "security.policy_updated",
   SECURITY_POLICY_DELETED: "security.policy_deleted",
+  SECURITY_POLICY_ENABLED: "security.policy_enabled",
+  SECURITY_POLICY_DISABLED: "security.policy_disabled",
   SECURITY_ALERT: "security.alert",
   SECURITY_IP_BLOCKED: "security.ip_blocked",
   SECURITY_RATE_LIMITED: "security.rate_limited",

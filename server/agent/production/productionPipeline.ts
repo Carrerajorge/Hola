@@ -20,6 +20,8 @@ import type {
     WorkOrder,
     PipelineStage,
     StageProgress,
+    Deliverable,
+    DocumentIntent,
     ProductionResult,
     ProductionEvent,
     ProductionEventHandler,
@@ -29,7 +31,7 @@ import type {
     TraceMap,
     Artifact,
 } from './types';
-import { routeTask } from './taskRouter';
+import { routeTask, type RouterResult, type TaskRouterOptions } from './taskRouter';
 import { createWorkOrder, enrichWorkOrder, validateWorkOrder } from './workOrderProcessor';
 import { consistencyAgent } from './consistencyAgent';
 import { generateBlueprint } from './blueprintAgent';
@@ -976,14 +978,43 @@ ${this.evidencePack?.limitations.length ? `**Limitaciones:** ${this.evidencePack
 // Factory Function
 // ============================================================================
 
+export interface StartProductionPipelineOptions extends TaskRouterOptions {
+    // Allows callers (e.g. doc-tool selection / intent router) to force production mode
+    // and avoid the pipeline reclassifying the message as regular chat.
+    deliverables?: Deliverable[];
+    intent?: DocumentIntent;
+    topic?: string;
+}
+
 export async function startProductionPipeline(
     message: string,
     userId: string,
     chatId?: string,
-    onEvent?: ProductionEventHandler
+    onEvent?: ProductionEventHandler,
+    options: StartProductionPipelineOptions = {}
 ): Promise<ProductionResult> {
+    const { deliverables, intent, topic, ...routerOptions } = options;
+    const forceProduction =
+        routerOptions.forceProduction ||
+        Boolean(deliverables?.length) ||
+        Boolean(intent) ||
+        Boolean(topic);
+
     // Route the task
-    const routerResult = await routeTask(message);
+    const routerResultBase = await routeTask(message, undefined, {
+        ...routerOptions,
+        forceProduction,
+    });
+
+    const routerResult: RouterResult = {
+        ...routerResultBase,
+        ...(forceProduction
+            ? { mode: 'PRODUCTION', reasoning: `${routerResultBase.reasoning} (forced by caller)` }
+            : {}),
+        ...(deliverables?.length ? { deliverables } : {}),
+        ...(intent ? { intent } : {}),
+        ...(topic ? { topic } : {}),
+    };
 
     if (routerResult.mode !== 'PRODUCTION') {
         throw new Error('Message does not require production mode');

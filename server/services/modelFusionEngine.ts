@@ -6,7 +6,7 @@
  */
 
 import OpenAI from "openai";
-import { GoogleGenAI } from "@google/genai";
+import { getGeminiClientOrThrow } from "../lib/gemini";
 
 // ============== Types ==============
 
@@ -53,12 +53,8 @@ export interface ModelSpec {
 // ============== Clients ==============
 
 const grokClient = new OpenAI({
-    apiKey: process.env.XAI_API_KEY || "",
+    apiKey: process.env.XAI_API_KEY || "missing" || "",
     baseURL: "https://api.x.ai/v1",
-});
-
-const geminiAI = new GoogleGenAI({
-    apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
 });
 
 // ============== Model Specs ==============
@@ -144,6 +140,7 @@ async function callGemini(
     options: { maxTokens?: number; temperature?: number } = {}
 ): Promise<{ content: string; latencyMs: number }> {
     const start = Date.now();
+    const geminiAI = getGeminiClientOrThrow();
 
     const geminiModel = geminiAI.models.generateContent({
         model,
@@ -381,6 +378,7 @@ export async function fuseVisionModels(
                     weight: spec.weight ?? 1,
                 };
             } else {
+                const geminiAI = getGeminiClientOrThrow();
                 const model = geminiAI.models.generateContent({
                     model: spec.model,
                     contents: [

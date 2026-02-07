@@ -3,8 +3,9 @@ import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { db } from "../../db";
 import { users, excelDocuments } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 // SECURITY: Admin email moved to environment variable
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
@@ -62,16 +63,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
             
             // Fallback: check by email if userId didn't find admin
             if (!dbUser?.role && userEmail) {
-                const result = await db.select({ role: users.role, email: users.email, id: users.id })
-                    .from(users).where(eq(users.email, userEmail));
+                const normalizedEmail = userEmail.toLowerCase().trim();
+                const result = await db
+                    .select({ role: users.role, email: users.email, id: users.id })
+                    .from(users)
+                    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+                    .limit(1);
                 dbUser = result[0];
-                
-                // Also try case-insensitive search
-                if (!dbUser) {
-                    const allUsers = await db.select({ role: users.role, email: users.email, id: users.id })
-                        .from(users);
-                    dbUser = allUsers.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
-                }
             }
             
             isAdmin = dbUser?.role === "admin";
@@ -79,13 +77,25 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         }
 
         if (!isAdmin) {
-            await storage.createAuditLog({
-                action: "admin_access_denied",
+            await auditLog(req, {
+                action: AuditActions.ADMIN_DENIED,
                 resource: "admin_panel",
-                details: { email: userEmail, userId, path: req.path }
+                details: { email: userEmail, userId, path: req.path },
+                category: "admin",
+                severity: "warning",
             });
             return res.status(403).json({ error: "Admin access restricted" });
         }
+
+        // Propagate role for downstream middleware (e.g. 2FA enforcement).
+        if (userReq.user && typeof userReq.user === "object") {
+            (userReq.user as any).role = "admin";
+        } else {
+            const existingUser = (req as any).user;
+            (req as any).user = { ...(existingUser || {}), role: "admin" };
+        }
+        (req as any).isAdmin = true;
+
         next();
     } catch (error) {
         console.error("[Admin] Authorization check failed:", error);
@@ -240,15 +250,22 @@ export async function seedDefaultExcelDocuments() {
 }
 
 export function checkApiKeyExists(provider: string): boolean {
+    if (!provider) return false;
+
+    const normalized = String(provider).toLowerCase();
     const keyMap: Record<string, string | undefined> = {
         'openai': process.env.OPENAI_API_KEY,
         'anthropic': process.env.ANTHROPIC_API_KEY,
-        'google': process.env.GEMINI_API_KEY,
-        'grok': process.env.GROK_API_KEY,
-        'xai': process.env.XAI_API_KEY,
+        'google': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+        'gemini': process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+        // Legacy/alias support: some deployments use GROK_API_KEY, some use XAI_API_KEY.
+        'xai': process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY,
+        'grok': process.env.GROK_API_KEY || process.env.XAI_API_KEY || process.env.ILIAGPT_API_KEY,
+        'openrouter': process.env.OPENROUTER_API_KEY,
+        'perplexity': process.env.PERPLEXITY_API_KEY,
         'deepseek': process.env.DEEPSEEK_API_KEY,
         'mistral': process.env.MISTRAL_API_KEY,
         'cohere': process.env.COHERE_API_KEY
     };
-    return !!keyMap[provider.toLowerCase()];
+    return !!keyMap[normalized];
 }

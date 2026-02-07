@@ -2,6 +2,8 @@ import crypto from "crypto";
 import { db } from "../db";
 import { users, magicLinks } from "@shared/schema";
 import { eq, and, gt } from "drizzle-orm";
+import { getSettingValue } from "./settingsConfigService";
+import { autoAcceptWorkspaceInvitationForUser } from "./workspaceInvitationService";
 
 const MAGIC_LINK_EXPIRY_MINUTES = 15;
 
@@ -24,13 +26,24 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
         let [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
 
         if (!user) {
+            const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
+            if (!allowRegistration) {
+                return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+            }
+
             // Create new user for magic link signup
+            const newUserId = crypto.randomUUID();
             const [newUser] = await db.insert(users).values({
+                id: newUserId,
+                // Each user starts with their own workspace by default.
+                // If they were invited to an existing workspace, we'll swap org/role on first login.
+                orgId: newUserId,
                 email: email.toLowerCase(),
                 firstName: email.split("@")[0],
                 lastName: "",
-                role: "user",
+                role: "team_admin",
                 status: "pending", // Will be activated on first magic link verification
+                emailVerified: "false",
             }).returning();
             user = newUser;
         }
@@ -91,9 +104,16 @@ export async function verifyMagicLink(token: string): Promise<{ success: boolean
             return { success: false, error: "Usuario no encontrado" };
         }
 
-        // Activate user if pending
-        if (user.status === "pending") {
-            await db.update(users).set({ status: "active" }).where(eq(users.id, user.id));
+        // Activate user if pending + mark email verified
+        const wasPending = user.status === "pending";
+        const patch: Record<string, any> = { emailVerified: "true", updatedAt: new Date() };
+        if (wasPending) patch.status = "active";
+        await db.update(users).set(patch).where(eq(users.id, user.id));
+
+        try {
+            await autoAcceptWorkspaceInvitationForUser(user.id);
+        } catch (e) {
+            console.warn("[MagicLink] Failed to auto-accept workspace invitation:", e);
         }
 
         console.log(`[MagicLink] Verified token for user ${user.email}`);
@@ -121,5 +141,6 @@ export function getMagicLinkUrl(token: string): string {
     const baseUrl = process.env.REPLIT_DOMAINS
         ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
         : "http://localhost:5050";
-    return `${baseUrl}/auth/magic-link?token=${token}`;
+    // This endpoint performs the login and redirects to the app.
+    return `${baseUrl}/api/auth/magic-link/verify?token=${token}`;
 }

@@ -31,12 +31,27 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
+import {
+  SILVER_BORDER_DIVIDER,
+  SILVER_CONTAINER_FOCUS,
+  SILVER_CONTAINER_SHADOW,
+  SILVER_GLASS_BG,
+  SILVER_HAIRLINE,
+  SILVER_HAIRLINE_DASHED,
+  SILVER_HOVER_BORDER_INNER,
+  SILVER_HOVER_BORDER_SOFT,
+  SILVER_ICON_BUTTON_BASE,
+  SILVER_ICON_BUTTON_TONE,
+  SILVER_KBD,
+  SILVER_RING_SOFT,
+} from "@/lib/silver-ui";
 import { SourceListItem } from "@/components/ui/source-list-item";
 import { RecordingPanel } from "@/components/recording-panel";
 import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import "@/components/ui/glass-effects.css";
 
 interface UploadedFile {
@@ -190,6 +205,9 @@ export function Composer({
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
+  const { settings } = useSettingsContext();
+  const webSearchEnabled = !!settings.webSearch;
+  const canvasEnabled = !!settings.canvas;
 
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
 
@@ -389,10 +407,11 @@ export function Composer({
             <div
               key={file.id || index}
               className={cn(
-                "relative group rounded-lg border overflow-hidden",
+                "relative group rounded-lg overflow-hidden",
+                SILVER_HAIRLINE,
                 file.status === "error"
                   ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
-                  : "bg-card border-border"
+                  : cn("bg-card", "border-[#c7c7c7]/45 dark:border-white/10", SILVER_HOVER_BORDER_SOFT)
               )}
               data-testid={`inline-file-${index}`}
             >
@@ -465,7 +484,7 @@ export function Composer({
     }
 
     return (
-      <div className="flex items-center gap-2 pl-2">
+      <div className="flex items-center gap-1.5 pl-1">
         {uploadedFiles.map((file, index) => {
           const theme = getFileTheme(file.name, file.mimeType);
           const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
@@ -473,8 +492,14 @@ export function Composer({
           if (isImage && file.dataUrl) {
             return (
               <div key={file.id} className="relative group">
-                <div
-                  className="relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer border border-border hover:border-primary transition-colors"
+                  <div
+                    className={cn(
+                      "relative w-12 h-12 rounded-lg overflow-hidden cursor-pointer",
+                      SILVER_HAIRLINE,
+                      "border-[#c7c7c7]/55 dark:border-white/10",
+                      SILVER_HOVER_BORDER_SOFT,
+                      "transition-colors duration-150"
+                  )}
                   onClick={() => setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl! })}
                   data-testid={`preview-image-${index}`}
                 >
@@ -485,7 +510,7 @@ export function Composer({
                   />
                   {(file.status === "uploading" || file.status === "processing") && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <Loader2 className="h-4 w-4 text-white animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
                     </div>
                   )}
                 </div>
@@ -509,21 +534,26 @@ export function Composer({
                 <TooltipTrigger asChild>
                   <div
                     className={cn(
-                      "relative group flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 cursor-pointer",
-                      file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
-                      file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800",
-                      file.status === "ready" && "bg-muted/50 border border-border hover:bg-muted",
-                      file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                      "relative group flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all duration-200 cursor-pointer",
+                      file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border-[0.5px] border-blue-200 dark:border-blue-800",
+                      file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border-[0.5px] border-yellow-200 dark:border-yellow-800",
+                      file.status === "ready" && cn(
+                        "bg-white/30 dark:bg-white/5 hover:bg-white/40 dark:hover:bg-white/6",
+                        SILVER_HAIRLINE,
+                        "border-[#c7c7c7]/45 dark:border-white/10",
+                        SILVER_HOVER_BORDER_SOFT
+                      ),
+                      file.status === "error" && "bg-red-50 dark:bg-red-950/30 border-[0.5px] border-red-200 dark:border-red-800"
                     )}
                   >
                     <div className={cn(
-                      "flex items-center justify-center w-7 h-7 rounded shrink-0",
+                      "flex items-center justify-center w-6 h-6 rounded shrink-0",
                       theme.bgColor
                     )}>
                       {file.status === "uploading" || file.status === "processing" ? (
-                        <Loader2 className="h-4 w-4 text-white animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
                       ) : (
-                        <span className="text-white text-xs font-bold">
+                        <span className="text-white text-[11px] font-bold leading-none">
                           {theme.icon}
                         </span>
                       )}
@@ -561,11 +591,13 @@ export function Composer({
           aria-label="Open tools menu"
           title="Open tools menu"
           className={cn(
-            "liquid-plus-button h-10 w-10 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
-            isDocumentMode && "h-11 w-11"
+            isDocumentMode ? "h-10 w-10 rounded-full" : "h-9 w-9 sm:h-8 sm:w-8 rounded-full",
+            "flex-shrink-0",
+            SILVER_ICON_BUTTON_BASE,
+            SILVER_ICON_BUTTON_TONE
           )}
         >
-          <Plus className="h-5 w-5" />
+          <Plus className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn("p-1", isDocumentMode ? "w-48" : "w-56 p-2")} align="start" side="top">
@@ -587,6 +619,7 @@ export function Composer({
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+                disabled={!webSearchEnabled}
               >
                 <Search className="h-4 w-4" />
                 Web Search
@@ -637,7 +670,12 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                onClick={() => { setSelectedTool("web"); onCloseSidebar?.(); }}
+                disabled={!webSearchEnabled}
+                onClick={() => {
+                  if (!webSearchEnabled) return;
+                  setSelectedTool("web");
+                  onCloseSidebar?.();
+                }}
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-cyan-100 dark:bg-cyan-900/30">
                   <Globe className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
@@ -654,71 +692,80 @@ export function Composer({
                 </div>
                 Generar imagen
               </Button>
-
-              <HoverCard openDelay={100} closeDelay={100}>
-                <HoverCardTrigger asChild>
-                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
-                    <span className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Crear documento
-                    </span>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </HoverCardTrigger>
-                <HoverCardContent side="right" align="start" className="w-48 p-2">
-                  <div className="grid gap-1">
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("word")}
-                      data-testid="button-create-word"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
-                        <span className="text-white text-xs font-bold">W</span>
-                      </div>
-                      Documento Word
+              {canvasEnabled ? (
+                <HoverCard openDelay={100} closeDelay={100}>
+                  <HoverCardTrigger asChild>
+                    <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
+                      <span className="flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Crear documento
+                      </span>
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("excel")}
-                      data-testid="button-create-excel"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
-                        <span className="text-white text-xs font-bold">X</span>
-                      </div>
-                      Hoja Excel
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("ppt")}
-                      data-testid="button-create-ppt"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
-                        <span className="text-white text-xs font-bold">P</span>
-                      </div>
-                      Presentación PPT
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
-                        <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
-                          <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
-                          <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
-                          <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
-                          <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
-                          <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
-                        </svg>
-                      </div>
-                      Diagrama Figma
-                    </Button>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
+                  </HoverCardTrigger>
+                  <HoverCardContent side="right" align="start" className="w-48 p-2">
+                    <div className="grid gap-1">
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("word")}
+                        data-testid="button-create-word"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
+                          <span className="text-white text-xs font-bold">W</span>
+                        </div>
+                        Documento Word
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("excel")}
+                        data-testid="button-create-excel"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
+                          <span className="text-white text-xs font-bold">X</span>
+                        </div>
+                        Hoja Excel
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("ppt")}
+                        data-testid="button-create-ppt"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
+                          <span className="text-white text-xs font-bold">P</span>
+                        </div>
+                        Presentación PPT
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
+                          <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
+                            <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
+                            <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
+                            <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
+                            <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
+                            <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
+                          </svg>
+                        </div>
+                        Diagrama Figma
+                      </Button>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              ) : (
+                <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item" disabled>
+                  <span className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Crear documento
+                  </span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
 
               <Button
                 variant="ghost"
@@ -841,29 +888,48 @@ export function Composer({
   const containerClass = isDocumentMode
     ? cn(
       "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
-      isDraggingOver && "ring-2 ring-primary rounded-2xl"
+      isDraggingOver && cn("ring-2 rounded-2xl", SILVER_RING_SOFT)
     )
-    : "shrink-0 w-full px-4 pb-4 pt-2 bg-background";
+    : "shrink-0 w-full px-4 pb-2.5 pt-1.5 bg-background";
 
-  const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
-    : cn(
-      // Professional Premium Container
-      "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-      // Glass Background & Blur
-      "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
-      // Premium Border
-      "border border-black/5 dark:border-white/10",
-      // Shape & Spacing
-      "rounded-[26px] px-5 py-4",
-      // Elevated Shadow
-      "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
-      // Focus State (Subtle Glow)
-      "focus-within:shadow-[0_0_0_2px_rgba(var(--primary),0.1),0_8px_40px_rgba(0,0,0,0.1)] focus-within:border-primary/30",
-
-      selectedDocText && "border-primary/20",
-      isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
-    );
+  const inputContainerClass = cn(
+    isDocumentMode
+      ? cn(
+        "relative flex flex-col",
+        // Glass Background & Blur
+        SILVER_GLASS_BG,
+        // Premium Border (silver, ultra-thin)
+        SILVER_HAIRLINE,
+        "border-[#c7c7c7]/55 dark:border-white/10",
+        SILVER_HOVER_BORDER_SOFT,
+        // Shape & Spacing
+        "rounded-[22px] px-3 py-1.5",
+        // Elevated Shadow
+        SILVER_CONTAINER_SHADOW,
+        // Focus State (minimal silver)
+        SILVER_CONTAINER_FOCUS,
+        "transition-colors duration-200"
+      )
+      : cn(
+        // Professional Premium Container
+        "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
+        // Glass Background & Blur
+        SILVER_GLASS_BG,
+        // Premium Border (silver, ultra-thin)
+        SILVER_HAIRLINE,
+        "border-[#c7c7c7]/55 dark:border-white/10",
+        SILVER_HOVER_BORDER_SOFT,
+        // Shape & Spacing
+        "rounded-[22px] px-3 py-1.5",
+        // Elevated Shadow
+        SILVER_CONTAINER_SHADOW,
+        // Focus State (minimal silver)
+        SILVER_CONTAINER_FOCUS,
+      ),
+    // Keep these highlights in document mode too
+    selectedDocText && "border-primary/20",
+    isDraggingOver && cn("border-[#bdbdbd]/85 bg-white/80 ring-2 dark:bg-white/5", SILVER_RING_SOFT)
+  );
 
   return (
     <div
@@ -875,8 +941,14 @@ export function Composer({
       onDrop={handleDrop}
     >
       {isDraggingOver && (
-        <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-dashed border-primary pointer-events-none">
-          <div className="flex flex-col items-center gap-2 text-primary">
+        <div
+          className={cn(
+            "absolute inset-0 z-50 bg-white/55 dark:bg-zinc-900/35 backdrop-blur-sm rounded-2xl flex items-center justify-center pointer-events-none",
+            SILVER_HAIRLINE_DASHED,
+            "border-[#c7c7c7]/70 dark:border-white/20"
+          )}
+        >
+          <div className="flex flex-col items-center gap-2 text-zinc-700 dark:text-zinc-200">
             <Upload className="h-8 w-8" />
             <span className="text-sm font-medium">Suelta los archivos aquí</span>
           </div>
@@ -1008,36 +1080,49 @@ export function Composer({
 
 
         <div className="flex flex-col relative">
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={handleInputChange}
-            onFocus={onTextareaFocus}
-            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-              handleMentionKeyDown(e);
-              if (showMentionPopover) return;
-              handleHistoryNavigation(e);
-              const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
-                e.preventDefault();
-                handleSubmitWithHistory();
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
-                e.preventDefault();
-                handleSubmitWithHistory();
-              }
-            }}
-            onPaste={handlePaste}
-            placeholder={placeholder}
-            aria-label="Message input"
-            aria-describedby="composer-hint"
-            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
-            rows={1}
-          />
+          {/* Inner input contour (thin, minimalist, silver) */}
+          <div
+            className={cn(
+              "rounded-[20px] bg-white/40 dark:bg-zinc-950/10 backdrop-blur-sm",
+              SILVER_HAIRLINE,
+              "border-[#c7c7c7]/80 dark:border-white/20",
+              SILVER_HOVER_BORDER_INNER,
+              "px-3 py-1",
+              "transition-colors duration-150",
+              "focus-within:border-[#b0b0b0]/95 dark:focus-within:border-white/35"
+            )}
+          >
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onFocus={onTextareaFocus}
+              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                handleMentionKeyDown(e);
+                if (showMentionPopover) return;
+                handleHistoryNavigation(e);
+                const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                }
+              }}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              aria-label="Message input"
+              aria-describedby="composer-hint"
+              className="min-h-[22px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none outline-none focus-visible:!outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-[1.4] overflow-y-auto scrollbar-none"
+              rows={1}
+            />
+          </div>
 
-          <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/40">
-            <div className="flex items-center gap-2">
+          <div className={cn("flex items-center justify-between mt-0.5 pt-0.5 border-t-[0.5px]", SILVER_BORDER_DIVIDER)}>
+            <div className="flex items-center gap-1.5">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
               {renderSelectedDocToolLogo()}
@@ -1122,7 +1207,7 @@ export function Composer({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {/* Character counter */}
               {input.length > 0 && (
                 <span className="text-[11px] text-muted-foreground tabular-nums" data-testid="char-counter">
@@ -1132,7 +1217,7 @@ export function Composer({
 
               {/* Keyboard shortcut hint */}
               <span className="hidden sm:flex items-center text-[10px] text-muted-foreground/70">
-                <kbd className="px-1 py-0.5 rounded bg-muted/50 text-[9px] font-mono">⌘K</kbd>
+                <kbd className={SILVER_KBD}>⌘K</kbd>
                 <span className="ml-1">comandos</span>
               </span>
 

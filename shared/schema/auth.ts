@@ -10,8 +10,17 @@ export const sessions = pgTable(
         sid: varchar("sid").primaryKey(),
         sess: jsonb("sess").notNull(),
         expire: timestamp("expire").notNull(),
+        // Optional: derived from sess JSON by a DB trigger (see migrations/0005_session_user_tracking.sql)
+        userId: varchar("user_id"),
+        createdAt: timestamp("created_at").defaultNow().notNull(),
+        updatedAt: timestamp("updated_at").defaultNow().notNull(),
+        lastSeenAt: timestamp("last_seen_at"),
     },
-    (table) => [index("IDX_session_expire").on(table.expire)]
+    (table) => [
+        index("IDX_session_expire").on(table.expire),
+        index("sessions_user_idx").on(table.userId),
+        index("sessions_user_expire_idx").on(table.userId, table.expire),
+    ]
 );
 
 // Magic Links table for passwordless email authentication
@@ -148,6 +157,12 @@ export const userProfileSchema = z.object({
     nickname: z.string().default(''),
     occupation: z.string().default(''),
     bio: z.string().default(''),
+    // Builder profile (public-facing metadata for GPTs)
+    showName: z.boolean().default(true),
+    linkedInUrl: z.string().default(''),
+    githubUrl: z.string().default(''),
+    websiteDomain: z.string().default(''),
+    receiveEmailComments: z.boolean().default(false),
 });
 
 export const featureFlagsSchema = z.object({
@@ -164,6 +179,8 @@ export const featureFlagsSchema = z.object({
 export const privacySettingsSchema = z.object({
     trainingOptIn: z.boolean().default(false),
     remoteBrowserDataAccess: z.boolean().default(false),
+    analyticsTracking: z.boolean().default(true),
+    chatHistoryEnabled: z.boolean().default(true),
 });
 
 export const userSettings = pgTable("user_settings", {

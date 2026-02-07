@@ -2,21 +2,35 @@ services:
   app:
     build: .
     restart: always
+    command: ["node", "dist/index.cjs"]
     environment:
       - NODE_ENV=production
       - PORT=5000
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
       - REDIS_URL=redis://redis:6379
-      # Add other keys from .env here or mount .env file
+      - AGENT_WORKSPACE_ROOT=/app/sandbox_workspace
+      # Use isolated runner for shell_command execution (no docker socket in app)
+      - SHELL_COMMAND_SANDBOX_MODE=runner
+      - SHELL_COMMAND_RUNNER_URL=http://sandbox-runner:8080
+      - SHELL_COMMAND_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
     env_file:
       - .env.production
     ports:
       - "5000:5000"
+    volumes:
+      - agent_workspace:/app/sandbox_workspace
     depends_on:
       - postgres
       - redis
+      - sandbox-runner
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5000/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   worker:
     build: .
@@ -26,7 +40,6 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
       - REDIS_URL=redis://redis:6379
-      # Add other keys from .env here
     env_file:
       - .env.production
     depends_on:
@@ -34,6 +47,8 @@ services:
       - redis
     networks:
       - app-network
+    healthcheck:
+      disable: true
 
   postgres:
     image: pgvector/pgvector:pg15
@@ -53,9 +68,32 @@ services:
     networks:
       - app-network
 
+  sandbox-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox-runner
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - SANDBOX_RUNNER_PORT=8080
+      - SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
+      - AGENT_WORKSPACE_ROOT=/workspace_root
+      - SHELL_COMMAND_DOCKER_IMAGE=debian:bookworm-slim
+      - SHELL_COMMAND_DOCKER_CPUS=1
+      - SHELL_COMMAND_DOCKER_MEMORY=512m
+      - SHELL_COMMAND_DOCKER_PIDS=256
+    volumes:
+      - agent_workspace:/workspace_root
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8080"
+    networks:
+      - app-network
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
   postgres_data:
+  agent_workspace:

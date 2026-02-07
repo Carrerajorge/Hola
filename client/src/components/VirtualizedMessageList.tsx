@@ -20,6 +20,8 @@ import { Bot, User, Copy, RotateCcw, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
+import { usePlatformSettings } from '@/contexts/PlatformSettingsContext';
+import { formatZonedTime, normalizeTimeZone } from '@/lib/platformDateTime';
 
 interface VirtualizedMessageListProps {
     messages: Message[];
@@ -50,6 +52,8 @@ export function VirtualizedMessageList({
     const listRef = useRef<List>(null);
     const rowHeights = useRef<Map<number, number>>(new Map());
     const { toast } = useToast();
+    const { settings: platformSettings } = usePlatformSettings();
+    const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
 
     // Include streaming message if active
     const displayMessages = useMemo(() => {
@@ -110,8 +114,9 @@ export function VirtualizedMessageList({
         onCopy: handleCopy,
         onEditMessage,
         onDeleteMessage,
-        onRegenerateMessage
-    }), [displayMessages, handleCopy, onEditMessage, onDeleteMessage, onRegenerateMessage]);
+        onRegenerateMessage,
+        platformTimeZone,
+    }), [displayMessages, handleCopy, onEditMessage, onDeleteMessage, onRegenerateMessage, platformTimeZone]);
 
     return (
         <div className={cn("flex-1 h-full", className)}>
@@ -140,7 +145,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
     const message = data.messages[index];
     if (!message) return null;
 
-    const { onCopy, onEditMessage, onDeleteMessage, onRegenerateMessage } = data;
+    const { onCopy, onEditMessage, onDeleteMessage, onRegenerateMessage, platformTimeZone } = data;
     const isUser = message.role === 'user';
     const isStreamingMessage = message.id === 'streaming';
 
@@ -245,10 +250,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
                         "text-xs text-muted-foreground mt-1",
                         isUser ? "text-right" : "text-left"
                     )}>
-                        {message.timestamp.toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                        })}
+                        {formatZonedTime(message.timestamp, { timeZone: platformTimeZone })}
                     </p>
                 </div>
             </div>

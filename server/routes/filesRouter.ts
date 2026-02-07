@@ -1,10 +1,15 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "../objectStorage";
-import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, LIMITS } from "../lib/constants";
+import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, HTTP_HEADERS, LIMITS } from "../lib/constants";
 import { fileProcessingQueue } from "../lib/fileProcessingQueue";
+import { validateAttachmentSecurity } from "../lib/pareSecurityGuard";
 import { processDocument } from "../services/documentProcessing";
 import { chunkText, generateEmbeddingsBatch } from "../embeddingService";
+import { sanitizeFilename } from "../services/fileValidation";
+import dns from "node:dns/promises";
+import net from "node:net";
+import path from "node:path";
 
 interface MultipartUploadSession {
   uploadId: string;
@@ -22,6 +27,276 @@ interface MultipartUploadSession {
 const multipartSessions: Map<string, MultipartUploadSession> = new Map();
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+
+function isPrivateIpAddress(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+
+  // IPv4-mapped IPv6, e.g. ::ffff:127.0.0.1
+  if (normalized.startsWith("::ffff:")) {
+    const v4 = normalized.slice("::ffff:".length);
+    return isPrivateIpAddress(v4);
+  }
+
+  if (net.isIPv4(normalized)) {
+    const parts = normalized.split(".").map(Number);
+    if (parts.length !== 4 || parts.some(p => Number.isNaN(p) || p < 0 || p > 255)) return true;
+    const [a, b, c] = parts;
+
+    if (a === 0) return true; // "this host on this network"
+    if (a === 10) return true; // RFC1918
+    if (a === 127) return true; // loopback
+    if (a === 169 && b === 254) return true; // link-local
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+    if (a === 192 && b === 168) return true; // RFC1918
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+
+    // TEST-NET ranges and benchmarking ranges (avoid SSRF to non-routable)
+    if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24
+    if (a === 192 && b === 0 && c === 2) return true; // 192.0.2.0/24
+    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15
+    if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24
+    if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24
+
+    if (a >= 224) return true; // multicast/reserved
+    return false;
+  }
+
+  if (net.isIPv6(normalized)) {
+    if (normalized === "::" || normalized === "::1") return true;
+    if (normalized.startsWith("fe80:")) return true; // link-local
+    if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // unique local
+    if (normalized.startsWith("2001:db8:")) return true; // documentation
+    return false;
+  }
+
+  // Unknown format: be safe and block.
+  return true;
+}
+
+async function assertSafeRemoteHttpUrl(rawUrl: string): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("Invalid URL");
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Unsupported URL protocol");
+  }
+
+  // Strip credentials (userinfo) to avoid leaking secrets and weird auth flows.
+  parsed.username = "";
+  parsed.password = "";
+
+  const hostname = (parsed.hostname || "").toLowerCase();
+  if (!hostname) throw new Error("Invalid URL hostname");
+
+  // Block obvious internal domains.
+  const blocked = [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+  ];
+  if (blocked.includes(hostname) || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
+    throw new Error("Blocked internal hostname");
+  }
+
+  const ipType = net.isIP(hostname);
+  if (ipType) {
+    if (isPrivateIpAddress(hostname)) {
+      throw new Error("Blocked private IP");
+    }
+    return parsed.href;
+  }
+
+  // DNS resolve and reject any private/reserved targets.
+  const addrs = await dns.lookup(hostname, { all: true });
+  if (!addrs || addrs.length === 0) {
+    throw new Error("Unable to resolve hostname");
+  }
+  if (addrs.some(a => isPrivateIpAddress(a.address))) {
+    throw new Error("Blocked private IP (DNS)");
+  }
+
+  return parsed.href;
+}
+
+function stripContentType(contentType: string | null): string | null {
+  if (!contentType) return null;
+  const base = contentType.split(";")[0]?.trim().toLowerCase();
+  return base || null;
+}
+
+function parseFilenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+
+  // RFC 5987: filename*=UTF-8''...
+  const filenameStarMatch = header.match(/filename\\*\\s*=\\s*([^']*)''([^;]+)/i);
+  if (filenameStarMatch) {
+    try {
+      const encoded = filenameStarMatch[2].trim();
+      return decodeURIComponent(encoded);
+    } catch {
+      // fall through to filename=
+    }
+  }
+
+  const filenameMatch = header.match(/filename\\s*=\\s*\"?([^\";]+)\"?/i);
+  if (filenameMatch) {
+    return filenameMatch[1].trim();
+  }
+  return null;
+}
+
+function inferMimeTypeFromFileName(fileName: string): string | null {
+  const ext = (path.extname(fileName || "").toLowerCase() || "").replace(".", "");
+  if (!ext) return null;
+
+  const map: Record<string, string> = {
+    // documents
+    pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ppt: "application/vnd.ms-powerpoint",
+    txt: "text/plain",
+    md: "text/markdown",
+    csv: "text/csv",
+    html: "text/html",
+    htm: "text/html",
+    json: "application/json",
+
+    // images
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    webp: "image/webp",
+    tif: "image/tiff",
+    tiff: "image/tiff",
+    svg: "image/svg+xml",
+  };
+
+  return map[ext] || null;
+}
+
+function ensureExtensionForMimeType(fileName: string, mimeType: string): string {
+  if (!fileName) return fileName;
+  if (path.extname(fileName)) return fileName;
+
+  if (mimeType.startsWith("image/")) {
+    const imageExtMap: Record<string, string> = {
+      "image/jpeg": ".jpg",
+      "image/jpg": ".jpg",
+      "image/png": ".png",
+      "image/gif": ".gif",
+      "image/bmp": ".bmp",
+      "image/webp": ".webp",
+      "image/tiff": ".tiff",
+      "image/svg+xml": ".svg",
+    };
+    return fileName + (imageExtMap[mimeType] || "");
+  }
+
+  const ext = (ALLOWED_EXTENSIONS as Record<string, string>)[mimeType];
+  if (ext) return fileName + ext;
+  return fileName;
+}
+
+async function downloadUrlToBufferWithRedirects(
+  rawUrl: string,
+  {
+    maxBytes,
+    timeoutMs,
+    maxRedirects,
+  }: {
+    maxBytes: number;
+    timeoutMs: number;
+    maxRedirects: number;
+  }
+): Promise<{
+  finalUrl: string;
+  contentType: string | null;
+  contentDisposition: string | null;
+  buffer: Buffer;
+}> {
+  let currentUrl = await assertSafeRemoteHttpUrl(rawUrl);
+
+  for (let i = 0; i <= maxRedirects; i++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": HTTP_HEADERS.USER_AGENT,
+          "Accept": "*/*",
+          "Accept-Language": HTTP_HEADERS.ACCEPT_LANGUAGE,
+        },
+      });
+
+      // Redirect handling
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) {
+          throw new Error(`Redirect without location (status ${response.status})`);
+        }
+        const next = new URL(location, currentUrl).href;
+        currentUrl = await assertSafeRemoteHttpUrl(next);
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to download (status ${response.status})`);
+      }
+
+      const contentType = stripContentType(response.headers.get("content-type"));
+      const contentDisposition = response.headers.get("content-disposition");
+      const declaredLen = response.headers.get("content-length");
+      const contentLength = declaredLen ? parseInt(declaredLen, 10) : NaN;
+      if (!Number.isNaN(contentLength) && contentLength > maxBytes) {
+        throw new Error("File too large");
+      }
+
+      const chunks: Buffer[] = [];
+      let received = 0;
+
+      // Node/undici ReadableStream is async iterable.
+      const body = response.body as any;
+      if (!body) {
+        throw new Error("Empty response body");
+      }
+
+      for await (const chunk of body) {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        received += buf.length;
+        if (received > maxBytes) {
+          controller.abort();
+          throw new Error("File too large");
+        }
+        chunks.push(buf);
+      }
+
+      return {
+        finalUrl: currentUrl,
+        contentType,
+        contentDisposition,
+        buffer: Buffer.concat(chunks),
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw new Error("Too many redirects");
+}
 
 function parseObjectPath(path: string): {
   bucketName: string;
@@ -76,18 +351,33 @@ async function signObjectURLForMultipart({
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
     let content: Buffer;
+    const fs = await import("fs");
+    const path = await import("path");
+
+    console.log(`[processFileAsync] Starting processing for file ${fileId}, storagePath: ${storagePath}, mimeType: ${mimeType}`);
 
     // Check if this is a local storage path (from our local fallback)
-    if (storagePath.startsWith('/objects/uploads/')) {
+    // Local paths start with /objects/uploads/ and the file exists in ./uploads/
+    const isLocalPath = storagePath.startsWith('/objects/uploads/');
+
+    if (isLocalPath) {
       // Extract the object ID from the path and read from local uploads directory
       const objectId = storagePath.replace('/objects/uploads/', '');
-      const fs = await import("fs");
-      const path = await import("path");
       const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
 
-      console.log(`[processFileAsync] Reading local file: ${localFilePath}`);
+      console.log(`[processFileAsync] Attempting to read local file: ${localFilePath}`);
+
+      // Wait a bit for the file to be fully written (upload might still be in progress)
+      let attempts = 0;
+      const maxAttempts = 10;
+      while (!fs.default.existsSync(localFilePath) && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+        console.log(`[processFileAsync] Waiting for file... attempt ${attempts}/${maxAttempts}`);
+      }
 
       if (!fs.default.existsSync(localFilePath)) {
+        console.error(`[processFileAsync] Local file not found after ${maxAttempts} attempts: ${localFilePath}`);
         throw new Error(`Local file not found: ${localFilePath}`);
       }
 
@@ -95,12 +385,41 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
       console.log(`[processFileAsync] Read ${content.length} bytes from local file`);
     } else {
       // Use object storage for non-local paths
-      const objectStorageService = new ObjectStorageService();
-      const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
-      content = await objectStorageService.getFileContent(objectFile);
+      try {
+        const objectStorageService = new ObjectStorageService();
+        const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
+        content = await objectStorageService.getFileContent(objectFile);
+        console.log(`[processFileAsync] Read ${content.length} bytes from object storage`);
+      } catch (storageError: any) {
+        console.error(`[processFileAsync] Object storage error for ${storagePath}:`, storageError.message);
+
+        // Fallback: try to read as local file if object storage fails
+        const objectId = storagePath.replace('/objects/', '');
+        const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
+
+        if (fs.default.existsSync(localFilePath)) {
+          console.log(`[processFileAsync] Fallback to local file: ${localFilePath}`);
+          content = await fs.promises.readFile(localFilePath);
+        } else {
+          throw storageError;
+        }
+      }
+    }
+
+    if (!content || content.length === 0) {
+      console.error(`[processFileAsync] Empty content for file ${fileId}`);
+      throw new Error('File content is empty');
     }
 
     const result = await processDocument(content, mimeType, filename);
+
+    if (!result.text || result.text.trim().length === 0) {
+      console.warn(`[processFileAsync] No text extracted from file ${fileId}, setting as ready with empty content`);
+      // Still mark as ready but with no chunks - allows the file to be used
+      await storage.updateFileStatus(fileId, "ready");
+      return;
+    }
+
     const chunks = chunkText(result.text, 1500, 150);
 
     const chunksWithoutEmbeddings = chunks.map((chunk) => ({
@@ -115,12 +434,16 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     await storage.createFileChunks(chunksWithoutEmbeddings);
     await storage.updateFileStatus(fileId, "ready");
 
-    console.log(`File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
+    console.log(`[processFileAsync] File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
 
     generateEmbeddingsAsync(fileId, chunks);
-  } catch (error) {
-    console.error(`Error processing file ${fileId}:`, error);
-    await storage.updateFileStatus(fileId, "error");
+  } catch (error: any) {
+    console.error(`[processFileAsync] Error processing file ${fileId}:`, error.message || error);
+    try {
+      await storage.updateFileStatus(fileId, "error");
+    } catch (updateError) {
+      console.error(`[processFileAsync] Failed to update file status to error:`, updateError);
+    }
   }
 }
 
@@ -141,6 +464,7 @@ async function generateEmbeddingsAsync(fileId: string, chunks: { content: string
 export function createFilesRouter() {
   const router = Router();
   const objectStorageService = new ObjectStorageService();
+  const uploadsDir = path.resolve(process.cwd(), "uploads");
 
   router.get("/api/files", async (req, res) => {
     try {
@@ -387,6 +711,165 @@ export function createFilesRouter() {
     });
   });
 
+  router.post("/api/files/import-url", async (req, res) => {
+    try {
+      const { url } = req.body as { url?: unknown };
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ error: "Missing required field: url" });
+      }
+
+      const download = await downloadUrlToBufferWithRedirects(url, {
+        maxBytes: LIMITS.MAX_FILE_SIZE_BYTES,
+        timeoutMs: 15000,
+        maxRedirects: 5,
+      });
+
+      const fromDisposition = parseFilenameFromContentDisposition(download.contentDisposition);
+      const fromUrlPath = (() => {
+        try {
+          const u = new URL(download.finalUrl);
+          const base = path.basename(u.pathname || "");
+          return base ? decodeURIComponent(base) : null;
+        } catch {
+          return null;
+        }
+      })();
+
+      let fileName = sanitizeFilename(fromDisposition || fromUrlPath || `imported-${Date.now()}`);
+
+      // Determine MIME type: prefer header when usable; otherwise infer from filename.
+      const headerType = download.contentType;
+      let claimedMimeType = headerType && headerType !== "application/octet-stream" ? headerType : null;
+      if (!claimedMimeType) {
+        claimedMimeType = inferMimeTypeFromFileName(fileName);
+      }
+      if (!claimedMimeType) {
+        claimedMimeType = "application/octet-stream";
+      }
+
+      // Security validation (magic bytes, dangerous formats, zip bomb/path traversal checks).
+      const security = await validateAttachmentSecurity(
+        {
+          filename: fileName,
+          buffer: download.buffer,
+          providedMimeType: claimedMimeType,
+        },
+        {
+          strictMode: true,
+          allowMimeMismatch: true,
+          maxFileSizeMB: LIMITS.MAX_FILE_SIZE_MB,
+        }
+      );
+
+      if (!security.safe) {
+        const topViolation =
+          security.violations.find(v => v.severity === "critical") ||
+          security.violations.find(v => v.severity === "high") ||
+          security.violations[0];
+        return res.status(400).json({ error: topViolation?.message || "Archivo rechazado por seguridad" });
+      }
+
+      const detectedMimeType = security.mimeDetection?.detectedMime || claimedMimeType;
+      const mimeType =
+        ALLOWED_MIME_TYPES.includes(detectedMimeType as any) ? detectedMimeType :
+          ALLOWED_MIME_TYPES.includes(claimedMimeType as any) ? claimedMimeType :
+            null;
+
+      if (!mimeType) {
+        return res.status(400).json({ error: `Unsupported file type: ${detectedMimeType}` });
+      }
+
+      const hasAttachmentDisposition = (download.contentDisposition || "").toLowerCase().includes("attachment");
+      const hasHtmlExtension = /\.html?$/i.test(fileName);
+      if (mimeType === "text/html" && !hasAttachmentDisposition && !hasHtmlExtension) {
+        return res.status(400).json({ error: "El enlace no parece un archivo descargable (HTML)" });
+      }
+
+      fileName = ensureExtensionForMimeType(fileName, mimeType);
+      const fileSize = download.buffer.length;
+
+      if (fileSize === 0) {
+        return res.status(400).json({ error: "Downloaded file is empty" });
+      }
+
+      if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
+        return res.status(413).json({ error: "File too large" });
+      }
+
+      // Upload to object storage (or local fallback).
+      let storagePath: string;
+      try {
+        const { uploadURL, storagePath: sp } = await objectStorageService.getObjectEntityUploadURLWithPath();
+        const putRes = await fetch(uploadURL, {
+          method: "PUT",
+          headers: { "Content-Type": mimeType },
+          body: download.buffer,
+        });
+        if (!putRes.ok) {
+          throw new Error(`Upload failed with status ${putRes.status}`);
+        }
+        storagePath = sp;
+      } catch (error: any) {
+        // Local fallback
+        const fs = await import("node:fs/promises");
+        const crypto = await import("node:crypto");
+
+        await fs.mkdir(uploadsDir, { recursive: true });
+        const objectId = crypto.randomUUID();
+        const localFilePath = path.join(uploadsDir, objectId);
+        await fs.writeFile(localFilePath, download.buffer);
+        storagePath = `/objects/uploads/${objectId}`;
+      }
+
+      const isImage = mimeType.startsWith("image/");
+      if (isImage) {
+        const file = await storage.createFile({
+          name: fileName,
+          type: mimeType,
+          size: fileSize,
+          storagePath,
+          status: "ready",
+          userId: null,
+        });
+        const shouldInlineDataUrl = fileSize <= 15 * 1024 * 1024;
+        const dataUrl = shouldInlineDataUrl
+          ? `data:${mimeType};base64,${download.buffer.toString("base64")}`
+          : undefined;
+        return res.json({ ...file, ...(dataUrl ? { dataUrl } : {}) });
+      }
+
+      const file = await storage.createFile({
+        name: fileName,
+        type: mimeType,
+        size: fileSize,
+        storagePath,
+        status: "processing",
+        userId: null,
+      });
+
+      // Process immediately (same behavior as /api/files).
+      processFileAsync(file.id, storagePath, mimeType, fileName);
+
+      return res.json(file);
+    } catch (error: any) {
+      console.error("Error importing file from URL:", error);
+      const msg = String(error?.message || "Failed to import file");
+      const lower = msg.toLowerCase();
+
+      if (lower.includes("file too large") || lower.includes("too large")) {
+        return res.status(413).json({ error: msg });
+      }
+      if (lower.includes("invalid url") || lower.includes("unsupported url protocol") || lower.includes("blocked") || lower.includes("resolve hostname") || lower.includes("redirect")) {
+        return res.status(400).json({ error: msg });
+      }
+      if (lower.includes("unsupported file type")) {
+        return res.status(400).json({ error: msg });
+      }
+
+      return res.status(500).json({ error: msg });
+    }
+  });
+
   router.post("/api/files/quick", async (req, res) => {
     try {
       const { name, type, size, storagePath } = req.body;
@@ -474,6 +957,29 @@ export function createFilesRouter() {
 
   router.get("/objects/:objectPath(*)", async (req, res) => {
     try {
+      // LOCAL FALLBACK: In development, /api/objects/upload can return storage paths like
+      // /objects/uploads/<uuid> when the Replit object storage sidecar is unavailable.
+      // Serve those files directly from disk so the client can preview attachments.
+      if (req.path.startsWith("/objects/uploads/")) {
+        const fs = await import("fs");
+        const path = await import("path");
+        const objectId = req.path.replace("/objects/uploads/", "");
+        const uploadsDir = path.default.resolve(process.cwd(), "uploads");
+        const localFilePath = path.default.resolve(uploadsDir, objectId);
+        const safePrefix = uploadsDir + path.default.sep;
+
+        // Prevent path traversal outside uploads/.
+        if (!localFilePath.startsWith(safePrefix)) {
+          return res.sendStatus(404);
+        }
+
+        if (!fs.default.existsSync(localFilePath)) {
+          return res.sendStatus(404);
+        }
+
+        return res.sendFile(localFilePath);
+      }
+
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);
       objectStorageService.downloadObject(objectFile, res);
     } catch (error) {
@@ -537,7 +1043,7 @@ export function createFilesRouter() {
     }
   });
 
-  // Serve locally uploaded files
+  // Serve locally uploaded files with proper content type
   router.get("/api/local-files/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
@@ -550,10 +1056,43 @@ export function createFilesRouter() {
         return res.status(404).json({ error: "File not found" });
       }
 
+      // Try to get the file record for content type
+      const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
+      const contentType = file?.type || "application/octet-stream";
+
+      res.setHeader("Content-Type", contentType);
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);
     } catch (error: any) {
       console.error("Error serving file:", error);
+      res.status(500).json({ error: "Failed to serve file" });
+    }
+  });
+
+  // Serve files from /objects/uploads/ path (local storage fallback)
+  router.get("/objects/uploads/:objectId", async (req, res) => {
+    try {
+      const { objectId } = req.params;
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
+
+      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+
+      if (!fsSync.default.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      // Try to get the file record for content type
+      const file = await storage.getFileByStoragePath(`/objects/uploads/${objectId}`);
+      const contentType = file?.type || "application/octet-stream";
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+
+      const content = await fsSync.promises.readFile(filePath);
+      res.send(content);
+    } catch (error: any) {
+      console.error("Error serving local object:", error);
       res.status(500).json({ error: "Failed to serve file" });
     }
   });

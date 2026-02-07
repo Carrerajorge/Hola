@@ -5,26 +5,72 @@
 
 import { Request, Response, NextFunction } from 'express';
 
-// Define permission types
-type Permission =
+// Define permission catalog (runtime + type-safe)
+export const PERMISSIONS = [
     // Chat permissions
-    | 'chat:read' | 'chat:create' | 'chat:edit' | 'chat:delete' | 'chat:share'
+    'chat:read', 'chat:create', 'chat:edit', 'chat:delete', 'chat:share',
     // Message permissions
-    | 'message:read' | 'message:create' | 'message:edit' | 'message:delete'
+    'message:read', 'message:create', 'message:edit', 'message:delete',
     // Document permissions
-    | 'document:read' | 'document:create' | 'document:export' | 'document:delete'
+    'document:read', 'document:create', 'document:export', 'document:delete',
     // Project permissions
-    | 'project:read' | 'project:create' | 'project:edit' | 'project:delete' | 'project:share'
+    'project:read', 'project:create', 'project:edit', 'project:delete', 'project:share',
     // File permissions
-    | 'file:upload' | 'file:download' | 'file:delete'
+    'file:upload', 'file:download', 'file:delete',
     // AI permissions
-    | 'ai:chat' | 'ai:research' | 'ai:production' | 'ai:custom_prompts'
+    'ai:chat', 'ai:research', 'ai:production', 'ai:custom_prompts',
     // Settings permissions
-    | 'settings:read' | 'settings:edit'
+    'settings:read', 'settings:edit',
     // Admin permissions
-    | 'admin:users' | 'admin:billing' | 'admin:analytics' | 'admin:settings' | 'admin:audit'
+    'admin:users', 'admin:billing', 'admin:analytics', 'admin:settings', 'admin:audit',
     // API permissions
-    | 'api:read' | 'api:write' | 'api:admin';
+    'api:read', 'api:write', 'api:admin',
+] as const;
+
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const PERMISSION_CATALOG: Array<{
+    id: Permission;
+    label: string;
+    category: string;
+    description?: string;
+}> = [
+    { id: 'chat:read', label: 'Ver chats', category: 'Chats' },
+    { id: 'chat:create', label: 'Crear chats', category: 'Chats' },
+    { id: 'chat:edit', label: 'Editar chats', category: 'Chats' },
+    { id: 'chat:delete', label: 'Eliminar chats', category: 'Chats' },
+    { id: 'chat:share', label: 'Compartir chats', category: 'Chats' },
+    { id: 'message:read', label: 'Ver mensajes', category: 'Mensajes' },
+    { id: 'message:create', label: 'Crear mensajes', category: 'Mensajes' },
+    { id: 'message:edit', label: 'Editar mensajes', category: 'Mensajes' },
+    { id: 'message:delete', label: 'Eliminar mensajes', category: 'Mensajes' },
+    { id: 'document:read', label: 'Ver documentos', category: 'Documentos' },
+    { id: 'document:create', label: 'Crear documentos', category: 'Documentos' },
+    { id: 'document:export', label: 'Exportar documentos', category: 'Documentos' },
+    { id: 'document:delete', label: 'Eliminar documentos', category: 'Documentos' },
+    { id: 'project:read', label: 'Ver proyectos', category: 'Proyectos' },
+    { id: 'project:create', label: 'Crear proyectos', category: 'Proyectos' },
+    { id: 'project:edit', label: 'Editar proyectos', category: 'Proyectos' },
+    { id: 'project:delete', label: 'Eliminar proyectos', category: 'Proyectos' },
+    { id: 'project:share', label: 'Compartir proyectos', category: 'Proyectos' },
+    { id: 'file:upload', label: 'Subir archivos', category: 'Archivos' },
+    { id: 'file:download', label: 'Descargar archivos', category: 'Archivos' },
+    { id: 'file:delete', label: 'Eliminar archivos', category: 'Archivos' },
+    { id: 'ai:chat', label: 'Chat con IA', category: 'IA' },
+    { id: 'ai:research', label: 'Investigación con IA', category: 'IA' },
+    { id: 'ai:production', label: 'Producción con IA', category: 'IA' },
+    { id: 'ai:custom_prompts', label: 'Prompts personalizados', category: 'IA' },
+    { id: 'settings:read', label: 'Ver configuración', category: 'Configuración' },
+    { id: 'settings:edit', label: 'Editar configuración', category: 'Configuración' },
+    { id: 'admin:users', label: 'Administrar usuarios', category: 'Administración' },
+    { id: 'admin:billing', label: 'Administrar facturación', category: 'Administración' },
+    { id: 'admin:analytics', label: 'Ver analíticas', category: 'Administración' },
+    { id: 'admin:settings', label: 'Administrar ajustes', category: 'Administración' },
+    { id: 'admin:audit', label: 'Ver auditorías', category: 'Administración' },
+    { id: 'api:read', label: 'Leer API', category: 'API' },
+    { id: 'api:write', label: 'Escribir API', category: 'API' },
+    { id: 'api:admin', label: 'Administrar API', category: 'API' },
+];
 
 // Define roles with their permissions
 interface Role {
@@ -34,16 +80,16 @@ interface Role {
     inherits?: string[];
 }
 
-const ROLES: Record<string, Role> = {
+export const BUILTIN_ROLES: Record<string, Role> = {
     guest: {
-        name: 'Guest',
-        description: 'Unauthenticated or limited access user',
+        name: 'Invitado',
+        description: 'Usuario sin autenticación o con acceso limitado',
         permissions: ['chat:read'],
     },
 
     free: {
-        name: 'Free User',
-        description: 'Basic free tier user',
+        name: 'Usuario gratuito',
+        description: 'Usuario básico en plan gratuito',
         permissions: [
             'chat:read', 'chat:create', 'chat:edit', 'chat:delete',
             'message:read', 'message:create', 'message:edit', 'message:delete',
@@ -55,8 +101,8 @@ const ROLES: Record<string, Role> = {
     },
 
     pro: {
-        name: 'Pro User',
-        description: 'Paid individual user',
+        name: 'Usuario Pro',
+        description: 'Usuario individual de pago',
         inherits: ['free'],
         permissions: [
             'chat:share',
@@ -69,26 +115,37 @@ const ROLES: Record<string, Role> = {
     },
 
     team_member: {
-        name: 'Team Member',
-        description: 'Member of a team/organization',
+        name: 'Miembro',
+        description: 'Miembro de un equipo u organizacion',
         inherits: ['pro'],
         permissions: [],
     },
 
     team_admin: {
-        name: 'Team Admin',
-        description: 'Administrator of a team/organization',
+        name: 'Administrador',
+        description: 'Administrador de un equipo u organizacion',
         inherits: ['team_member'],
         permissions: [
             'admin:users',
             'admin:analytics',
+            'admin:billing',
+            'admin:settings',
             'api:write',
         ],
     },
 
+    billing_manager: {
+        name: 'Facturacion',
+        description: 'Administrador de facturacion del equipo',
+        inherits: ['team_member'],
+        permissions: [
+            'admin:billing',
+        ],
+    },
+
     admin: {
-        name: 'System Admin',
-        description: 'Full system administrator',
+        name: 'Administrador del sistema',
+        description: 'Administrador del sistema con acceso completo',
         inherits: ['team_admin'],
         permissions: [
             'admin:billing',
@@ -99,14 +156,21 @@ const ROLES: Record<string, Role> = {
     },
 
     superadmin: {
-        name: 'Super Admin',
-        description: 'Unrestricted access',
+        name: 'Superadministrador',
+        description: 'Acceso sin restricciones',
         permissions: ['*'] as any, // All permissions
     },
 };
 
 // Cache for resolved permissions
 const permissionCache = new Map<string, Set<Permission>>();
+
+export const BUILTIN_ROLE_KEYS = Object.keys(BUILTIN_ROLES);
+export const BUILTIN_ROLE_SET = new Set(BUILTIN_ROLE_KEYS);
+
+export function isBuiltinRole(roleName: string): boolean {
+    return BUILTIN_ROLE_SET.has(roleName);
+}
 
 /**
  * Resolve all permissions for a role (including inherited)
@@ -117,7 +181,7 @@ function resolveRolePermissions(roleName: string): Set<Permission> {
         return permissionCache.get(roleName)!;
     }
 
-    const role = ROLES[roleName];
+    const role = BUILTIN_ROLES[roleName];
     if (!role) {
         return new Set();
     }
@@ -179,7 +243,7 @@ export function getRolePermissions(roleName: string): Permission[] {
  * Get all available roles
  */
 export function getAllRoles(): { name: string; description: string }[] {
-    return Object.entries(ROLES).map(([key, role]) => ({
+    return Object.entries(BUILTIN_ROLES).map(([key, role]) => ({
         name: key,
         description: role.description,
     }));

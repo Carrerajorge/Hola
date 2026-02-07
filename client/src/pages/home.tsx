@@ -2,22 +2,10 @@ import { Sidebar } from "@/components/sidebar";
 import { SkeletonPage } from "@/components/skeletons";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
-import { GptExplorer, Gpt } from "@/components/gpt-explorer";
-import { GptBuilder } from "@/components/gpt-builder";
-import { AboutGptDialog } from "@/components/about-gpt-dialog";
-import { UserLibrary } from "@/components/user-library";
-import { AppsView } from "@/components/apps-view";
-import { WhatsAppConnectDialog } from "@/components/whatsapp-connect-dialog";
-import { SearchModal } from "@/components/search-modal";
-import { SettingsDialog } from "@/components/settings-dialog";
-import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
-import { ExportChatDialog } from "@/components/export-chat-dialog";
-import { FavoritesDialog } from "@/components/favorites-dialog";
-import { CodexDialog } from "@/components/codex-dialog";
-import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
+import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
@@ -39,6 +27,32 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
+
+const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
+const WhatsAppConnectDialogLazy = lazy(() =>
+  import("@/components/whatsapp-connect-dialog").then((m) => ({ default: m.WhatsAppConnectDialog }))
+);
+const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
+const AboutGptDialogLazy = lazy(() =>
+  import("@/components/about-gpt-dialog").then((m) => ({ default: m.AboutGptDialog }))
+);
+const GptBuilderLazy = lazy(() => import("@/components/gpt-builder").then((m) => ({ default: m.GptBuilder })));
+const UserLibraryLazy = lazy(() => import("@/components/user-library").then((m) => ({ default: m.UserLibrary })));
+const CodexDialogLazy = lazy(() => import("@/components/codex-dialog").then((m) => ({ default: m.CodexDialog })));
+const SearchModalLazy = lazy(() => import("@/components/search-modal").then((m) => ({ default: m.SearchModal })));
+const SettingsDialogLazy = lazy(() => import("@/components/settings-dialog").then((m) => ({ default: m.SettingsDialog })));
+const KeyboardShortcutsDialogLazy = lazy(() =>
+  import("@/components/keyboard-shortcuts-dialog").then((m) => ({ default: m.KeyboardShortcutsDialog }))
+);
+const ExportChatDialogLazy = lazy(() =>
+  import("@/components/export-chat-dialog").then((m) => ({ default: m.ExportChatDialog }))
+);
+const FavoritesDialogLazy = lazy(() =>
+  import("@/components/favorites-dialog").then((m) => ({ default: m.FavoritesDialog }))
+);
+const PromptTemplatesDialogLazy = lazy(() =>
+  import("@/components/prompt-templates-dialog").then((m) => ({ default: m.PromptTemplatesDialog }))
+);
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -636,22 +650,26 @@ export default function Home() {
         </Sheet>
       </div>
 
-      <WhatsAppConnectDialog
-        open={isWhatsAppConnectOpen}
-        onOpenChange={setIsWhatsAppConnectOpen}
-      />
+      <Suspense fallback={null}>
+        {isWhatsAppConnectOpen ? (
+          <WhatsAppConnectDialogLazy
+            open={isWhatsAppConnectOpen}
+            onOpenChange={setIsWhatsAppConnectOpen}
+          />
+        ) : null}
+      </Suspense>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full min-h-0">
         {isAppsDialogOpen ? (
-          
-            <AppsView
+          <Suspense fallback={<SkeletonPage />}>
+            <AppsViewLazy
               onClose={() => setIsAppsDialogOpen(false)}
               onOpenGmail={() => {
                 setIsAppsDialogOpen(false);
               }}
             />
-          
+          </Suspense>
         ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId) && (
           
             <ChatInterface
@@ -704,122 +722,154 @@ export default function Home() {
 
       {/* GPT Explorer Modal */}
       
-        <GptExplorer
-          open={isGptExplorerOpen}
-          onOpenChange={setIsGptExplorerOpen}
-          onSelectGpt={handleSelectGpt}
-          onCreateGpt={handleCreateGpt}
-        />
+      <Suspense fallback={null}>
+        {isGptExplorerOpen ? (
+          <GptExplorerLazy
+            open={isGptExplorerOpen}
+            onOpenChange={setIsGptExplorerOpen}
+            onSelectGpt={handleSelectGpt}
+            onCreateGpt={handleCreateGpt}
+          />
+        ) : null}
+      </Suspense>
       
 
       {/* About GPT Dialog */}
-      <AboutGptDialog
-        open={!!aboutGptId}
-        onOpenChange={(open) => !open && setAboutGptId(null)}
-        gptId={aboutGptId}
-        onSelectGpt={async (gpt) => {
-          setAboutGptId(null);
-          try {
-            const res = await fetch(`/api/gpts/${gpt.id}`);
-            if (res.ok) {
-              const fullGpt = await res.json();
-              handleSelectGpt(fullGpt);
-            }
-          } catch (error) {
-            console.error("Error fetching GPT:", error);
-          }
-        }}
-        onEditGpt={() => {
-          if (activeGpt) {
-            setAboutGptId(null);
-            setEditingGpt(activeGpt);
-            setIsGptBuilderOpen(true);
-          }
-        }}
-        onCopyLink={() => {
-          if (aboutGptId) {
-            navigator.clipboard.writeText(`${window.location.origin}/gpts/${aboutGptId}`);
-            toast.success("Enlace copiado al portapapeles");
-          }
-        }}
-      />
+      <Suspense fallback={null}>
+        {aboutGptId ? (
+          <AboutGptDialogLazy
+            open={!!aboutGptId}
+            onOpenChange={(open) => !open && setAboutGptId(null)}
+            gptId={aboutGptId}
+            onSelectGpt={async (gpt) => {
+              setAboutGptId(null);
+              try {
+                const res = await fetch(`/api/gpts/${gpt.id}`);
+                if (res.ok) {
+                  const fullGpt = await res.json();
+                  handleSelectGpt(fullGpt);
+                }
+              } catch (error) {
+                console.error("Error fetching GPT:", error);
+              }
+            }}
+            onEditGpt={() => {
+              if (activeGpt) {
+                setAboutGptId(null);
+                setEditingGpt(activeGpt);
+                setIsGptBuilderOpen(true);
+              }
+            }}
+            onCopyLink={() => {
+              if (aboutGptId) {
+                navigator.clipboard.writeText(`${window.location.origin}/gpts/${aboutGptId}`);
+                toast.success("Enlace copiado al portapapeles");
+              }
+            }}
+          />
+        ) : null}
+      </Suspense>
 
       {/* GPT Builder Modal */}
       
-        <GptBuilder
-          open={isGptBuilderOpen}
-          onOpenChange={setIsGptBuilderOpen}
-          editingGpt={editingGpt}
-          onSave={() => {
-            setIsGptBuilderOpen(false);
-          setEditingGpt(null);
-        }}
-        />
+      <Suspense fallback={null}>
+        {isGptBuilderOpen ? (
+          <GptBuilderLazy
+            open={isGptBuilderOpen}
+            onOpenChange={setIsGptBuilderOpen}
+            editingGpt={editingGpt}
+            onSave={() => {
+              setIsGptBuilderOpen(false);
+              setEditingGpt(null);
+            }}
+          />
+        ) : null}
+      </Suspense>
       
 
       {/* User Library Modal */}
       
-        <UserLibrary
-          open={isLibraryOpen}
-          onOpenChange={setIsLibraryOpen}
-        />
+      <Suspense fallback={null}>
+        {isLibraryOpen ? (
+          <UserLibraryLazy open={isLibraryOpen} onOpenChange={setIsLibraryOpen} />
+        ) : null}
+      </Suspense>
       {/* Codex Dialog */}
-      <CodexDialog
-        isOpen={isCodexOpen}
-        onClose={() => setIsCodexOpen(false)}
-      />
+      <Suspense fallback={null}>
+        {isCodexOpen ? (
+          <CodexDialogLazy isOpen={isCodexOpen} onClose={() => setIsCodexOpen(false)} />
+        ) : null}
+      </Suspense>
 
       {/* Search Modal */}
-      <SearchModal
-        open={isSearchOpen}
-        onOpenChange={setIsSearchOpen}
-        chats={chats}
-        onSelectChat={handleSelectChatWithClear}
-      />
+      <Suspense fallback={null}>
+        {isSearchOpen ? (
+          <SearchModalLazy
+            open={isSearchOpen}
+            onOpenChange={setIsSearchOpen}
+            chats={chats}
+            onSelectChat={handleSelectChatWithClear}
+          />
+        ) : null}
+      </Suspense>
 
       {/* Settings Dialog */}
       
-        <SettingsDialog
-          open={isSettingsOpen}
-          onOpenChange={setIsSettingsOpen}
-        />
+      <Suspense fallback={null}>
+        {isSettingsOpen ? (
+          <SettingsDialogLazy open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+        ) : null}
+      </Suspense>
       
 
       {/* Keyboard Shortcuts Dialog */}
-      <KeyboardShortcutsDialog
-        open={isShortcutsOpen}
-        onOpenChange={setIsShortcutsOpen}
-      />
+      <Suspense fallback={null}>
+        {isShortcutsOpen ? (
+          <KeyboardShortcutsDialogLazy open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen} />
+        ) : null}
+      </Suspense>
 
       {/* Export Chat Dialog */}
-      <ExportChatDialog
-        open={isExportOpen}
-        onOpenChange={setIsExportOpen}
-        chatTitle={activeChat?.title || "Conversación"}
-        messages={currentMessages}
-      />
+      <Suspense fallback={null}>
+        {isExportOpen ? (
+          <ExportChatDialogLazy
+            open={isExportOpen}
+            onOpenChange={setIsExportOpen}
+            chatTitle={activeChat?.title || "Conversación"}
+            messages={currentMessages}
+          />
+        ) : null}
+      </Suspense>
 
       {/* Favorites Dialog */}
-      <FavoritesDialog
-        open={isFavoritesOpen}
-        onOpenChange={setIsFavoritesOpen}
-        favorites={favorites}
-        onRemove={removeFavorite}
-        onSelect={handleSelectChatWithClear}
-      />
+      <Suspense fallback={null}>
+        {isFavoritesOpen ? (
+          <FavoritesDialogLazy
+            open={isFavoritesOpen}
+            onOpenChange={setIsFavoritesOpen}
+            favorites={favorites}
+            onRemove={removeFavorite}
+            onSelect={handleSelectChatWithClear}
+          />
+        ) : null}
+      </Suspense>
 
       {/* Prompt Templates Dialog */}
-      <PromptTemplatesDialog
-        open={isTemplatesOpen}
-        onOpenChange={setIsTemplatesOpen}
-        templates={templates}
-        categories={categories}
-        onAdd={addTemplate}
-        onRemove={removeTemplate}
-        onUpdate={updateTemplate}
-        onSelect={setPendingPrompt}
-        onIncrementUsage={incrementUsage}
-      />
+      <Suspense fallback={null}>
+        {isTemplatesOpen ? (
+          <PromptTemplatesDialogLazy
+            open={isTemplatesOpen}
+            onOpenChange={setIsTemplatesOpen}
+            templates={templates}
+            categories={categories}
+            onAdd={addTemplate}
+            onRemove={removeTemplate}
+            onUpdate={updateTemplate}
+            onSelect={setPendingPrompt}
+            onIncrementUsage={incrementUsage}
+          />
+        ) : null}
+      </Suspense>
 
     </div>
   );

@@ -84,6 +84,193 @@ databaseRouter.get("/health", async (req, res) => {
     }
 });
 
+// Minimal, practical attribution/traceability coverage for admin diagnostics.
+databaseRouter.get("/coverage", async (req, res) => {
+    try {
+        const startTime = Date.now();
+
+        const existence = await db.execute(sql`
+          SELECT
+            to_regclass('public.sessions') IS NOT NULL AS has_sessions,
+            EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='sessions' AND column_name='user_id'
+            ) AS has_sessions_user_id,
+
+            to_regclass('public.conversation_states') IS NOT NULL AS has_conversation_states,
+            to_regclass('public.chats') IS NOT NULL AS has_chats,
+
+            to_regclass('public.login_attempts') IS NOT NULL AS has_login_attempts,
+            to_regclass('public.audit_logs') IS NOT NULL AS has_audit_logs,
+            to_regclass('public.agent_gap_logs') IS NOT NULL AS has_agent_gap_logs,
+            to_regclass('public.tool_call_logs') IS NOT NULL AS has_tool_call_logs
+        `);
+
+        const has = (existence.rows?.[0] || {}) as any;
+        const toBool = (v: any) => v === true || v === "t" || v === "true" || v === 1 || v === "1";
+        const hasSessions = toBool(has.has_sessions);
+        const hasSessionsUserId = toBool(has.has_sessions_user_id);
+        const hasConversationStates = toBool(has.has_conversation_states);
+        const hasChats = toBool(has.has_chats);
+        const hasLoginAttempts = toBool(has.has_login_attempts);
+        const hasAuditLogs = toBool(has.has_audit_logs);
+        const hasAgentGapLogs = toBool(has.has_agent_gap_logs);
+        const hasToolCallLogs = toBool(has.has_tool_call_logs);
+
+        const toInt = (value: any) => {
+            const n = typeof value === "number" ? value : parseInt(String(value || "0"), 10);
+            return Number.isFinite(n) ? n : 0;
+        };
+
+        const sessions = {
+            active: 0,
+            attributed: 0,
+            anonymous: 0,
+            missingUserId: 0,
+            attributionRate: null as number | null,
+            ready: hasSessions && hasSessionsUserId,
+        };
+
+        if (hasSessions) {
+            if (hasSessionsUserId) {
+                const s = await db.execute(sql`
+                  SELECT
+                    COUNT(*) FILTER (WHERE expire > NOW()) AS active,
+                    COUNT(*) FILTER (WHERE expire > NOW() AND user_id IS NOT NULL) AS attributed,
+                    COUNT(*) FILTER (WHERE expire > NOW() AND user_id LIKE 'anon_%') AS anonymous,
+                    COUNT(*) FILTER (WHERE expire > NOW() AND user_id IS NULL) AS missing_user_id
+                  FROM sessions
+                `);
+                const row = (s.rows?.[0] || {}) as any;
+                sessions.active = toInt(row.active);
+                sessions.attributed = toInt(row.attributed);
+                sessions.anonymous = toInt(row.anonymous);
+                sessions.missingUserId = toInt(row.missing_user_id);
+                sessions.attributionRate = sessions.active > 0 ? sessions.attributed / sessions.active : 1;
+            } else {
+                const s = await db.execute(sql`
+                  SELECT COUNT(*) AS active
+                  FROM sessions
+                  WHERE expire > NOW()
+                `);
+                sessions.active = toInt((s.rows?.[0] as any)?.active);
+            }
+        }
+
+        const conversationStates = {
+            missingUserId: 0,
+            ready: hasConversationStates && hasChats,
+        };
+
+        if (hasConversationStates && hasChats) {
+            const q = await db.execute(sql`
+              SELECT COUNT(*) AS missing
+              FROM conversation_states cs
+              JOIN chats c ON c.id = cs.chat_id
+              WHERE cs.user_id IS NULL AND c.user_id IS NOT NULL
+            `);
+            conversationStates.missingUserId = toInt((q.rows?.[0] as any)?.missing);
+        }
+
+        const loginAttempts = {
+            last24hTotal: 0,
+            last24hSuccess: 0,
+            last24hFailure: 0,
+            ready: hasLoginAttempts,
+        };
+
+        if (hasLoginAttempts) {
+            const q = await db.execute(sql`
+              SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE success = true) AS success,
+                COUNT(*) FILTER (WHERE success = false) AS failure
+              FROM login_attempts
+              WHERE created_at > NOW() - INTERVAL '24 hours'
+            `);
+            const row = (q.rows?.[0] || {}) as any;
+            loginAttempts.last24hTotal = toInt(row.total);
+            loginAttempts.last24hSuccess = toInt(row.success);
+            loginAttempts.last24hFailure = toInt(row.failure);
+        }
+
+        const auditLogs = {
+            last24hTotal: 0,
+            last24hMissingUserId: 0,
+            ready: hasAuditLogs,
+        };
+
+        if (hasAuditLogs) {
+            const q = await db.execute(sql`
+              SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE user_id IS NULL) AS missing_user_id
+              FROM audit_logs
+              WHERE created_at > NOW() - INTERVAL '24 hours'
+            `);
+            const row = (q.rows?.[0] || {}) as any;
+            auditLogs.last24hTotal = toInt(row.total);
+            auditLogs.last24hMissingUserId = toInt(row.missing_user_id);
+        }
+
+        const agentGaps = {
+            open: 0,
+            resolved: 0,
+            missingUserId: 0,
+            ready: hasAgentGapLogs,
+        };
+
+        if (hasAgentGapLogs) {
+            const q = await db.execute(sql`
+              SELECT
+                COUNT(*) FILTER (WHERE status = 'open') AS open,
+                COUNT(*) FILTER (WHERE status = 'resolved') AS resolved,
+                COUNT(*) FILTER (WHERE user_id IS NULL) AS missing_user_id
+              FROM agent_gap_logs
+            `);
+            const row = (q.rows?.[0] || {}) as any;
+            agentGaps.open = toInt(row.open);
+            agentGaps.resolved = toInt(row.resolved);
+            agentGaps.missingUserId = toInt(row.missing_user_id);
+        }
+
+        const toolCalls = {
+            last24hTotal: 0,
+            last24hMissingUserId: 0,
+            ready: hasToolCallLogs,
+        };
+
+        if (hasToolCallLogs) {
+            const q = await db.execute(sql`
+              SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE user_id IS NULL) AS missing_user_id
+              FROM tool_call_logs
+              WHERE created_at > NOW() - INTERVAL '24 hours'
+            `);
+            const row = (q.rows?.[0] || {}) as any;
+            toolCalls.last24hTotal = toInt(row.total);
+            toolCalls.last24hMissingUserId = toInt(row.missing_user_id);
+        }
+
+        const executionTimeMs = Date.now() - startTime;
+
+        res.json({
+            status: "ok",
+            executionTimeMs,
+            timestamp: new Date().toISOString(),
+            sessions,
+            conversationStates,
+            loginAttempts,
+            auditLogs,
+            agentGaps,
+            toolCalls,
+        });
+    } catch (error: any) {
+        res.status(500).json({ status: "error", error: error.message });
+    }
+});
+
 // Database status endpoint for production monitoring
 // Merged logic from multiple checkpoints
 databaseRouter.get("/status", async (req, res) => {
@@ -287,15 +474,81 @@ databaseRouter.post("/query", async (req, res) => {
         }
 
         // Whitelist: Only allow queries against specific tables
-        const allowedTables = ['users', 'ai_models', 'chats', 'messages', 'sessions', 'audit_logs',
-                              'payments', 'invoices', 'notifications', 'user_settings', 'excel_documents'];
-        const tablePattern = /FROM\s+["']?(\w+)["']?/gi;
+        // Note: Admin-only route, but still validate to reduce blast-radius of mistakes.
+        const allowedTables = [
+            // Core identity
+            "users",
+            "sessions",
+            "auth_tokens",
+            "login_attempts",
+
+            // Chat + memory
+            "chats",
+            "chat_messages",
+            "chat_runs",
+            "chat_shares",
+            "chat_participants",
+            "conversation_states",
+            "conversation_state_versions",
+            "conversation_messages",
+            "conversation_contexts",
+            "conversation_images",
+            "conversation_artifacts",
+            "processed_requests",
+
+            // Library + files
+            "library_storage",
+            "library_items",
+            "library_files",
+            "library_folders",
+            "library_collections",
+            "library_file_collections",
+
+            // Spreadsheet analyzer
+            "spreadsheet_uploads",
+            "spreadsheet_sheets",
+            "spreadsheet_analysis_sessions",
+            "spreadsheet_analysis_jobs",
+            "spreadsheet_analysis_outputs",
+            "chat_message_analysis",
+
+            // Sharing
+            "shared_links",
+
+            // Admin / security / observability
+            "audit_logs",
+            "provider_metrics",
+            "kpi_snapshots",
+            "security_policies",
+            "platform_settings",
+            "analytics_snapshots",
+            "api_logs",
+            "tool_call_logs",
+
+            // Billing (if enabled)
+            "payments",
+            "invoices",
+
+            // Workspace / org
+            "workspaces",
+            "workspace_invitations",
+            "org_settings",
+        ];
+
+        // Extract table names from FROM/JOIN clauses (basic safeguard; not a full SQL parser).
+        // Supports: table, schema.table, "table", "schema"."table"
+        const tablePattern = /\b(?:FROM|JOIN)\s+(?:\"?(\w+)\"?\.)?\"?(\w+)\"?/gi;
         const matches = [...query.matchAll(tablePattern)];
         for (const match of matches) {
-            const tableName = match[1].toLowerCase();
-            if (!allowedTables.includes(tableName) && !tableName.startsWith('pg_') && !tableName.startsWith('information_schema')) {
-                // Allow system tables for introspection but log it
-                if (!['pg_stat_database', 'pg_stat_user_tables', 'pg_indexes', 'pg_stat_statements'].includes(tableName)) {
+            const schemaName = (match[1] || "").toLowerCase();
+            const tableName = (match[2] || "").toLowerCase();
+
+            const isSystemSchema = schemaName === "pg_catalog" || schemaName === "information_schema";
+            const isSystemTable = isSystemSchema || tableName.startsWith("pg_");
+
+            if (!allowedTables.includes(tableName) && !isSystemTable) {
+                // Allow system views for introspection (even when schema is omitted)
+                if (!["pg_stat_database", "pg_stat_user_tables", "pg_indexes", "pg_stat_statements"].includes(tableName)) {
                     return res.status(403).json({
                         error: `Table '${tableName}' is not in the allowed list`,
                         allowedTables: allowedTables

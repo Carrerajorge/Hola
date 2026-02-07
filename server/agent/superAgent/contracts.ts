@@ -117,6 +117,7 @@ export type ExecutionState = z.infer<typeof ExecutionStateSchema>;
 
 // ... (previous lines)
 export const SSEEventTypeSchema = z.enum([
+  "brief",
   "contract",
   "plan",
   "tool_call",

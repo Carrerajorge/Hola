@@ -21,7 +21,6 @@ import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
-import helmet from "helmet";
 import hpp from "hpp";
 import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
@@ -35,6 +34,9 @@ import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { setupSecurity } from "./middleware/security";
 import { runCleanup } from "./lib/cleanup";
+import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { startChatScheduleRunner } from "./services/chatScheduleRunner";
+import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
 
 initTracing();
 
@@ -67,16 +69,6 @@ app.use(csrfTokenMiddleware);
 // API-specific security headers for /api routes
 app.use("/api", apiSecurityHeaders());
 
-// CSRF Protection for API (validates header)
-app.use("/api", csrfProtection);
-
-// Rate Limiting
-app.use("/api", globalLimiter);
-app.use("/api/auth", authLimiter);
-
-// Idempotency for mutations
-app.use("/api", idempotency);
-
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
 
@@ -100,10 +92,9 @@ export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
 }
 
-// Manual logging middleware removed in favor of requestLoggerMiddleware at line 38
-
 (async () => {
   const isProduction = process.env.NODE_ENV === "production";
+  const isTest = process.env.NODE_ENV === "test";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
 
   // Start Python Agent Tools service if enabled
@@ -157,13 +148,33 @@ export function log(message: string, source = "express") {
     }
   }
 
+  // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
+  await setupAuth(app);
+  registerAuthRoutes(app);
+
+  // Capture best-effort device metadata for session management UI.
+  app.use("/api", sessionDeviceInfoMiddleware);
+
+  // CSRF Protection for API (validates header)
+  if (!isTest) {
+    app.use("/api", csrfProtection);
+  } else {
+    log("CSRF protection disabled in test environment", "security");
+  }
+
+  // Rate Limiting (User-based) - Applied AFTER auth to use req.user
+  app.use("/api", globalLimiter);
+  app.use("/api/auth", authLimiter);
+
+  // Idempotency for mutations
+  app.use("/api", idempotency);
 
   await registerRoutes(httpServer, app);
 
   // API Error Handler (Centralized)
   app.use("/api", apiErrorHandler);
-
-
+  
+  // App-level error handler (catch-all)
   app.use(errorHandler);
 
   // importantly only setup vite in development and after
@@ -178,12 +189,8 @@ export function log(message: string, source = "express") {
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = env.PORT;
 
-  // In local development on macOS, `reusePort` can throw ENOTSUP.
-  // Only use host/reusePort settings in production deployments.
   const listenOptions = isProduction
     ? ({ port, host: "0.0.0.0", reusePort: true } as const)
     : port;
@@ -195,6 +202,11 @@ export function log(message: string, source = "express") {
     log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
     startAggregator();
     await seedProductionData();
+    if (dbConnected) {
+      startChatScheduleRunner();
+    } else {
+      log("[Schedules] Skipping schedule runner start because DB is not connected");
+    }
 
     // Setup graceful shutdown with connection draining
     setupGracefulShutdown(httpServer, {

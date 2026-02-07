@@ -25,6 +25,11 @@ export interface WosSearchResult {
 
 const WOS_STARTER_API_BASE = "https://api.clarivate.com/apis/wos-starter/v1";
 
+export function isWosConfigured(): boolean {
+  const key = process.env.WOS_API_KEY;
+  return typeof key === "string" && key.trim().length > 0;
+}
+
 export async function searchWos(
   query: string,
   options: {

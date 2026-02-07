@@ -10,7 +10,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 type SessionState = z.infer<typeof SessionStateSchema>;
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } from "@shared/schema";
+import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory, chats } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
@@ -185,9 +185,15 @@ export async function createUnifiedRun(
     .reverse()
     .find(m => m.role === 'user')?.content || '';
 
+  // agent_mode_runs.message_id + request_spec_history.message_id both FK to chat_messages.id (UUID).
+  // Some callers historically passed provisional ids like "msg_<timestamp>".
+  // Normalize to avoid FK violations (best-effort logging only; chat should still work).
+  const isUuid = (value?: string) => !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const normalizedMessageId = isUuid(request.messageId) ? request.messageId : undefined;
+
   const requestSpec = createRequestSpec({
     chatId: request.chatId,
-    messageId: request.messageId,
+    messageId: normalizedMessageId,
     userId: request.userId,
     rawMessage: lastUserMessage,
     attachments: request.attachments,
@@ -202,10 +208,19 @@ export async function createUnifiedRun(
     (request.attachments && request.attachments.length > 0);
 
   try {
+    // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
+    // The UI sometimes generates provisional chat ids (e.g. "chat_<timestamp>") before it has
+    // created the chat via POST /api/chats. We upsert a minimal chat row to avoid FK violations.
+    await db.insert(chats).values({
+      id: request.chatId,
+      userId: request.userId,
+      title: 'New Chat',
+    }).onConflictDoNothing();
+
     await db.insert(agentModeRuns).values({
       id: runId,
       chatId: request.chatId,
-      messageId: request.messageId,
+      messageId: normalizedMessageId,
       userId: request.userId,
       status: 'planning',
       idempotencyKey: requestSpec.id,

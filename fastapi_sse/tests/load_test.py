@@ -266,6 +266,8 @@ def print_results(results: LoadTestResults):
 
 
 async def main():
+    global BASE_URL
+
     parser = argparse.ArgumentParser(description="SSE Load Testing Tool")
     parser.add_argument("-c", "--concurrent", type=int, default=10,
                        help="Number of concurrent connections (default: 10)")
@@ -285,8 +287,6 @@ async def main():
                        help="Output results as JSON")
     
     args = parser.parse_args()
-    
-    global BASE_URL
     BASE_URL = args.url
     
     results = await run_load_test(

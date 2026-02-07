@@ -2,8 +2,16 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { checkApiKeyExists } from "./utils";
-import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
+import { syncModelsForProvider, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import {
+    getIntegratedModelProviderIds,
+    getSupportedModelProviderIds,
+    isModelChatCapable,
+    isModelProviderIntegrated,
+    isModelProviderSupported,
+    normalizeModelProviderToRuntime,
+} from "../../services/modelIntegration";
 
 export const modelsRouter = Router();
 
@@ -27,7 +35,7 @@ modelsRouter.post("/", async (req, res) => {
         });
         
         await auditLog(req, {
-            action: "model.created",
+            action: AuditActions.MODEL_CREATED,
             resource: "ai_models",
             resourceId: model.id,
             details: { name, provider, modelId, status, createdBy: (req as any).user?.email },
@@ -51,11 +59,18 @@ modelsRouter.get("/filtered", async (req, res) => {
             status,
             search,
             sortBy = "name",
-            sortOrder = "asc"
+            sortOrder = "asc",
+            scope = "all",
         } = req.query;
+
+        const scopeProviders =
+            scope === "supported" ? getSupportedModelProviderIds() :
+            scope === "integrated" ? getIntegratedModelProviderIds() :
+            undefined;
 
         const result = await storage.getAiModelsFiltered({
             provider: provider as string,
+            providers: scopeProviders,
             type: type as string,
             status: status as string,
             search: search as string,
@@ -66,7 +81,13 @@ modelsRouter.get("/filtered", async (req, res) => {
         });
 
         res.json({
-            models: result.models,
+            models: result.models.map((m: any) => ({
+                ...m,
+                hasApiKey: checkApiKeyExists(m.provider),
+                isSupported: isModelProviderSupported(m.provider),
+                isIntegrated: isModelProviderIntegrated(m.provider),
+                isChatCapable: isModelChatCapable(m),
+            })),
             total: result.total,
             page: parseInt(page as string),
             limit: parseInt(limit as string),
@@ -79,7 +100,12 @@ modelsRouter.get("/filtered", async (req, res) => {
 
 modelsRouter.get("/stats", async (req, res) => {
     try {
-        const allModels = await storage.getAiModels();
+        const { scope = "all" } = req.query as any;
+        const allModelsRaw = await storage.getAiModels();
+        const allModels =
+            scope === "supported" ? allModelsRaw.filter((m) => isModelProviderSupported(m.provider)) :
+            scope === "integrated" ? allModelsRaw.filter((m) => isModelProviderIntegrated(m.provider)) :
+            allModelsRaw;
         const knownStats = getModelStats();
 
         const byProvider: Record<string, number> = {};
@@ -87,6 +113,8 @@ modelsRouter.get("/stats", async (req, res) => {
         let active = 0;
         let inactive = 0;
         let deprecated = 0;
+        let enabled = 0;
+        let disabled = 0;
 
         for (const model of allModels) {
             byProvider[model.provider] = (byProvider[model.provider] || 0) + 1;
@@ -94,6 +122,8 @@ modelsRouter.get("/stats", async (req, res) => {
             if (model.status === "active") active++;
             else inactive++;
             if (model.isDeprecated === "true") deprecated++;
+            if (model.isEnabled === "true") enabled++;
+            else disabled++;
         }
 
         res.json({
@@ -101,6 +131,9 @@ modelsRouter.get("/stats", async (req, res) => {
             active,
             inactive,
             deprecated,
+            enabled,
+            disabled,
+            providers: Object.keys(byProvider).length,
             byProvider,
             byType,
             knownModels: knownStats,
@@ -113,8 +146,21 @@ modelsRouter.get("/stats", async (req, res) => {
 modelsRouter.patch("/:id", async (req, res) => {
     try {
         // Get model before update for audit
-        const previousModel = await storage.getAiModel(req.params.id);
-        const model = await storage.updateAiModel(req.params.id, req.body);
+        const previousModel = await storage.getAiModelById(req.params.id);
+
+        const incoming = req.body || {};
+        const updates = { ...incoming } as any;
+        let forcedDisable = false;
+
+        // Data integrity: an Inactive model must not remain enabled.
+        if (typeof incoming.status === "string" && incoming.status !== "active") {
+            if (previousModel?.isEnabled === "true") forcedDisable = true;
+            updates.isEnabled = "false";
+            updates.enabledAt = null;
+            updates.enabledByAdminId = null;
+        }
+
+        const model = await storage.updateAiModel(req.params.id, updates);
         if (!model) {
             return res.status(404).json({ error: "Model not found" });
         }
@@ -123,9 +169,11 @@ modelsRouter.patch("/:id", async (req, res) => {
             resource: "ai_models",
             resourceId: req.params.id,
             details: {
-                changes: req.body,
+                changes: incoming,
+                applied: updates,
+                forcedDisable,
                 previousStatus: previousModel?.status,
-                newStatus: req.body.status,
+                newStatus: incoming.status,
                 updatedBy: (req as any).user?.email
             },
             category: "admin",
@@ -139,7 +187,7 @@ modelsRouter.patch("/:id", async (req, res) => {
 
 modelsRouter.delete("/:id", async (req, res) => {
     try {
-        const existing = await storage.getAiModel(req.params.id);
+        const existing = await storage.getAiModelById(req.params.id);
         await storage.deleteAiModel(req.params.id);
         await auditLog(req, {
             action: AuditActions.MODEL_DELETED,
@@ -161,14 +209,31 @@ modelsRouter.delete("/:id", async (req, res) => {
 
 modelsRouter.patch("/:id/toggle", async (req, res) => {
     try {
-        const { isEnabled } = req.body;
+        const requestedEnabled = req.body?.isEnabled === true || req.body?.isEnabled === "true";
         const userId = (req as AuthenticatedRequest).user?.id || null;
 
+        const existing = await storage.getAiModelById(req.params.id);
+        if (!existing) {
+            return res.status(404).json({ error: "Model not found" });
+        }
+
+        if (requestedEnabled) {
+            if (existing.status !== "active") {
+                return res.status(409).json({ error: "Model must be Active (Status) before enabling" });
+            }
+            if (!isModelProviderIntegrated(existing.provider)) {
+                return res.status(409).json({ error: "Provider not integrated (missing API key or unsupported)" });
+            }
+            if (!isModelChatCapable(existing)) {
+                return res.status(409).json({ error: "Model is not chat-capable (only TEXT/MULTIMODAL gemini*/grok* are supported)" });
+            }
+        }
+
         const updateData: any = {
-            isEnabled: isEnabled ? "true" : "false",
+            isEnabled: requestedEnabled ? "true" : "false",
         };
 
-        if (isEnabled) {
+        if (requestedEnabled) {
             updateData.enabledAt = new Date();
             updateData.enabledByAdminId = userId;
         } else {
@@ -177,30 +242,22 @@ modelsRouter.patch("/:id/toggle", async (req, res) => {
         }
 
         const model = await storage.updateAiModel(req.params.id, updateData);
-        if (!model) {
-            return res.status(404).json({ error: "Model not found" });
-        }
+        if (!model) return res.status(404).json({ error: "Model not found" });
 
-        await storage.createAuditLog({
-            userId,
-            action: isEnabled ? "model_enable" : "model_disable",
+        await auditLog(req, {
+            action: requestedEnabled ? AuditActions.MODEL_ENABLED : AuditActions.MODEL_DISABLED,
             resource: "ai_models",
             resourceId: req.params.id,
-            details: { isEnabled, modelName: model.name }
+            details: {
+                isEnabled: requestedEnabled,
+                modelName: model.name,
+                provider: model.provider,
+                modelId: model.modelId,
+            },
+            category: "admin",
+            severity: "info",
         });
 
-        res.json(model);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-modelsRouter.get("/:id", async (req, res) => {
-    try {
-        const model = await storage.getAiModelById(req.params.id);
-        if (!model) {
-            return res.status(404).json({ error: "Model not found" });
-        }
         res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -213,10 +270,12 @@ modelsRouter.post("/sync/:provider", async (req, res) => {
         const { provider } = req.params;
         const result = await syncModelsForProvider(provider);
 
-        await storage.createAuditLog({
-            action: "models_sync",
+        await auditLog(req, {
+            action: AuditActions.MODELS_SYNC,
             resource: "ai_models",
             details: { provider, ...result },
+            category: "admin",
+            severity: "info",
         });
 
         res.json({
@@ -231,7 +290,18 @@ modelsRouter.post("/sync/:provider", async (req, res) => {
 
 modelsRouter.post("/sync", async (req, res) => {
     try {
-        const results = await syncAllProviders();
+        const { scope = "all" } = (req.query || {}) as any;
+
+        const allProviders = getAvailableProviders();
+        const providersToSync =
+            scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
+
+        const results: Record<string, { added: number; updated: number; errors: string[] }> = {};
+        for (const provider of providersToSync) {
+            results[provider] = await syncModelsForProvider(provider);
+        }
 
         let totalAdded = 0;
         let totalUpdated = 0;
@@ -240,14 +310,17 @@ modelsRouter.post("/sync", async (req, res) => {
             totalUpdated += r.updated;
         }
 
-        await storage.createAuditLog({
-            action: "models_sync_all",
+        await auditLog(req, {
+            action: AuditActions.MODELS_SYNC_ALL,
             resource: "ai_models",
-            details: { results, totalAdded, totalUpdated },
+            details: { scope, providers: providersToSync, results, totalAdded, totalUpdated },
+            category: "admin",
+            severity: "info",
         });
 
         res.json({
             success: true,
+            scope,
             results,
             summary: { totalAdded, totalUpdated },
         });
@@ -259,18 +332,36 @@ modelsRouter.post("/sync", async (req, res) => {
 // providers route
 modelsRouter.get("/providers/list", async (req, res) => { // Renamed from /providers to avoid conflict if mounted on /models
     try {
-        const providers = getAvailableProviders();
+        const { scope = "all" } = req.query as any;
+        const allProviders = getAvailableProviders();
+        const providersToList =
+            scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
+
         const allModels = await storage.getAiModels();
 
-        const providerStats = providers.map(provider => {
+        const providerNames: Record<string, string> = {
+            google: "Google (Gemini)",
+            xai: "xAI (Grok)",
+            openai: "OpenAI",
+            anthropic: "Anthropic",
+            openrouter: "OpenRouter",
+            perplexity: "Perplexity",
+        };
+
+        const providerStats = providersToList.map(provider => {
             const models = allModels.filter(m => m.provider.toLowerCase() === provider.toLowerCase());
             const activeCount = models.filter(m => m.status === "active").length;
             return {
                 id: provider,
-                name: provider.charAt(0).toUpperCase() + provider.slice(1),
+                name: providerNames[provider.toLowerCase()] || (provider.charAt(0).toUpperCase() + provider.slice(1)),
                 modelCount: models.length,
                 activeCount,
                 hasApiKey: checkApiKeyExists(provider),
+                isSupported: isModelProviderSupported(provider),
+                isIntegrated: isModelProviderIntegrated(provider),
+                runtimeProvider: normalizeModelProviderToRuntime(provider),
             };
         });
 
@@ -290,25 +381,32 @@ modelsRouter.get("/health", async (req, res) => {
             xai: {
                 name: "xAI (Grok)",
                 available: healthStatus?.xai?.available ?? false,
-                latency: healthStatus?.xai?.latency ?? null,
+                latencyMs: healthStatus?.xai?.latencyMs ?? null,
                 error: healthStatus?.xai?.error ?? null,
-                hasApiKey: !!process.env.XAI_API_KEY
+                hasApiKey: checkApiKeyExists("xai"),
+                isSupported: isModelProviderSupported("xai"),
+                isIntegrated: isModelProviderIntegrated("xai"),
+                runtimeProvider: "xai",
             },
-            gemini: {
-                name: "Google Gemini",
+            google: {
+                name: "Google (Gemini)",
                 available: healthStatus?.gemini?.available ?? false,
-                latency: healthStatus?.gemini?.latency ?? null,
+                latencyMs: healthStatus?.gemini?.latencyMs ?? null,
                 error: healthStatus?.gemini?.error ?? null,
-                hasApiKey: !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY
+                hasApiKey: checkApiKeyExists("google"),
+                isSupported: isModelProviderSupported("google"),
+                isIntegrated: isModelProviderIntegrated("google"),
+                runtimeProvider: "gemini",
             }
         };
 
-        const allHealthy = Object.values(providers).every(p => p.available || !p.hasApiKey);
-        const anyAvailable = Object.values(providers).some(p => p.available);
+        const tracked = Object.values(providers).filter((p) => p.hasApiKey);
+        const anyAvailable = tracked.some(p => p.available);
+        const allAvailable = tracked.length > 0 && tracked.every(p => p.available);
 
         res.json({
-            status: anyAvailable ? "healthy" : "degraded",
-            allProvidersHealthy: allHealthy,
+            status: tracked.length === 0 ? "unconfigured" : allAvailable ? "healthy" : anyAvailable ? "degraded" : "down",
+            allProvidersHealthy: allAvailable,
             providers,
             checkedAt: new Date().toISOString()
         });
@@ -329,6 +427,17 @@ modelsRouter.post("/:id/test", async (req, res) => {
             return res.status(404).json({ error: "Model not found" });
         }
 
+        const runtimeProvider = normalizeModelProviderToRuntime(model.provider);
+        if (!runtimeProvider) {
+            return res.status(409).json({ error: "Provider not supported by runtime" });
+        }
+        if (!isModelProviderIntegrated(model.provider)) {
+            return res.status(409).json({ error: "Provider not integrated (missing API key)" });
+        }
+        if (!isModelChatCapable(model)) {
+            return res.status(409).json({ error: "Model is not chat-capable (only TEXT/MULTIMODAL gemini*/grok*)" });
+        }
+
         const { llmGateway } = await import("../../lib/llmGateway");
         const testPrompt = "Say 'OK' if you can read this.";
         
@@ -338,17 +447,22 @@ modelsRouter.post("/:id/test", async (req, res) => {
                 [{ role: "user", content: testPrompt }],
                 { 
                     model: model.modelId,
+                    provider: runtimeProvider,
+                    enableFallback: false,
+                    skipCache: true,
                     maxTokens: 10,
                     timeout: 10000
                 }
             );
             const latency = Date.now() - startTime;
 
-            await storage.createAuditLog({
-                action: "model_test",
+            await auditLog(req, {
+                action: AuditActions.MODEL_TESTED,
                 resource: "ai_models",
                 resourceId: req.params.id,
-                details: { success: true, latency, modelId: model.modelId }
+                details: { success: true, latencyMs: latency, modelId: model.modelId, provider: model.provider, runtimeProvider },
+                category: "admin",
+                severity: "info",
             });
 
             res.json({
@@ -361,11 +475,13 @@ modelsRouter.post("/:id/test", async (req, res) => {
         } catch (testError: any) {
             const latency = Date.now() - startTime;
             
-            await storage.createAuditLog({
-                action: "model_test",
+            await auditLog(req, {
+                action: AuditActions.MODEL_TESTED,
                 resource: "ai_models",
                 resourceId: req.params.id,
-                details: { success: false, error: testError.message, modelId: model.modelId }
+                details: { success: false, error: testError.message, latencyMs: latency, modelId: model.modelId, provider: model.provider, runtimeProvider },
+                category: "admin",
+                severity: "warning",
             });
 
             res.json({
@@ -422,22 +538,14 @@ modelsRouter.get("/usage", async (req, res) => {
     }
 });
 
-// GET /api/admin/models/health - Health check for all providers
-modelsRouter.get("/health", async (req, res) => {
+// NOTE: keep this AFTER fixed routes like /health, /usage to avoid capturing them as :id.
+modelsRouter.get("/:id", async (req, res) => {
     try {
-        const providers = getAvailableProviders();
-        const health: Record<string, { available: boolean; hasKey: boolean; lastCheck: string }> = {};
-        
-        for (const provider of providers) {
-            const hasKey = await checkApiKeyExists(provider);
-            health[provider] = {
-                available: hasKey,
-                hasKey,
-                lastCheck: new Date().toISOString()
-            };
+        const model = await storage.getAiModelById(req.params.id);
+        if (!model) {
+            return res.status(404).json({ error: "Model not found" });
         }
-        
-        res.json(health);
+        res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

@@ -1,9 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface UserSettings {
   // Display
   appearance: "system" | "light" | "dark";
-  accentColor: "default" | "blue" | "green" | "purple" | "orange" | "pink";
+  accentColor:
+    | "default"
+    | "blue"
+    | "green"
+    | "purple"
+    | "orange"
+    | "pink"
+    | "red"
+    | "teal"
+    | "yellow"
+    | "indigo";
   fontSize: "small" | "medium" | "large";
   density: "compact" | "comfortable" | "spacious";
   
@@ -35,6 +46,12 @@ export interface UserSettings {
   notifTasks: "push" | "email" | "push_email" | "none";
   notifProjects: "push" | "email" | "push_email" | "none";
   notifRecommendations: "push" | "email" | "push_email" | "none";
+  notifInApp: boolean;
+  notifSound: boolean;
+  notifDesktop: boolean;
+  notifQuietHours: boolean;
+  notifQuietStart: string; // HH:MM
+  notifQuietEnd: string; // HH:MM
   
   // Personalization
   styleAndTone: "default" | "formal" | "casual" | "concise";
@@ -79,6 +96,12 @@ interface ApiUserSettings {
     nickname: string;
     occupation: string;
     bio: string;
+    // Builder profile (optional for backwards compatibility)
+    showName?: boolean;
+    linkedInUrl?: string;
+    githubUrl?: string;
+    websiteDomain?: string;
+    receiveEmailComments?: boolean;
   };
   featureFlags: {
     memoryEnabled: boolean;
@@ -114,7 +137,8 @@ const defaultSettings: UserSettings = {
   
   // AI Models
   showAdditionalModels: true,
-  defaultModel: "gemini-2.5-flash",
+  // Platform-level default model is applied via PlatformSettings.
+  defaultModel: "",
   streamResponses: true,
   
   // Keyboard & Accessibility
@@ -127,6 +151,12 @@ const defaultSettings: UserSettings = {
   notifTasks: "push_email",
   notifProjects: "email",
   notifRecommendations: "push_email",
+  notifInApp: true,
+  notifSound: true,
+  notifDesktop: false,
+  notifQuietHours: false,
+  notifQuietStart: "22:00",
+  notifQuietEnd: "08:00",
   
   // Personalization
   styleAndTone: "default",
@@ -168,7 +198,12 @@ function loadSettings(): UserSettings {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return { ...defaultSettings, ...parsed };
+      const merged = { ...defaultSettings, ...parsed };
+
+      // Legacy: older UI stored a sentinel value ("custom") instead of an actual URL.
+      if (merged.websiteDomain === "custom") merged.websiteDomain = "";
+
+      return merged;
     }
   } catch (e) {
     console.error("Failed to load settings:", e);
@@ -194,6 +229,11 @@ function mapLocalToApiSettings(settings: UserSettings): Omit<ApiUserSettings, 'u
       nickname: settings.nickname,
       occupation: settings.occupation,
       bio: settings.aboutYou,
+      showName: settings.showName,
+      linkedInUrl: settings.linkedInUrl,
+      githubUrl: settings.githubUrl,
+      websiteDomain: settings.websiteDomain,
+      receiveEmailComments: settings.receiveEmailComments,
     },
     featureFlags: {
       memoryEnabled: settings.allowMemories,
@@ -215,6 +255,11 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
     nickname: apiSettings.userProfile?.nickname || '',
     occupation: apiSettings.userProfile?.occupation || '',
     aboutYou: apiSettings.userProfile?.bio || '',
+    showName: apiSettings.userProfile?.showName ?? true,
+    linkedInUrl: apiSettings.userProfile?.linkedInUrl || '',
+    githubUrl: apiSettings.userProfile?.githubUrl || '',
+    websiteDomain: apiSettings.userProfile?.websiteDomain || '',
+    receiveEmailComments: apiSettings.userProfile?.receiveEmailComments ?? false,
     allowMemories: apiSettings.featureFlags?.memoryEnabled ?? true,
     allowRecordings: apiSettings.featureFlags?.recordingHistoryEnabled ?? false,
     webSearch: apiSettings.featureFlags?.webSearchAuto ?? true,
@@ -228,7 +273,6 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
 
 async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`);
     if (!response.ok) {
       if (response.status === 401) {
@@ -246,7 +290,6 @@ async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null
 
 async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 'userId'>): Promise<boolean> {
   try {
-    const { apiFetch } = await import('@/lib/apiClient');
     const response = await apiFetch(`/api/users/${userId}/settings`, {
       method: 'PUT',
       headers: {
@@ -408,6 +451,10 @@ export function applyAccentColor(color: UserSettings["accentColor"]) {
     purple: { light: "271 81% 56%", dark: "271 81% 66%" },
     orange: { light: "25 95% 53%", dark: "25 95% 63%" },
     pink: { light: "330 81% 60%", dark: "330 81% 70%" },
+    red: { light: "0 84% 60%", dark: "0 84% 70%" },
+    teal: { light: "173 80% 40%", dark: "173 80% 50%" },
+    yellow: { light: "48 96% 53%", dark: "48 96% 63%" },
+    indigo: { light: "239 84% 67%", dark: "239 84% 77%" },
   };
   
   const isDark = root.classList.contains("dark");

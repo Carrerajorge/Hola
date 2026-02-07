@@ -263,7 +263,8 @@ export async function is2FAEnabled(userId: string): Promise<boolean> {
   const result = await db.execute(sql`
     SELECT is_enabled FROM user_2fa WHERE user_id = ${userId}
   `);
-  return result.rows?.[0]?.is_enabled === true;
+  const raw = (result.rows?.[0] as any)?.is_enabled;
+  return raw === true || raw === "true" || raw === 1 || raw === "1" || raw === "t";
 }
 
 export async function disable2FA(userId: string): Promise<boolean> {

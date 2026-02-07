@@ -259,8 +259,100 @@ export async function sendPaymentEmail(to: string, options: {
     });
 }
 
+// ============================================================================
+// Workspace Invitation Emails
+// ============================================================================
+
+export function getWorkspaceInviteEmailHTML(options: {
+    workspaceName: string;
+    inviterName: string;
+    roleName: string;
+    magicLinkUrl: string;
+    message?: string;
+}): string {
+    const { workspaceName, inviterName, roleName, magicLinkUrl, message } = options;
+    const safeMessage = message ? message.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "";
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 520px; margin: 0 auto; }
+        .header { text-align: center; padding: 20px 0; }
+        .content { background: #f8f9fa; padding: 28px; border-radius: 12px; }
+        .button { display: block; background: #4f46e5; color: white !important; text-decoration: none; padding: 14px 28px; border-radius: 8px; text-align: center; font-weight: 600; margin: 20px 0; }
+        .footer { text-align: center; color: #666; font-size: 12px; margin-top: 24px; }
+        .tag { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; background: #e5e7eb; }
+        .note { font-size: 13px; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Invitacion a ${APP_NAME}</h2>
+        </div>
+        <div class="content">
+            <p><strong>${inviterName}</strong> te invito a unirte al espacio de trabajo <strong>${workspaceName}</strong>.</p>
+            <p class="note">Rol asignado: <span class="tag">${roleName}</span></p>
+            ${safeMessage ? `<p class="note">Mensaje: ${safeMessage}</p>` : ""}
+            <a href="${magicLinkUrl}" class="button">Aceptar invitacion</a>
+            <p class="note">Este enlace es valido por 15 minutos y solo puede usarse una vez.</p>
+        </div>
+        <div class="footer">
+            <p>${APP_NAME} - ${APP_URL}</p>
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+export function getWorkspaceInviteEmailText(options: {
+    workspaceName: string;
+    inviterName: string;
+    roleName: string;
+    magicLinkUrl: string;
+    message?: string;
+}): string {
+    const { workspaceName, inviterName, roleName, magicLinkUrl, message } = options;
+    return `
+Invitacion a ${APP_NAME}
+
+${inviterName} te invito a unirte al espacio de trabajo ${workspaceName}.
+Rol asignado: ${roleName}
+${message ? `Mensaje: ${message}\n` : ""}Acepta la invitacion aqui:
+${magicLinkUrl}
+
+Este enlace es valido por 15 minutos y solo puede usarse una vez.
+
+---
+${APP_NAME} - ${APP_URL}
+`;
+}
+
+export async function sendWorkspaceInviteEmail(
+    to: string,
+    options: {
+        workspaceName: string;
+        inviterName: string;
+        roleName: string;
+        magicLinkUrl: string;
+        message?: string;
+    }
+): Promise<EmailResult> {
+    return sendEmail({
+        to,
+        subject: `Invitacion a ${APP_NAME}`,
+        html: getWorkspaceInviteEmailHTML(options),
+        text: getWorkspaceInviteEmailText(options),
+    });
+}
+
 export default {
     sendEmail,
     sendMagicLinkEmail,
-    sendPaymentEmail
+    sendPaymentEmail,
+    sendWorkspaceInviteEmail
 };

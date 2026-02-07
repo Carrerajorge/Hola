@@ -21,6 +21,7 @@ const envSchema = z.object({
     GEMINI_API_KEY: z.string().optional(),
     OPENAI_API_KEY: z.string().optional(),
     ANTHROPIC_API_KEY: z.string().optional(),
+    DEEPSEEK_API_KEY: z.string().optional(),
 
     // Optional services
     REDIS_URL: z.string().optional(),
@@ -87,7 +88,8 @@ export function validateEnv(): EnvConfig {
         result.data.XAI_API_KEY ||
         result.data.GEMINI_API_KEY ||
         result.data.OPENAI_API_KEY ||
-        result.data.ANTHROPIC_API_KEY
+        result.data.ANTHROPIC_API_KEY ||
+        result.data.DEEPSEEK_API_KEY
     );
 
     if (!hasLlmKey) {
@@ -125,7 +127,7 @@ export function hasFeature(feature: 'redis' | 'stripe' | 'google' | 'brave' | 'l
         case 'brave':
             return !!env.BRAVE_API_KEY;
         case 'llm':
-            return !!(env.XAI_API_KEY || env.GEMINI_API_KEY || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY);
+            return !!(env.XAI_API_KEY || env.GEMINI_API_KEY || env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || env.DEEPSEEK_API_KEY);
         default:
             return false;
     }

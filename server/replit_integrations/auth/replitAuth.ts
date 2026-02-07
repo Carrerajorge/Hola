@@ -10,6 +10,8 @@ import { authStorage } from "./storage";
 import { storage } from "../../storage";
 import { withRetry } from "../../utils/retry";
 import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter";
+import { recordLoginAttempt } from "../../services/twoFactorAuth";
+import { getSettingValue } from "../../services/settingsConfigService";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {
@@ -85,14 +87,23 @@ const getOidcConfig = memoize(
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const pgStore = connectPg(session);
-  const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
-    ttl: sessionTtl,
-    tableName: "sessions",
-  });
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
+  const isTest = process.env.NODE_ENV === "test";
+
+  // Tests should be hermetic and must not require DB migrations just to serve a request.
+  // Use the default MemoryStore in test env.
+  const sessionStore = isTest
+    ? undefined
+    : (() => {
+        const pgStore = connectPg(session);
+        return new pgStore({
+          conString: process.env.DATABASE_URL,
+          createTableIfMissing: false,
+          ttl: sessionTtl,
+          tableName: "sessions",
+        });
+      })();
+
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -141,13 +152,46 @@ function updateUserSession(
 }
 
 async function upsertUser(claims: any) {
-  await authStorage.upsertUser({
-    id: claims["sub"],
-    email: claims["email"],
-    firstName: claims["first_name"],
-    lastName: claims["last_name"],
+  const providerSub = claims["sub"];
+  const email = claims["email"];
+
+  // Block new registrations if disabled (existing users can still log in).
+  try {
+    const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
+    if (!allowRegistration) {
+      const existing =
+        (providerSub ? await authStorage.getUser(providerSub) : undefined) ||
+        (email ? await authStorage.getUserByEmail(email) : undefined);
+      if (!existing) {
+        throw new Error("Registration is disabled");
+      }
+    }
+  } catch {
+    // If settings are unavailable, default to allowing login.
+  }
+
+  const firstName = claims["first_name"];
+  const lastName = claims["last_name"];
+  const fullName = [firstName, lastName].filter(Boolean).join(" ") || claims["full_name"] || null;
+
+  const dbUser = await authStorage.upsertUser({
+    id: providerSub,
+    email,
+    fullName,
+    firstName,
+    lastName,
     profileImageUrl: claims["profile_image_url"],
+    authProvider: "replit",
+    emailVerified: "true",
   });
+
+  // Bind the session identity to the DB primary key (stable across the app).
+  // If a user already exists with the same unique email, `upsertUser()` will merge by email
+  // without changing users.id; in that case we must override the session's sub to match DB id.
+  if (claims && dbUser?.id && providerSub && providerSub !== dbUser.id) {
+    claims["provider_sub"] = providerSub;
+    claims["sub"] = dbUser.id;
+  }
 }
 
 export async function setupAuth(app: Express) {
@@ -155,6 +199,13 @@ export async function setupAuth(app: Express) {
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
+
+  // In non-Replit production deployments (e.g., VPS), REPL_ID may be unset.
+  // Do not crash the server if OIDC is not configured.
+  if (!process.env.REPL_ID) {
+    console.warn('[Auth] REPL_ID is not set; Replit OIDC auth is disabled.');
+    return;
+  }
 
   const config = await getOidcConfig();
 
@@ -261,6 +312,18 @@ export async function setupAuth(app: Express) {
               ipAddress: req.ip || req.socket.remoteAddress || null,
               userAgent: req.headers["user-agent"] || null
             });
+
+            try {
+              await recordLoginAttempt(
+                mockUser.claims.email,
+                mockUser.claims.sub,
+                String(req.ip || req.socket.remoteAddress || "unknown"),
+                String(req.headers["user-agent"] || "unknown"),
+                true
+              );
+            } catch (e) {
+              console.warn("[Auth] Failed to record login_attempts (local dev):", (e as any)?.message || e);
+            }
           } catch (e) { console.warn("Failed to log local auth audit", e) }
 
           return res.redirect("/?auth=success");
@@ -318,6 +381,18 @@ export async function setupAuth(app: Express) {
               userAgent: req.headers["user-agent"] || null
             });
 
+            try {
+              await recordLoginAttempt(
+                String(user.claims?.email || "unknown"),
+                userId,
+                String(req.ip || req.socket.remoteAddress || "unknown"),
+                String(req.headers["user-agent"] || "unknown"),
+                true
+              );
+            } catch (e) {
+              console.warn(`[Auth] [${requestId}] Failed to record login_attempts:`, (e as any)?.message || e);
+            }
+
             await storage.createAuditLog({
               userId,
               action: "user_login",
@@ -353,6 +428,14 @@ export async function setupAuth(app: Express) {
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
+  // If Replit OIDC isn't configured, don't crash on token refresh paths.
+  if (!process.env.REPL_ID) {
+    return res.status(503).json({
+      message: "Authentication is not configured",
+      code: "AUTH_NOT_CONFIGURED",
+    });
+  }
+
   const user = req.user as any;
   const requestId = `auth-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 

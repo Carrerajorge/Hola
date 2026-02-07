@@ -122,14 +122,16 @@ class AIProviderManager extends EventEmitter {
   /**
    * Get circuit status for all providers
    */
-  getCircuitStatus(): Array<{ provider: string; state: string; failures: number }> {
-    const status: Array<{ provider: string; state: string; failures: number }> = [];
+  getCircuitStatus(): Array<{ provider: string; state: CircuitState["state"]; failures: number; lastFailure: number; successCount: number }> {
+    const status: Array<{ provider: string; state: CircuitState["state"]; failures: number; lastFailure: number; successCount: number }> = [];
     
     for (const [name, circuit] of this.circuits) {
       status.push({
         provider: name,
         state: circuit.state,
-        failures: circuit.failures
+        failures: circuit.failures,
+        lastFailure: circuit.lastFailure,
+        successCount: circuit.successCount,
       });
     }
     

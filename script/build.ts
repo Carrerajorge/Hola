@@ -1,16 +1,52 @@
 import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, writeFile } from "fs/promises";
+import { copyFile, mkdir, rm, readFile, writeFile } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
 const allowlist: string[] = [];
+
+async function bumpBuiltSwCleanupVersion() {
+  // Ensure the built SW cleanup script changes on each production build.
+  // This breaks the cache-cycle for users who still have an older Service Worker
+  // that serves stale HTML/JS after deploys.
+  const swCleanupPath = "dist/public/sw-cleanup.js";
+  let src: string;
+  try {
+    src = await readFile(swCleanupPath, "utf-8");
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+
+    // Defensive: some build setups can race the public asset copy step.
+    // Ensure we have the cleanup script before we bump its version.
+    await mkdir("dist/public", { recursive: true });
+    await copyFile("client/public/sw-cleanup.js", swCleanupPath);
+    src = await readFile(swCleanupPath, "utf-8");
+  }
+
+  const version = `build-${Date.now()}`;
+  const next = src.replace(
+    /var APP_VERSION = '([^']*)';/,
+    `var APP_VERSION = '${version}';`
+  );
+
+  if (next === src) {
+    throw new Error(
+      `[build] Failed to bump APP_VERSION in ${swCleanupPath} (pattern not found)`
+    );
+  }
+
+  await writeFile(swCleanupPath, next, "utf-8");
+  console.log(`[build] dist sw-cleanup APP_VERSION -> ${version}`);
+}
 
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
   await viteBuild();
+
+  await bumpBuiltSwCleanupVersion();
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
@@ -49,7 +85,7 @@ const __dirname = dirname(__filename);
   // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts"],
+    entryPoints: ["server/index.ts", "server/worker.ts", "server/agent/sandboxRunner/index.ts"],
     outdir: "dist",
     outExtension: { ".js": ".mjs" },
     splitting: true,
@@ -105,7 +141,19 @@ import(pathToFileURL(join(__dirname, "worker.mjs")).href).catch(err => {
 });
 `;
   await writeFile("dist/worker.cjs", workerWrapper, "utf-8");
+
+  const sandboxRunnerWrapper = `#!/usr/bin/env node
+"use strict";
+const { pathToFileURL } = require("url");
+const { join } = require("path");
+import(pathToFileURL(join(__dirname, "agent/sandboxRunner/index.mjs")).href).catch(err => {
+  console.error("Failed to start sandbox runner:", err);
+  process.exit(1);
+});
+`;
+  await writeFile("dist/sandbox-runner.cjs", sandboxRunnerWrapper, "utf-8");
 }
+
 
 buildAll().catch((err) => {
   console.error(err);

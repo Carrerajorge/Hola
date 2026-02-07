@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { trackWorkspaceEvent } from "@/lib/analytics";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -87,6 +88,7 @@ export interface Message {
   timestamp: Date;
   requestId?: string; // Unique ID for idempotency - prevents duplicate processing
   clientRequestId?: string; // For run-based idempotency - creates atomic user message + run
+  skipRun?: boolean; // Persist message without creating a chat run (used by Agent mode)
   userMessageId?: string; // For assistant messages: links to the user message it responds to
   runId?: string; // ID of the run this message belongs to
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
@@ -316,6 +318,59 @@ export function stopRetryProcessor(): void {
   }
 }
 
+// Strip all large data fields from attachments before sending to server.
+// Only lightweight metadata (name, type, fileId, storagePath, size) is needed server-side.
+// The actual file content lives in object storage (storagePath) and conversationDocuments table.
+function sanitizeAttachmentsForServer(attachments: Message['attachments']): Message['attachments'] {
+  if (!attachments || attachments.length === 0) return attachments;
+  return attachments.map(att => {
+    // Build a clean attachment with only metadata — strip content, imageUrl, thumbnail, dataUrl
+    const a = att as any;
+    const clean: Record<string, any> = {
+      id: a.id || a.fileId,
+      fileId: a.fileId,
+      name: att.name,
+      type: att.type,
+      mimeType: a.mimeType || att.type,
+      size: a.size,
+      storagePath: a.storagePath,
+    };
+    // Keep spreadsheetData metadata but strip large previewData
+    const spreadsheetData = a.spreadsheetData;
+    if (spreadsheetData) {
+      clean.spreadsheetData = {
+        uploadId: spreadsheetData.uploadId,
+        sheets: spreadsheetData.sheets,
+        analysisId: spreadsheetData.analysisId,
+        sessionId: spreadsheetData.sessionId,
+      };
+    }
+    return clean as any;
+  });
+}
+
+// Retry an async operation with exponential backoff and jitter.
+// Used for critical operations like message saves that must not silently fail.
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  { maxRetries = 3, baseDelayMs = 800, maxDelayMs = 10000 }: { maxRetries?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxRetries) {
+        const delay = Math.min(baseDelayMs * Math.pow(2, attempt) + Math.random() * 200, maxDelayMs);
+        console.warn(`[withRetry] Attempt ${attempt + 1} failed, retrying in ${Math.round(delay)}ms:`, lastError.message);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -338,13 +393,19 @@ function debouncedLocalStorageSave(chats: Chat[], storageKey: string): void {
   localStorageDebounceTimer = setTimeout(() => {
     if (pendingChatsToSave) {
       try {
-        // Strip large data from messages to save space
+        // Strip large data from messages to save space (base64 images, sources, etc.)
         const chatsForStorage = pendingChatsToSave.map(chat => ({
           ...chat,
           messages: chat.messages.map(msg => ({
             ...msg,
             sources: undefined,
-            generatedImage: undefined
+            generatedImage: undefined,
+            // Strip base64 imageUrl from attachments to avoid exceeding localStorage 5MB limit.
+            // Images can be reloaded from storagePath on next session.
+            attachments: msg.attachments?.map(att => {
+              const { imageUrl, ...rest } = att;
+              return rest;
+            })
           }))
         }));
         localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
@@ -371,7 +432,11 @@ export function flushPendingLocalStorageSave(storageKey: string): void {
         messages: chat.messages.map(msg => ({
           ...msg,
           sources: undefined,
-          generatedImage: undefined
+          generatedImage: undefined,
+          attachments: msg.attachments?.map(att => {
+            const { imageUrl, ...rest } = att;
+            return rest;
+          })
         }))
       }));
       localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
@@ -586,6 +651,21 @@ export function useChats() {
     setActiveChatId(id);
   }, []);
 
+  const trackChatMessageSent = useCallback((chatId: string, message: any, deduplicated?: boolean) => {
+    if (message?.role !== "user") return;
+    if (deduplicated) return;
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "chat_message_sent",
+      metadata: {
+        chatId,
+        contentLength: typeof message?.content === "string" ? message.content.length : 0,
+        attachmentsCount: Array.isArray(message?.attachments) ? message.attachments.length : 0,
+        hasAttachments: Array.isArray(message?.attachments) ? message.attachments.length > 0 : false,
+      },
+    });
+  }, []);
+
   const loadChatsFromServer = useCallback(async () => {
     try {
       const res = await fetch("/api/chats", {
@@ -602,6 +682,19 @@ export function useChats() {
             credentials: "include"
           });
           const fullChat = await chatRes.json();
+
+          // Build a lookup of conversationDocuments by messageId for attachment hydration.
+          // conversationDocuments are the durable server records of uploaded files.
+          const convDocs: any[] = fullChat.conversationDocuments || [];
+          const docsByMessageId = new Map<string, any[]>();
+          for (const doc of convDocs) {
+            if (doc.messageId) {
+              const existing = docsByMessageId.get(doc.messageId) || [];
+              existing.push(doc);
+              docsByMessageId.set(doc.messageId, existing);
+            }
+          }
+
           return {
             id: chat.id,
             stableKey: `stable-${chat.id}`, // Use ID as stable key for server chats
@@ -616,6 +709,40 @@ export function useChats() {
               if (msg.requestId) {
                 markRequestPersisted(msg.requestId);
               }
+
+              // Hydrate attachments: prefer message JSONB, fall back to conversationDocuments
+              let hydratedAttachments = msg.attachments;
+              if ((!hydratedAttachments || hydratedAttachments.length === 0) && docsByMessageId.has(msg.id)) {
+                // No JSONB attachments — reconstruct from conversationDocuments
+                hydratedAttachments = docsByMessageId.get(msg.id)!.map((doc: any) => ({
+                  id: doc.id,
+                  fileId: doc.metadata?.fileId || doc.id,
+                  name: doc.fileName,
+                  type: doc.mimeType,
+                  mimeType: doc.mimeType,
+                  size: doc.fileSize || 0,
+                  storagePath: doc.storagePath,
+                }));
+              } else if (hydratedAttachments && hydratedAttachments.length > 0 && docsByMessageId.has(msg.id)) {
+                // JSONB attachments exist — enrich with any missing data from conversationDocuments
+                const docs = docsByMessageId.get(msg.id)!;
+                hydratedAttachments = hydratedAttachments.map((att: any) => {
+                  const matchingDoc = docs.find((d: any) =>
+                    d.fileName === att.name ||
+                    (d.metadata?.fileId && d.metadata.fileId === att.fileId)
+                  );
+                  if (matchingDoc) {
+                    return {
+                      ...att,
+                      storagePath: att.storagePath || matchingDoc.storagePath,
+                      size: att.size || matchingDoc.fileSize || 0,
+                      mimeType: att.mimeType || matchingDoc.mimeType,
+                    };
+                  }
+                  return att;
+                });
+              }
+
               return {
                 id: msg.id,
                 role: msg.role,
@@ -623,7 +750,7 @@ export function useChats() {
                 timestamp: new Date(msg.createdAt),
                 requestId: msg.requestId,
                 userMessageId: msg.userMessageId,
-                attachments: msg.attachments,
+                attachments: hydratedAttachments,
                 sources: msg.sources,
                 figmaDiagram: msg.figmaDiagram,
                 googleFormPreview: msg.googleFormPreview,
@@ -654,7 +781,9 @@ export function useChats() {
 
       const serverChats = await loadChatsFromServer();
 
-      if (serverChats && serverChats.length > 0) {
+      // IMPORTANT: an empty array is still a valid server response (authoritative).
+      // Only fall back to localStorage when the server request failed (null).
+      if (serverChats) {
         setChats(serverChats);
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
@@ -663,7 +792,7 @@ export function useChats() {
           localStorage.removeItem(STORAGE_KEY);
         }
         // Only auto-select first chat if user hasn't manually selected/deselected
-        if (!userHasSelectedRef.current && !activeChatId) {
+        if (!userHasSelectedRef.current && !activeChatId && serverChats.length > 0) {
           setActiveChatId(serverChats[0]?.id || null);
         }
       } else {
@@ -706,7 +835,7 @@ export function useChats() {
                       content: msg.content,
                       requestId: msg.requestId,
                       userMessageId: msg.userMessageId,
-                      attachments: msg.attachments
+                      attachments: sanitizeAttachmentsForServer(msg.attachments)
                     }));
 
                     const res = await fetch("/api/chats", {
@@ -769,10 +898,85 @@ export function useChats() {
       }
 
       setIsLoading(false);
+
+      // Recover failed message saves from previous session
+      const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
+      try {
+        const failedQueue = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
+        if (failedQueue.length > 0) {
+          console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
+          const remaining: any[] = [];
+          for (const queued of failedQueue) {
+            // Skip entries older than 24 hours
+            if (Date.now() - queued.timestamp > 24 * 60 * 60 * 1000) continue;
+            try {
+              const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                credentials: "include",
+                body: JSON.stringify({
+                  role: queued.role,
+                  content: queued.content,
+                  requestId: queued.requestId,
+                  clientRequestId: queued.clientRequestId,
+                  attachments: queued.attachments,
+                })
+              });
+              if (res.ok) {
+                console.log(`[FailedQueue] Recovered message for chat ${queued.chatId}`);
+              } else if (res.status < 500) {
+                // Client error (4xx) — skip, don't retry
+                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
+              } else {
+                remaining.push(queued); // Retry next time
+              }
+            } catch {
+              remaining.push(queued); // Network error, retry next time
+            }
+          }
+          localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(remaining));
+        }
+      } catch (e) {
+        console.warn('[FailedQueue] Error processing recovery queue:', e);
+      }
     };
 
     initChats();
   }, []);
+
+  // Allows other parts of the app (settings/privacy) to request a full server refresh.
+  useEffect(() => {
+    const handleRefresh = () => {
+      void (async () => {
+        setIsLoading(true);
+        try {
+          const serverChats = await loadChatsFromServer();
+          if (!serverChats) return;
+
+          setChats(serverChats);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
+          } catch (e) {
+            console.warn("Failed to cache chats to localStorage:", e);
+            localStorage.removeItem(STORAGE_KEY);
+          }
+
+          // If the active chat disappeared (archived/deleted), pick a sane fallback.
+          if (activeChatId && !serverChats.some((c) => c.id === activeChatId)) {
+            setActiveChatId(serverChats[0]?.id || null);
+          }
+          if (!activeChatId && !userHasSelectedRef.current) {
+            setActiveChatId(serverChats[0]?.id || null);
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+    };
+
+    window.addEventListener("refresh-chats", handleRefresh);
+    return () => window.removeEventListener("refresh-chats", handleRefresh);
+  }, [activeChatId, loadChatsFromServer]);
 
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
@@ -818,7 +1022,9 @@ export function useChats() {
 
       for (const msg of queuedMessages) {
         try {
-          const clientRequestId = msg.role === 'user' ? (msg as any).clientRequestId || generateClientRequestId() : undefined;
+          const clientRequestId = msg.role === 'user' && !(msg as any).skipRun
+            ? (msg as any).clientRequestId || generateClientRequestId()
+            : undefined;
           
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
@@ -830,7 +1036,7 @@ export function useChats() {
               requestId: msg.requestId,
               clientRequestId,
               userMessageId: msg.userMessageId,
-              attachments: msg.attachments,
+              attachments: sanitizeAttachmentsForServer(msg.attachments),
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
@@ -855,6 +1061,7 @@ export function useChats() {
           // If response includes a run, track it for AI streaming
           if (res.ok) {
             const data = await res.json();
+            trackChatMessageSent(realChatId, msg, data?.deduplicated);
             if (data.run) {
               const run: ChatRun = {
                 id: data.run.id,
@@ -917,8 +1124,57 @@ export function useChats() {
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    // Track whether message was actually added (for requestId cleanup)
-    let messageAdded = false;
+    // If first message comes in while the chat is still pending, force-create the chat
+    // so we get a real chatId and can flush the queued messages.
+    if (isPending && message.role === "user" && !isCreatingChat) {
+      chatCreationInProgress.add(chatId);
+
+      // Optimistically add the message to the pending chat so the UI doesn't look stuck
+      setChats(prev => prev.map(chat => {
+        if (chat.id !== chatId) return chat;
+        const messageExists = chat.messages.some(m => m.id === message.id);
+        if (messageExists) return chat;
+        const isFirstMessage = chat.messages.length === 0;
+        return {
+          ...chat,
+          messages: [...chat.messages, message],
+          title: isFirstMessage && message.role === "user" ? title : chat.title,
+          timestamp: Date.now()
+        };
+      }));
+
+      const queue = pendingMessageQueue.get(chatId) || [];
+      queue.push(message);
+      pendingMessageQueue.set(chatId, queue);
+
+      try {
+        console.error("[CRITICAL] About to POST /api/chats - forced pending creation");
+        const res = await fetch("/api/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
+          body: JSON.stringify({ title })
+        });
+        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
+
+        if (!res.ok) return undefined;
+
+        const newChat = await res.json();
+        const realChatId = newChat.id;
+
+        pendingToRealIdMap.set(chatId, realChatId);
+
+        setChats(prev => prev.map(chat => (chat.id === chatId ? { ...chat, id: realChatId } : chat)));
+        setActiveChatId(realChatId);
+
+        return await flushPendingMessages(chatId, realChatId);
+      } catch (error) {
+        console.error("Error creating chat on first message (forced):", error);
+        return undefined;
+      } finally {
+        chatCreationInProgress.delete(chatId);
+      }
+    }
 
     // Check if message already exists in chat (by ID) and add if not
     setChats(prev => {
@@ -928,7 +1184,7 @@ export function useChats() {
       if (!chatExists && isPending) {
         // Chat doesn't exist yet - create it with this message
         console.error("[CRITICAL] Chat doesn't exist, creating new pending chat");
-        messageAdded = true;
+        
         return [...prev, {
           id: chatId,
           title: title,
@@ -953,7 +1209,7 @@ export function useChats() {
             return chat;
           }
 
-          messageAdded = true;
+          
           const isFirstMessage = chat.messages.length === 0;
           return {
             ...chat,
@@ -967,89 +1223,8 @@ export function useChats() {
     });
 
     // If message wasn't added (duplicate), don't proceed with persistence
-    if (!messageAdded) {
-      // Return existing run if available
-      const existingRun = getActiveRun(resolvedChatId);
-      if (existingRun) {
-        return { run: existingRun, deduplicated: true };
-      }
-      return undefined;
-    }
 
-    if (isPending && message.role === "user" && !isCreatingChat) {
-      chatCreationInProgress.add(chatId);
-      const queue = pendingMessageQueue.get(chatId) || [];
-      queue.push(message);
-      pendingMessageQueue.set(chatId, queue);
-
-      try {
-        console.error("[CRITICAL] About to POST /api/chats - this is the server call");
-        console.log("[addMessage] Creating new chat via POST /api/chats");
-        const res = await fetch("/api/chats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({ title })
-        });
-        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
-        console.log("[addMessage] POST /api/chats response:", res.status, res.ok);
-
-        if (res.ok) {
-          const newChat = await res.json();
-          const realChatId = newChat.id;
-          console.log("[addMessage] Chat created with id:", realChatId);
-
-          pendingToRealIdMap.set(chatId, realChatId);
-
-          setChats(prev => prev.map(chat => {
-            if (chat.id === chatId) {
-              return { ...chat, id: realChatId };
-            }
-            return chat;
-          }));
-          setActiveChatId(realChatId);
-
-          console.log("[addMessage] Calling flushPendingMessages");
-          const flushResult = await flushPendingMessages(chatId, realChatId);
-          console.log("[addMessage] flushPendingMessages result:", flushResult);
-          // Always return the flush result (even if undefined) to prevent falling through
-          return flushResult;
-        } else {
-          // Server creation failed - keep messages in local-only mode (visible in UI)
-          // Mark requestIds as complete to prevent re-processing but keep messages visible
-          const queuedMsgs = pendingMessageQueue.get(chatId) || [];
-          queuedMsgs.forEach(msg => {
-            if (msg.requestId) markRequestComplete(msg.requestId);
-          });
-          pendingMessageQueue.delete(chatId);
-          // Resolve pending promises with undefined (no run)
-          const resolvers = pendingFlushResolvers.get(chatId) || [];
-          for (const resolve of resolvers) {
-            resolve(undefined);
-          }
-          pendingFlushResolvers.delete(chatId);
-          console.warn("Chat creation failed, operating in local-only mode");
-          return undefined;
-        }
-      } catch (error) {
-        console.error("Error creating chat on first message:", error);
-        // Keep messages in local-only mode on error
-        const queuedMsgs = pendingMessageQueue.get(chatId) || [];
-        queuedMsgs.forEach(msg => {
-          if (msg.requestId) markRequestComplete(msg.requestId);
-        });
-        pendingMessageQueue.delete(chatId);
-        // Resolve pending promises with undefined (no run)
-        const resolvers = pendingFlushResolvers.get(chatId) || [];
-        for (const resolve of resolvers) {
-          resolve(undefined);
-        }
-        pendingFlushResolvers.delete(chatId);
-        return undefined;
-      } finally {
-        chatCreationInProgress.delete(chatId);
-      }
-    } else if (isPending || isCreatingChat) {
+    if (isPending || isCreatingChat) {
       const queueKey = chatCreationInProgress.has(chatId) ? chatId : resolvedChatId;
       const queue = pendingMessageQueue.get(queueKey) || [];
       queue.push(message);
@@ -1064,34 +1239,46 @@ export function useChats() {
     } else {
       try {
         // For user messages, use run-based idempotency with clientRequestId
-        const clientRequestId = message.role === 'user' ? (message as any).clientRequestId || generateClientRequestId() : undefined;
+        const clientRequestId = message.role === 'user' && !(message as any).skipRun
+          ? (message as any).clientRequestId || generateClientRequestId()
+          : undefined;
 
-        const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-          credentials: "include",
-          body: JSON.stringify({
-            role: message.role,
-            content: message.content,
-            requestId: message.requestId,
-            clientRequestId, // For run-based idempotency
-            userMessageId: message.userMessageId,
-            attachments: message.attachments,
-            sources: message.sources,
-            figmaDiagram: message.figmaDiagram,
-            googleFormPreview: message.googleFormPreview,
-            gmailPreview: message.gmailPreview,
-            generatedImage: message.generatedImage,
-            webSources: message.webSources, // For news cards display
-            confidence: message.confidence,
-            uncertaintyReason: message.uncertaintyReason,
-            retrievalSteps: message.retrievalSteps
-          })
-        });
+        // Retry message saves with exponential backoff for reliability.
+        // Uses idempotent clientRequestId to prevent duplicates on retry.
+        const res = await withRetry(async () => {
+          const response = await fetch(`/api/chats/${resolvedChatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              role: message.role,
+              content: message.content,
+              requestId: message.requestId,
+              clientRequestId, // For run-based idempotency
+              userMessageId: message.userMessageId,
+              attachments: sanitizeAttachmentsForServer(message.attachments),
+              sources: message.sources,
+              figmaDiagram: message.figmaDiagram,
+              googleFormPreview: message.googleFormPreview,
+              gmailPreview: message.gmailPreview,
+              generatedImage: message.generatedImage,
+              webSources: message.webSources,
+              confidence: message.confidence,
+              uncertaintyReason: message.uncertaintyReason,
+              retrievalSteps: message.retrievalSteps
+            })
+          });
+          // Retry on network failures and 5xx server errors; don't retry 4xx client errors
+          if (!response.ok && response.status >= 500) {
+            throw new Error(`Server error ${response.status}`);
+          }
+          return response;
+        }, { maxRetries: 2 });
 
         // Handle run-based response for user messages
         if (res.ok) {
           const data = await res.json();
+          trackChatMessageSent(resolvedChatId, message, data?.deduplicated);
 
           // If response includes a run, track it for AI streaming
           if (data.run) {
@@ -1143,6 +1330,33 @@ export function useChats() {
         if (message.requestId) {
           processingRequestIds.delete(message.requestId);
         }
+
+        // Queue failed message save for later recovery
+        if (message.role === 'user' && message.attachments?.length) {
+          try {
+            const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
+            const existing = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
+            // Only queue if not already queued (by requestId)
+            if (!existing.some((q: any) => q.requestId === message.requestId)) {
+              existing.push({
+                chatId: resolvedChatId,
+                role: message.role,
+                content: message.content,
+                requestId: message.requestId,
+                clientRequestId: (message as any).clientRequestId,
+                attachments: sanitizeAttachmentsForServer(message.attachments),
+                timestamp: Date.now(),
+              });
+              // Keep only last 20 entries to prevent bloat
+              const trimmed = existing.slice(-20);
+              localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(trimmed));
+              console.log(`[FailedQueue] Queued message with ${message.attachments.length} attachment(s) for retry`);
+            }
+          } catch (queueError) {
+            console.warn('[FailedQueue] Failed to queue message for retry:', queueError);
+          }
+        }
+
         return undefined;
       }
     }
@@ -1194,9 +1408,13 @@ export function useChats() {
     const chat = chats.find(c => c.id === chatId);
     const newArchived = !chat?.archived;
 
-    setChats(prev => prev.map(c =>
-      c.id === chatId ? { ...c, archived: newArchived } : c
-    ));
+    // Archived chats are removed from the main list and managed via Settings > Historial.
+    setChats(prev => {
+      if (newArchived) {
+        return prev.filter(c => c.id !== chatId);
+      }
+      return prev.map(c => (c.id === chatId ? { ...c, archived: newArchived } : c));
+    });
 
     try {
       await fetch(`/api/chats/${chatId}`, {
@@ -1205,6 +1423,7 @@ export function useChats() {
         credentials: "include",
         body: JSON.stringify({ archived: newArchived })
       });
+      window.dispatchEvent(new CustomEvent("refresh-chats"));
     } catch (error) {
       console.error("Error archiving chat:", error);
     }

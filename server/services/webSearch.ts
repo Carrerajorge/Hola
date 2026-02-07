@@ -292,7 +292,18 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
     // Request more results than needed to ensure diversity after deduplication
     const requestCount = Math.min(maxResults * 2, 30);
     const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await fetch(searchUrl, { headers: getHeaders() });
+
+    // IMPORTANT: Protect the initial search request with a hard timeout.
+    // If this hangs, /api/chat/stream never flushes headers and the UI stays stuck on "Buscando".
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const response = await fetch(searchUrl, {
+      headers: getHeaders(),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       throw new Error(`Search failed: ${response.status}`);
@@ -398,7 +409,13 @@ export async function searchScholar(query: string, maxResults: number = LIMITS.M
 
   try {
     const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es`;
-    const response = await fetch(searchUrl, { headers: getHeaders() });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const response = await fetch(searchUrl, { headers: getHeaders(), signal: controller.signal });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       console.error("Scholar search failed:", response.status);

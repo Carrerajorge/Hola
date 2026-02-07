@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,17 +22,30 @@ import {
   Bell,
   Shield,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { getPlanLabel } from "@/lib/planUtils";
 import { cn } from "@/lib/utils";
+import { isAdminUser } from "@/lib/admin";
+import { useSettingsContext } from "@/contexts/SettingsContext";
+import { channelIncludesEmail } from "@/lib/notification-preferences";
+import { apiFetch } from "@/lib/apiClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ProfilePage() {
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [emailUpdates, setEmailUpdates] = useState(false);
+  const { user, refreshAuth } = useAuth();
+  const isAdmin = isAdminUser(user as any);
+  const { settings, updateSetting } = useSettingsContext();
+  const { toast } = useToast();
+
+  const notificationsEnabled = settings.notifInApp;
+  const emailUpdates = channelIncludesEmail(settings.notifRecommendations);
+  const [fullName, setFullName] = useState("");
+  const [company, setCompany] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const stats = [
     { label: "Chats", value: "24", icon: MessageSquare },
@@ -48,12 +61,62 @@ export default function ProfilePage() {
 
   const quickActions = [
     { label: "Privacidad y seguridad", icon: Shield, path: "/privacy" },
-    ...(user?.role === "admin" ? [{ label: "Facturación", icon: Calendar, path: "/billing" }] : []),
-    { label: "Configuración", icon: Globe, path: "/workspace-settings" },
+    ...(isAdmin ? [{ label: "Facturación", icon: Calendar, path: "/billing" }] : []),
+    { label: "Configuración", icon: Globe, path: "/settings" },
   ];
 
-  const displayName = user?.firstName || user?.email?.split("@")[0] || "Usuario";
-  const initials = (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase();
+  const displayName = useMemo(
+    () => user?.fullName || user?.firstName || user?.email?.split("@")[0] || "Usuario",
+    [user?.email, user?.firstName, user?.fullName]
+  );
+  const initials = useMemo(() => {
+    const parts = displayName.split(/\s+/g).filter(Boolean);
+    const raw =
+      parts.length >= 2 ? `${parts[0][0] || ""}${parts[1][0] || ""}` : (parts[0]?.[0] || "U");
+    return raw.toUpperCase();
+  }, [displayName]);
+
+  useEffect(() => {
+    setFullName(displayName);
+    setCompany(user?.company || "");
+  }, [displayName, user?.company, user?.id]);
+
+  const canSave = !!user?.id && !isSaving && fullName.trim().length > 0;
+
+  const saveProfile = async () => {
+    if (!user?.id) {
+      toast({ title: "Sesión requerida", description: "Inicia sesión para guardar cambios.", variant: "destructive" });
+      return;
+    }
+    if (fullName.trim().length === 0) {
+      toast({ title: "Nombre requerido", description: "Ingresa tu nombre.", variant: "destructive" });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const res = await apiFetch(`/api/users/${user.id}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          company: company.trim().length ? company.trim() : null,
+        }),
+      });
+
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudo guardar.");
+      }
+
+      toast({ title: "Guardado", description: "Tu perfil se actualizó correctamente." });
+      refreshAuth();
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudo guardar.", variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background">
@@ -92,7 +155,7 @@ export default function ProfilePage() {
               <div className="text-center sm:text-left flex-1">
                 <div className="flex items-center justify-center sm:justify-start gap-2">
                   <h2 className="text-2xl font-bold">{displayName}</h2>
-                  {user?.role === "admin" && (
+                  {isAdmin && (
                     <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
                       Admin
                     </Badge>
@@ -146,7 +209,8 @@ export default function ProfilePage() {
                 <Label htmlFor="name" className="text-xs text-muted-foreground">Nombre</Label>
                 <Input 
                   id="name" 
-                  defaultValue={displayName}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
                   className="bg-muted/50 border-0"
                   data-testid="input-profile-name"
                 />
@@ -170,11 +234,14 @@ export default function ProfilePage() {
               <Input 
                 id="company" 
                 placeholder="Tu empresa u organización"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
                 className="bg-muted/50 border-0"
                 data-testid="input-profile-company"
               />
             </div>
-            <Button className="w-full sm:w-auto" data-testid="button-save-profile">
+            <Button className="w-full sm:w-auto" onClick={saveProfile} disabled={!canSave} data-testid="button-save-profile">
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Guardar cambios
             </Button>
           </CardContent>
@@ -227,7 +294,7 @@ export default function ProfilePage() {
               </div>
               <Switch 
                 checked={notificationsEnabled} 
-                onCheckedChange={setNotificationsEnabled}
+                onCheckedChange={(checked) => updateSetting("notifInApp", checked)}
                 data-testid="switch-notifications"
               />
             </div>
@@ -239,7 +306,18 @@ export default function ProfilePage() {
               </div>
               <Switch 
                 checked={emailUpdates} 
-                onCheckedChange={setEmailUpdates}
+                onCheckedChange={(checked) => {
+                  const current = settings.notifRecommendations;
+
+                  if (checked) {
+                    if (current === "none") updateSetting("notifRecommendations", "email");
+                    else if (current === "push") updateSetting("notifRecommendations", "push_email");
+                    return;
+                  }
+
+                  if (current === "push_email") updateSetting("notifRecommendations", "push");
+                  else if (current === "email") updateSetting("notifRecommendations", "none");
+                }}
                 data-testid="switch-email-updates"
               />
             </div>
@@ -269,7 +347,14 @@ export default function ProfilePage() {
 
         <div className="text-center py-4">
           <p className="text-xs text-muted-foreground">
-            IliaGPT v1.0 · <button className="underline hover:text-foreground">Términos</button> · <button className="underline hover:text-foreground">Privacidad</button>
+            IliaGPT v1.0 ·{" "}
+            <button className="underline hover:text-foreground" onClick={() => setLocation("/terms")} type="button">
+              Términos
+            </button>{" "}
+            ·{" "}
+            <button className="underline hover:text-foreground" onClick={() => setLocation("/privacy")} type="button">
+              Privacidad
+            </button>
           </p>
         </div>
       </div>

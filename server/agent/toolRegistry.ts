@@ -20,6 +20,80 @@ import { randomUUID } from "crypto";
 import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
+import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
+import { getUserSettingsCached } from "../services/userSettingsCache";
+
+const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
+const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
+
+type AutoConfirmPolicy = "always" | "ask" | "never";
+
+type ConcurrencyState = { active: number; queue: Array<() => void> };
+const concurrencyByKey = new Map<string, ConcurrencyState>();
+
+const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+};
+
+const normalizeAutoConfirmPolicy = (value: unknown): AutoConfirmPolicy => {
+  const v = String(value ?? "").toLowerCase().trim();
+  if (v === "always" || v === "ask" || v === "never") return v;
+  return "ask";
+};
+
+async function acquireConcurrencySlot(
+  key: string,
+  limit: number,
+  signal?: AbortSignal
+): Promise<() => void> {
+  const state = concurrencyByKey.get(key) || { active: 0, queue: [] };
+  if (!concurrencyByKey.has(key)) concurrencyByKey.set(key, state);
+
+  const release = () => {
+    const s = concurrencyByKey.get(key);
+    if (!s) return;
+    s.active = Math.max(0, s.active - 1);
+    const next = s.queue.shift();
+    if (next) next();
+    if (s.active === 0 && s.queue.length === 0) {
+      concurrencyByKey.delete(key);
+    }
+  };
+
+  if (signal?.aborted) {
+    throw new Error("ABORTED");
+  }
+
+  if (state.active < limit) {
+    state.active++;
+    return release;
+  }
+
+  return new Promise<() => void>((resolve, reject) => {
+    const grant = () => {
+      if (signal?.aborted) {
+        reject(new Error("ABORTED"));
+        return;
+      }
+      state.active++;
+      resolve(release);
+    };
+
+    const onAbort = () => {
+      const idx = state.queue.indexOf(grant);
+      if (idx >= 0) state.queue.splice(idx, 1);
+      if (state.active === 0 && state.queue.length === 0) {
+        concurrencyByKey.delete(key);
+      }
+      reject(new Error("ABORTED"));
+    };
+
+    state.queue.push(grant);
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
+}
 
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
@@ -45,6 +119,28 @@ export interface ToolContext {
   userPlan?: "free" | "pro" | "admin";
   isConfirmed?: boolean;
   signal?: AbortSignal;
+  // Wiring from IntegrationPolicy (Settings -> Apps -> Advanced)
+  autoConfirmPolicy?: AutoConfirmPolicy;
+  sandboxMode?: boolean;
+  maxParallelCalls?: number;
+
+  /**
+   * Optional streaming hook for long-running tools (e.g. shell_command).
+   * The callback MUST be best-effort (never throw); the tool will ignore failures.
+   * Consumers should not assume chunk boundaries align with lines.
+   */
+  onStream?: (evt: { stream: "stdout" | "stderr"; chunk: string }) => void;
+
+  /**
+   * Optional hook invoked once when a tool-backed process exits.
+   * Best-effort: errors are ignored by the tool.
+   */
+  onExit?: (evt: {
+    exitCode: number;
+    signal: string | null;
+    wasKilled: boolean;
+    durationMs: number;
+  }) => void;
 }
 
 export interface ToolArtifact {
@@ -133,8 +229,8 @@ export class ToolRegistry {
     return this.list().filter(t => allowedTools.includes(t.name));
   }
 
-  async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
-    const tool = this.tools.get(name);
+	async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
+    let tool = this.tools.get(name);
     const startTime = Date.now();
     const logs: ToolLog[] = [];
     
@@ -142,9 +238,112 @@ export class ToolRegistry {
       logs.push({ level, message, timestamp: new Date(), data });
     };
 
+    const redactForLog = (value: any): any => {
+      const seen = new WeakSet();
+      const sensitiveKeys = ["password", "token", "secret", "key", "auth", "credential", "apiKey"];
+
+      const walk = (v: any): any => {
+        if (v === null || v === undefined) return v;
+        if (typeof v === "string") {
+          if (v.length > 2000) return v.slice(0, 2000) + "...[truncated]";
+          return v;
+        }
+        if (typeof v !== "object") return v;
+        if (seen.has(v)) return "[Circular]";
+        seen.add(v);
+
+        if (Array.isArray(v)) {
+          return v.slice(0, 50).map(walk);
+        }
+
+        const out: Record<string, any> = {};
+        for (const [k, child] of Object.entries(v)) {
+          if (sensitiveKeys.some(s => k.toLowerCase().includes(s.toLowerCase()))) {
+            out[k] = "[REDACTED]";
+          } else {
+            out[k] = walk(child);
+          }
+        }
+        return out;
+      };
+
+      return walk(value);
+    };
+
+    const idempotencyKey =
+      typeof input?.idempotencyKey === "string"
+        ? input.idempotencyKey
+        : typeof input?.idempotency_key === "string"
+          ? input.idempotency_key
+          : undefined;
+
+    const persistToolCallLog = (params: {
+      status: string;
+      providerId?: string;
+      latencyMs?: number;
+      errorCode?: string;
+      errorMessage?: string;
+      output?: any;
+    }) => {
+      void (async () => {
+        try {
+          const safeUserId =
+            context.userId === "anonymous" || context.userId.startsWith("anon_")
+              ? undefined
+              : context.userId;
+          const { storage } = await import("../storage");
+          await storage.createToolCallLog({
+            userId: safeUserId,
+            chatId: context.chatId,
+            runId: context.runId,
+            toolId: name,
+            providerId: params.providerId || "agentic_engine",
+            inputRedacted: redactForLog(input),
+            outputRedacted: redactForLog(params.output),
+            status: params.status,
+            errorCode: params.errorCode,
+            errorMessage: params.errorMessage,
+            latencyMs: Math.max(0, Math.round(params.latencyMs ?? (Date.now() - startTime))),
+            idempotencyKey,
+          });
+
+          // Best-effort gap tracking: if the tool was requested but does not exist, log it as a capability gap.
+          if (params.status === "not_found") {
+            await storage.createAgentGapLog({
+              userId: safeUserId,
+              userPrompt: `Missing tool: ${name}`,
+              detectedIntent: "tool_not_found",
+              gapReason: params.errorMessage || `Tool "${name}" not found`,
+              suggestedCapability: name,
+              status: "pending",
+            });
+          }
+        } catch (err: any) {
+          console.warn("[ToolRegistry] Failed to persist tool_call_logs:", err?.message || err);
+        }
+      })();
+    };
+
+    const trackAndReturn = (result: ToolResult, meta?: { status?: string; providerId?: string }) => {
+      persistToolCallLog({
+        status: meta?.status || (result.success ? "success" : "error"),
+        providerId: meta?.providerId,
+        latencyMs: result.metrics?.durationMs,
+        errorCode: result.error?.code,
+        errorMessage: result.error?.message,
+        output: {
+          success: result.success,
+          output: result.output,
+          error: result.error ? { code: result.error.code, message: result.error.message } : undefined,
+          metrics: result.metrics,
+        },
+      });
+      return result;
+    };
+
     if (context.signal?.aborted) {
       addLog("info", "Tool execution aborted before start");
-      return {
+      return trackAndReturn({
         success: false,
         output: null,
         artifacts: [],
@@ -156,17 +355,95 @@ export class ToolRegistry {
           message: "Tool execution was cancelled",
           retryable: false,
         },
-      };
+      }, { status: "cancelled" });
     }
-    
-    if (!tool) {
-      // Try sandbox tools as fallback with proper adaptation
-      if (sandboxToolRegistry.has(name)) {
-        addLog("info", `Using sandbox tool: ${name}`);
-        
-        // Check abort signal before sandbox execution
-        if (context.signal?.aborted) {
-          return {
+
+    const integrationPolicy = await getIntegrationPolicyCached(context.userId);
+    const enabledTools = integrationPolicy?.enabledTools || [];
+    const disabledTools = new Set(integrationPolicy?.disabledTools || []);
+
+    if (disabledTools.has(name) || (enabledTools.length > 0 && !enabledTools.includes(name))) {
+      addLog("warn", `Tool blocked by integration policy: ${name}`);
+      return trackAndReturn(
+        {
+          success: false,
+          output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
+          error: {
+            code: "TOOL_DISABLED",
+            message: `Tool "${name}" is disabled by policy`,
+            retryable: false,
+          },
+        },
+        { status: "denied", providerId: "integration_policy" }
+      );
+    }
+
+    const autoConfirmPolicy = normalizeAutoConfirmPolicy(
+      context.autoConfirmPolicy ?? integrationPolicy?.autoConfirmPolicy
+    );
+    const sandboxMode = context.sandboxMode ?? integrationPolicy?.sandboxMode === "true";
+    const maxParallelCalls = clampInt(
+      context.maxParallelCalls ?? integrationPolicy?.maxParallelCalls,
+      3,
+      1,
+      10
+    );
+
+    const effectiveContext: ToolContext = {
+      ...context,
+      autoConfirmPolicy,
+      sandboxMode,
+      maxParallelCalls,
+      isConfirmed: context.isConfirmed === true || autoConfirmPolicy === "always",
+    };
+
+    // Concurrency is a user preference; enforce it globally per user (not just per run).
+    // Fallback to runId only when we can't identify a stable user.
+    const normalizedUserId = String(effectiveContext.userId || "").trim();
+    const concurrencyKey =
+      normalizedUserId && normalizedUserId !== "anonymous"
+        ? `user:${normalizedUserId}`
+        : `run:${effectiveContext.runId}`;
+
+    // User Settings Feature Gates (Privacy/Safety toggles)
+    // These are user-controlled switches from Configuraciones > Personalización.
+    // They must be enforced server-side to prevent accidental tool usage.
+    try {
+      const userSettings = await getUserSettingsCached(context.userId);
+      const featureFlags = {
+        webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true,
+        codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
+        canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
+        connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
+      };
+
+      const isWebTool = new Set([
+        "web_search",
+        "browse_url",
+        "web_search_retrieve",
+        // Sandbox aliases
+        "search",
+        "browser",
+        "research",
+      ]).has(name);
+
+      const isCanvasTool = new Set([
+        "generate_document",
+        // Sandbox aliases
+        "document",
+        "slides",
+      ]).has(name);
+
+      const isConnectorTool = name.startsWith("gmail_") || name.startsWith("whatsapp_");
+
+      if (!featureFlags.webSearchAuto && isWebTool) {
+        addLog("warn", `Tool blocked: web search disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
             success: false,
             output: null,
             artifacts: [],
@@ -174,14 +451,244 @@ export class ToolRegistry {
             logs,
             metrics: { durationMs: Date.now() - startTime },
             error: {
-              code: "ABORTED",
-              message: "Tool execution was cancelled before sandbox tool",
+              code: "WEB_SEARCH_DISABLED",
+              message: "Web search is disabled in your settings",
               retryable: false,
             },
-          };
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      if (!featureFlags.canvasEnabled && isCanvasTool) {
+        addLog("warn", `Tool blocked: canvas disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CANVAS_DISABLED",
+              message: "Canvas features are disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      if (!featureFlags.connectorSearchAuto && isConnectorTool) {
+        addLog("warn", `Tool blocked: connector search disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CONNECTOR_SEARCH_DISABLED",
+              message: "Connector search is disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+
+      // Deny any code-executing tool when code interpreter is disabled.
+      if (!featureFlags.codeInterpreterEnabled && policyEngine.hasCapability(name, "executes_code")) {
+        addLog("warn", `Tool blocked: code interpreter disabled in user settings (${name})`);
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "CODE_INTERPRETER_DISABLED",
+              message: "Code interpreter is disabled in your settings",
+              retryable: false,
+            },
+          },
+          { status: "denied", providerId: "user_settings" }
+        );
+      }
+    } catch (e: any) {
+      // Best-effort: if settings can't be loaded, don't block tools.
+      addLog("debug", "User settings feature-gate check skipped (unavailable)", e?.message || e);
+    }
+    
+    if (!tool) {
+      // Try sandbox tools as fallback with proper adaptation
+      if (sandboxToolRegistry.has(name)) {
+        addLog("info", `Using sandbox tool: ${name}`);
+
+        const sandboxPolicyContext: PolicyContext = {
+          userId: context.userId,
+          userPlan: context.userPlan || "free",
+          toolName: name,
+          isConfirmed: effectiveContext.isConfirmed,
+        };
+
+        const sandboxPolicyCheck = policyEngine.checkAccess(sandboxPolicyContext);
+        if (!sandboxPolicyCheck.allowed) {
+          addLog("warn", `Policy denied sandbox tool execution: ${sandboxPolicyCheck.reason}`);
+          const denialCode = sandboxPolicyCheck.requiresConfirmation
+            ? effectiveContext.autoConfirmPolicy === "never"
+              ? "ACCESS_DENIED"
+              : "REQUIRES_CONFIRMATION"
+            : "ACCESS_DENIED";
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: denialCode,
+                message: sandboxPolicyCheck.reason || "Access denied",
+                retryable: false,
+              },
+            },
+            { status: "denied", providerId: "sandbox" }
+          );
         }
-        
+
+        // Enforce network access policy for tools that require network.
+        if (
+          sandboxPolicyCheck.policy.capabilities.includes("requires_network") &&
+          context.userId &&
+          context.userId !== "anonymous" &&
+          !context.userId.startsWith("anon_")
+        ) {
+          try {
+            const { getNetworkAccessPolicyForUser } = await import("../services/networkAccessPolicyService");
+            const net = await getNetworkAccessPolicyForUser(context.userId);
+            if (!net.effectiveNetworkAccessEnabled) {
+              addLog("warn", `Network access disabled by policy (lockedByOrg=${net.lockedByOrg})`);
+              return trackAndReturn(
+                {
+                  success: false,
+                  output: null,
+                  artifacts: [],
+                  previews: [],
+                  logs,
+                  metrics: { durationMs: Date.now() - startTime },
+                  error: {
+                    code: "NETWORK_DISABLED",
+                    message: net.lockedByOrg
+                      ? "Network access is disabled by your organization policy"
+                      : "Network access is disabled for your user",
+                    retryable: false,
+                    details: { lockedByOrg: net.lockedByOrg, orgId: net.orgId },
+                  },
+                },
+                { status: "denied", providerId: "network_policy" }
+              );
+            }
+          } catch (err: any) {
+            // Best-effort: if DB/env isn't configured, don't block tool usage.
+            addLog("debug", "Network access policy check skipped (unavailable)", err?.message || err);
+          }
+        }
+
+        let releaseSlot: (() => void) | undefined;
         try {
+          releaseSlot = await acquireConcurrencySlot(concurrencyKey, maxParallelCalls, effectiveContext.signal);
+        } catch (err: any) {
+          addLog("info", "Tool execution aborted while waiting for concurrency slot");
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: "ABORTED",
+                message: "Tool execution was cancelled",
+                retryable: false,
+              },
+            },
+            { status: "cancelled", providerId: "sandbox" }
+          );
+        }
+
+        try {
+          // Check abort signal before sandbox execution
+          if (effectiveContext.signal?.aborted) {
+            return trackAndReturn(
+              {
+                success: false,
+                output: null,
+                artifacts: [],
+                previews: [],
+                logs,
+                metrics: { durationMs: Date.now() - startTime },
+                error: {
+                  code: "ABORTED",
+                  message: "Tool execution was cancelled before sandbox tool",
+                  retryable: false,
+                },
+              },
+              { status: "cancelled", providerId: "sandbox" }
+            );
+          }
+
+          // Guardrails: sandbox shell can execute arbitrary commands. Require confirmation
+          // for dangerous command patterns (same policy as shell_command).
+          if (name === "shell") {
+            const cmd = String(
+              input?.command || input?.cmd || input?.shell || input?.exec || input?.run || ""
+            ).trim();
+            if (cmd) {
+              const { getDangerousShellMatch } = await import("./security/shellCommandPolicy");
+              const matchedDanger = getDangerousShellMatch(cmd);
+              if (matchedDanger && effectiveContext.isConfirmed !== true) {
+                const denialCode =
+                  effectiveContext.autoConfirmPolicy === "never"
+                    ? "ACCESS_DENIED"
+                    : "REQUIRES_CONFIRMATION";
+                return trackAndReturn(
+                  {
+                    success: false,
+                    output: { command: cmd },
+                    artifacts: [],
+                    previews: [
+                      {
+                        type: "text",
+                        title: "Confirmation required",
+                        content: `This command is considered high-risk and requires explicit confirmation before execution:\n\n${cmd}`,
+                      },
+                    ],
+                    logs,
+                    metrics: { durationMs: Date.now() - startTime },
+                    error: {
+                      code: denialCode,
+                      message:
+                        denialCode === "ACCESS_DENIED"
+                          ? "Blocked by settings: auto-confirm policy is set to 'never'."
+                          : `Command requires confirmation (${matchedDanger.reason}). Confirm to proceed.`,
+                      retryable: false,
+                      details: { reason: matchedDanger.reason },
+                    },
+                  },
+                  { status: "denied", providerId: "sandbox" }
+                );
+              }
+            }
+          }
+
           const sandboxResult = await sandboxToolRegistry.execute(name, input);
           const artifacts: ToolArtifact[] = [];
           const previews: ToolPreview[] = [];
@@ -246,21 +753,21 @@ export class ToolRegistry {
             timestamp: new Date(),
           });
           
-          return {
-            success: sandboxResult.success,
-            output,
-            artifacts,
-            previews,
-            logs,
-            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
-            error: sandboxResult.error ? {
-              code: "SANDBOX_ERROR",
-              message: sandboxResult.error,
-              retryable: true,
-            } : undefined,
-          };
-        } catch (sandboxError: any) {
-          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
+	          return trackAndReturn({
+	            success: sandboxResult.success,
+	            output,
+	            artifacts,
+	            previews,
+	            logs,
+	            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
+	            error: sandboxResult.error ? {
+	              code: "SANDBOX_ERROR",
+	              message: sandboxResult.error,
+	              retryable: true,
+	            } : undefined,
+	          }, { providerId: "sandbox" });
+	        } catch (sandboxError: any) {
+	          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
           
           metricsCollector.record({
             toolName: name,
@@ -270,63 +777,109 @@ export class ToolRegistry {
             timestamp: new Date(),
           });
           
-          return {
-            success: false,
-            output: null,
-            artifacts: [],
-            previews: [],
-            logs,
-            metrics: { durationMs: Date.now() - startTime },
-            error: {
-              code: "SANDBOX_ERROR",
-              message: sandboxError.message,
-              retryable: false,
-            },
-          };
-        }
-      }
-      
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: "TOOL_NOT_FOUND",
-          message: `Tool "${name}" not found`,
-          retryable: false,
-        },
-      };
-    }
+	          return trackAndReturn({
+	            success: false,
+	            output: null,
+	            artifacts: [],
+	            previews: [],
+	            logs,
+	            metrics: { durationMs: Date.now() - startTime },
+	            error: {
+	              code: "SANDBOX_ERROR",
+	              message: sandboxError.message,
+	              retryable: false,
+	            },
+	          }, { providerId: "sandbox" });
+	        } finally {
+            releaseSlot?.();
+          }
+	      }
+	      
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: "TOOL_NOT_FOUND",
+	          message: `Tool "${name}" not found`,
+	          retryable: false,
+	        },
+	      }, { status: "not_found" });
+	    }
 
     const policyContext: PolicyContext = {
       userId: context.userId,
       userPlan: context.userPlan || "free",
       toolName: name,
-      isConfirmed: context.isConfirmed,
+      isConfirmed: effectiveContext.isConfirmed,
     };
 
     const policyCheck = policyEngine.checkAccess(policyContext);
     
-    if (!policyCheck.allowed) {
-      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
-          message: policyCheck.reason || "Access denied",
-          retryable: false,
-        },
-      };
+	    if (!policyCheck.allowed) {
+	      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
+        const denialCode = policyCheck.requiresConfirmation
+          ? effectiveContext.autoConfirmPolicy === "never"
+            ? "ACCESS_DENIED"
+            : "REQUIRES_CONFIRMATION"
+          : "ACCESS_DENIED";
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: denialCode,
+	          message: policyCheck.reason || "Access denied",
+	          retryable: false,
+	        },
+	      }, { status: "denied" });
+	    }
+
+    // Enforce network access policy for tools that require network.
+    if (
+      policyCheck.policy.capabilities.includes("requires_network") &&
+      context.userId &&
+      context.userId !== "anonymous" &&
+      !context.userId.startsWith("anon_")
+    ) {
+      try {
+        const { getNetworkAccessPolicyForUser } = await import("../services/networkAccessPolicyService");
+        const net = await getNetworkAccessPolicyForUser(context.userId);
+        if (!net.effectiveNetworkAccessEnabled) {
+          addLog("warn", `Network access disabled by policy (lockedByOrg=${net.lockedByOrg})`);
+          return trackAndReturn(
+            {
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: Date.now() - startTime },
+              error: {
+                code: "NETWORK_DISABLED",
+                message: net.lockedByOrg
+                  ? "Network access is disabled by your organization policy"
+                  : "Network access is disabled for your user",
+                retryable: false,
+                details: { lockedByOrg: net.lockedByOrg, orgId: net.orgId },
+              },
+            },
+            { status: "denied", providerId: "network_policy" }
+          );
+        }
+      } catch (err: any) {
+        // Best-effort: if DB/env isn't configured, don't block tool usage.
+        addLog("debug", "Network access policy check skipped (unavailable)", err?.message || err);
+      }
     }
 
+    let releaseSlot: (() => void) | undefined;
     try {
       let validatedInput: unknown;
       try {
@@ -335,29 +888,50 @@ export class ToolRegistry {
           input,
           `ToolRegistry.execute(${name}).input`
         );
-      } catch (validationError: any) {
-        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
-        return {
-          success: false,
-          output: null,
-          artifacts: [],
-          previews: [],
-          logs,
-          metrics: { durationMs: Date.now() - startTime },
-          error: {
-            code: "INVALID_INPUT",
-            message: `Invalid input: ${validationError.message}`,
-            retryable: false,
-            details: validationError.zodError?.errors,
-          },
-        };
-      }
+	      } catch (validationError: any) {
+	        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
+	        return trackAndReturn({
+	          success: false,
+	          output: null,
+	          artifacts: [],
+	          previews: [],
+	          logs,
+	          metrics: { durationMs: Date.now() - startTime },
+	          error: {
+	            code: "INVALID_INPUT",
+	            message: `Invalid input: ${validationError.message}`,
+	            retryable: false,
+	            details: validationError.zodError?.errors,
+	          },
+	        }, { status: "validation_error" });
+	      }
 
       addLog("info", `Executing tool: ${name}`);
+      try {
+        releaseSlot = await acquireConcurrencySlot(concurrencyKey, maxParallelCalls, effectiveContext.signal);
+      } catch (err: any) {
+        addLog("info", "Tool execution aborted while waiting for concurrency slot");
+        return trackAndReturn(
+          {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "ABORTED",
+              message: "Tool execution was cancelled",
+              retryable: false,
+            },
+          },
+          { status: "cancelled" }
+        );
+      }
 
       const executionResult = await executionEngine.execute(
         name,
-        () => tool.execute(validatedInput, context),
+        () => tool.execute(validatedInput, effectiveContext),
         {
           maxRetries: policyCheck.policy.maxRetries,
           timeoutMs: policyCheck.policy.maxExecutionTimeMs,
@@ -372,34 +946,67 @@ export class ToolRegistry {
       );
 
       if (executionResult.success && executionResult.data) {
-        const result = executionResult.data;
+        const denyRequiresConfirmation =
+          executionResult.data?.error?.code === "REQUIRES_CONFIRMATION" &&
+          effectiveContext.autoConfirmPolicy === "never";
+
+        const result = denyRequiresConfirmation
+          ? ({
+              ...executionResult.data,
+              success: false,
+              error: {
+                code: "ACCESS_DENIED",
+                message:
+                  "Blocked by settings: auto-confirm policy is set to 'never'.",
+                retryable: false,
+                details: executionResult.data?.error?.details,
+              },
+            } as ToolResult)
+          : executionResult.data;
         addLog("info", `Tool completed successfully in ${executionResult.metrics.totalDurationMs}ms`);
         
         metricsCollector.record({
           toolName: name,
           latencyMs: executionResult.metrics.totalDurationMs,
-          success: true,
+          success: result.success,
+          errorCode: result.success ? undefined : result.error?.code,
           timestamp: new Date(),
         });
         
         const validatedOutput = ToolOutputSchema.safeParse(result);
         if (!validatedOutput.success) {
           addLog("warn", `Tool output validation failed: ${validatedOutput.error.message}`);
+          if (process.env.AGENTIC_STRICT_TOOL_OUTPUT_VALIDATION === "true") {
+            return trackAndReturn({
+              success: false,
+              output: null,
+              artifacts: [],
+              previews: [],
+              logs,
+              metrics: { durationMs: executionResult.metrics.totalDurationMs },
+              error: {
+                code: "CONTRACT_VIOLATION",
+                message: "Tool returned an invalid result shape",
+                retryable: false,
+                details: validatedOutput.error.flatten(),
+              },
+            });
+          }
         }
         
-        return {
-          success: result.success,
-          output: result.output,
-          artifacts: result.artifacts || [],
-          previews: result.previews || [],
-          logs: [...(result.logs || []), ...logs],
-          metrics: {
-            durationMs: executionResult.metrics.totalDurationMs,
-            ...result.metrics,
-          },
-          error: result.error,
-        };
-      } else {
+	        return trackAndReturn({
+	          success: result.success,
+	          output: result.output,
+	          artifacts: result.artifacts || [],
+	          previews: result.previews || [],
+	          logs: [...(result.logs || []), ...logs],
+	          metrics: {
+	            durationMs: executionResult.metrics.totalDurationMs,
+	            ...result.metrics,
+	          },
+	          error: result.error,
+	        }, denyRequiresConfirmation ? { status: "denied" } : undefined);
+	      } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
         
         metricsCollector.record({
@@ -410,23 +1017,23 @@ export class ToolRegistry {
           timestamp: new Date(),
         });
         
-        return {
-          success: false,
-          output: null,
-          artifacts: [],
-          previews: [],
-          logs,
-          metrics: {
-            durationMs: executionResult.metrics.totalDurationMs,
-          },
-          error: {
-            code: executionResult.error?.code || "EXECUTION_ERROR",
-            message: executionResult.error?.message || "Unknown error",
-            retryable: executionResult.error?.retryable || false,
-          },
-        };
-      }
-    } catch (error: any) {
+	        return trackAndReturn({
+	          success: false,
+	          output: null,
+	          artifacts: [],
+	          previews: [],
+	          logs,
+	          metrics: {
+	            durationMs: executionResult.metrics.totalDurationMs,
+	          },
+	          error: {
+	            code: executionResult.error?.code || "EXECUTION_ERROR",
+	            message: executionResult.error?.message || "Unknown error",
+	            retryable: executionResult.error?.retryable || false,
+	          },
+	        });
+	      }
+	    } catch (error: any) {
       addLog("error", `Unexpected error: ${error.message}`, { stack: error.stack });
       
       metricsCollector.record({
@@ -437,21 +1044,23 @@ export class ToolRegistry {
         timestamp: new Date(),
       });
       
-      return {
-        success: false,
-        output: null,
-        artifacts: [],
-        previews: [],
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
-        error: {
-          code: "UNEXPECTED_ERROR",
-          message: error.message || "Unknown error",
-          retryable: false,
-        },
-      };
-    }
-  }
+	      return trackAndReturn({
+	        success: false,
+	        output: null,
+	        artifacts: [],
+	        previews: [],
+	        logs,
+	        metrics: { durationMs: Date.now() - startTime },
+	        error: {
+	          code: "UNEXPECTED_ERROR",
+	          message: error.message || "Unknown error",
+	          retryable: false,
+	        },
+	      });
+	    } finally {
+        releaseSlot?.();
+      }
+	  }
 
   createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string): ToolArtifact {
     return createArtifact(type, name, data, mimeType);
@@ -979,8 +1588,8 @@ const readFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const safePath = path.resolve('/tmp/agent-workspace', context.runId, input.filepath);
-      if (!safePath.startsWith(path.resolve('/tmp/agent-workspace', context.runId))) {
+      const safePath = path.resolve(getRunWorkspaceDir(context.runId), input.filepath);
+      if (!safePath.startsWith(getRunWorkspaceDir(context.runId))) {
         throw new Error('Access denied: path outside workspace');
       }
       const content = await fs.readFile(safePath, 'utf-8');
@@ -1021,7 +1630,7 @@ const writeFileTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      const workspaceDir = getRunWorkspaceDir(context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const safePath = path.resolve(workspaceDir, input.filepath);
       if (!safePath.startsWith(workspaceDir)) {
@@ -1058,52 +1667,457 @@ const shellCommandSchema = z.object({
 
 const shellCommandTool: ToolDefinition = {
   name: "shell_command",
-  description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
+  description: "Execute a shell command in the agent's sandbox. Useful for system/terminal tasks (install/uninstall packages, monitor CPU/RAM/disk, manage processes/services, backups/restore). Streams stdout/stderr and enforces safety checks.",
   inputSchema: shellCommandSchema,
-  capabilities: ["executes_code", "long_running"],
+  capabilities: ["executes_code", "long_running", "high_risk"],
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
-    const blockedCommands = ['rm -rf', 'sudo', 'chmod 777', 'mkfs', 'dd if=', '> /dev', 'curl | sh', 'wget | sh'];
-    const isBlocked = blockedCommands.some(bc => input.command.toLowerCase().includes(bc));
-    if (isBlocked) {
+
+    // Ensure workspace exists
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const workspaceDir = getRunWorkspaceDir(context.runId);
+    await fs.mkdir(workspaceDir, { recursive: true });
+
+    const cmd = String(input.command ?? "").trim();
+    if (!cmd) {
       return {
         success: false,
         output: null,
-        error: createError("COMMAND_BLOCKED", "This command is not allowed for security reasons", false),
+        error: createError("INVALID_INPUT", "Command is required", false),
         artifacts: [],
         previews: [],
         logs: [],
         metrics: { durationMs: Date.now() - startTime },
       };
     }
-    try {
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
-      const { stdout, stderr } = await execAsync(input.command, {
-        timeout: input.timeout,
-        cwd: `/tmp/agent-workspace/${context.runId}`,
-        env: { ...process.env, HOME: `/tmp/agent-workspace/${context.runId}` },
-      });
-      return {
-        success: true,
-        output: { command: input.command, stdout, stderr, exitCode: 0 },
-        artifacts: [],
-        previews: [{ type: "text", content: stdout || stderr, title: "Command Output" }],
-        logs: [],
-        metrics: { durationMs: Date.now() - startTime },
-      };
-    } catch (error: any) {
+
+    const { getDangerousShellMatch, getShellSandboxMode } = await import("./security/shellCommandPolicy");
+
+    const matchedDanger = getDangerousShellMatch(cmd);
+    if (matchedDanger && context.isConfirmed !== true) {
       return {
         success: false,
-        output: { command: input.command, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: error.code || 1 },
-        error: createError("COMMAND_ERROR", error.message, true),
+        output: { command: cmd },
+        error: createError(
+          "REQUIRES_CONFIRMATION",
+          `Command requires confirmation (${matchedDanger.reason}). Confirm to proceed.`,
+          false,
+          { reason: matchedDanger.reason }
+        ),
         artifacts: [],
-        previews: [{ type: "text", content: error.stderr || error.message, title: "Error Output" }],
+        previews: [
+          {
+            type: "text",
+            title: "Confirmation required",
+            content: `This command is considered high-risk and requires explicit confirmation before execution:\n\n${cmd}`,
+          },
+        ],
         logs: [],
         metrics: { durationMs: Date.now() - startTime },
       };
     }
+
+    const { spawn } = await import("child_process");
+
+    const timeoutMs = Math.min(Math.max(Number(input.timeout ?? 30000), 1000), 60000);
+
+    // Sandbox mode: host | docker | runner.
+    // Stable default: in production, default to runner (docker-isolated service).
+    let sandboxMode = getShellSandboxMode();
+    const dockerImage = process.env.SHELL_COMMAND_DOCKER_IMAGE || "debian:bookworm-slim";
+
+    const runnerUrl = process.env.SHELL_COMMAND_RUNNER_URL || "http://sandbox-runner:8080";
+    const runnerToken = process.env.SHELL_COMMAND_RUNNER_TOKEN || process.env.SANDBOX_RUNNER_TOKEN || "";
+
+    // User-driven sandbox preference: when enabled, prefer the runner if configured.
+    if (context.sandboxMode === true && sandboxMode === "host" && runnerToken) {
+      sandboxMode = "runner";
+    }
+
+    const runWithRunner = async (): Promise<ToolResult> => {
+      if (!runnerToken) {
+        return {
+          success: false,
+          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+          error: createError("COMMAND_ERROR", "Runner token not configured (SHELL_COMMAND_RUNNER_TOKEN)", false),
+          artifacts: [],
+          previews: [{ type: "text", content: "Runner token not configured", title: "Error" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
+      // Start remote job
+      const ac = new AbortController();
+      const abortHandler = () => ac.abort();
+      context.signal?.addEventListener?.("abort", abortHandler, { once: true });
+
+      let stdout = "";
+      let stderr = "";
+      const maxCapture = 1024 * 1024;
+
+      try {
+        const startRes = await fetch(`${runnerUrl.replace(/\/$/, "")}/v1/shell/run`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${runnerToken}`,
+          },
+          body: JSON.stringify({ runId: context.runId, command: cmd, timeoutMs }),
+          signal: ac.signal,
+        });
+
+        if (!startRes.ok) {
+          const text = await startRes.text().catch(() => "");
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
+            error: createError("COMMAND_ERROR", `Runner start failed: ${startRes.status}`, true, { body: text }),
+            artifacts: [],
+            previews: [{ type: "text", content: text, title: "Runner Error" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const { jobId, streamUrl } = (await startRes.json()) as any;
+        const streamRes = await fetch(`${runnerUrl.replace(/\/$/, "")}${streamUrl || `/v1/shell/stream/${jobId}`}`, {
+          headers: { Authorization: `Bearer ${runnerToken}` },
+          signal: ac.signal,
+        });
+
+        if (!streamRes.ok || !streamRes.body) {
+          const text = await streamRes.text().catch(() => "");
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: text, exitCode: 1 },
+            error: createError("COMMAND_ERROR", `Runner stream failed: ${streamRes.status}`, true, { body: text }),
+            artifacts: [],
+            previews: [{ type: "text", content: text, title: "Runner Stream Error" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+
+        let exitEvt: any = null;
+        let doneReceived = false;
+
+        const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
+          if (!chunk) return;
+          try {
+            context.onStream?.({ stream, chunk });
+          } catch {
+            // ignore
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+
+          // parse SSE by events separated by blank line
+          while (true) {
+            const idx = buf.indexOf("\n\n");
+            if (idx === -1) break;
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+
+            const lines = raw.split("\n");
+            let eventName = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event:")) eventName = line.slice("event:".length).trim();
+              if (line.startsWith("data:")) data += line.slice("data:".length).trim();
+            }
+
+            if (eventName === "shell") {
+              try {
+                const evt = JSON.parse(data);
+                if (evt?.type === "stdout") {
+                  safeEmit("stdout", String(evt.chunk || ""));
+                  if (stdout.length < maxCapture) stdout += String(evt.chunk || "").slice(0, maxCapture - stdout.length);
+                } else if (evt?.type === "stderr") {
+                  safeEmit("stderr", String(evt.chunk || ""));
+                  if (stderr.length < maxCapture) stderr += String(evt.chunk || "").slice(0, maxCapture - stderr.length);
+                } else if (evt?.type === "exit") {
+                  exitEvt = evt;
+                }
+              } catch {
+                // ignore malformed events
+              }
+            }
+
+            // Some SSE servers keep the connection open. If we receive a terminal marker,
+            // stop reading to avoid hanging indefinitely.
+            if (eventName === "done") {
+              doneReceived = true;
+              try {
+                void reader.cancel();
+              } catch {
+                // ignore
+              }
+              buf = "";
+              break;
+            }
+          }
+
+          // If we got a terminal marker, stop reading.
+          if (doneReceived) {
+            break;
+          }
+
+          // If we got an exit event, we can also stop early.
+          if (exitEvt) {
+            try {
+              void reader.cancel();
+            } catch {
+              // ignore
+            }
+            break;
+          }
+        }
+
+        const exitCode = Number(exitEvt?.exitCode ?? 1);
+        const signal = exitEvt?.signal ? String(exitEvt.signal) : null;
+        const wasKilled = Boolean(exitEvt?.wasKilled);
+        const durationMs = Number(exitEvt?.durationMs ?? Date.now() - startTime);
+
+        try {
+          context.onExit?.({ exitCode, signal, wasKilled, durationMs });
+        } catch {
+          // ignore
+        }
+
+        const ok = exitCode === 0 && !wasKilled;
+        return {
+          success: ok,
+          output: { command: cmd, stdout, stderr, exitCode },
+          artifacts: [],
+          previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: ok ? "Command Output" : "Error Output" }],
+          logs: [],
+          error: ok ? undefined : createError(wasKilled ? "COMMAND_TIMEOUT" : "COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      } catch (err: any) {
+        if (context.signal?.aborted || ac.signal.aborted) {
+          return {
+            success: false,
+            output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+            error: createError("ABORTED", "Command cancelled", false),
+            artifacts: [],
+            previews: [],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+        return {
+          success: false,
+          output: { command: cmd, stdout: "", stderr: err?.message || String(err), exitCode: 1 },
+          error: createError("COMMAND_ERROR", `Runner unavailable: ${err?.message || String(err)}`, true),
+          artifacts: [],
+          previews: [{ type: "text", content: err?.message || String(err), title: "Runner Error" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      } finally {
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+      }
+    };
+
+    if (sandboxMode === "runner") {
+      return await runWithRunner();
+    }
+
+    const { existsSync } = await import("fs");
+    const bashPath =
+      process.env.SHELL_COMMAND_BASH_PATH ||
+      (existsSync("/bin/bash")
+        ? "/bin/bash"
+        : existsSync("/usr/bin/bash")
+          ? "/usr/bin/bash"
+          : "bash");
+
+    const runWithHost = () => {
+      return spawn(bashPath, ["-lc", cmd], {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: workspaceDir },
+        shell: false,
+        windowsHide: true,
+      });
+    };
+
+    const runWithDocker = () => {
+      // Hardening defaults (v1): no network, drop caps, no new privileges.
+      // We mount the per-run workspace as /workspace.
+      const uid = typeof (process as any).getuid === "function" ? (process as any).getuid() : undefined;
+      const gid = typeof (process as any).getgid === "function" ? (process as any).getgid() : undefined;
+
+      const dockerArgs: string[] = [
+        "run",
+        "--rm",
+        "-i",
+        "--network",
+        "none",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--pids-limit",
+        "256",
+        "--cpus",
+        process.env.SHELL_COMMAND_DOCKER_CPUS || "1",
+        "--memory",
+        process.env.SHELL_COMMAND_DOCKER_MEMORY || "512m",
+        "-v",
+        `${workspaceDir}:/workspace`,
+        "-w",
+        "/workspace",
+      ];
+
+      if (uid !== undefined && gid !== undefined) {
+        dockerArgs.push("--user", `${uid}:${gid}`);
+      }
+
+      dockerArgs.push(dockerImage, "/bin/bash", "-lc", cmd);
+
+      return spawn("docker", dockerArgs, {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: workspaceDir },
+        shell: false,
+        windowsHide: true,
+      });
+    };
+
+    return new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let killed = false;
+
+      let child = null as any;
+      try {
+        child = sandboxMode === "docker" ? runWithDocker() : runWithHost();
+      } catch (err: any) {
+        return resolve({
+          success: false,
+          output: { command: cmd, stdout: "", stderr: "", exitCode: 1 },
+          error: createError(
+            "COMMAND_ERROR",
+            sandboxMode === "docker"
+              ? `Docker sandbox unavailable: ${err?.message || String(err)}`
+              : `Command spawn failed: ${err?.message || String(err)}`,
+            true
+          ),
+          artifacts: [],
+          previews: [{ type: "text", content: err?.message || String(err), title: "Error Output" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      }
+
+      const maxCapture = 1024 * 1024; // 1MB each stream
+
+      const safeEmit = (stream: "stdout" | "stderr", chunk: string) => {
+        if (!chunk) return;
+        try {
+          context.onStream?.({ stream, chunk });
+        } catch {
+          // ignore
+        }
+      };
+
+      const onData = (stream: "stdout" | "stderr") => (data: any) => {
+        const chunk = data?.toString?.() ?? String(data);
+        safeEmit(stream, chunk);
+
+        if (stream === "stdout") {
+          if (stdout.length < maxCapture) stdout += chunk.slice(0, maxCapture - stdout.length);
+        } else {
+          if (stderr.length < maxCapture) stderr += chunk.slice(0, maxCapture - stderr.length);
+        }
+      };
+
+      child.stdout?.on("data", onData("stdout"));
+      child.stderr?.on("data", onData("stderr"));
+
+      const timeoutHandle = setTimeout(() => {
+        killed = true;
+        child.kill("SIGKILL");
+      }, timeoutMs);
+
+      const abortHandler = () => {
+        killed = true;
+        child.kill("SIGKILL");
+      };
+
+      if (context.signal) {
+        if (context.signal.aborted) abortHandler();
+        context.signal.addEventListener("abort", abortHandler, { once: true });
+      }
+
+      child.on("close", (code, signal) => {
+        clearTimeout(timeoutHandle);
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+
+        const exitCode = typeof code === "number" ? code : signal ? 1 : 0;
+
+        try {
+          context.onExit?.({
+            exitCode,
+            signal: signal ? String(signal) : null,
+            wasKilled: killed,
+            durationMs: Date.now() - startTime,
+          });
+        } catch {
+          // ignore
+        }
+
+        if (killed) {
+          return resolve({
+            success: false,
+            output: { command: cmd, stdout, stderr, exitCode },
+            error: createError("COMMAND_TIMEOUT", `Command exceeded timeout of ${timeoutMs}ms`, false),
+            artifacts: [],
+            previews: [{ type: "text", content: (stdout || stderr).slice(0, 100000), title: "Command Output (partial)" }],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          });
+        }
+
+        const ok = exitCode === 0;
+        const previewText = (stdout || stderr).slice(0, 100000);
+
+        return resolve({
+          success: ok,
+          output: { command: cmd, stdout, stderr, exitCode },
+          artifacts: [],
+          previews: [{ type: "text", content: previewText, title: ok ? "Command Output" : "Error Output" }],
+          logs: [],
+          error: ok ? undefined : createError("COMMAND_ERROR", stderr || `Exit code ${exitCode}`, true),
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(timeoutHandle);
+        context.signal?.removeEventListener?.("abort", abortHandler as any);
+
+        return resolve({
+          success: false,
+          output: { command: cmd, stdout, stderr, exitCode: 1 },
+          error: createError("COMMAND_ERROR", err.message, true),
+          artifacts: [],
+          previews: [{ type: "text", content: err.message, title: "Error Output" }],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        });
+      });
+    });
   },
 };
 
@@ -1121,7 +2135,7 @@ const listFilesTool: ToolDefinition = {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      const workspaceDir = getRunWorkspaceDir(context.runId);
       await fs.mkdir(workspaceDir, { recursive: true });
       const targetDir = path.resolve(workspaceDir, input.directory);
       if (!targetDir.startsWith(workspaceDir)) {

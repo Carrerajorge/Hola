@@ -2,6 +2,76 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import ExcelJS from "exceljs";
+import * as fs from "node:fs/promises";
+import path from "node:path";
+
+function toSafeDownloadBaseName(value: string | null | undefined): string {
+    const input = (value || "").trim();
+    const sanitized = input
+        .replace(/[^a-zA-Z0-9._-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 200);
+    return sanitized || "report";
+}
+
+function toPdfText(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === "object") {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+async function generateSimplePdfReport(title: string, rows: Array<Record<string, unknown>>): Promise<Buffer> {
+    // Lazy import to avoid hard startup dependency for servers that don't use PDF export.
+    const { default: PDFDocument } = await import("pdfkit");
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const chunks: Buffer[] = [];
+
+    doc.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+
+    const done = new Promise<Buffer>((resolve, reject) => {
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+    });
+
+    doc.fontSize(20).text(title);
+    doc.moveDown(0.25);
+    doc.fontSize(10).fillColor("gray").text(`Generated: ${new Date().toISOString()} | Rows: ${rows.length}`);
+    doc.fillColor("black");
+    doc.moveDown();
+
+    const keys = rows.length > 0 ? Object.keys(rows[0] || {}) : [];
+    const maxRows = 200;
+    const slice = rows.slice(0, maxRows);
+    if (rows.length > maxRows) {
+        doc.fontSize(10).fillColor("gray").text(`Showing first ${maxRows} rows (PDF export is summary-friendly).`);
+        doc.fillColor("black");
+        doc.moveDown();
+    }
+
+    for (let idx = 0; idx < slice.length; idx++) {
+        const row = slice[idx];
+        doc.fontSize(12).text(`Row ${idx + 1}`, { underline: true });
+        doc.moveDown(0.25);
+        for (const key of keys) {
+            doc.fontSize(10).text(`${key}: ${toPdfText(row?.[key])}`);
+        }
+        doc.moveDown();
+
+        const pageBottom = doc.page.height - doc.page.margins.bottom;
+        if (doc.y > pageBottom - 60) doc.addPage();
+    }
+
+    doc.end();
+    return done;
+}
 
 export const reportsRouter = Router();
 
@@ -269,19 +339,17 @@ reportsRouter.post("/generate", async (req, res) => {
 
                 rowCount = data.length;
 
-                // Save to file
-                const fs = require("fs").promises;
-                const path = require("path");
+                // Save to file (report.id ensures uniqueness across runs)
                 const reportsDir = path.join(process.cwd(), "generated_reports");
                 await fs.mkdir(reportsDir, { recursive: true });
 
-                const timestamp = Date.now();
-                const fileName = `${reportType}_${timestamp}.${format}`;
+                const normalizedFormat = String(format || "json").toLowerCase();
+                const fileName = `${report.id}.${normalizedFormat}`;
                 const filePath = path.join(reportsDir, fileName);
 
-                if (format === "json") {
-                    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-                } else if (format === "csv") {
+                if (normalizedFormat === "json") {
+                    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+                } else if (normalizedFormat === "csv") {
                     // Simple CSV generation
                     if (data.length > 0) {
                         const headers = Object.keys(data[0]);
@@ -294,16 +362,37 @@ reportsRouter.post("/generate", async (req, res) => {
                                 return String(val).replace(/,/g, ";");
                             }).join(","));
                         }
-                        await fs.writeFile(filePath, csvRows.join("\n"));
+                        await fs.writeFile(filePath, csvRows.join("\n"), "utf-8");
                     } else {
-                        await fs.writeFile(filePath, "");
+                        await fs.writeFile(filePath, "", "utf-8");
                     }
+                } else if (normalizedFormat === "xlsx") {
+                    const workbook = new ExcelJS.Workbook();
+                    const sheet = workbook.addWorksheet(reportType.substring(0, 31) || "Report");
+
+                    const keys = data.length > 0 ? Object.keys(data[0]) : [];
+                    sheet.columns = keys.map((key) => ({ header: key, key, width: Math.min(40, Math.max(12, key.length + 2)) }));
+                    sheet.getRow(1).font = { bold: true };
+
+                    for (const row of data) {
+                        // Ensure we only include known keys to keep column order stable.
+                        const record: Record<string, any> = {};
+                        for (const key of keys) record[key] = row?.[key];
+                        sheet.addRow(record);
+                    }
+
+                    await workbook.xlsx.writeFile(filePath);
+                } else if (normalizedFormat === "pdf") {
+                    const pdf = await generateSimplePdfReport(reportName, data as Array<Record<string, unknown>>);
+                    await fs.writeFile(filePath, pdf);
+                } else {
+                    throw new Error(`Unsupported report format: ${normalizedFormat}`);
                 }
 
                 // Update report status
                 await storage.updateGeneratedReport(report.id, {
                     status: "completed",
-                    filePath: `/api/admin/reports/download/${report.id}`,
+                    filePath: fileName,
                     resultSummary: { rowCount },
                     completedAt: new Date()
                 });
@@ -333,95 +422,41 @@ reportsRouter.get("/download/:id", async (req, res) => {
             return res.status(400).json({ error: "Report is not ready for download" });
         }
 
-        const fs = require("fs").promises;
-        const path = require("path");
-
         const reportsDir = path.join(process.cwd(), "generated_reports");
-        const files = await fs.readdir(reportsDir);
-        const reportFile = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${report.format}`));
 
-        if (!reportFile) {
+        const normalizedFormat = String(report.format || "json").toLowerCase();
+        const preferredFile = report.filePath ? path.resolve(reportsDir, report.filePath) : null;
+        const safePrefix = path.resolve(reportsDir) + path.sep;
+
+        let filePath: string | null = null;
+        if (preferredFile && preferredFile.startsWith(safePrefix)) {
+            const exists = await fs.stat(preferredFile).then(() => true).catch(() => false);
+            if (exists) filePath = preferredFile;
+        }
+
+        // Backward compatibility: older reports used name-based search and stored an API URL in filePath.
+        if (!filePath) {
+            const files = await fs.readdir(reportsDir).catch(() => []);
+            const found = files.find((f: string) => f.includes(report.type) && f.endsWith(`.${normalizedFormat}`));
+            if (found) filePath = path.join(reportsDir, found);
+        }
+
+        if (!filePath) {
             return res.status(404).json({ error: "Report file not found" });
         }
 
-        const filePath = path.join(reportsDir, reportFile);
-        const content = await fs.readFile(filePath, "utf-8");
+        const buffer = await fs.readFile(filePath);
+        const contentType =
+            normalizedFormat === "json" ? "application/json" :
+            normalizedFormat === "csv" ? "text/csv" :
+            normalizedFormat === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+            normalizedFormat === "pdf" ? "application/pdf" :
+            "application/octet-stream";
 
-        const contentType = report.format === "json" ? "application/json" : "text/csv";
         res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.${report.format}"`);
-        res.send(content);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Generate PDF report
-reportsRouter.post("/generate-pdf/:id", async (req, res) => {
-    try {
-        const report = await storage.getGeneratedReport(req.params.id);
-        if (!report) {
-            return res.status(404).json({ error: "Report not found" });
-        }
-
-        // Simple HTML-to-PDF using template
-        const fs = require("fs").promises;
-        const path = require("path");
-
-        const reportsDir = path.join(process.cwd(), "generated_reports");
-        const files = await fs.readdir(reportsDir).catch(() => []);
-        const jsonFile = files.find((f: string) => f.includes(report.type) && f.endsWith('.json'));
-
-        let data: any[] = [];
-        if (jsonFile) {
-            const content = await fs.readFile(path.join(reportsDir, jsonFile), "utf-8");
-            data = JSON.parse(content);
-        }
-
-        // Generate HTML for PDF
-        const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>${report.name}</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 40px; }
-        h1 { color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: #667eea; color: white; padding: 12px; text-align: left; }
-        td { padding: 10px; border-bottom: 1px solid #ddd; }
-        tr:nth-child(even) { background: #f9f9f9; }
-        .footer { margin-top: 40px; color: #666; font-size: 12px; }
-    </style>
-</head>
-<body>
-    <h1>${report.name}</h1>
-    <p>Generado: ${new Date().toLocaleDateString('es')}</p>
-    <p>Total de registros: ${data.length}</p>
-    
-    <table>
-        <thead>
-            <tr>${data.length > 0 ? Object.keys(data[0]).map(k => `<th>${k}</th>`).join('') : ''}</tr>
-        </thead>
-        <tbody>
-            ${data.slice(0, 100).map(row => 
-                `<tr>${Object.values(row).map(v => `<td>${v ?? ''}</td>`).join('')}</tr>`
-            ).join('')}
-        </tbody>
-    </table>
-    
-    <div class="footer">
-        <p>IliaGPT - Reporte generado automáticamente</p>
-    </div>
-</body>
-</html>`;
-
-        // Return HTML that can be printed to PDF by browser
-        res.setHeader("Content-Type", "text/html");
-        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.html"`);
-        res.send(htmlContent);
-
+        const downloadName = `${toSafeDownloadBaseName(report.name)}.${normalizedFormat}`;
+        res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+        res.send(buffer);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

@@ -4,7 +4,7 @@
  */
 
 import { db } from "../db";
-import { users } from "@shared/schema";
+import { payments, users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { getStripeClient } from "../stripeClient";
 import { randomUUID } from "crypto";
@@ -85,6 +85,136 @@ const PLAN_PRICES: Record<string, number> = {
 // Processed event IDs for idempotency (in-memory cache, could be Redis in production)
 const processedEvents = new Map<string, number>();
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// ============================================
+// STRIPE AMOUNT HELPERS
+// ============================================
+
+// Stripe reports amounts in the smallest currency unit. Most are 2-decimal (cents),
+// but some are 0-decimal (JPY) or 3-decimal (BHD). Keep conversion logic centralized.
+const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set([
+  "bif",
+  "clp",
+  "djf",
+  "gnf",
+  "jpy",
+  "kmf",
+  "krw",
+  "mga",
+  "pyg",
+  "rwf",
+  "ugx",
+  "vnd",
+  "vuv",
+  "xaf",
+  "xof",
+  "xpf",
+]);
+
+const STRIPE_THREE_DECIMAL_CURRENCIES = new Set(["bhd", "jod", "kwd", "omr", "tnd"]);
+
+function getStripeCurrencyExponent(currency: string | null | undefined): number {
+  const c = String(currency || "").toLowerCase().trim();
+  if (!c) return 2;
+  if (STRIPE_ZERO_DECIMAL_CURRENCIES.has(c)) return 0;
+  if (STRIPE_THREE_DECIMAL_CURRENCIES.has(c)) return 3;
+  return 2;
+}
+
+function formatStripeAmountToMajorUnit(amountMinor: unknown, currency: string | null | undefined): string {
+  const n = typeof amountMinor === "number" ? amountMinor : Number(amountMinor || 0);
+  if (!Number.isFinite(n)) return "0.00";
+  const exponent = getStripeCurrencyExponent(currency);
+  const divisor = Math.pow(10, exponent);
+  return (n / divisor).toFixed(exponent);
+}
+
+function unixSecondsToDate(value: unknown): Date | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return new Date(value * 1000);
+}
+
+function getStripeCustomerIdFromInvoice(invoice: any): string | null {
+  const customer = invoice?.customer;
+  if (!customer) return null;
+  if (typeof customer === "string") return customer;
+  if (typeof customer === "object" && typeof customer.id === "string") return customer.id;
+  return null;
+}
+
+async function resolveUserIdFromStripeCustomerId(stripeCustomerId: string | null): Promise<string | null> {
+  if (!stripeCustomerId) return null;
+  const [result] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.stripeCustomerId, stripeCustomerId))
+    .limit(1);
+  return result?.id || null;
+}
+
+async function upsertPaymentFromStripeInvoice(args: {
+  invoice: any;
+  status: "completed" | "failed";
+  userId: string | null;
+  plan?: string | null;
+}): Promise<void> {
+  const { invoice, status, userId, plan } = args;
+
+  const stripePaymentId = typeof invoice?.id === "string" ? invoice.id : null;
+  if (!stripePaymentId) return;
+
+  const currencyRaw = typeof invoice?.currency === "string" ? invoice.currency : "eur";
+  const currency = currencyRaw.toUpperCase();
+
+  const amountMinor =
+    status === "completed"
+      ? (typeof invoice?.amount_paid === "number" ? invoice.amount_paid : 0)
+      : (typeof invoice?.amount_due === "number" ? invoice.amount_due : 0);
+  const amount = formatStripeAmountToMajorUnit(amountMinor, currencyRaw);
+
+  const occurredAt =
+    unixSecondsToDate(invoice?.status_transitions?.paid_at) ||
+    unixSecondsToDate(invoice?.created) ||
+    new Date();
+
+  const billingReason = typeof invoice?.billing_reason === "string" ? invoice.billing_reason : "";
+  const descriptionParts = ["stripe"];
+  if (plan) descriptionParts.push(String(plan));
+  if (billingReason) descriptionParts.push(`(${billingReason})`);
+  const description = descriptionParts.join(" ").trim();
+
+  const [existing] = await db
+    .select({ id: payments.id })
+    .from(payments)
+    .where(eq(payments.stripePaymentId, stripePaymentId))
+    .limit(1);
+
+  if (existing) {
+    const updates: Record<string, any> = {
+      amount,
+      currency,
+      status,
+      method: "stripe",
+      description,
+      createdAt: occurredAt,
+    };
+    if (userId) updates.userId = userId;
+
+    await db.update(payments).set(updates).where(eq(payments.id, existing.id));
+    return;
+  }
+
+  await db.insert(payments).values({
+    userId: userId || null,
+    amount,
+    currency,
+    status,
+    method: "stripe",
+    description,
+    stripePaymentId,
+    createdAt: occurredAt,
+  });
+}
 
 // ============================================
 // TEXT SANITIZATION - Clean invisible characters
@@ -187,8 +317,8 @@ export async function getUserSubscription(userId: string): Promise<SubscriptionI
     }
     
     return {
-      plan: (user.plan as SubscriptionInfo["plan"]) || "free",
-      status: (user.status as SubscriptionInfo["status"]) || "inactive",
+      plan: ((user.subscriptionPlan || user.plan) as SubscriptionInfo["plan"]) || "free",
+      status: ((user.subscriptionStatus || "inactive") as SubscriptionInfo["status"]) || "inactive",
       currentPeriodEnd: user.subscriptionPeriodEnd ? new Date(user.subscriptionPeriodEnd) : undefined,
       stripeCustomerId: user.stripeCustomerId || undefined,
       stripeSubscriptionId: user.stripeSubscriptionId || undefined,
@@ -204,16 +334,32 @@ export async function updateUserSubscription(
   subscription: Partial<SubscriptionInfo>
 ): Promise<boolean> {
   try {
-    await db.update(users)
-      .set({
-        plan: subscription.plan,
-        status: subscription.status,
-        subscriptionPeriodEnd: subscription.currentPeriodEnd,
-        stripeCustomerId: subscription.stripeCustomerId,
-        stripeSubscriptionId: subscription.stripeSubscriptionId,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
+    // NOTE: `users.status` is reserved for account state (active/inactive/etc).
+    // Use `subscriptionStatus`/`subscriptionPlan` for billing state.
+    const patch: Record<string, any> = { updatedAt: new Date() };
+
+    if ("plan" in subscription && subscription.plan) {
+      patch.plan = subscription.plan;
+      patch.subscriptionPlan = subscription.plan;
+    }
+
+    if ("status" in subscription && subscription.status) {
+      patch.subscriptionStatus = subscription.status;
+    }
+
+    if ("currentPeriodEnd" in subscription) {
+      patch.subscriptionPeriodEnd = subscription.currentPeriodEnd || null;
+    }
+
+    if ("stripeCustomerId" in subscription) {
+      patch.stripeCustomerId = subscription.stripeCustomerId || null;
+    }
+
+    if ("stripeSubscriptionId" in subscription) {
+      patch.stripeSubscriptionId = subscription.stripeSubscriptionId || null;
+    }
+
+    await db.update(users).set(patch).where(eq(users.id, userId));
     
     return true;
   } catch (error) {
@@ -619,39 +765,57 @@ export async function handlePaymentSucceeded(invoice: any, eventId?: string): Pr
     return;
   }
   
-  const subscriptionId = invoice.subscription;
-  if (!subscriptionId) return;
-  
+  const subscriptionId = invoice?.subscription;
+  const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+
+  let userId: string | null = null;
+  let planName: string | null = null;
+
   try {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    const userId = subscription.metadata?.userId;
-    
-    if (userId) {
-      await updateUserSubscription(userId, {
-        status: "active",
-        currentPeriodEnd: new Date(((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000),
-      });
-      
-      // For recurring payments (not first payment), send notification
-      if (invoice.billing_reason === "subscription_cycle") {
-        const [user] = await db.select().from(users).where(eq(users.id, userId));
-        if (user) {
-          const planName = getPlanFromPriceId(subscription.items.data[0]?.price?.id);
-          await notifyAdminOfPurchase({
-            userId,
-            userEmail: user.email || "unknown",
-            userName: (user as any).displayName || (user as any).name || user.fullName || [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
-            plan: planName,
-            amount: invoice.amount_paid || subscription.items.data[0]?.price?.unit_amount || 0,
-            currency: invoice.currency || "usd",
-            timestamp: new Date(),
-            stripePaymentId: invoice.id,
-            intentId: invoice.payment_intent,
-          });
+    if (subscriptionId) {
+      const stripe = getStripeClient();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      userId = subscription?.metadata?.userId || null;
+      planName = getPlanFromPriceId(subscription?.items?.data?.[0]?.price?.id);
+
+      if (userId) {
+        await updateUserSubscription(userId, {
+          status: "active",
+          currentPeriodEnd: new Date(
+            ((subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd ?? 0) * 1000
+          ),
+        });
+
+        // For recurring payments (not first payment), send notification
+        if (invoice?.billing_reason === "subscription_cycle") {
+          const [user] = await db.select().from(users).where(eq(users.id, userId));
+          if (user) {
+            await notifyAdminOfPurchase({
+              userId,
+              userEmail: user.email || "unknown",
+              userName:
+                (user as any).displayName ||
+                (user as any).name ||
+                user.fullName ||
+                [user.firstName, user.lastName].filter(Boolean).join(" ") ||
+                undefined,
+              plan: planName || "go",
+              amount: invoice?.amount_paid || subscription?.items?.data?.[0]?.price?.unit_amount || 0,
+              currency: invoice?.currency || "usd",
+              timestamp: new Date(),
+              stripePaymentId: invoice?.id,
+              intentId: invoice?.payment_intent,
+            });
+          }
         }
       }
     }
+
+    if (!userId) {
+      userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+    }
+
+    await upsertPaymentFromStripeInvoice({ invoice, status: "completed", userId, plan: planName });
     
     if (eventId) {
       markEventProcessed(eventId);
@@ -667,13 +831,23 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
     return;
   }
   
-  const subscriptionId = invoice.subscription;
-  if (!subscriptionId) return;
+  const subscriptionId = invoice?.subscription;
+  const stripeCustomerId = getStripeCustomerIdFromInvoice(invoice);
+
+  let userId: string | null = null;
+  let planName: string | null = null;
   
   try {
-    const stripe = getStripeClient();
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    const userId = subscription.metadata?.userId;
+    if (subscriptionId) {
+      const stripe = getStripeClient();
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      userId = subscription?.metadata?.userId || null;
+      planName = getPlanFromPriceId(subscription?.items?.data?.[0]?.price?.id);
+    }
+
+    if (!userId) {
+      userId = await resolveUserIdFromStripeCustomerId(stripeCustomerId);
+    }
     
     if (userId) {
       await updateUserSubscription(userId, {
@@ -694,6 +868,8 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
         });
       }
     }
+
+    await upsertPaymentFromStripeInvoice({ invoice, status: "failed", userId, plan: planName });
     
     if (eventId) {
       markEventProcessed(eventId);
@@ -707,7 +883,7 @@ export async function handlePaymentFailed(invoice: any, eventId?: string): Promi
 // HELPERS
 // ============================================
 
-function getPlanFromPriceId(priceId: string): string {
+function getPlanFromPriceId(priceId?: string | null): string {
   const pricePlanMap: Record<string, string> = {
     price_go_monthly: "go",
     price_plus_monthly: "plus",
@@ -719,6 +895,8 @@ function getPlanFromPriceId(priceId: string): string {
   if (priceId === process.env.STRIPE_PRICE_PLUS) return "plus";
   if (priceId === process.env.STRIPE_PRICE_PRO) return "pro";
   if (priceId === process.env.STRIPE_PRICE_BUSINESS) return "business";
+
+  if (!priceId) return "go";
   
   return pricePlanMap[priceId] || "go";
 }

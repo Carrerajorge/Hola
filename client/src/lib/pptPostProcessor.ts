@@ -7,6 +7,7 @@
 
 import { useDeckStore, selectDeck } from '@/components/ppt/store/deckStore';
 import type { Deck, Slide, ElementAny, TextElement, ChartElement, TextStyle } from '@/components/ppt/store/types';
+import { formatZonedDate } from '@/lib/platformDateTime';
 
 // ============================================================================
 // CONSTANTS: Design System (Rule 3, 4, 8)
@@ -343,7 +344,7 @@ export function runFullNormalization(): void {
         injectFooter: true,
         footerConfig: {
             showSlideNumber: true,
-            date: new Date().toLocaleDateString('es-ES'),
+            date: formatZonedDate(new Date(), { timeZone: "UTC", dateFormat: "YYYY-MM-DD" }),
         },
     });
 }

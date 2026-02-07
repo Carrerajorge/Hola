@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton, TableSkeleton } from "@/components/ui/skeleton";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -78,9 +79,12 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
+import AgenticEngineDashboard from "@/components/admin/AgenticEngineDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
@@ -1508,35 +1512,70 @@ function ConversationsSection() {
 
 function AIModelsSection() {
   const queryClient = useQueryClient();
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+  const [health, setHealth] = useState<any>(null);
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [modelsScope, setModelsScope] = useState<"supported" | "integrated" | "all">("integrated");
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["/api/admin/models/stats"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/models/stats", { credentials: "include" });
-      return res.json();
+  const readApiError = async (res: Response): Promise<string> => {
+    const raw = await res.text().catch(() => "");
+    if (!raw) return `${res.status} ${res.statusText}`.trim();
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.error || parsed?.message || raw;
+    } catch {
+      return raw;
     }
+  };
+
+  const { data: stats, isLoading: statsLoading, isError: statsIsError, error: statsError } = useQuery({
+    queryKey: ["/api/admin/models/stats", modelsScope],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/models/stats?scope=${modelsScope}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    retry: false,
   });
 
-  const { data: modelsData, isLoading, refetch } = useQuery({
-    queryKey: ["/api/admin/models/filtered", page, debouncedSearch, providerFilter, typeFilter, statusFilter],
+  const { data: modelsData, isLoading, refetch, isError: modelsIsError, error: modelsError } = useQuery({
+    queryKey: ["/api/admin/models/filtered", modelsScope, page, debouncedSearch, providerFilter, typeFilter, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), limit: "15" });
       if (debouncedSearch) params.append("search", debouncedSearch);
       if (providerFilter !== "all") params.append("provider", providerFilter);
       if (typeFilter !== "all") params.append("type", typeFilter);
       if (statusFilter !== "all") params.append("status", statusFilter);
+      params.append("scope", modelsScope);
       const res = await fetch(`/api/admin/models/filtered?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
       return res.json();
-    }
+    },
+    retry: false,
   });
+
+  const { data: providersData } = useQuery({
+    queryKey: ["/api/admin/models/providers/list", modelsScope],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/models/providers/list?scope=${modelsScope}`, { credentials: "include" });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    retry: false,
+  });
+
+  const providers = Array.isArray(providersData) ? providersData : [];
 
   const handleSearch = (value: string) => {
     setSearch(value);
@@ -1550,12 +1589,45 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      const res = await fetch(`/api/admin/models/sync?scope=${modelsScope}`, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+
+      const payload = await res.json().catch(() => null);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+
+      const summary = payload?.summary;
+      const summaryText = summary && typeof summary.totalAdded === "number" && typeof summary.totalUpdated === "number"
+        ? `+${summary.totalAdded} nuevos, ${summary.totalUpdated} actualizados`
+        : "Sincronizacion completada";
+      toast.success(`Modelos sincronizados: ${summaryText}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Sincronizacion fallida: ${error.message}` : "Sincronizacion fallida");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const checkHealth = async () => {
+    setIsCheckingHealth(true);
+    try {
+      const res = await fetch(`/api/admin/models/health`, { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      const payload = await res.json();
+      setHealth(payload);
+      const status = payload?.status || "unknown";
+      toast.success(`Health check: ${status}`);
+    } catch (error: any) {
+      toast.error(error?.message ? `Health check fallido: ${error.message}` : "Health check fallido");
+    } finally {
+      setIsCheckingHealth(false);
     }
   };
 
@@ -1567,26 +1639,136 @@ function AIModelsSection() {
         body: JSON.stringify(updates),
         credentials: "include"
       });
-      if (!res.ok) throw new Error("Failed to update model");
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
       return res.json();
     },
+    onMutate: async ({ id, updates }: { id: string; updates: any }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      // Optimistic: update model row so switches feel instant.
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        const applied = { ...updates };
+        if (typeof updates?.status === "string" && updates.status !== "active") {
+          applied.isEnabled = "false";
+          applied.enabledAt = null;
+          applied.enabledByAdminId = null;
+        }
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, ...applied } : m)),
+        };
+      });
+
+      return { previous };
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
     }
+  });
+
+  const toggleEnabledMutation = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await fetch(`/api/admin/models/${id}/toggle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isEnabled: enabled }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
+      return res.json();
+    },
+    onMutate: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/admin/models/filtered"] });
+      const previous = queryClient.getQueriesData({ queryKey: ["/api/admin/models/filtered"] });
+
+      queryClient.setQueriesData({ queryKey: ["/api/admin/models/filtered"] }, (old: any) => {
+        if (!old?.models || !Array.isArray(old.models)) return old;
+        return {
+          ...old,
+          models: old.models.map((m: any) => (m.id === id ? { ...m, isEnabled: enabled ? "true" : "false" } : m)),
+        };
+      });
+
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+      refetch();
+    },
+    onError: (error: any, _variables: any, context: any) => {
+      if (context?.previous) {
+        for (const [key, data] of context.previous) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      toast.error(error?.message ? `No se pudo actualizar: ${error.message}` : "No se pudo actualizar");
+    }
+  });
+
+  const testModelMutation = useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const res = await fetch(`/api/admin/models/${id}/test`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(await readApiError(res));
+      return res.json();
+    },
+    onMutate: ({ id }: { id: string }) => {
+      setTestingModelId(id);
+    },
+    onSettled: () => {
+      setTestingModelId(null);
+    },
+    onSuccess: (payload: any) => {
+      if (payload?.success) {
+        const latency = typeof payload.latency === "number" ? `${payload.latency}ms` : "";
+        toast.success(`Test OK: ${payload.model || "modelo"} ${latency}`.trim());
+      } else {
+        toast.error(payload?.error ? `Test fallido: ${payload.error}` : "Test fallido");
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `Test fallido: ${error.message}` : "Test fallido");
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      const res = await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        throw new Error(await readApiError(res));
+      }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/filtered"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
-    }
+      toast.success("Modelo eliminado");
+    },
+    onError: (error: any) => {
+      toast.error(error?.message ? `No se pudo eliminar: ${error.message}` : "No se pudo eliminar");
+    },
   });
 
   const providerColors: Record<string, string> = {
@@ -1641,26 +1823,47 @@ function AIModelsSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium" data-testid="text-ai-models-title">AI Models</h2>
-        <Button
-          size="sm"
-          onClick={syncAll}
-          disabled={isSyncing}
-          className="gap-2"
-          data-testid="button-sync-all"
-        >
-          {isSyncing ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Sincronizando...
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-4 w-4" />
-              Sincronizar Todo
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={checkHealth}
+            disabled={isCheckingHealth}
+            className="gap-2"
+            data-testid="button-models-health"
+          >
+            {isCheckingHealth ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+            Salud
+          </Button>
+          <Button
+            size="sm"
+            onClick={syncAll}
+            disabled={isSyncing}
+            className="gap-2"
+            data-testid="button-sync-all"
+          >
+            {isSyncing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Sincronizando...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Sincronizar Todo
+              </>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {(statsIsError || modelsIsError) && (
+        <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-sm text-destructive" data-testid="banner-models-error">
+          {statsIsError ? `Estadisticas: ${(statsError as any)?.message || "Error"}` : ""}
+          {statsIsError && modelsIsError ? " | " : ""}
+          {modelsIsError ? `Modelos: ${(modelsError as any)?.message || "Error"}` : ""}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsLoading ? (
@@ -1682,24 +1885,24 @@ function AIModelsSection() {
               <p className="text-2xl font-bold" data-testid="text-total-models-count">{stats?.total || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-active-models">
+            <div className="rounded-lg border p-4" data-testid="card-enabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-green-500/10">
                   <CheckCircle className="h-4 w-4 text-green-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Activos</span>
+                <span className="text-sm font-medium text-muted-foreground">Habilitados</span>
               </div>
-              <p className="text-2xl font-bold text-green-600" data-testid="text-active-models-count">{stats?.active || 0}</p>
+              <p className="text-2xl font-bold text-green-600" data-testid="text-enabled-models-count">{stats?.enabled || 0}</p>
             </div>
 
-            <div className="rounded-lg border p-4" data-testid="card-inactive-models">
+            <div className="rounded-lg border p-4" data-testid="card-disabled-models">
               <div className="flex items-center gap-3 mb-2">
                 <div className="p-2 rounded-md bg-red-500/10">
                   <X className="h-4 w-4 text-red-500" />
                 </div>
-                <span className="text-sm font-medium text-muted-foreground">Modelos Inactivos</span>
+                <span className="text-sm font-medium text-muted-foreground">Deshabilitados</span>
               </div>
-              <p className="text-2xl font-bold text-red-600" data-testid="text-inactive-models-count">{stats?.inactive || 0}</p>
+              <p className="text-2xl font-bold text-red-600" data-testid="text-disabled-models-count">{stats?.disabled || 0}</p>
             </div>
 
             <div className="rounded-lg border p-4" data-testid="card-providers">
@@ -1715,6 +1918,36 @@ function AIModelsSection() {
         )}
       </div>
 
+      {!statsLoading && (
+        <div className="text-xs text-muted-foreground" data-testid="text-models-status-summary">
+          Status: {stats?.active || 0} activos / {stats?.inactive || 0} inactivos
+        </div>
+      )}
+
+      {health && (
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border bg-muted/30 text-xs" data-testid="card-models-health">
+          <Badge variant="outline" className="text-xs">{String(health.status || "unknown")}</Badge>
+          {Object.entries(health.providers || {}).map(([id, p]: any) => (
+            <div key={id} className="flex items-center gap-2">
+              <span className="font-medium">{id}</span>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs border",
+                  p?.available ? "bg-green-500/10 text-green-600 border-green-500/30" : p?.hasApiKey ? "bg-red-500/10 text-red-600 border-red-500/30" : "bg-gray-500/10 text-gray-600 border-gray-500/30"
+                )}
+              >
+                {p?.available ? `OK${typeof p?.latencyMs === "number" ? ` ${p.latencyMs}ms` : ""}` : p?.hasApiKey ? "DOWN" : "NO KEY"}
+              </Badge>
+              {p?.error && <span className="text-muted-foreground truncate max-w-[240px]" title={p.error}>{p.error}</span>}
+            </div>
+          ))}
+          <span className="ml-auto text-muted-foreground">
+            {health.checkedAt ? formatZonedDateTime(health.checkedAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : ""}
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1727,18 +1960,34 @@ function AIModelsSection() {
           />
         </div>
 
+        <Select
+          value={modelsScope}
+          onValueChange={(v) => {
+            const scope = v as "supported" | "integrated" | "all";
+            setModelsScope(scope);
+            setProviderFilter("all");
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[160px] h-9" data-testid="select-models-scope">
+            <SelectValue placeholder="Scope" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="integrated">Integrados</SelectItem>
+            <SelectItem value="supported">Soportados</SelectItem>
+            <SelectItem value="all">Todos</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select value={providerFilter} onValueChange={(v) => { setProviderFilter(v); setPage(1); }}>
           <SelectTrigger className="w-[140px] h-9" data-testid="select-provider-filter">
             <SelectValue placeholder="Proveedor" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="anthropic">Anthropic</SelectItem>
-            <SelectItem value="google">Google</SelectItem>
-            <SelectItem value="xai">xAI</SelectItem>
-            <SelectItem value="openai">OpenAI</SelectItem>
-            <SelectItem value="openrouter">OpenRouter</SelectItem>
-            <SelectItem value="perplexity">Perplexity</SelectItem>
+            {providers.map((p: any) => (
+              <SelectItem key={p.id} value={p.id}>{p.name || p.id}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -1803,13 +2052,22 @@ function AIModelsSection() {
               ) : models.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                    <div className="flex flex-col items-center gap-2">
-                      <Bot className="h-8 w-8 text-muted-foreground/50" />
-                      <p>No hay modelos {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all" ? "que coincidan con los filtros" : "configurados"}</p>
-                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
-                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Sincronizar modelos
+	                      <div className="flex flex-col items-center gap-2">
+	                      <Bot className="h-8 w-8 text-muted-foreground/50" />
+	                      <p>
+	                        No hay modelos{" "}
+	                        {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all"
+	                          ? "que coincidan con los filtros"
+	                          : modelsScope === "integrated"
+	                            ? "integrados (configura API keys)"
+	                            : modelsScope === "supported"
+	                              ? "soportados"
+	                              : "configurados"}
+	                      </p>
+	                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
+	                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
+	                          <RefreshCw className="h-4 w-4 mr-2" />
+	                          Sincronizar modelos
                         </Button>
                       )}
                     </div>
@@ -1825,21 +2083,41 @@ function AIModelsSection() {
                       </div>
                     </td>
                     <td className="p-3">
-                      <Badge
-                        variant="outline"
-                        className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
-                        data-testid={`badge-provider-${model.id}`}
-                      >
-                        {model.provider}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
+                          data-testid={`badge-provider-${model.id}`}
+                        >
+                          {model.provider}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-xs border",
+                            model.isSupported === false ? "bg-red-500/10 text-red-600 border-red-500/30" :
+                            model.isIntegrated === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            model.isChatCapable === false ? "bg-amber-500/10 text-amber-700 border-amber-500/30" :
+                            "bg-green-500/10 text-green-600 border-green-500/30"
+                          )}
+                          title={
+                            model.isSupported === false ? "Proveedor no soportado por el runtime" :
+                            model.isIntegrated === false ? "API key no configurada para este proveedor" :
+                            model.isChatCapable === false ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                            "Integrado"
+                          }
+                        >
+                          {model.isSupported === false ? "UNSUPPORTED" : model.isIntegrated === false ? "NO KEY" : model.isChatCapable === false ? "NO CHAT" : "OK"}
+                        </Badge>
+                      </div>
                     </td>
                     <td className="p-3">
                       <Badge
                         variant="secondary"
-                        className={cn("text-xs", typeColors[model.type] || "bg-gray-500/10 text-gray-600")}
+                        className={cn("text-xs", typeColors[model.modelType || model.type] || "bg-gray-500/10 text-gray-600")}
                         data-testid={`badge-type-${model.id}`}
                       >
-                        {model.type || "TEXT"}
+                        {model.modelType || model.type || "TEXT"}
                       </Badge>
                     </td>
                     <td className="p-3 text-muted-foreground">
@@ -1859,25 +2137,50 @@ function AIModelsSection() {
                     <td className="p-3">
                       <Switch
                         checked={model.isEnabled === "true"}
-                        onCheckedChange={(checked) => updateMutation.mutate({
-                          id: model.id,
-                          updates: { isEnabled: checked ? "true" : "false" }
-                        })}
-                        disabled={updateMutation.isPending}
+                        onCheckedChange={(checked) => toggleEnabledMutation.mutate({ id: model.id, enabled: checked })}
+                        disabled={
+                          toggleEnabledMutation.isPending ||
+                          (model.isEnabled !== "true" && (model.isIntegrated !== true || model.isChatCapable === false || model.status !== "active"))
+                        }
                         className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
                         data-testid={`switch-enabled-${model.id}`}
+                        title={
+                          model.isEnabled !== "true" && model.status !== "active" ? "Activa el modelo primero (Status)" :
+                          model.isIntegrated === false && model.isEnabled !== "true" ? "API key no configurada para este proveedor" :
+                          model.isChatCapable === false && model.isEnabled !== "true" ? "Modelo no compatible con chat (solo TEXT/MULTIMODAL gemini*/grok*)" :
+                          undefined
+                        }
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">
-                      {model.lastSyncAt ? format(new Date(model.lastSyncAt), "dd/MM/yyyy HH:mm") : "Never"}
+                      {model.lastSyncAt ? formatZonedDateTime(model.lastSyncAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat }) : "Never"}
                     </td>
                     <td className="p-3">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          onClick={() => testModelMutation.mutate({ id: model.id })}
+                          disabled={testModelMutation.isPending || model.isIntegrated !== true || model.isChatCapable !== true}
+                          data-testid={`button-test-model-${model.id}`}
+                          title={
+                            model.isIntegrated !== true ? "Configura API key para testear" :
+                            model.isChatCapable !== true ? "Modelo no compatible con chat" :
+                            "Testear modelo"
+                          }
+                        >
+                          {testModelMutation.isPending && testingModelId === model.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                          onClick={() => deleteMutation.mutate(model.id)}
+                          onClick={() => {
+                            const ok = window.confirm(`Eliminar modelo '${model.name}' (${model.modelId})?`);
+                            if (!ok) return;
+                            deleteMutation.mutate(model.id);
+                          }}
                           disabled={deleteMutation.isPending}
                           data-testid={`button-delete-model-${model.id}`}
                         >
@@ -1926,72 +2229,921 @@ function AIModelsSection() {
 
 function PaymentsSection() {
   const queryClient = useQueryClient();
+  const [view, setView] = useState<"all" | "unmatched">("all");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [status, setStatus] = useState<string>("all");
+  const [currency, setCurrency] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
+  const [sortBy, setSortBy] = useState<"createdAt" | "amount">("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  const { data: paymentsData, isLoading } = useQuery({
-    queryKey: ["/api/admin/finance/payments"],
+  const [syncJobId, setSyncJobId] = useState<string | null>(null);
+  const [detailsPaymentId, setDetailsPaymentId] = useState<string | null>(null);
+  const [assignEmail, setAssignEmail] = useState("");
+
+  const [isHydrated, setIsHydrated] = useState(false);
+  const didInitRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+
+    const pageParam = Number(params.get("pay_page") || "");
+    if (Number.isFinite(pageParam) && pageParam >= 1) setPage(Math.floor(pageParam));
+
+    const limitParam = Number(params.get("pay_limit") || "");
+    if (Number.isFinite(limitParam) && [20, 50, 100].includes(limitParam)) setLimit(limitParam);
+
+    const viewParam = params.get("pay_view");
+    if (viewParam === "unmatched" || viewParam === "all") setView(viewParam);
+
+    const statusParam = params.get("pay_status");
+    if (statusParam && ["all", "completed", "pending", "failed", "refunded", "disputed"].includes(statusParam)) setStatus(statusParam);
+
+    const currencyParam = params.get("pay_currency");
+    if (currencyParam) {
+      setCurrency(currencyParam.toLowerCase() === "all" ? "all" : currencyParam.toUpperCase());
+    }
+
+    const searchParam = params.get("pay_search");
+    if (typeof searchParam === "string") setSearch(searchParam);
+
+    const fromParam = params.get("pay_from");
+    if (fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam)) setDateFrom(fromParam);
+
+    const toParam = params.get("pay_to");
+    if (toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)) setDateTo(toParam);
+
+    const minParam = params.get("pay_min");
+    if (typeof minParam === "string") setMinAmount(minParam);
+
+    const maxParam = params.get("pay_max");
+    if (typeof maxParam === "string") setMaxAmount(maxParam);
+
+    const sortByParam = params.get("pay_sortBy");
+    if (sortByParam === "amount" || sortByParam === "createdAt") setSortBy(sortByParam);
+
+    const sortOrderParam = params.get("pay_sortOrder");
+    if (sortOrderParam === "asc" || sortOrderParam === "desc") setSortOrder(sortOrderParam);
+
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      return;
+    }
+    setPage(1);
+  }, [isHydrated, view, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const setOrDelete = (key: string, value: string, defaultValue?: string) => {
+      if (!value || value === defaultValue) params.delete(key);
+      else params.set(key, value);
+    };
+
+    setOrDelete("pay_page", String(page), "1");
+    setOrDelete("pay_limit", String(limit), "20");
+    setOrDelete("pay_view", view, "all");
+    setOrDelete("pay_status", status, "all");
+    setOrDelete("pay_currency", currency, "all");
+    setOrDelete("pay_search", search.trim(), "");
+    setOrDelete("pay_from", dateFrom, "");
+    setOrDelete("pay_to", dateTo, "");
+    setOrDelete("pay_min", minAmount, "");
+    setOrDelete("pay_max", maxAmount, "");
+    setOrDelete("pay_sortBy", sortBy, "createdAt");
+    setOrDelete("pay_sortOrder", sortOrder, "desc");
+
+    const qs = params.toString();
+    const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+  }, [isHydrated, page, limit, view, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder]);
+
+  const buildPaymentsFilterParams = () => {
+    const params = new URLSearchParams();
+    if (status && status !== "all") params.set("status", status);
+    if (currency && currency !== "all") params.set("currency", currency);
+    if (search.trim()) params.set("search", search.trim());
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    if (minAmount.trim()) params.set("minAmount", minAmount.trim());
+    if (maxAmount.trim()) params.set("maxAmount", maxAmount.trim());
+    return params;
+  };
+
+  const buildPaymentsListParams = () => {
+    const params = buildPaymentsFilterParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+    if (sortBy !== "createdAt") params.set("sortBy", sortBy);
+    if (sortOrder !== "desc") params.set("sortOrder", sortOrder);
+    return params;
+  };
+
+  const formatMoney = (value: any, currency?: string | null) => {
+    const cur = String(currency || "").toUpperCase().trim();
+    const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+
+    if (!Number.isFinite(n)) {
+      return cur ? `${String(value ?? "-")} ${cur}` : String(value ?? "-");
+    }
+
+    if (cur) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(n);
+      } catch {
+        // Ignore invalid currency codes and fall back.
+      }
+    }
+
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copiado al portapapeles");
+    } catch {
+      toast.error("No se pudo copiar");
+    }
+  };
+
+  const paymentsEndpoint = view === "unmatched" ? "/api/admin/finance/payments/unmatched" : "/api/admin/finance/payments";
+
+  const {
+    data: paymentsData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: [paymentsEndpoint, page, limit, status, currency, search, dateFrom, dateTo, minAmount, maxAmount, sortBy, sortOrder],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments", { credentials: "include" });
+      const params = buildPaymentsListParams();
+      const res = await fetch(`${paymentsEndpoint}?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Failed to fetch payments");
+      }
       return res.json();
     }
   });
-  
-  const payments = paymentsData?.payments || paymentsData || [];
+
+  const payments = paymentsData?.payments || [];
+  const pagination = paymentsData?.pagination || { page, limit, total: payments.length, totalPages: 1 };
 
   const { data: stats } = useQuery({
-    queryKey: ["/api/admin/finance/payments/stats"],
+    queryKey: ["/api/admin/finance/payments/stats", status, currency, search, dateFrom, dateTo, minAmount, maxAmount],
     queryFn: async () => {
-      const res = await fetch("/api/admin/finance/payments/stats", { credentials: "include" });
-      return res.json();
+      const params = buildPaymentsFilterParams();
+      const qs = params.toString();
+      const res = await fetch(`/api/admin/finance/payments/stats${qs ? `?${qs}` : ""}`, { credentials: "include" });
+      return await res.json();
+    }
+  });
+
+  const syncStripeMutation = useMutation({
+    mutationFn: async () => {
+      const payload: any = { maxInvoices: 200, async: true };
+      if (dateFrom) payload.dateFrom = dateFrom;
+      if (dateTo) payload.dateTo = dateTo;
+
+      const res = await fetch("/api/admin/finance/payments/sync-stripe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || "Stripe sync failed");
+      }
+      return body;
+    },
+    onSuccess: (data) => {
+      if (data?.async && data?.jobId) {
+        setSyncJobId(String(data.jobId));
+        toast.success("Sincronización en cola. Mostrando progreso...");
+        return;
+      }
+
+      const created = Number(data?.created || 0);
+      const updated = Number(data?.updated || 0);
+      const errors = Number(data?.errors || 0);
+      const unmatched = Array.isArray(data?.unmatchedInvoiceIds) ? data.unmatchedInvoiceIds.length : 0;
+
+      const parts = [
+        `Stripe sincronizado: ${data?.synced || 0} pagos`,
+        created || updated ? `(${created} creados, ${updated} actualizados)` : null,
+        errors ? `${errors} errores` : null,
+        unmatched ? `${unmatched} sin usuario` : null,
+      ].filter(Boolean);
+
+      toast.success(parts.join(" • "));
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Stripe sync failed"));
+    }
+  });
+
+  const { data: syncJob } = useQuery({
+    queryKey: ["/api/admin/finance/payments/sync-stripe/jobs", syncJobId],
+    enabled: !!syncJobId,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/finance/payments/sync-stripe/jobs/${syncJobId}`, { credentials: "include" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to fetch sync job");
+      return body;
+    },
+    refetchInterval: (q) => {
+      const state = (q as any)?.state;
+      if (!state) return 2000;
+      if (state === "completed" || state === "failed") return false;
+      return 2000;
+    },
+  });
+
+  useEffect(() => {
+    if (!syncJobId) return;
+    const state = (syncJob as any)?.state;
+    if (state === "completed") {
+      const result = (syncJob as any)?.returnvalue;
+      const created = Number(result?.created || 0);
+      const updated = Number(result?.updated || 0);
+      const errors = Number(result?.errors || 0);
+      const unmatched = Array.isArray(result?.unmatchedInvoiceIds) ? result.unmatchedInvoiceIds.length : 0;
+      const parts = [
+        `Stripe sincronizado: ${result?.synced || 0} pagos`,
+        created || updated ? `(${created} creados, ${updated} actualizados)` : null,
+        errors ? `${errors} errores` : null,
+        unmatched ? `${unmatched} sin usuario` : null,
+      ].filter(Boolean);
+      toast.success(parts.join(" • "));
+      setSyncJobId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+    } else if (state === "failed") {
+      toast.error(String((syncJob as any)?.failedReason || "Stripe sync failed"));
+      setSyncJobId(null);
+    }
+  }, [syncJobId, syncJob, queryClient]);
+
+  const { data: paymentDetails, isLoading: isDetailsLoading } = useQuery({
+    queryKey: ["/api/admin/finance/payments/detail", detailsPaymentId],
+    enabled: !!detailsPaymentId,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/finance/payments/${detailsPaymentId}`, { credentials: "include" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to fetch payment");
+      return body;
+    }
+  });
+
+  const assignUserMutation = useMutation({
+    mutationFn: async () => {
+      if (!detailsPaymentId) throw new Error("Missing payment id");
+      const email = assignEmail.trim();
+      if (!email) throw new Error("Ingresa un email");
+
+      const res = await fetch(`/api/admin/finance/payments/${detailsPaymentId}/assign-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Failed to assign payment");
+      return body;
+    },
+    onSuccess: () => {
+      toast.success("Pago conciliado con el usuario");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/unmatched"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/payments/detail", detailsPaymentId] });
+    },
+    onError: (err: any) => {
+      toast.error(String(err?.message || err || "Failed to assign payment"));
     }
   });
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-medium">Payments</h2>
+            <p className="text-xs text-muted-foreground">
+              Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
+            </p>
+            <Tabs value={view} onValueChange={(v) => setView(v as any)} className="mt-2">
+              <TabsList>
+                <TabsTrigger value="all">Todos</TabsTrigger>
+                <TabsTrigger value="unmatched">Sin usuario</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Actualizar
+            </Button>
+            <Button variant="outline" size="sm" disabled>
+              <Download className="h-4 w-4 mr-2" />
+              Exportar
+            </Button>
+            <Button size="sm" disabled>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Sincronizar Stripe
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border p-4 space-y-2">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-7 w-28" />
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <Skeleton className="h-9 w-full max-w-[420px]" />
+            <Skeleton className="h-9 w-full max-w-[520px]" />
+          </div>
+        </div>
+
+        <TableSkeleton rows={6} columns={6} />
+      </div>
+    );
   }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border p-4 bg-destructive/10 text-destructive">
+        <p className="font-medium">No se pudieron cargar los pagos</p>
+        <p className="text-sm mt-1">{String((error as any)?.message || error || "")}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
+
+  const statsCurrencies: string[] = stats?.currencies || (stats?.byCurrency ? Object.keys(stats.byCurrency) : []);
+  const primaryCurrency: string | null =
+    stats?.primaryCurrency || (statsCurrencies.length === 1 ? statsCurrencies[0] : null);
+
+  const renderStatsAmount = (key: "total" | "thisMonth" | "pendingTotal") => {
+    if (!stats) return "-";
+
+    if (primaryCurrency) {
+      return (
+        <p className="text-xl font-semibold tabular-nums" data-testid={key === "total" ? "text-total-payments" : undefined}>
+          {formatMoney(stats?.[key] || "0", primaryCurrency)}
+        </p>
+      );
+    }
+
+    if (statsCurrencies.length > 1 && stats?.byCurrency) {
+      return (
+        <div className="space-y-0.5">
+          {statsCurrencies.slice(0, 3).map((cur) => (
+            <p key={cur} className="text-sm font-semibold tabular-nums">
+              {cur} {formatMoney(stats.byCurrency?.[cur]?.[key] || "0", cur)}
+            </p>
+          ))}
+          {statsCurrencies.length > 3 && (
+            <p className="text-xs text-muted-foreground">+{statsCurrencies.length - 3} monedas</p>
+          )}
+        </div>
+      );
+    }
+
+    return <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.[key] || "0", "EUR")}</p>;
+  };
+
+  const buildExportUrl = (format: "csv" | "xlsx") => {
+    const params = buildPaymentsFilterParams();
+    if (sortBy !== "createdAt") params.set("sortBy", sortBy);
+    if (sortOrder !== "desc") params.set("sortOrder", sortOrder);
+    params.set("format", format);
+    return `/api/admin/finance/payments/export?${params.toString()}`;
+  };
+
+  const exportCsvUrl = buildExportUrl("csv");
+  const exportXlsxUrl = buildExportUrl("xlsx");
+
+  const toggleSort = (next: "createdAt" | "amount") => {
+    if (sortBy !== next) {
+      setSortBy(next);
+      setSortOrder("desc");
+      return;
+    }
+    setSortOrder((o) => (o === "desc" ? "asc" : "desc"));
+  };
+
+  const renderStatusBadge = (s: string) => {
+    const st = String(s || "").toLowerCase();
+    if (st === "completed") return <Badge>Completado</Badge>;
+    if (st === "pending") return <Badge variant="secondary">Pendiente</Badge>;
+    if (st === "refunded") return <Badge variant="secondary" className="bg-muted text-foreground">Reembolsado</Badge>;
+    if (st === "disputed") return <Badge variant="secondary" className="bg-yellow-500/15 text-yellow-700 dark:text-yellow-300">Disputa</Badge>;
+    if (st === "failed") return <Badge variant="destructive">Fallido</Badge>;
+    return <Badge variant="secondary">{st || "N/A"}</Badge>;
+  };
+
+  const syncState = String((syncJob as any)?.state || "");
+  const syncProgress = (syncJob as any)?.progress;
+  const progressSynced = Number(syncProgress?.synced ?? 0);
+  const progressMax = Number(syncProgress?.maxInvoices ?? 0);
+  const progressPct = progressMax > 0 ? Math.min(100, Math.round((progressSynced / progressMax) * 100)) : 0;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Payments</h2>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
-          <p className="text-xl font-semibold" data-testid="text-total-payments">€{stats?.total || "0"}</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-medium">Payments</h2>
+          <p className="text-xs text-muted-foreground">
+            Vista basada en BD. Usa sincronización con Stripe para backfill si faltan registros.
+          </p>
+          <Tabs value={view} onValueChange={(v) => setView(v as any)} className="mt-2">
+            <TabsList>
+              <TabsTrigger value="all">Todos</TabsTrigger>
+              <TabsTrigger value="unmatched">Sin usuario</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Este mes</p>
-          <p className="text-xl font-semibold">€{stats?.thisMonth || "0"}</p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
-          <p className="text-xl font-semibold">{stats?.count || 0}</p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            data-testid="button-refresh-payments"
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", isFetching && "animate-spin")} />
+            Actualizar
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1" disabled={view !== "all"} data-testid="button-export-payments">
+                <Download className="h-4 w-4" />
+                Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => window.open(exportCsvUrl, "_blank")}>CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.open(exportXlsxUrl, "_blank")}>Excel (.xlsx)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            size="sm"
+            onClick={() => syncStripeMutation.mutate()}
+            disabled={syncStripeMutation.isPending || !!syncJobId}
+            data-testid="button-sync-stripe"
+          >
+            <RotateCcw className={cn("h-4 w-4 mr-2", (syncStripeMutation.isPending || !!syncJobId) && "animate-spin")} />
+            {syncJobId ? "Sincronizando..." : "Sincronizar Stripe"}
+          </Button>
         </div>
       </div>
+
+      {!!syncJobId && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Sincronización Stripe en progreso</p>
+              <p className="text-xs text-muted-foreground">
+                Estado: {syncState || "..."}. Sincronizados: {progressSynced}{progressMax ? `/${progressMax}` : ""}.
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground tabular-nums">{progressPct}%</div>
+          </div>
+          <Progress value={progressPct} />
+        </div>
+      )}
+
+      {view === "all" && (
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
+            {renderStatsAmount("total")}
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Este mes</p>
+            {renderStatsAmount("thisMonth")}
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
+            <p className="text-xl font-semibold tabular-nums">{stats?.count || 0}</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Pendientes</p>
+            {renderStatsAmount("pendingTotal")}
+            <p className="text-xs text-muted-foreground mt-1">{stats?.pendingCount || 0} pagos</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Reembolsos</p>
+            <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.refundedTotal || "0", primaryCurrency || "EUR")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{stats?.refundedCount || 0} pagos</p>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-xs text-muted-foreground mb-1">Disputas</p>
+            <p className="text-xl font-semibold tabular-nums">{formatMoney(stats?.disputedTotal || "0", primaryCurrency || "EUR")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{stats?.disputedCount || 0} pagos</p>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por email, userId, Stripe invoice/customer/intent/charge..."
+              className="pl-9 h-9"
+              data-testid="input-search-payments"
+            />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="h-9 w-[160px]" data-testid="select-payment-status">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="completed">Completados</SelectItem>
+                <SelectItem value="pending">Pendientes</SelectItem>
+                <SelectItem value="failed">Fallidos</SelectItem>
+                <SelectItem value="refunded">Reembolsados</SelectItem>
+                <SelectItem value="disputed">Disputa</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={currency} onValueChange={setCurrency}>
+              <SelectTrigger className="h-9 w-[130px]" data-testid="select-payment-currency">
+                <SelectValue placeholder="Moneda" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {statsCurrencies.map((cur) => (
+                  <SelectItem key={cur} value={cur}>
+                    {cur}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={minAmount}
+              onChange={(e) => setMinAmount(e.target.value)}
+              placeholder="Min"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-min"
+            />
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              value={maxAmount}
+              onChange={(e) => setMaxAmount(e.target.value)}
+              placeholder="Max"
+              className="h-9 w-[100px]"
+              data-testid="input-payments-max"
+            />
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-from"
+            />
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-9 w-[150px]"
+              data-testid="input-payments-to"
+            />
+            <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
+              <SelectTrigger className="h-9 w-[110px]" data-testid="select-payment-limit">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">20 / pág</SelectItem>
+                <SelectItem value="50">50 / pág</SelectItem>
+                <SelectItem value="100">100 / pág</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearch("");
+                setStatus("all");
+                setCurrency("all");
+                setDateFrom("");
+                setDateTo("");
+                setMinAmount("");
+                setMaxAmount("");
+                setSortBy("createdAt");
+                setSortOrder("desc");
+              }}
+              data-testid="button-clear-payment-filters"
+            >
+              <X className="h-4 w-4 mr-2" />
+              Limpiar
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-lg border">
-        <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
+        <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>ID</span>
           <span>Usuario</span>
-          <span>Cantidad</span>
-          <span>Fecha</span>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("amount")}
+            data-testid="button-sort-payments-amount"
+          >
+            Cantidad
+            {sortBy === "amount" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left hover:text-foreground"
+            onClick={() => toggleSort("createdAt")}
+            data-testid="button-sort-payments-date"
+          >
+            Fecha
+            {sortBy === "createdAt" && (
+              sortOrder === "asc"
+                ? <ChevronUp className="h-3.5 w-3.5" />
+                : <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
           <span>Estado</span>
+          <span className="text-right">Stripe</span>
         </div>
         {payments.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground text-center">No hay pagos registrados</div>
+          <div className="p-6 text-sm text-muted-foreground text-center space-y-2">
+            <p>No hay pagos registrados</p>
+            <div className="flex items-center justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => syncStripeMutation.mutate()}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Sincronizar Stripe
+              </Button>
+            </div>
+          </div>
         ) : (
           payments.map((payment: any) => (
-            <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
+            <div
+              key={payment.id}
+              className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm cursor-pointer hover:bg-muted/30"
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetailsPaymentId(payment.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setDetailsPaymentId(payment.id);
+              }}
+            >
               <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
-              <span>{payment.userId || "N/A"}</span>
-              <span className="font-medium">€{payment.amount}</span>
+              <div className="min-w-0">
+                <p className="truncate">{payment.userEmail || payment.userName || payment.userId || "N/A"}</p>
+                {payment.userId && (
+                  <p className="text-xs text-muted-foreground font-mono truncate">{String(payment.userId).slice(0, 16)}</p>
+                )}
+              </div>
+              <span className="font-medium tabular-nums">{formatMoney(payment.amountValue ?? payment.amount, payment.currency)}</span>
               <span className="text-muted-foreground">
                 {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
               </span>
-              <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
-                {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
-              </Badge>
+              {renderStatusBadge(payment.status)}
+              <div className="flex justify-end">
+                {payment.stripePaymentId ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyToClipboard(String(payment.stripePaymentId));
+                    }}
+                    data-testid={`button-copy-stripe-${payment.id}`}
+                    title="Copiar Stripe ID"
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                    <span className="text-xs font-mono">{String(payment.stripePaymentId).slice(0, 12)}</span>
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">-</span>
+                )}
+              </div>
             </div>
           ))
         )}
       </div>
+
+      <Dialog
+        open={!!detailsPaymentId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailsPaymentId(null);
+            setAssignEmail("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Detalle de pago</DialogTitle>
+          </DialogHeader>
+
+          {isDetailsLoading ? (
+            <div className="space-y-4 py-2">
+              <Skeleton className="h-6 w-48" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+              <Skeleton className="h-28 w-full" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Payment ID</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs">{paymentDetails?.payment?.id}</code>
+                    {paymentDetails?.payment?.id && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyToClipboard(String(paymentDetails.payment.id))}>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div>{renderStatusBadge(paymentDetails?.payment?.status)}</div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Usuario</p>
+                  <p className="text-sm">
+                    {paymentDetails?.payment?.userEmail || paymentDetails?.payment?.userName || paymentDetails?.payment?.userId || "Sin usuario"}
+                  </p>
+                  {paymentDetails?.payment?.userId && (
+                    <p className="text-xs text-muted-foreground font-mono mt-1">{String(paymentDetails.payment.userId)}</p>
+                  )}
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Importe</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    {formatMoney(paymentDetails?.payment?.amountValue ?? paymentDetails?.payment?.amount, paymentDetails?.payment?.currency)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {paymentDetails?.payment?.createdAt ? format(new Date(paymentDetails.payment.createdAt), "dd MMM yyyy HH:mm") : "-"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-xs text-muted-foreground">Stripe</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  {[
+                    { label: "Invoice ID", value: paymentDetails?.payment?.stripePaymentId },
+                    { label: "Customer ID", value: paymentDetails?.payment?.stripeCustomerId },
+                    { label: "PaymentIntent ID", value: paymentDetails?.payment?.stripePaymentIntentId },
+                    { label: "Charge ID", value: paymentDetails?.payment?.stripeChargeId },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between gap-2 rounded-md bg-muted/40 p-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="text-xs font-mono truncate">{item.value || "-"}</p>
+                      </div>
+                      {item.value ? (
+                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => copyToClipboard(String(item.value))}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {!!paymentDetails?.invoices?.length && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Facturas</p>
+                  <div className="space-y-2">
+                    {paymentDetails.invoices.map((inv: any) => (
+                      <div key={inv.id} className="rounded-md border p-2 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{inv.invoiceNumber}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {String(inv.currency || "EUR").toUpperCase()} {inv.amountValue ?? inv.amount} • {inv.status}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {inv.createdAt ? format(new Date(inv.createdAt), "dd MMM yyyy") : "-"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {inv.stripeHostedInvoiceUrl && (
+                            <Button variant="outline" size="sm" className="h-7" asChild>
+                              <a href={inv.stripeHostedInvoiceUrl} target="_blank" rel="noreferrer">
+                                Ver
+                              </a>
+                            </Button>
+                          )}
+                          {(inv.stripeInvoicePdfUrl || inv.pdfPath) && (
+                            <Button variant="outline" size="sm" className="h-7" asChild>
+                              <a href={inv.stripeInvoicePdfUrl || inv.pdfPath} target="_blank" rel="noreferrer">
+                                PDF
+                              </a>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!paymentDetails?.payment?.userId && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Conciliar pago con usuario</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="email@dominio.com"
+                      value={assignEmail}
+                      onChange={(e) => setAssignEmail(e.target.value)}
+                    />
+                    <Button onClick={() => assignUserMutation.mutate()} disabled={assignUserMutation.isPending}>
+                      {assignUserMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      Asignar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground" data-testid="text-payments-pagination-info">
+            Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              data-testid="button-payments-prev-page"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Anterior
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page >= pagination.totalPages}
+              onClick={() => setPage((p) => p + 1)}
+              data-testid="button-payments-next-page"
+            >
+              Siguiente
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2525,7 +3677,7 @@ function SecuritySection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
   const [auditPage, setAuditPage] = useState(1);
-  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+  const [auditFilters, setAuditFilters] = useState({ action: "", actor: "", dateFrom: "", dateTo: "" });
 
   const [newPolicy, setNewPolicy] = useState({
     policyName: "",
@@ -2558,6 +3710,7 @@ function SecuritySection() {
         page: auditPage.toString(),
         limit: "20",
         ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.actor && { actor: auditFilters.actor }),
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
@@ -2681,14 +3834,50 @@ function SecuritySection() {
     return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
   };
 
-  const getSeverityBadge = (action: string) => {
-    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-    const warningActions = ["warning", "update", "delete"];
-    
-    if (criticalActions.some(a => action?.includes(a))) {
+  const getActorLabel = (log: any) => {
+    const details = (log?.details || {}) as any;
+    const email = details.actorEmail || details.email;
+    if (email) return String(email);
+
+    const userId = log?.userId;
+    if (userId) {
+      const id = String(userId);
+      if (id.startsWith("anon_")) return "Anonymous";
+      return id;
+    }
+
+    return "System";
+  };
+
+  const getSeverityBadge = (log: any) => {
+    const action = String(log?.action || "");
+    const details = (log?.details || {}) as any;
+
+    let severity: string | null =
+      typeof details.severity === "string" ? details.severity.toLowerCase() : null;
+
+    // Derive severity from HTTP status if available.
+    if (!severity && typeof details.statusCode === "number") {
+      severity =
+        details.statusCode >= 500 ? "error" :
+        details.statusCode >= 400 ? "warning" :
+        "info";
+    }
+
+    // Fallback heuristics based on action string.
+    if (!severity) {
+      const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied", "access_denied"];
+      const warningActions = ["warning", "update", "delete", "disable", "enable"];
+
+      if (criticalActions.some(a => action.includes(a))) severity = "critical";
+      else if (warningActions.some(a => action.includes(a))) severity = "warning";
+      else severity = "info";
+    }
+
+    if (severity === "critical" || severity === "error") {
       return <Badge variant="destructive" className="text-xs">Critical</Badge>;
     }
-    if (warningActions.some(a => action?.includes(a))) {
+    if (severity === "warning") {
       return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
     }
     return <Badge variant="outline" className="text-xs">Info</Badge>;
@@ -2981,10 +4170,11 @@ function SecuritySection() {
                 recentLogs.map((log: any) => (
                   <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
                     <div className="flex items-center gap-3">
-                      {getSeverityBadge(log.action)}
+                      {getSeverityBadge(log)}
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -3186,6 +4376,16 @@ function SecuritySection() {
               />
             </div>
             <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">User:</Label>
+              <Input 
+                data-testid="filter-actor"
+                placeholder="Email or userId..."
+                className="h-8 w-44"
+                value={auditFilters.actor}
+                onChange={(e) => setAuditFilters({ ...auditFilters, actor: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground">From:</Label>
               <Input 
                 data-testid="filter-date-from"
@@ -3209,7 +4409,7 @@ function SecuritySection() {
               variant="outline" 
               size="sm" 
               onClick={() => {
-                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditFilters({ action: "", actor: "", dateFrom: "", dateTo: "" });
                 setAuditPage(1);
               }}
               data-testid="button-clear-filters"
@@ -3223,6 +4423,7 @@ function SecuritySection() {
               <thead className="bg-muted/50">
                 <tr>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
                   <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
@@ -3232,7 +4433,7 @@ function SecuritySection() {
               <tbody>
                 {auditLogsData?.data?.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
                       No audit logs found matching your filters.
                     </td>
                   </tr>
@@ -3242,10 +4443,11 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
-                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                      <td className="p-3">{getSeverityBadge(log)}</td>
                     </tr>
                   ))
                 )}
@@ -5020,7 +6222,7 @@ export default function AdminPage() {
       case "settings":
         return <SettingsSection />;
       case "agentic":
-        return <AgenticEngineSection />;
+        return <AgenticEngineDashboard />;
       case "excel":
         return <ExcelManagerSection />;
       default:

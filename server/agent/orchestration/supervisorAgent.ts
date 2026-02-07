@@ -16,7 +16,7 @@ import { agentEventBus } from "../eventBus";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
+  apiKey: process.env.XAI_API_KEY || "missing",
 });
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
@@ -59,6 +59,8 @@ export type StepResult = z.infer<typeof StepResultSchema>;
 export const ExecutionContextSchema = z.object({
   runId: z.string(),
   parentRunId: z.string().optional(),
+  userId: z.string().optional(),
+  chatId: z.string().optional(),
   previousResults: z.record(z.any()),
   sharedMemory: z.record(z.any()),
   maxRetries: z.number().default(3),
@@ -289,7 +291,11 @@ Return a JSON object with:
   }
 
   async orchestrate(analysis: AnalysisResult, route: RouteDecision): Promise<OrchestrationResult> {
-    const runId = crypto.randomUUID();
+    const providedRunId = (analysis as any)?.context?.runId;
+    const runId =
+      typeof providedRunId === "string" && providedRunId.trim()
+        ? providedRunId.trim()
+        : crypto.randomUUID();
     const startTime = Date.now();
 
     activityStreamPublisher.publishRunCreated(runId, {
@@ -325,8 +331,15 @@ Return a JSON object with:
       },
     });
 
+    const contextUserId =
+      typeof (analysis as any)?.context?.userId === "string" ? String((analysis as any).context.userId).trim() : undefined;
+    const contextChatId =
+      typeof (analysis as any)?.context?.chatId === "string" ? String((analysis as any).context.chatId).trim() : undefined;
+
     const context: ExecutionContext = {
       runId,
+      userId: contextUserId || undefined,
+      chatId: contextChatId || undefined,
       previousResults: {},
       sharedMemory: {},
       maxRetries: 3,
@@ -535,10 +548,21 @@ Steps in later groups wait for earlier groups to complete.`
         let result: any;
 
         if (step.tool && toolRegistry.has(step.tool)) {
-          const toolResult = await toolRegistry.execute(step.tool, {
-            ...step.input,
-            previousResults: context.previousResults,
-          });
+          const toolResult = await toolRegistry.execute(
+            step.tool,
+            {
+              ...step.input,
+              previousResults: context.previousResults,
+            },
+            {
+              context: {
+                userId: context.userId,
+                chatId: context.chatId,
+                runId: context.runId,
+                providerId: "agentic_engine",
+              },
+            }
+          );
           result = toolResult.success ? toolResult.data : { error: toolResult.error };
         } else {
           result = await this.delegateToAgent(step.agent, {

@@ -10,9 +10,10 @@
  * SOLUCIÓN: Actualizar el tipo UpsertUser y la función upsertUser
  */
 
-import { users, type User } from "@shared/schema";
+import { users, userSettings, libraryStorage, type User } from "@shared/schema";
 import { db } from "../../db";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
+import { autoAcceptWorkspaceInvitationForUser } from "../../services/workspaceInvitationService";
 
 export type UpsertUser = {
   id: string;
@@ -88,16 +89,24 @@ class AuthStorage implements IAuthStorage {
           timestamp: new Date().toISOString(),
         }));
         
+        // Best-effort: bind org/role if the user has a pending workspace invitation.
+        try {
+          await autoAcceptWorkspaceInvitationForUser(updatedUser.id);
+        } catch (e: any) {
+          console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${updatedUser.id}:`, e?.message || e);
+        }
+
         return updatedUser;
       }
       
       if (userData.email) {
         const existingByEmail = await this.getUserByEmail(userData.email);
         if (existingByEmail) {
+          // IMPORTANT: Never update the primary key (users.id) when merging by email.
+          // Many tables reference users.id; changing it would break referential integrity.
           const [updatedUser] = await db
             .update(users)
             .set({
-              id: userData.id,
               username: userData.username ?? existingByEmail.username,
               fullName: userData.fullName ?? existingByEmail.fullName,
               firstName: userData.firstName ?? existingByEmail.firstName,
@@ -115,11 +124,20 @@ class AuthStorage implements IAuthStorage {
             userId: updatedUser.id,
             email: updatedUser.email,
             authProvider: updatedUser.authProvider,
-            previousId: existingByEmail.id,
+            // Persisting the old/new external id mapping is out of scope for this storage layer,
+            // but we keep observability for debugging.
+            attemptedId: userData.id,
+            existingId: existingByEmail.id,
             durationMs: Date.now() - startTime,
             timestamp: new Date().toISOString(),
           }));
           
+          try {
+            await autoAcceptWorkspaceInvitationForUser(updatedUser.id);
+          } catch (e: any) {
+            console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${updatedUser.id}:`, e?.message || e);
+          }
+
           return updatedUser;
         }
       }
@@ -128,6 +146,7 @@ class AuthStorage implements IAuthStorage {
         .insert(users)
         .values({
           id: userData.id,
+          orgId: userData.id,
           email: userData.email,
           username: userData.username ?? (userData.email ? userData.email.split("@")[0] : null),
           fullName: userData.fullName,
@@ -136,7 +155,8 @@ class AuthStorage implements IAuthStorage {
           profileImageUrl: userData.profileImageUrl,
           authProvider: userData.authProvider ?? "email",
           emailVerified: userData.emailVerified ?? "false",
-          role: "user",
+          // Use a builtin workspace admin role by default so RBAC + workspace settings work out of the box.
+          role: userData.role ?? "team_admin",
           plan: "free",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -154,6 +174,12 @@ class AuthStorage implements IAuthStorage {
         timestamp: new Date().toISOString(),
       }));
       
+      try {
+        await autoAcceptWorkspaceInvitationForUser(newUser.id);
+      } catch (e: any) {
+        console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${newUser.id}:`, e?.message || e);
+      }
+
       return newUser;
     } catch (error: any) {
       console.error(JSON.stringify({
@@ -171,15 +197,30 @@ class AuthStorage implements IAuthStorage {
 
   async updateUserLogin(id: string, loginData: { ipAddress?: string | null; userAgent?: string | null }): Promise<void> {
     try {
+      const now = new Date();
       const result = await db.update(users).set({
-        lastLoginAt: new Date(),
+        lastLoginAt: now,
         lastIp: loginData.ipAddress,
         userAgent: loginData.userAgent,
-        updatedAt: new Date()
+        loginCount: sql<number>`COALESCE(${users.loginCount}, 0) + 1`,
+        updatedAt: now,
       }).where(eq(users.id, id)).returning();
       
       if (result.length === 0) {
         console.warn(`[AuthStorage] updateUserLogin: No user found with id=${id}`);
+      }
+
+      // Ensure per-user dependent rows exist (minimal bootstrap on first login).
+      // These are safe no-ops for existing users due to unique constraints.
+      try {
+        await db.insert(userSettings).values({ userId: id }).onConflictDoNothing();
+      } catch (e: any) {
+        console.warn(`[AuthStorage] Failed to ensure user_settings for user=${id}:`, e?.message || e);
+      }
+      try {
+        await db.insert(libraryStorage).values({ userId: id }).onConflictDoNothing();
+      } catch (e: any) {
+        console.warn(`[AuthStorage] Failed to ensure library_storage for user=${id}:`, e?.message || e);
       }
     } catch (error: any) {
       console.error(`[AuthStorage] updateUserLogin failed for id=${id}:`, error.message);

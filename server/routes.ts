@@ -61,6 +61,7 @@ import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
 import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
+import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -72,13 +73,16 @@ import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
+import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
+import { isModelEligibleForPublic } from "./services/modelIntegration";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
+import { getHealthStatus as getDbHealthStatus } from "./db";
 import { templatesRouter } from "./routes/templatesRouter";
 import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
@@ -111,16 +115,17 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Session + Passport (registers express-session before passport.session)
-  await setupAuth(app);
-  registerAuthRoutes(app);
+  // Session + Passport are initialized in server/index.ts (before csrf/rateLimiter).
 
   // Passport Auth Routes
   // Google (only register if credentials are configured)
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     app.get("/api/auth/google", passport.authenticate("google", {
       scope: ["openid", "email", "profile"],
-      prompt: "select_account",
+      // Ensure Google issues a refresh_token (needed for long-lived access).
+      // Note: Google may still only return refresh_token on first consent unless prompt includes "consent".
+      accessType: "offline",
+      prompt: "consent select_account",
     }));
     app.get("/api/auth/google/callback",
       passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
@@ -200,7 +205,9 @@ export async function registerRoutes(
   app.use(compression);
 
   // Global Audit Middleware (Logs mutations)
-  app.use(globalAuditMiddleware);
+  if (process.env.NODE_ENV !== "test" || process.env.ENABLE_AUDIT_IN_TEST === "true") {
+    app.use(globalAuditMiddleware);
+  }
 
   // Session identity endpoint for consistent user ID across frontend/backend
 
@@ -315,9 +322,64 @@ export async function registerRoutes(
   app.use("/health", healthRouter);
   app.use("/health/pare", createPareHealthRouter());
   
-  // Simple API health check
+  // Simple API health check (used by clients and local smoke checks)
   app.get("/api/health", (req, res) => {
+    const mem = process.memoryUsage();
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || process.env.APP_VERSION || "unknown",
+      node: {
+        version: process.version,
+        platform: process.platform,
+        arch: process.arch,
+      },
+      memory: {
+        rss: mem.rss,
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+      },
+      uptime: process.uptime(),
+    });
+  });
+
+  // Liveness probe (must be fast and never depend on downstreams)
+  app.get("/api/health/live", (_req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // Readiness probe (best-effort dependency summary, no hard DB query on each call)
+  app.get("/api/health/ready", (_req: Request, res: Response) => {
+    const db = getDbHealthStatus();
+    const mem = process.memoryUsage();
+
+    const dbReady = db.status === "HEALTHY";
+    const status = dbReady ? "ready" : "degraded";
+    const httpStatus = dbReady ? 200 : 503;
+
+    res.status(httpStatus).json({
+      status,
+      checks: {
+        database: {
+          status: db.status,
+          latencyMs: db.latencyMs,
+          lastCheck: db.lastCheck ? db.lastCheck.toISOString() : null,
+          consecutiveFailures: db.consecutiveFailures,
+        },
+        memory: {
+          status: "ok",
+          rss: mem.rss,
+          heapUsed: mem.heapUsed,
+          heapTotal: mem.heapTotal,
+        },
+        uptime: {
+          status: "ok",
+          seconds: process.uptime(),
+        },
+      },
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // API Documentation
@@ -366,6 +428,7 @@ export async function registerRoutes(
   app.use("/api/rag", ragRouter);
   app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
+  app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
 
@@ -434,6 +497,56 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: error.message || "Failed to load agents",
+      });
+    }
+  });
+
+  // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
+  // Query: ?source=combined|runtime|langgraph
+  app.get("/api/super-agent/capabilities", async (req: Request, res: Response) => {
+    try {
+      const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
+      const source: SuperAgentCoverageSource =
+        rawSource === "langgraph" || rawSource === "runtime" || rawSource === "combined"
+          ? rawSource
+          : "combined";
+
+      const report = await getSuperAgentCoverageReport(source);
+
+      // Optional filters for quickly spotting gaps:
+      // - ?status=missing|partial|covered
+      // - ?ready=true|false
+      const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
+      const readyFilter = typeof req.query.ready === "string" ? req.query.ready : undefined;
+
+      let capabilities = report.capabilities;
+      if (statusFilter === "missing" || statusFilter === "partial" || statusFilter === "covered") {
+        capabilities = capabilities.filter((c) => c.status === statusFilter);
+      }
+      if (readyFilter === "true" || readyFilter === "false") {
+        const wantReady = readyFilter === "true";
+        capabilities = capabilities.filter((c) => c.availability.ready === wantReady);
+      }
+
+      const summary = {
+        total: capabilities.length,
+        covered: capabilities.filter((c) => c.status === "covered").length,
+        partial: capabilities.filter((c) => c.status === "partial").length,
+        missing: capabilities.filter((c) => c.status === "missing").length,
+        ready: capabilities.filter((c) => c.availability.ready).length,
+        blocked: capabilities.filter((c) => !c.availability.ready).length,
+      };
+      res.json({
+        success: true,
+        ...report,
+        summary,
+        capabilities,
+      });
+    } catch (error: any) {
+      console.error("[SuperAgentCapabilities] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to compute super agent coverage",
       });
     }
   });
@@ -710,13 +823,13 @@ export async function registerRoutes(
       "Expires": "0"
     });
     try {
-      const allModels = await storage.getAiModels();
-      const models = allModels
-        .filter((m: any) => m.isEnabled === "true")
-        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-        .map((m: any) => ({
-          id: m.id,
-          name: m.name,
+	      const allModels = await storage.getAiModels();
+	      const models = allModels
+	        .filter((m: any) => isModelEligibleForPublic(m))
+	        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+	        .map((m: any) => ({
+	          id: m.id,
+	          name: m.name,
           provider: m.provider,
           modelId: m.modelId,
           description: m.description,

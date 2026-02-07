@@ -35,15 +35,11 @@ import { Message, WebSource } from "@/hooks/use-chats";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
+import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
-export const formatMessageTime = (timestamp: Date | number | undefined): string => {
+export const formatMessageTime = (timestamp: Date | number | undefined, timeZone: string): string => {
     if (!timestamp) return "";
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-    });
+    return formatZonedTime(timestamp, { timeZone: normalizeTimeZone(timeZone), includeSeconds: false });
 };
 
 export interface DocumentBlock {
@@ -121,6 +117,165 @@ export const LazyImage = memo(function LazyImage({
                 onError={() => setHasError(true)}
                 data-testid={testId}
             />
+        </div>
+    );
+});
+
+// Smart attachment image component with multi-source fallback and IndexedDB caching.
+// Priority: 1) imageUrl (base64, instant) 2) IndexedDB cache 3) storagePath (network)
+// On successful network load, caches in IndexedDB for future sessions.
+export const AttachmentImage = memo(function AttachmentImage({
+    imageUrl,
+    storagePath,
+    fileId,
+    alt,
+    className,
+    onClick,
+    "data-testid": testId
+}: {
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+    alt: string;
+    className?: string;
+    onClick?: () => void;
+    "data-testid"?: string;
+}) {
+    const [resolvedSrc, setResolvedSrc] = useState<string>(imageUrl || '');
+    const [isLoading, setIsLoading] = useState(!imageUrl);
+    const [hasError, setHasError] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+    const cacheKey = fileId || storagePath || '';
+    const maxRetries = 2;
+
+    // Resolve image source: try IndexedDB cache first, then storagePath
+    useEffect(() => {
+        if (imageUrl) {
+            setResolvedSrc(imageUrl);
+            setIsLoading(false);
+            // Cache base64 in IndexedDB for future sessions (fire-and-forget)
+            if (cacheKey) {
+                import('@/lib/attachment-db').then(({ storeImage }) => {
+                    storeImage({ id: `att_${cacheKey}`, messageId: '', chatId: '', base64: imageUrl, mimeType: 'image/jpeg' }).catch(() => {});
+                }).catch(() => {});
+            }
+            return;
+        }
+
+        let cancelled = false;
+
+        const resolve = async () => {
+            // Try IndexedDB cache first
+            if (cacheKey) {
+                try {
+                    const { getImage } = await import('@/lib/attachment-db');
+                    const cached = await getImage(`att_${cacheKey}`);
+                    if (cached?.base64 && !cancelled) {
+                        setResolvedSrc(cached.base64);
+                        setIsLoading(false);
+                        return;
+                    }
+                } catch {}
+            }
+
+            // Fall back to storagePath (network request)
+            if (storagePath && !cancelled) {
+                setResolvedSrc(storagePath);
+                setIsLoading(false);
+            } else if (!cancelled) {
+                setHasError(true);
+                setIsLoading(false);
+            }
+        };
+
+        resolve();
+        return () => { cancelled = true; };
+    }, [imageUrl, storagePath, cacheKey]);
+
+    const handleLoad = useCallback(() => {
+        setIsLoading(false);
+        setHasError(false);
+        // Cache network-loaded image in IndexedDB for future
+        if (!imageUrl && storagePath && cacheKey) {
+            // Convert loaded image to base64 and cache
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.min(img.naturalWidth, 800); // Limit cache size
+                    canvas.height = Math.round(img.naturalHeight * (canvas.width / img.naturalWidth));
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        const base64 = canvas.toDataURL('image/jpeg', 0.85);
+                        import('@/lib/attachment-db').then(({ storeImage }) => {
+                            storeImage({ id: `att_${cacheKey}`, messageId: '', chatId: '', base64, mimeType: 'image/jpeg' }).catch(() => {});
+                        }).catch(() => {});
+                    }
+                } catch {}
+            };
+            img.src = storagePath;
+        }
+    }, [imageUrl, storagePath, cacheKey]);
+
+    const handleError = useCallback(() => {
+        if (retryCount < maxRetries) {
+            // Retry with exponential backoff
+            const delay = 1000 * Math.pow(2, retryCount);
+            setTimeout(() => {
+                setRetryCount(prev => prev + 1);
+                setHasError(false);
+                // Force re-fetch by appending retry param
+                if (storagePath) {
+                    const separator = storagePath.includes('?') ? '&' : '?';
+                    setResolvedSrc(`${storagePath}${separator}_retry=${retryCount + 1}`);
+                }
+            }, delay);
+        } else {
+            setHasError(true);
+            setIsLoading(false);
+        }
+    }, [retryCount, storagePath]);
+
+    const handleRetryClick = useCallback(() => {
+        setRetryCount(0);
+        setHasError(false);
+        setIsLoading(true);
+        if (storagePath) {
+            setResolvedSrc(`${storagePath}?_retry=${Date.now()}`);
+        }
+    }, [storagePath]);
+
+    if (hasError && retryCount >= maxRetries) {
+        return (
+            <div
+                className={cn("flex flex-col items-center justify-center gap-2 bg-muted/50 rounded-lg p-4 cursor-pointer", className)}
+                onClick={handleRetryClick}
+                data-testid={testId}
+            >
+                <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                <span className="text-xs text-muted-foreground">Error al cargar - Clic para reintentar</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="relative" data-testid={testId}>
+            {isLoading && (
+                <ImageSkeleton className={cn(className, "absolute inset-0")} />
+            )}
+            {resolvedSrc && (
+                <img
+                    src={resolvedSrc}
+                    alt={alt}
+                    loading="lazy"
+                    className={cn(className, isLoading && "opacity-0")}
+                    onClick={onClick}
+                    onLoad={handleLoad}
+                    onError={handleError}
+                />
+            )}
         </div>
     );
 });
@@ -446,7 +601,7 @@ export const AttachmentList = memo(function AttachmentList({
                             </span>
                         </div>
                     </div>
-                ) : att.type === "image" && att.imageUrl ? (
+                ) : att.type === "image" && (att.imageUrl || att.storagePath || att.fileId) ? (
                     <div
                         key={i}
                         className={cn(
@@ -454,12 +609,14 @@ export const AttachmentList = memo(function AttachmentList({
                             variant === "default" && "max-w-[280px] cursor-pointer hover:opacity-90 transition-opacity"
                         )}
                         onClick={() => onOpenPreview?.(att)}
-                        data-testid={`attachment-image-${i}`}
                     >
-                        <LazyImage
-                            src={att.imageUrl}
+                        <AttachmentImage
+                            imageUrl={att.imageUrl}
+                            storagePath={att.storagePath}
+                            fileId={att.fileId}
                             alt={att.name}
                             className="w-full h-auto max-h-[200px] object-cover"
+                            data-testid={`attachment-image-${i}`}
                         />
                     </div>
                 ) : att.spreadsheetData ? (

@@ -21,6 +21,9 @@ import {
     gmailSend,
     gmailMarkRead,
 } from "../integrations/gmailApi";
+import { whatsappWebManager } from "../integrations/whatsappWeb";
+import { chunkText } from "../integrations/whatsappWebAutoReply";
+import { storage } from "../storage";
 
 // ============================================================================
 // CALCULATOR TOOL
@@ -1058,6 +1061,315 @@ const gmailMarkReadTool: ToolDefinition = {
 };
 
 // ============================================================================
+// WHATSAPP WEB TOOLS (REAL)
+// ============================================================================
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeWhatsAppJid(to: string): string {
+    const trimmed = String(to || "").trim();
+    if (!trimmed) return trimmed;
+    if (trimmed.includes("@")) return trimmed;
+    const digits = trimmed.replace(/[^0-9]/g, "");
+    if (!digits) return trimmed;
+    return `${digits}@s.whatsapp.net`;
+}
+
+const whatsappStatusSchema = z.object({});
+
+const whatsappStatusTool: ToolDefinition = {
+    name: "whatsapp_status",
+    description: "Get the current WhatsApp Web connection status (disconnected, connecting, qr, pairing_code, connected).",
+    inputSchema: whatsappStatusSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (_input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const status = whatsappWebManager.getStatus(context.userId);
+            return {
+                success: true,
+                output: status,
+                artifacts: [],
+                previews: [{ type: "text", title: "WhatsApp status", content: JSON.stringify(status, null, 2) }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_STATUS_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappConnectSchema = z.object({
+    phone: z.string().optional().describe("Optional phone number to request a pairing code (digits or E.164). If omitted, QR flow is used."),
+    waitMs: z.number().int().min(0).max(30000).optional().default(8000).describe("How long to wait for QR/pairing_code after starting (ms)."),
+});
+
+const whatsappConnectTool: ToolDefinition = {
+    name: "whatsapp_connect",
+    description: "Start or resume a WhatsApp Web session. Returns QR or pairing code status for linking.",
+    inputSchema: whatsappConnectSchema,
+    capabilities: ["requires_network", "accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const initial = input.phone
+                ? await whatsappWebManager.startWithOptions(context.userId, { phone: String(input.phone) })
+                : await whatsappWebManager.startWithOptions(context.userId);
+
+            let status = initial;
+            const waitMs = Math.max(0, Math.min(Number(input.waitMs ?? 8000), 30000));
+            const deadline = Date.now() + waitMs;
+
+            while (Date.now() < deadline && status.state === "connecting") {
+                await sleep(250);
+                status = whatsappWebManager.getStatus(context.userId);
+            }
+
+            return {
+                success: true,
+                output: status,
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp connect",
+                    content: status.state === "qr"
+                        ? `Scan this QR in WhatsApp to link:\n\n${status.qr}`
+                        : status.state === "pairing_code"
+                            ? `Pairing code for ${status.phone}: ${status.code}`
+                            : `Status: ${status.state}`,
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_CONNECT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappDisconnectSchema = z.object({});
+
+const whatsappDisconnectTool: ToolDefinition = {
+    name: "whatsapp_disconnect",
+    description: "Disconnect the current user's WhatsApp Web session.",
+    inputSchema: whatsappDisconnectSchema,
+    capabilities: ["accesses_external_api"],
+    execute: async (_input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            await whatsappWebManager.disconnect(context.userId);
+            return {
+                success: true,
+                output: { success: true },
+                artifacts: [],
+                previews: [{ type: "text", title: "WhatsApp disconnect", content: "Disconnected." }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: 1 },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_DISCONNECT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappSendTextSchema = z.object({
+    to: z.string().min(1).describe("Recipient JID (e.g. 15551234567@s.whatsapp.net) or phone number"),
+    text: z.string().min(1).describe("Message text"),
+    chunkSize: z.number().int().min(200).max(2000).optional().default(1400).describe("Max characters per WhatsApp message chunk"),
+});
+
+const whatsappSendTextTool: ToolDefinition = {
+    name: "whatsapp_send_text",
+    description: "Send a WhatsApp text message to a user or group. Will chunk long messages to avoid delivery limits.",
+    inputSchema: whatsappSendTextSchema,
+    capabilities: ["requires_network", "accesses_external_api"],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const toJid = normalizeWhatsAppJid(String(input.to));
+            const parts = chunkText(String(input.text), Number(input.chunkSize ?? 1400));
+            if (parts.length === 0) {
+                throw new Error("Text is empty after trimming");
+            }
+
+            for (const part of parts) {
+                await whatsappWebManager.sendText(context.userId, toJid, part);
+            }
+
+            return {
+                success: true,
+                output: { to: toJid, parts: parts.length },
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp sent",
+                    content: `To: ${toJid}\nParts: ${parts.length}`,
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime, apiCalls: parts.length },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_SEND_TEXT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappSearchSchema = z.object({
+    query: z.string().min(1).describe("Text search query (Spanish-friendly)"),
+    maxResults: z.number().int().min(1).max(50).optional().default(20),
+});
+
+const whatsappSearchMessagesTool: ToolDefinition = {
+    name: "whatsapp_search_messages",
+    description: "Search mirrored WhatsApp chat messages stored in IliaGPT (requires DB).",
+    inputSchema: whatsappSearchSchema,
+    capabilities: [],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const raw = await storage.searchMessages(context.userId, String(input.query));
+            const filtered = raw
+                .filter((m: any) => {
+                    const chatId = String(m.chatId || "");
+                    const channel = m?.metadata?.channel;
+                    return channel === "whatsapp_web" || chatId.startsWith("wa_");
+                })
+                .slice(0, Number(input.maxResults ?? 20));
+
+            const results = filtered.map((m: any) => ({
+                id: m.id,
+                chatId: m.chatId,
+                role: m.role,
+                content: String(m.content || "").slice(0, 500),
+                createdAt: m.createdAt,
+                from: m?.metadata?.from,
+                to: m?.metadata?.to,
+            }));
+
+            return {
+                success: true,
+                output: { query: input.query, results },
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp search results",
+                    content: results.map((r: any, i: number) => `${i + 1}. [${r.chatId}] ${r.content}`).join("\n") || "No results",
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_SEARCH_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+const whatsappRecentSchema = z.object({
+    chatsLimit: z.number().int().min(1).max(20).optional().default(5),
+    messagesLimit: z.number().int().min(1).max(50).optional().default(10),
+});
+
+const whatsappRecentMessagesTool: ToolDefinition = {
+    name: "whatsapp_recent_messages",
+    description: "List recent messages from mirrored WhatsApp chats stored in IliaGPT (requires DB).",
+    inputSchema: whatsappRecentSchema,
+    capabilities: [],
+    execute: async (input, context): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+            const chats = await storage.getChats(context.userId);
+            const waChats = chats
+                .filter((c: any) => String(c.id || "").startsWith("wa_"))
+                .slice(0, Number(input.chatsLimit ?? 5));
+
+            const out: any[] = [];
+            for (const chat of waChats) {
+                const messages = await storage.getChatMessages(chat.id, { limit: Number(input.messagesLimit ?? 10), orderBy: "desc" });
+                out.push({
+                    chatId: chat.id,
+                    title: chat.title,
+                    updatedAt: chat.updatedAt,
+                    messages: (messages || []).map((m: any) => ({
+                        id: m.id,
+                        role: m.role,
+                        content: String(m.content || "").slice(0, 500),
+                        createdAt: m.createdAt,
+                        from: m?.metadata?.from,
+                        to: m?.metadata?.to,
+                    })),
+                });
+            }
+
+            return {
+                success: true,
+                output: { chats: out },
+                artifacts: [],
+                previews: [{
+                    type: "text",
+                    title: "WhatsApp recent messages",
+                    content: out.map((c: any) => `# ${c.title || c.chatId}\n` + (c.messages || []).slice(0, 3).map((m: any) => `- (${m.role}) ${m.content}`).join("\n")).join("\n\n") || "No WhatsApp chats found",
+                }],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        } catch (error: any) {
+            return {
+                success: false,
+                output: null,
+                error: createError("WHATSAPP_RECENT_ERROR", error.message, true),
+                artifacts: [],
+                previews: [],
+                logs: [],
+                metrics: { durationMs: Date.now() - startTime },
+            };
+        }
+    },
+};
+
+// ============================================================================
 // EXPORT ALL TOOLS
 // ============================================================================
 
@@ -1075,6 +1387,14 @@ export const extendedTools: ToolDefinition[] = [
     gmailFetchTool,
     gmailSendTool,
     gmailMarkReadTool,
+
+    // WhatsApp Web (real)
+    whatsappStatusTool,
+    whatsappConnectTool,
+    whatsappDisconnectTool,
+    whatsappSendTextTool,
+    whatsappSearchMessagesTool,
+    whatsappRecentMessagesTool,
 ];
 
 export default extendedTools;

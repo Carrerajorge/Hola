@@ -52,7 +52,7 @@ export interface VisionConfig {
 // ============== Grok Client ==============
 
 const grokClient = new OpenAI({
-    apiKey: process.env.XAI_API_KEY || "",
+    apiKey: process.env.XAI_API_KEY || "missing" || "",
     baseURL: "https://api.x.ai/v1",
 });
 

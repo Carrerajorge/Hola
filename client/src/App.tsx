@@ -4,8 +4,9 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
@@ -15,15 +16,38 @@ import { BackgroundNotificationContainer } from "@/components/background-notific
 import { CommandPalette } from "@/components/command-palette";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
+import { trackWorkspaceEvent } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
 const Home = lazy(() => import("@/pages/home"));
-import { AuthProvider } from "@/hooks/use-auth";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { isAdminUser } from "@/lib/admin";
+const MaintenancePage = lazy(() => import("@/pages/maintenance"));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
     <Loader2 className="h-8 w-8 animate-spin text-primary" />
   </div>
 );
+
+function WorkspaceAnalyticsTracker() {
+  const [location] = useLocation();
+  const { user, isReady } = useAuth();
+  const lastLocationRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isReady || !user) return;
+    if (lastLocationRef.current === location) return;
+    lastLocationRef.current = location;
+    void trackWorkspaceEvent({
+      eventType: "page_view",
+      page: location,
+      metadata: { path: location },
+    });
+  }, [location, user, isReady]);
+
+  return null;
+}
 
 function ChatPageRedirect() {
   const params = useParams<{ id: string }>();
@@ -47,6 +71,8 @@ const ProfilePage = lazy(() => import("@/pages/profile"));
 const BillingPage = lazy(() => import("@/pages/billing"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
 const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const PrivacyPolicyPage = lazy(() => import("@/pages/privacy-policy"));
+const TermsPage = lazy(() => import("@/pages/terms"));
 const AdminPage = lazy(() => import("@/pages/admin"));
 const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
 const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
@@ -68,18 +94,34 @@ function GlobalKeyboardShortcuts() {
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { chats } = useChats();
+  const { settings } = useSettingsContext();
 
   const handleNewChat = useCallback(() => {
     setLocation("/");
     window.dispatchEvent(new CustomEvent("new-chat-requested"));
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "new_chat_requested",
+      metadata: { source: "shortcut" },
+    });
   }, [setLocation]);
 
   const handleOpenSearch = useCallback(() => {
     setCommandPaletteOpen(true); // Now opens Command Palette instead
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "command_palette_opened",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleOpenToolCatalog = useCallback(() => {
     setToolCatalogOpen(true);
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "tool_catalog_opened",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleCloseDialogs = useCallback(() => {
@@ -87,10 +129,20 @@ function GlobalKeyboardShortcuts() {
     setToolCatalogOpen(false);
     setCommandPaletteOpen(false);
     window.dispatchEvent(new CustomEvent("close-all-dialogs"));
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "dialogs_closed",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleOpenSettings = useCallback(() => {
     setLocation("/settings");
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "settings_opened",
+      metadata: { source: "shortcut" },
+    });
   }, [setLocation]);
 
   const handleSelectChat = useCallback((chatId: string) => {
@@ -109,7 +161,7 @@ function GlobalKeyboardShortcuts() {
     { key: "k", ctrl: true, shift: true, action: handleOpenToolCatalog, description: "Tool Catalog" },
     { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
-  ]);
+  ], { enabled: settings.keyboardShortcuts });
 
   return (
     <>
@@ -153,6 +205,8 @@ function Router() {
             <Route path="/billing" component={BillingPage} />
             <Route path="/settings" component={SettingsPage} />
             <Route path="/privacy" component={PrivacyPage} />
+            <Route path="/privacy-policy" component={PrivacyPolicyPage} />
+            <Route path="/terms" component={TermsPage} />
             <Route path="/admin" component={AdminPage} />
             <Route path="/admin/health" component={SystemHealthPage} />
             <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
@@ -175,35 +229,61 @@ function Router() {
   );
 }
 
+function AppContent() {
+  const [location] = useLocation();
+  const { settings: platformSettings, isLoading: platformLoading } = usePlatformSettings();
+  const { user } = useAuth();
+
+  const isLoginRoute = location.startsWith("/login");
+  const allowDuringMaintenance = isLoginRoute;
+
+  if (!platformLoading && platformSettings.maintenance_mode && !isAdminUser(user) && !allowDuringMaintenance) {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <MaintenancePage />
+      </Suspense>
+    );
+  }
+
+  return (
+    <>
+      <SkipLink />
+      <OfflineIndicator />
+      {/* AuthCallbackHandler removed, moved to AuthProvider */}
+      <GlobalKeyboardShortcuts />
+      <WorkspaceAnalyticsTracker />
+      <Toaster />
+      <SonnerToaster
+        position="bottom-right"
+        richColors
+        closeButton
+        toastOptions={{
+          classNames: {
+            toast: "text-sm",
+            actionButton: "text-xs font-medium",
+          },
+        }}
+      />
+      <Router />
+      <BackgroundNotificationContainer onNavigateToChat={() => {}} />
+    </>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <SettingsProvider>
-          <ModelAvailabilityProvider>
-            <TooltipProvider>
-              <SkipLink />
-              <OfflineIndicator />
-              {/* AuthCallbackHandler removed, moved to AuthProvider */}
-              <GlobalKeyboardShortcuts />
-              <Toaster />
-              <SonnerToaster
-                position="bottom-right"
-                richColors
-                closeButton
-                toastOptions={{
-                  classNames: {
-                    toast: 'text-sm',
-                    actionButton: 'text-xs font-medium',
-                  }
-                }}
-              />
-              <Router />
-              <BackgroundNotificationContainer onNavigateToChat={() => { }} />
-            </TooltipProvider>
-          </ModelAvailabilityProvider>
-        </SettingsProvider>
-      </AuthProvider>
+      <PlatformSettingsProvider>
+        <AuthProvider>
+          <SettingsProvider>
+            <ModelAvailabilityProvider>
+              <TooltipProvider>
+                <AppContent />
+              </TooltipProvider>
+            </ModelAvailabilityProvider>
+          </SettingsProvider>
+        </AuthProvider>
+      </PlatformSettingsProvider>
     </QueryClientProvider>
   );
 }

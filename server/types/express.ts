@@ -47,7 +47,20 @@ export interface RequiredAuthRequest extends Request {
  */
 export function getUserId(req: Request): string | undefined {
     const authReq = req as AuthenticatedRequest;
-    return authReq.user?.claims?.sub || authReq.user?.id;
+    const direct = authReq.user?.claims?.sub || authReq.user?.id;
+    if (direct) return direct;
+
+    // Passport sessions can exist even when `req.user` is missing.
+    // Best-effort extraction for email/password or OAuth flows that rely on sessions.
+    const session = (req as any)?.session;
+    if (session?.authUserId) return session.authUserId;
+
+    const passportUser = session?.passport?.user;
+    if (typeof passportUser === "string" && passportUser) return passportUser;
+    const passportId = passportUser?.claims?.sub || passportUser?.id;
+    if (passportId) return passportId;
+
+    return undefined;
 }
 
 /**

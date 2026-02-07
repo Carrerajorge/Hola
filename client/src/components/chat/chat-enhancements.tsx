@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
+import {
   Search, 
   Download, 
   FileText, 
@@ -26,9 +26,9 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { toast } from 'sonner';
+import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { formatZonedDateTime, normalizeTimeZone } from "@/lib/platformDateTime";
 
 /**
  * Enhanced Typing Indicator
@@ -145,6 +145,9 @@ interface ChatSearchProps {
 export function ChatSearch({ messages, onResultClick, className }: ChatSearchProps) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const results = query.length >= 2
     ? messages.filter(m => 
@@ -210,7 +213,7 @@ export function ChatSearch({ messages, onResultClick, className }: ChatSearchPro
                         </Badge>
                         {msg.createdAt && (
                           <span className="text-xs text-muted-foreground">
-                            {format(new Date(msg.createdAt), 'dd MMM HH:mm', { locale: es })}
+                            {formatZonedDateTime(msg.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false })}
                           </span>
                         )}
                       </div>
@@ -245,6 +248,9 @@ interface ExportConversationProps {
 
 export function ExportConversation({ chatId, title, messages, className }: ExportConversationProps) {
   const [isExporting, setIsExporting] = useState(false);
+  const { settings: platformSettings } = usePlatformSettings();
+  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+  const platformDateFormat = platformSettings.date_format;
 
   const exportAsText = () => {
     const text = messages.map(m => 
@@ -263,7 +269,7 @@ export function ExportConversation({ chatId, title, messages, className }: Expor
 
   const exportAsMarkdown = () => {
     const md = [`# ${title}\n`];
-    md.push(`*Exportado el ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: es })}*\n`);
+    md.push(`*Exportado el ${formatZonedDateTime(new Date(), { timeZone: platformTimeZone, dateFormat: platformDateFormat })}*\n`);
     md.push('---\n');
     
     messages.forEach(m => {

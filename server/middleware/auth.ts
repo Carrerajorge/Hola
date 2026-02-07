@@ -2,6 +2,8 @@
 import { Request, Response, NextFunction } from "express";
 import { storage } from "../storage";
 import { getSecureUserId } from "../lib/anonUserHelper";
+import { is2FAEnabled } from "../services/twoFactorAuth";
+import { getSettingValue } from "../services/settingsConfigService";
 
 /**
  * Middleware to require 2FA verification for accessing sensitive routes.
@@ -10,31 +12,40 @@ import { getSecureUserId } from "../lib/anonUserHelper";
  */
 export async function require2FA(req: Request, res: Response, next: NextFunction) {
     try {
-        const user = (req as any).user;
-        const session = (req.session as any);
-        
-        // Try to get userId from multiple sources (Passport or session)
-        let userId = user?.claims?.sub || user?.id || session?.authUserId;
-        
-        if (!userId) {
+        const anyReq = req as any;
+        const session = req.session as any;
+
+        const userId = getSecureUserId(req);
+        if (!userId || String(userId).startsWith("anon_")) {
             // Not authenticated at all
             return res.status(401).json({ error: "Unauthorized" });
         }
 
-        // If 2FA is already verified in this session, proceed
-        if (session?.is2FAVerified) {
+        const requireAdmins2FA = await getSettingValue<boolean>("require_2fa_admins", false);
+
+        // Determine role (best-effort: from req, then DB fallback).
+        const role =
+            anyReq.user?.role ||
+            session?.passport?.user?.role ||
+            anyReq.user?.claims?.role ||
+            (await storage.getUser(userId))?.role ||
+            null;
+        const isAdmin = String(role || "").toLowerCase() === "admin";
+
+        const enabled = await is2FAEnabled(userId);
+        if (isAdmin && requireAdmins2FA && !enabled) {
+            return res.status(403).json({
+                error: "2FA Setup Required",
+                code: "2FA_SETUP_REQUIRED",
+                message: "Administrators must enable 2FA to access this area."
+            });
+        }
+
+        if (enabled && session?.is2FAVerified) {
             return next();
         }
 
-        // Fetch full user record to check if 2FA is enabled
-        const dbUser = await storage.getUser(userId);
-        if (!dbUser) {
-            return res.status(401).json({ error: "User not found" });
-        }
-
-        // Check if 2FA is enabled for this user
-        if (dbUser.totpEnabled) {
-            // 2FA is enabled but not verified in session -> 403 Forbidden (requires verification)
+        if (enabled || (isAdmin && requireAdmins2FA)) {
             return res.status(403).json({
                 error: "2FA Verification Required",
                 code: "2FA_REQUIRED",
@@ -42,29 +53,8 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
             });
         }
 
-        // In development mode, skip 2FA requirement for admins
-        const isDev = process.env.NODE_ENV === 'development';
-        if (isDev && dbUser.role === 'admin') {
-            // Mark as verified for this session to avoid repeated checks
-            session.is2FAVerified = true;
-            return next();
-        }
-
-        // IF we want to FORCE 2FA for admins:
-        if (dbUser.role === 'admin' && !dbUser.totpEnabled) {
-            // Optional: Force them to setup 2FA.
-            // For now, we allow them if not enabled, but we might want to warn or block.
-            // The audit said "Strictly Require", implying they MUST have it.
-            // If we block here, they can't access admin panel. They need to go to profile settings to enable it.
-            return res.status(403).json({
-                error: "2FA Setup Required",
-                code: "2FA_SETUP_REQUIRED",
-                message: "Administrators must have 2FA enabled to access this area."
-            });
-        }
-
-        // User does not have 2FA enabled (and is not forced), proceed
-        next();
+        // 2FA not enabled and not required, proceed.
+        return next();
     } catch (error) {
         console.error("[AuthMiddleware] 2FA check error:", error);
         res.status(500).json({ error: "Internal Server Error during security check" });

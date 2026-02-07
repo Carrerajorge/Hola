@@ -47,7 +47,10 @@ const KNOWN_MODELS: Record<string, KnownModel[]> = {
     { modelId: "imagen-4", name: "Imagen 4", contextWindow: 0, maxOutput: 0, type: "IMAGE", inputCost: "0.04", outputCost: "0.00", description: "Most capable text-to-image model" },
     { modelId: "imagen-3", name: "Imagen 3", contextWindow: 0, maxOutput: 0, type: "IMAGE", inputCost: "0.04", outputCost: "0.00", description: "Image generation model" },
     { modelId: "veo-3", name: "Veo 3", contextWindow: 0, maxOutput: 0, type: "VIDEO", inputCost: "0.10", outputCost: "0.00", description: "Video generation with audio" },
-    { modelId: "text-embedding-004", name: "Text Embedding 004", contextWindow: 2048, maxOutput: 0, type: "EMBEDDING", inputCost: "0.000025", outputCost: "0.00", description: "Text embedding model" },
+    // Embeddings
+    // NOTE: some API keys/projects don't expose `text-embedding-004`; `gemini-embedding-001` is widely available.
+    { modelId: "gemini-embedding-001", name: "Gemini Embedding 001", contextWindow: 2048, maxOutput: 1, type: "EMBEDDING", inputCost: "0.000025", outputCost: "0.00", description: "Text embedding model (embedContent)" },
+    { modelId: "text-embedding-004", name: "Text Embedding 004", contextWindow: 2048, maxOutput: 0, type: "EMBEDDING", inputCost: "0.000025", outputCost: "0.00", description: "Text embedding model", isDeprecated: true },
   ],
 
   // ========================================
