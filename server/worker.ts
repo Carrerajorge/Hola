@@ -1,4 +1,12 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+
+// Load environment variables based on NODE_ENV (match server/index.ts behavior).
+const nodeEnv = process.env.NODE_ENV || "development";
+if (nodeEnv === "production") {
+    dotenv.config({ path: path.resolve(process.cwd(), ".env.production") });
+}
+dotenv.config();
 import { initTracing } from "./lib/tracing";
 
 // Initialize Distributed Tracing
@@ -8,10 +16,38 @@ import { createWorker, QUEUE_NAMES } from "./lib/queueFactory";
 import { UploadJobData } from "./services/uploadQueue";
 import { Logger } from "./lib/logger";
 import { Job } from "bullmq";
+import { retryInvoiceEmailNotifications } from "./services/invoiceEmailRetryService";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5");
 
 Logger.info(`Starting Worker Process (Concurrency: ${WORKER_CONCURRENCY})...`);
+
+// ==========================================
+// Invoice Email Retry Loop (DB-backed)
+// ==========================================
+
+const INVOICE_EMAIL_RETRY_ENABLED = process.env.INVOICE_EMAIL_RETRY_ENABLED !== "false";
+const INVOICE_EMAIL_RETRY_INTERVAL_MS = Math.max(10_000, Number(process.env.INVOICE_EMAIL_RETRY_INTERVAL_MS || 120_000));
+const INVOICE_EMAIL_RETRY_BATCH_SIZE = Math.min(100, Math.max(1, Number(process.env.INVOICE_EMAIL_RETRY_BATCH_SIZE || 25)));
+
+async function runInvoiceEmailRetryTick() {
+    try {
+        const result = await retryInvoiceEmailNotifications({ batchSize: INVOICE_EMAIL_RETRY_BATCH_SIZE });
+        if (result.considered > 0 || result.sent > 0 || result.failed > 0) {
+            Logger.info(`[InvoiceEmailRetry] considered=${result.considered} attempted=${result.attempted} sent=${result.sent} failed=${result.failed} skipped=${result.skipped} missingPayload=${result.missingPayload}`);
+        }
+    } catch (err: any) {
+        Logger.error(`[InvoiceEmailRetry] tick failed: ${err?.message || String(err)}`);
+    }
+}
+
+if (INVOICE_EMAIL_RETRY_ENABLED) {
+    Logger.info(`[InvoiceEmailRetry] enabled intervalMs=${INVOICE_EMAIL_RETRY_INTERVAL_MS} batchSize=${INVOICE_EMAIL_RETRY_BATCH_SIZE}`);
+    runInvoiceEmailRetryTick();
+    const timer = setInterval(runInvoiceEmailRetryTick, INVOICE_EMAIL_RETRY_INTERVAL_MS);
+    // Don't keep the worker alive if nothing else is running.
+    (timer as any).unref?.();
+}
 
 // ==========================================
 // 1. Upload Queue Worker
