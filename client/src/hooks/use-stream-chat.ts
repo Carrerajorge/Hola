@@ -48,10 +48,11 @@ export interface StreamOptions {
   onEvent?: (eventType: string, data: any) => void;
   /** Called when the AI state should change (e.g. "responding", "agent_working") */
   onAiStateChange?: (state: AiState) => void;
-  /** Called with the full content when streaming completes normally. Return a Message to customize the final message. */
-  buildFinalMessage?: (fullContent: string, lastEventData?: any) => Message;
+  /** Called with the full content when streaming completes normally. Return a Message to customize the final message.
+   *  `messageId` is pre-generated to match the streaming message key for zero-flicker Virtuoso transition. */
+  buildFinalMessage?: (fullContent: string, lastEventData?: any, messageId?: string) => Message;
   /** Called with the error when streaming fails. Return a Message to customize the error message. */
-  buildErrorMessage?: (error: Error) => Message;
+  buildErrorMessage?: (error: Error, messageId?: string) => Message;
 }
 
 export interface StreamResult {
@@ -85,6 +86,10 @@ export function useStreamChat(deps: StreamChatDeps) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
   const finalizingRef = useRef(false);
+  // Pre-generated message ID for the next stream — allows ChatMessageList
+  // to use the same key for the streaming message and the final message,
+  // so Virtuoso keeps the same DOM node (zero-flicker transition).
+  const nextMessageIdRef = useRef<string | null>(null);
 
   // RAF throttling state
   const rafIdRef = useRef<number | null>(null);
@@ -181,6 +186,10 @@ export function useStreamChat(deps: StreamChatDeps) {
         ? AbortSignal.any?.([controller.signal, signal]) ?? controller.signal
         : controller.signal;
 
+      // Pre-generate message ID so streaming and final message share the same key
+      const messageId = `assistant-${Date.now()}`;
+      nextMessageIdRef.current = messageId;
+
       // Initialize streaming state
       streamingContentRef.current = "";
       pendingContentRef.current = null;
@@ -204,8 +213,8 @@ export function useStreamChat(deps: StreamChatDeps) {
           const errorData = await response.json().catch(() => ({}));
           const error = new Error(errorData.error || `HTTP ${response.status}`);
 
-          const errorMsg = buildErrorMessage?.(error) ?? {
-            id: `error-${Date.now()}`,
+          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
+            id: messageId,
             role: "assistant" as const,
             content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
             timestamp: new Date(),
@@ -219,8 +228,8 @@ export function useStreamChat(deps: StreamChatDeps) {
         const reader = response.body?.getReader();
         if (!reader) {
           const error = new Error("No response body");
-          finalize(buildErrorMessage?.(error) ?? {
-            id: `error-${Date.now()}`,
+          finalize(buildErrorMessage?.(error, messageId) ?? {
+            id: messageId,
             role: "assistant" as const,
             content: "No se recibió respuesta del servidor.",
             timestamp: new Date(),
@@ -301,8 +310,8 @@ export function useStreamChat(deps: StreamChatDeps) {
               if (currentEventType === "done" || currentEventType === "finish") {
                 streamDone = true;
 
-                const msg = buildFinalMessage?.(fullContent, data) ?? {
-                  id: (Date.now() + 1).toString(),
+                const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
+                  id: messageId,
                   role: "assistant" as const,
                   content: fullContent,
                   timestamp: new Date(),
@@ -332,8 +341,8 @@ export function useStreamChat(deps: StreamChatDeps) {
 
         // Stream ended without explicit done event — finalize with accumulated content
         if (!finalizingRef.current && fullContent) {
-          const msg = buildFinalMessage?.(fullContent, lastEventData) ?? {
-            id: `assistant-${Date.now()}`,
+          const msg = buildFinalMessage?.(fullContent, lastEventData, messageId) ?? {
+            id: messageId,
             role: "assistant" as const,
             content: fullContent || "No se recibió respuesta del servidor.",
             timestamp: new Date(),
@@ -347,7 +356,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         // No content received
         if (!finalizingRef.current) {
           const msg: Message = {
-            id: `assistant-${Date.now()}`,
+            id: messageId,
             role: "assistant" as const,
             content: "No se recibió respuesta del servidor.",
             timestamp: new Date(),
@@ -366,8 +375,8 @@ export function useStreamChat(deps: StreamChatDeps) {
 
         console.error("[useStreamChat] Stream error:", err);
 
-        const errorMsg = buildErrorMessage?.(err) ?? {
-          id: `error-${Date.now()}`,
+        const errorMsg = buildErrorMessage?.(err, messageId) ?? {
+          id: messageId,
           role: "assistant" as const,
           content: err.message || "Error de conexión. Por favor, intenta de nuevo.",
           timestamp: new Date(),
@@ -406,5 +415,8 @@ export function useStreamChat(deps: StreamChatDeps) {
     abortControllerRef,
     /** Current accumulated content ref */
     contentRef: streamingContentRef,
+    /** Pre-generated message ID for the current/next stream.
+     *  Pass to ChatMessageList as streamingMsgId for zero-flicker Virtuoso transition. */
+    nextMessageIdRef,
   };
 }

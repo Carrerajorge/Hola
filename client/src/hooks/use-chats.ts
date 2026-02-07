@@ -317,24 +317,34 @@ export function stopRetryProcessor(): void {
   }
 }
 
-// Strip large base64 data (imageUrl, spreadsheetData previews) from attachments
-// before sending to server to prevent 413 Payload Too Large errors.
-// The server stores files at storagePath, so base64 data is not needed server-side.
+// Strip all large data fields from attachments before sending to server.
+// Only lightweight metadata (name, type, fileId, storagePath, size) is needed server-side.
+// The actual file content lives in object storage (storagePath) and conversationDocuments table.
 function sanitizeAttachmentsForServer(attachments: Message['attachments']): Message['attachments'] {
   if (!attachments || attachments.length === 0) return attachments;
   return attachments.map(att => {
-    const { imageUrl, spreadsheetData, ...rest } = att;
-    // Keep spreadsheetData metadata but strip large previewData
-    const cleanSpreadsheet = spreadsheetData ? {
-      uploadId: spreadsheetData.uploadId,
-      sheets: spreadsheetData.sheets,
-      analysisId: spreadsheetData.analysisId,
-      sessionId: spreadsheetData.sessionId,
-    } : undefined;
-    return {
-      ...rest,
-      ...(cleanSpreadsheet ? { spreadsheetData: cleanSpreadsheet } : {}),
+    // Build a clean attachment with only metadata — strip content, imageUrl, thumbnail, dataUrl
+    const a = att as any;
+    const clean: Record<string, any> = {
+      id: a.id || a.fileId,
+      fileId: a.fileId,
+      name: att.name,
+      type: att.type,
+      mimeType: a.mimeType || att.type,
+      size: a.size,
+      storagePath: a.storagePath,
     };
+    // Keep spreadsheetData metadata but strip large previewData
+    const spreadsheetData = a.spreadsheetData;
+    if (spreadsheetData) {
+      clean.spreadsheetData = {
+        uploadId: spreadsheetData.uploadId,
+        sheets: spreadsheetData.sheets,
+        analysisId: spreadsheetData.analysisId,
+        sessionId: spreadsheetData.sessionId,
+      };
+    }
+    return clean as any;
   });
 }
 
@@ -656,6 +666,19 @@ export function useChats() {
             credentials: "include"
           });
           const fullChat = await chatRes.json();
+
+          // Build a lookup of conversationDocuments by messageId for attachment hydration.
+          // conversationDocuments are the durable server records of uploaded files.
+          const convDocs: any[] = fullChat.conversationDocuments || [];
+          const docsByMessageId = new Map<string, any[]>();
+          for (const doc of convDocs) {
+            if (doc.messageId) {
+              const existing = docsByMessageId.get(doc.messageId) || [];
+              existing.push(doc);
+              docsByMessageId.set(doc.messageId, existing);
+            }
+          }
+
           return {
             id: chat.id,
             stableKey: `stable-${chat.id}`, // Use ID as stable key for server chats
@@ -670,6 +693,40 @@ export function useChats() {
               if (msg.requestId) {
                 markRequestPersisted(msg.requestId);
               }
+
+              // Hydrate attachments: prefer message JSONB, fall back to conversationDocuments
+              let hydratedAttachments = msg.attachments;
+              if ((!hydratedAttachments || hydratedAttachments.length === 0) && docsByMessageId.has(msg.id)) {
+                // No JSONB attachments — reconstruct from conversationDocuments
+                hydratedAttachments = docsByMessageId.get(msg.id)!.map((doc: any) => ({
+                  id: doc.id,
+                  fileId: doc.metadata?.fileId || doc.id,
+                  name: doc.fileName,
+                  type: doc.mimeType,
+                  mimeType: doc.mimeType,
+                  size: doc.fileSize || 0,
+                  storagePath: doc.storagePath,
+                }));
+              } else if (hydratedAttachments && hydratedAttachments.length > 0 && docsByMessageId.has(msg.id)) {
+                // JSONB attachments exist — enrich with any missing data from conversationDocuments
+                const docs = docsByMessageId.get(msg.id)!;
+                hydratedAttachments = hydratedAttachments.map((att: any) => {
+                  const matchingDoc = docs.find((d: any) =>
+                    d.fileName === att.name ||
+                    (d.metadata?.fileId && d.metadata.fileId === att.fileId)
+                  );
+                  if (matchingDoc) {
+                    return {
+                      ...att,
+                      storagePath: att.storagePath || matchingDoc.storagePath,
+                      size: att.size || matchingDoc.fileSize || 0,
+                      mimeType: att.mimeType || matchingDoc.mimeType,
+                    };
+                  }
+                  return att;
+                });
+              }
+
               return {
                 id: msg.id,
                 role: msg.role,
@@ -677,7 +734,7 @@ export function useChats() {
                 timestamp: new Date(msg.createdAt),
                 requestId: msg.requestId,
                 userMessageId: msg.userMessageId,
-                attachments: msg.attachments,
+                attachments: hydratedAttachments,
                 sources: msg.sources,
                 figmaDiagram: msg.figmaDiagram,
                 googleFormPreview: msg.googleFormPreview,
