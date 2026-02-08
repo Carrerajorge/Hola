@@ -9,7 +9,7 @@
 - Resultados:
   - type-check + tests + build: OK (agent-verify exit 0)
 - PRs:
-  - (pendiente)
+  - https://github.com/Carrerajorge/Hola/pull/136
 - Notas / riesgos:
   - Los logs mostraron warnings/errores “best-effort” por falta de Postgres local (ECONNREFUSED 127.0.0.1:5432), pero el verify completó exitosamente.
 
