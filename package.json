@@ -5,9 +5,9 @@
   "license": "MIT",
   "scripts": {
     "dev:client": "vite dev --port 5050",
-    "dev": "node scripts/with-env.cjs NODE_ENV=development -- tsx server/index.ts",
-    "build": "tsx script/build.ts",
-    "worker": "tsx server/worker.ts",
+    "dev": "node scripts/with-env.cjs NODE_ENV=development -- node --import tsx server/index.ts",
+    "build": "node scripts/with-env.cjs NODE_ENV=production -- node --import tsx script/build.ts",
+    "worker": "node --import tsx server/worker.ts",
     "start": "node scripts/with-env.cjs NODE_ENV=production -- node dist/index.cjs",
     "check": "tsc",
     "type-check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=4096 -- tsc -p tsconfig.ci.json",

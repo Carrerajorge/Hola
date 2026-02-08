@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
 vi.mock("../services/settingsConfigService", () => ({
   getSettingValue: vi.fn(async (key: string, fallback: any) => {
@@ -19,10 +19,15 @@ describe("maintenanceModeMiddleware", () => {
     app.use(maintenanceModeMiddleware);
     app.get("/api/blocked", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/api/blocked");
-    expect(res.status).toBe(503);
-    expect(res.body.code).toBe("MAINTENANCE_MODE");
-    expect(res.body.maintenance).toBe(true);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/blocked");
+      expect(res.status).toBe(503);
+      expect(res.body.code).toBe("MAINTENANCE_MODE");
+      expect(res.body.maintenance).toBe(true);
+    } finally {
+      await close();
+    }
   });
 
   it("allows exempt auth prefixes", async () => {
@@ -32,9 +37,14 @@ describe("maintenanceModeMiddleware", () => {
     app.use(maintenanceModeMiddleware);
     app.get("/api/auth/user", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/api/auth/user");
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/auth/user");
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+    } finally {
+      await close();
+    }
   });
 
   it("allows non-API routes (SPA) even during maintenance", async () => {
@@ -44,9 +54,14 @@ describe("maintenanceModeMiddleware", () => {
     app.use(maintenanceModeMiddleware);
     app.get("/", (_req, res) => res.status(200).send("ok"));
 
-    const res = await request(app).get("/");
-    expect(res.status).toBe(200);
-    expect(res.text).toBe("ok");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/");
+      expect(res.status).toBe(200);
+      expect(res.text).toBe("ok");
+    } finally {
+      await close();
+    }
   });
 
   it("allows admin requests through", async () => {
@@ -60,9 +75,13 @@ describe("maintenanceModeMiddleware", () => {
     app.use(maintenanceModeMiddleware);
     app.get("/api/admin-ok", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/api/admin-ok");
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/admin-ok");
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+    } finally {
+      await close();
+    }
   });
 });
-

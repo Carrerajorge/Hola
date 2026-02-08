@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import express from "express";
-import request from "supertest";
+import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
 const ENV_KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "ILIAGPT_API_KEY"] as const;
 
@@ -78,9 +78,14 @@ describe("admin models router", () => {
     });
 
     const app = await buildApp();
-    const res = await request(app).patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
-    expect(res.status).toBe(409);
-    expect(String(res.body?.error || "")).toMatch(/Active/i);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
+      expect(res.status).toBe(409);
+      expect(String(res.body?.error || "")).toMatch(/Active/i);
+    } finally {
+      await close();
+    }
   });
 
   it("blocks enabling when provider is not integrated", async () => {
@@ -95,9 +100,14 @@ describe("admin models router", () => {
     });
 
     const app = await buildApp();
-    const res = await request(app).patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
-    expect(res.status).toBe(409);
-    expect(String(res.body?.error || "")).toMatch(/integrated/i);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
+      expect(res.status).toBe(409);
+      expect(String(res.body?.error || "")).toMatch(/integrated/i);
+    } finally {
+      await close();
+    }
   });
 
   it("blocks enabling when model is not chat-capable", async () => {
@@ -113,9 +123,14 @@ describe("admin models router", () => {
     });
 
     const app = await buildApp();
-    const res = await request(app).patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
-    expect(res.status).toBe(409);
-    expect(String(res.body?.error || "")).toMatch(/chat/i);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
+      expect(res.status).toBe(409);
+      expect(String(res.body?.error || "")).toMatch(/chat/i);
+    } finally {
+      await close();
+    }
   });
 
   it("enables a valid integrated chat model", async () => {
@@ -133,10 +148,15 @@ describe("admin models router", () => {
     storageMock.updateAiModel.mockImplementation(async (_id: string, updates: any) => ({ ...existing, ...updates }));
 
     const app = await buildApp();
-    const res = await request(app).patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
-    expect(res.status).toBe(200);
-    expect(res.body.isEnabled).toBe("true");
-    expect(storageMock.updateAiModel).toHaveBeenCalledTimes(1);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.patch("/api/admin/models/m1/toggle").send({ isEnabled: true });
+      expect(res.status).toBe(200);
+      expect(res.body.isEnabled).toBe("true");
+      expect(storageMock.updateAiModel).toHaveBeenCalledTimes(1);
+    } finally {
+      await close();
+    }
   });
 
   it("forces disable when PATCHing status to inactive", async () => {
@@ -152,32 +172,47 @@ describe("admin models router", () => {
     storageMock.updateAiModel.mockImplementation(async (_id: string, updates: any) => updates);
 
     const app = await buildApp();
-    const res = await request(app).patch("/api/admin/models/m1").send({ status: "inactive" });
-    expect(res.status).toBe(200);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.patch("/api/admin/models/m1").send({ status: "inactive" });
+      expect(res.status).toBe(200);
 
-    const updates = storageMock.updateAiModel.mock.calls[0]?.[1] || {};
-    expect(updates.status).toBe("inactive");
-    expect(updates.isEnabled).toBe("false");
-    expect(updates.enabledAt).toBe(null);
-    expect(updates.enabledByAdminId).toBe(null);
+      const updates = storageMock.updateAiModel.mock.calls[0]?.[1] || {};
+      expect(updates.status).toBe("inactive");
+      expect(updates.isEnabled).toBe("false");
+      expect(updates.enabledAt).toBe(null);
+      expect(updates.enabledByAdminId).toBe(null);
+    } finally {
+      await close();
+    }
   });
 
   it("sync scope=supported filters to only runtime-supported providers", async () => {
     const app = await buildApp();
-    const res = await request(app).post("/api/admin/models/sync?scope=supported");
-    expect(res.status).toBe(200);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.post("/api/admin/models/sync?scope=supported");
+      expect(res.status).toBe(200);
 
-    const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
-    expect(calledProviders.sort()).toEqual(["google", "xai"]);
+      const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
+      expect(calledProviders.sort()).toEqual(["google", "xai"]);
+    } finally {
+      await close();
+    }
   });
 
   it("sync scope=integrated filters to providers with API keys configured", async () => {
     process.env.GEMINI_API_KEY = "x";
     const app = await buildApp();
-    const res = await request(app).post("/api/admin/models/sync?scope=integrated");
-    expect(res.status).toBe(200);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.post("/api/admin/models/sync?scope=integrated");
+      expect(res.status).toBe(200);
 
-    const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
-    expect(calledProviders).toEqual(["google"]);
+      const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
+      expect(calledProviders).toEqual(["google"]);
+    } finally {
+      await close();
+    }
   });
 });

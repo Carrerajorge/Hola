@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
-import request from "supertest";
+import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
 const getSettingValueMock = vi.fn(async (_key: string, fallback: any) => fallback);
 const is2FAEnabledMock = vi.fn(async (_userId: string) => false);
@@ -36,9 +36,14 @@ describe("require2FA middleware", () => {
     app.use(require2FA);
     app.get("/protected", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/protected");
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe("2FA_SETUP_REQUIRED");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/protected");
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe("2FA_SETUP_REQUIRED");
+    } finally {
+      await close();
+    }
   });
 
   it("requires verification when 2FA is enabled but session not verified", async () => {
@@ -58,9 +63,14 @@ describe("require2FA middleware", () => {
     app.use(require2FA);
     app.get("/protected", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/protected");
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe("2FA_REQUIRED");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/protected");
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe("2FA_REQUIRED");
+    } finally {
+      await close();
+    }
   });
 
   it("allows access when 2FA enabled and session verified", async () => {
@@ -80,9 +90,14 @@ describe("require2FA middleware", () => {
     app.use(require2FA);
     app.get("/protected", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/protected");
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/protected");
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+    } finally {
+      await close();
+    }
   });
 
   it("does not force setup for non-admins when require_2fa_admins=true", async () => {
@@ -102,9 +117,13 @@ describe("require2FA middleware", () => {
     app.use(require2FA);
     app.get("/protected", (_req, res) => res.json({ ok: true }));
 
-    const res = await request(app).get("/protected");
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/protected");
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+    } finally {
+      await close();
+    }
   });
 });
-
