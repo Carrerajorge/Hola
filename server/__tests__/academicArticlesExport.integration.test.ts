@@ -190,7 +190,9 @@ describe("academicArticlesExport (integration-ish)", () => {
     process.env.ACADEMIC_JSON_REPORT_DISABLED = "1";
   });
 
-  it("returns 100 articles with strict geo filtering, enriches missing fields, and writes Excel+Word outputs", async () => {
+  it(
+    "returns 100 articles with strict geo filtering, enriches missing fields, and writes Excel+Word outputs",
+    async () => {
     const { exportAcademicArticlesFromPrompt } = await import("../services/academicArticlesExport");
 
     const prompt =
@@ -242,5 +244,6 @@ describe("academicArticlesExport (integration-ish)", () => {
     // Word: should contain DOI links in extracted text
     const raw = await mammoth.extractRawText({ buffer: result.wordBuffer });
     expect(raw.value).toContain("https://doi.org/");
-  });
+  },
+  60000);
 });

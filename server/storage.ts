@@ -635,9 +635,15 @@ export class MemStorage implements IStorage {
 
   async getChats(userId?: string): Promise<Chat[]> {
     if (userId) {
-      return dbRead.select().from(chats).where(eq(chats.userId, userId)).orderBy(desc(chats.updatedAt));
+      return dbRead.select()
+        .from(chats)
+        .where(and(eq(chats.userId, userId), isNull(chats.deletedAt)))
+        .orderBy(desc(chats.updatedAt));
     }
-    return dbRead.select().from(chats).orderBy(desc(chats.updatedAt));
+    return dbRead.select()
+      .from(chats)
+      .where(isNull(chats.deletedAt))
+      .orderBy(desc(chats.updatedAt));
   }
 
   async getActiveChats(userId: string): Promise<Chat[]> {

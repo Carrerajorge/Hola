@@ -122,6 +122,16 @@
   background-color: hsl(var(--background));
 }
 
+/* Minimal background: subtle grid + soft vignette (stays readable in light/dark). */
+.paper-grid {
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(circle at 1px 1px, hsl(var(--foreground) / 0.06) 1px, transparent 0),
+    radial-gradient(circle at 50% 20%, hsl(var(--foreground) / 0.035), transparent 55%);
+  background-size: 28px 28px, auto;
+  background-position: 0 0, center;
+}
+
 /* Simple Card - Uses design tokens */
 .glass-card {
   background-color: hsl(var(--card));

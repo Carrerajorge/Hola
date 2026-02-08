@@ -91,6 +91,9 @@ import { memoryRouter } from "./routes/memoryRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
+import { createSecurityRouter } from "./routes/securityRouter";
+import { createMfaRouter } from "./routes/mfaRouter";
+import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
@@ -128,18 +131,64 @@ export async function registerRoutes(
       prompt: "consent select_account",
     }));
     app.get("/api/auth/google/callback",
-      passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=google_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Google callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Google login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -153,18 +202,64 @@ export async function registerRoutes(
   if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
     app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
     app.get("/api/auth/microsoft/callback",
-      passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=microsoft_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Microsoft callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Microsoft login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -177,18 +272,64 @@ export async function registerRoutes(
   if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
     app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
     app.get("/api/auth/auth0/callback",
-      passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=auth0_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Auth0 callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Auth0 login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -406,7 +547,9 @@ export async function registerRoutes(
   // New routes from 8H plan
   app.use("/api/templates", templatesRouter);
   app.use("/api/webhooks", webhooksRouter);
+  app.use("/api/auth/mfa", createMfaRouter());
   app.use("/api/2fa", twoFactorRouter);
+  app.use("/api/security", createSecurityRouter());
   app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/memory", memoryRouter);
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);

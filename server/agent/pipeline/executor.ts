@@ -25,7 +25,8 @@ export class PipelineExecutor {
 
   async execute(
     plan: ExecutionPlan,
-    onProgress?: StepCallback
+    onProgress?: StepCallback,
+    contextOverrides?: { userId?: string; conversationId?: string }
   ): Promise<{ results: StepResult[]; artifacts: Artifact[] }> {
     const results: StepResult[] = [];
     const artifacts: Map<string, Artifact> = new Map();
@@ -85,6 +86,8 @@ export class PipelineExecutor {
         runId: plan.runId,
         planId: plan.id,
         stepIndex: i,
+        userId: contextOverrides?.userId,
+        conversationId: contextOverrides?.conversationId,
         previousResults: results,
         artifacts,
         variables,

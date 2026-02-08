@@ -12,12 +12,12 @@ import {
   regenerateBackupCodes 
 } from "../services/twoFactorAuth";
 import { auditLog } from "../services/auditLogger";
-import { getSecureUserId } from "../lib/anonUserHelper";
+import { getUserId } from "../types/express";
 
 export const twoFactorRouter = Router();
 
 function getAuthenticatedUserId(req: any): string | null {
-  const userId = getSecureUserId(req);
+  const userId = getUserId(req);
   if (!userId || String(userId).startsWith("anon_")) return null;
   return userId;
 }

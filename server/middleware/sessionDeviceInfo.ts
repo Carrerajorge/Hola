@@ -17,26 +17,37 @@ export function sessionDeviceInfoMiddleware(req: Request, _res: Response, next: 
   const session = (req as any)?.session as any;
   if (!session) return next();
 
+  const now = Date.now();
   const ua = String(req.headers["user-agent"] || "");
-  const ipPrefix = ipPrefixFromRequest(req);
+  // Privacy-preserving IP prefix (enough to recognize a network without storing full IP).
+  const ip = ipPrefixFromRequest(req);
 
   const device = (session.device || {}) as any;
 
-  if (typeof device.userAgent !== "string") device.userAgent = ua;
-  if (typeof device.ipPrefix !== "string") device.ipPrefix = ipPrefix;
-  if (typeof device.createdAt !== "string") device.createdAt = new Date().toISOString();
+  let changed = false;
 
-  // Only write to the session when something is missing to avoid extra DB churn.
-  const shouldUpdate =
-    !session.device ||
-    session.device.userAgent !== device.userAgent ||
-    session.device.ipPrefix !== device.ipPrefix ||
-    session.device.createdAt !== device.createdAt;
-
-  if (shouldUpdate) {
-    session.device = device;
+  if (typeof device.createdAt !== "number") {
+    device.createdAt = now;
+    changed = true;
   }
+
+  if (typeof device.userAgent !== "string" || device.userAgent !== ua) {
+    device.userAgent = ua;
+    changed = true;
+  }
+
+  if (typeof device.ip !== "string" || device.ip !== ip) {
+    device.ip = ip;
+    changed = true;
+  }
+
+  // Throttle lastSeenAt updates to reduce DB writes (sessions are persisted in Postgres).
+  if (typeof device.lastSeenAt !== "number" || now - device.lastSeenAt > 60_000) {
+    device.lastSeenAt = now;
+    changed = true;
+  }
+
+  if (changed) session.device = device;
 
   next();
 }
-

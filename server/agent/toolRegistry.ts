@@ -22,6 +22,7 @@ import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
 import { getUserSettingsCached } from "../services/userSettingsCache";
+import { getUserPrivacySettings } from "../services/privacyService";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
@@ -1310,6 +1311,78 @@ const browseUrlTool: ToolDefinition = {
           artifacts: [],
           previews: [],
           logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
+      const privacy = await getUserPrivacySettings(context.userId);
+      if (!privacy.remoteBrowserDataAccess) {
+        // Privacy-preserving fallback: do a stateless HTTP fetch without cookies/session,
+        // and never capture screenshots.
+        const fetchStart = Date.now();
+
+        const extractTitle = (html: string): string => {
+          const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+          return (match?.[1] || "").replace(/\s+/g, " ").trim().slice(0, 200);
+        };
+
+        const response = await fetch(input.url, {
+          signal: context.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          },
+        });
+
+        if (!response.ok) {
+          return {
+            success: false,
+            output: null,
+            error: createError(
+              "BROWSE_ERROR",
+              `Remote browser data access is disabled. HTTP fetch failed: ${response.status} ${response.statusText}`,
+              response.status >= 500
+            ),
+            artifacts: [],
+            previews: [],
+            logs: [
+              {
+                level: "warn",
+                message: "Remote browser disabled by privacy settings; browse_url used HTTP fetch fallback.",
+                timestamp: new Date(),
+                data: { url: input.url, status: response.status },
+              },
+            ],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const htmlText = await response.text();
+        const html = htmlText.slice(0, 50000);
+
+        return {
+          success: true,
+          output: {
+            url: response.url || input.url,
+            title: extractTitle(html),
+            html,
+            timing: {
+              navigationMs: Date.now() - fetchStart,
+              renderMs: 0,
+            },
+            sessionId: undefined,
+            privacyFallback: true,
+          },
+          artifacts: [],
+          previews: [],
+          logs: [
+            {
+              level: "info",
+              message: "Remote browser disabled by privacy settings; browse_url used HTTP fetch fallback (no cookies/session, no screenshots).",
+              timestamp: new Date(),
+              data: { url: input.url },
+            },
+          ],
           metrics: { durationMs: Date.now() - startTime },
         };
       }

@@ -81,7 +81,10 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
 
     await storage.updateAgentRunStatus(agentRun.id, "running");
 
-    const { results, artifacts } = await pipelineExecutor.execute(plan, onProgress);
+    const { results, artifacts } = await pipelineExecutor.execute(plan, onProgress, {
+      userId,
+      conversationId,
+    });
 
     // Collect webSources from all completed steps
     const allWebSources: WebSource[] = [];

@@ -63,6 +63,7 @@ function ChatPageRedirect() {
   return <Home />;
 }
 const LoginPage = lazy(() => import("@/pages/login"));
+const LoginApprovePage = lazy(() => import("@/pages/login-approve"));
 const SignupPage = lazy(() => import("@/pages/signup"));
 const LandingPage = lazy(() => import("@/pages/landing"));
 const NotFound = lazy(() => import("@/pages/not-found"));
@@ -200,6 +201,7 @@ function Router() {
             <Route path="/chat/:id" component={ChatPageRedirect} />
             <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
+            <Route path="/login/approve" component={LoginApprovePage} />
             <Route path="/signup" component={SignupPage} />
             <Route path="/profile" component={ProfilePage} />
             <Route path="/billing" component={BillingPage} />

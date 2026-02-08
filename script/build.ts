@@ -44,7 +44,16 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  await viteBuild();
+  // Some environments terminate long-running commands that don't emit output.
+  // Emit a small heartbeat while Vite is working to keep logs alive.
+  const clientHeartbeat = setInterval(() => {
+    console.log("[build] client build still running...");
+  }, 15000);
+  try {
+    await viteBuild();
+  } finally {
+    clearInterval(clientHeartbeat);
+  }
 
   await bumpBuiltSwCleanupVersion();
 

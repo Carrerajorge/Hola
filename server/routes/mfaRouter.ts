@@ -1,296 +1,263 @@
-/**
- * MFA Router
- * Endpoints for two-factor authentication setup and verification
- */
+import { Router } from "express";
+import { z } from "zod";
+import { validateBody, validateParams } from "../middleware/validateRequest";
+import { getUserId } from "../types/express";
+import { storage } from "../storage";
+import { authStorage } from "../replit_integrations/auth/storage";
+import { verify2FALogin } from "../services/twoFactorAuth";
+import { expireLoginApproval, getLoginApproval, respondLoginApproval } from "../services/loginApprovals";
+import { buildSessionUserFromDbUser } from "../lib/sessionUser";
 
-import { Router } from 'express';
-import { z } from 'zod';
-import { db } from '../db';
-import { users } from '../../shared/schema';
-import { eq } from 'drizzle-orm';
-import {
-    generateMfaSecret,
-    verifyMfa,
-    hashBackupCodes,
-    checkHashedBackupCode
-} from '../services/mfaService';
+type PendingMfaSession = {
+  userId: string;
+  methods?: { totp?: boolean; push?: boolean };
+  approvalId?: string | null;
+  createdAt?: number;
+  expiresAt?: number;
+  sessionUser?: unknown;
+};
+
+function saveSession(session: any): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!session?.save) return resolve();
+    session.save((err: any) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
 
 export function createMfaRouter() {
-    const router = Router();
+  const router = Router();
 
-    // Setup MFA - Generate secret and QR code
-    router.post('/setup', async (req, res) => {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+  router.get("/status", async (req, res) => {
+    const session = req.session as any;
+    const pending = (session?.pendingMfa || null) as PendingMfaSession | null;
+    if (!pending?.userId) {
+      return res.json({ active: false });
+    }
 
-            const user = await db.query.users.findFirst({
-                where: eq(users.id, userId),
-            });
+    const now = Date.now();
+    const expiresAt = typeof pending.expiresAt === "number" ? pending.expiresAt : null;
+    if (expiresAt && now >= expiresAt) {
+      if (pending.approvalId) {
+        await expireLoginApproval(String(pending.approvalId)).catch(() => {});
+      }
+      delete session.pendingMfa;
+      await saveSession(session).catch(() => {});
+      return res.json({ active: false, status: "expired", methods: pending.methods ?? { totp: false, push: false } });
+    }
 
-            if (!user) {
-                return res.status(404).json({ error: 'User not found' });
-            }
+    let status: "pending" | "approved" | "denied" | "expired" = "pending";
+    const approvalId = typeof pending.approvalId === "string" ? pending.approvalId : null;
 
-            // Generate new MFA secret
-            const mfaSetup = await generateMfaSecret(user.email);
-
-            // Store pending secret (not activated yet)
-            // In production, store in a temporary table or Redis
-            // For now, we'll return it and expect /verify to confirm
-
-            res.json({
-                secret: mfaSetup.secret, // Only for initial setup
-                qrCode: mfaSetup.qrCodeDataUrl,
-                backupCodes: mfaSetup.backupCodes,
-                message: 'Scan the QR code with your authenticator app, then verify with a code',
-            });
-        } catch (error: any) {
-            console.error('MFA setup error:', error);
-            res.status(500).json({ error: 'Failed to setup MFA', details: error.message });
+    if (approvalId) {
+      const approval = await getLoginApproval(approvalId);
+      if (!approval || approval.userId !== pending.userId) {
+        status = "expired";
+      } else {
+        if (approval.status === "pending" && approval.expiresAt.getTime() <= now) {
+          await expireLoginApproval(approvalId).catch(() => {});
+          const refreshed = await getLoginApproval(approvalId);
+          status = (refreshed?.status as any) || "expired";
+        } else {
+          status = approval.status;
         }
+      }
+    }
+
+    // If it was denied/expired, stop the flow and clear pending state.
+    if (status === "denied" || status === "expired") {
+      delete session.pendingMfa;
+      await saveSession(session).catch(() => {});
+      return res.json({ active: false, status, methods: pending.methods ?? { totp: false, push: false } });
+    }
+
+    return res.json({
+      active: true,
+      status,
+      methods: pending.methods ?? { totp: false, push: false },
+      approvalId,
+      expiresAt,
     });
+  });
 
-    // Verify and enable MFA
-    router.post('/enable', async (req, res) => {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+  router.post(
+    "/cancel",
+    async (req, res) => {
+      const session = req.session as any;
+      if (session?.pendingMfa) {
+        delete session.pendingMfa;
+        await saveSession(session).catch(() => {});
+      }
+      return res.json({ success: true });
+    }
+  );
 
-            const schema = z.object({
-                secret: z.string(),
-                code: z.string().min(6),
-                backupCodes: z.array(z.string()),
-            });
+  router.post(
+    "/verify",
+    validateBody(z.object({
+      code: z.string().trim().min(6).optional(),
+    })),
+    async (req: any, res) => {
+      const session = req.session as any;
+      const pending = (session?.pendingMfa || null) as PendingMfaSession | null;
+      if (!pending?.userId) {
+        return res.status(400).json({ success: false, message: "No hay un inicio de sesión para verificar." });
+      }
 
-            const { secret, code, backupCodes } = schema.parse(req.body);
-
-            // Verify the code before enabling
-            const result = verifyMfa(code, secret, []);
-
-            if (!result.success) {
-                return res.status(400).json({ error: 'Invalid verification code' });
-            }
-
-            // Hash backup codes before storing
-            const hashedBackupCodes = hashBackupCodes(backupCodes);
-
-            // Update user with MFA enabled
-            await db.update(users)
-                .set({
-                    mfaEnabled: true,
-                    mfaSecret: secret,
-                    mfaBackupCodes: hashedBackupCodes,
-                    updatedAt: new Date(),
-                })
-                .where(eq(users.id, userId));
-
-            res.json({
-                success: true,
-                message: 'MFA enabled successfully',
-                backupCodesCount: backupCodes.length,
-            });
-        } catch (error: any) {
-            console.error('MFA enable error:', error);
-            res.status(500).json({ error: 'Failed to enable MFA', details: error.message });
+      const now = Date.now();
+      if (typeof pending.expiresAt === "number" && now >= pending.expiresAt) {
+        if (pending.approvalId) {
+          await expireLoginApproval(String(pending.approvalId)).catch(() => {});
         }
-    });
+        delete session.pendingMfa;
+        await saveSession(session).catch(() => {});
+        return res.status(401).json({ success: false, message: "La solicitud MFA expiró. Intenta de nuevo." });
+      }
 
-    // Verify MFA code during login
-    router.post('/verify', async (req, res) => {
-        try {
-            const schema = z.object({
-                userId: z.number(),
-                code: z.string().min(6),
-            });
+      const userId = pending.userId;
+      const methods = pending.methods ?? {};
 
-            const { userId, code } = schema.parse(req.body);
-
-            const user = await db.query.users.findFirst({
-                where: eq(users.id, userId),
-            });
-
-            if (!user || !user.mfaEnabled || !user.mfaSecret) {
-                return res.status(400).json({ error: 'MFA not enabled for this user' });
-            }
-
-            // Try TOTP verification first
-            const result = verifyMfa(code, user.mfaSecret, []);
-
-            if (result.success) {
-                // Update last MFA verification time
-                await db.update(users)
-                    .set({ mfaLastVerified: new Date() })
-                    .where(eq(users.id, userId));
-
-                return res.json({ success: true, usedBackupCode: false });
-            }
-
-            // Try backup code
-            if (user.mfaBackupCodes && user.mfaBackupCodes.length > 0) {
-                const { valid, usedIndex } = checkHashedBackupCode(code, user.mfaBackupCodes);
-
-                if (valid) {
-                    // Remove used backup code
-                    const remainingCodes = [...user.mfaBackupCodes];
-                    remainingCodes.splice(usedIndex, 1);
-
-                    await db.update(users)
-                        .set({
-                            mfaBackupCodes: remainingCodes,
-                            mfaLastVerified: new Date(),
-                        })
-                        .where(eq(users.id, userId));
-
-                    return res.json({
-                        success: true,
-                        usedBackupCode: true,
-                        remainingBackupCodes: remainingCodes.length,
-                    });
-                }
-            }
-
-            res.status(400).json({ error: 'Invalid verification code' });
-        } catch (error: any) {
-            console.error('MFA verify error:', error);
-            res.status(500).json({ error: 'Verification failed', details: error.message });
+      const code = (req.body?.code as string | undefined) || undefined;
+      if (code) {
+        if (!methods.totp) {
+          return res.status(400).json({ success: false, message: "Este inicio de sesión no acepta código 2FA." });
         }
-    });
-
-    // Disable MFA
-    router.post('/disable', async (req, res) => {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
-            const schema = z.object({
-                password: z.string(),
-                code: z.string().optional(),
-            });
-
-            const { password, code } = schema.parse(req.body);
-
-            const user = await db.query.users.findFirst({
-                where: eq(users.id, userId),
-            });
-
-            if (!user) {
-                return res.status(404).json({ error: 'User not found' });
-            }
-
-            // Verify password (simplified - use proper bcrypt compare in production)
-            // if (!await bcrypt.compare(password, user.password)) {
-            //   return res.status(400).json({ error: 'Invalid password' });
-            // }
-
-            // If MFA is enabled, require code verification
-            if (user.mfaEnabled && user.mfaSecret && code) {
-                const result = verifyMfa(code, user.mfaSecret, []);
-                if (!result.success) {
-                    return res.status(400).json({ error: 'Invalid MFA code' });
-                }
-            }
-
-            // Disable MFA
-            await db.update(users)
-                .set({
-                    mfaEnabled: false,
-                    mfaSecret: null,
-                    mfaBackupCodes: null,
-                    updatedAt: new Date(),
-                })
-                .where(eq(users.id, userId));
-
-            res.json({ success: true, message: 'MFA disabled successfully' });
-        } catch (error: any) {
-            console.error('MFA disable error:', error);
-            res.status(500).json({ error: 'Failed to disable MFA', details: error.message });
+        const ok = await verify2FALogin(userId, code).catch(() => false);
+        if (!ok) {
+          return res.status(401).json({ success: false, message: "Código 2FA inválido." });
         }
-    });
-
-    // Regenerate backup codes
-    router.post('/regenerate-backup-codes', async (req, res) => {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
-            const schema = z.object({
-                code: z.string().min(6),
-            });
-
-            const { code } = schema.parse(req.body);
-
-            const user = await db.query.users.findFirst({
-                where: eq(users.id, userId),
-            });
-
-            if (!user || !user.mfaEnabled || !user.mfaSecret) {
-                return res.status(400).json({ error: 'MFA not enabled' });
-            }
-
-            // Verify current code
-            const result = verifyMfa(code, user.mfaSecret, []);
-            if (!result.success) {
-                return res.status(400).json({ error: 'Invalid verification code' });
-            }
-
-            // Generate new backup codes
-            const { backupCodes } = await generateMfaSecret(user.email);
-            const hashedCodes = hashBackupCodes(backupCodes);
-
-            await db.update(users)
-                .set({ mfaBackupCodes: hashedCodes })
-                .where(eq(users.id, userId));
-
-            res.json({
-                success: true,
-                backupCodes, // Return new codes (only time they're shown)
-                message: 'New backup codes generated. Save them securely.',
-            });
-        } catch (error: any) {
-            console.error('Regenerate backup codes error:', error);
-            res.status(500).json({ error: 'Failed to regenerate codes', details: error.message });
+      } else {
+        const approvalId = typeof pending.approvalId === "string" ? pending.approvalId : null;
+        if (!approvalId || !methods.push) {
+          return res.status(400).json({ success: false, message: "Falta verificación MFA." });
         }
-    });
 
-    // Get MFA status
-    router.get('/status', async (req, res) => {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
-            const user = await db.query.users.findFirst({
-                where: eq(users.id, userId),
-                columns: {
-                    mfaEnabled: true,
-                    mfaBackupCodes: true,
-                    mfaLastVerified: true,
-                },
-            });
-
-            if (!user) {
-                return res.status(404).json({ error: 'User not found' });
-            }
-
-            res.json({
-                enabled: user.mfaEnabled || false,
-                backupCodesRemaining: user.mfaBackupCodes?.length || 0,
-                lastVerified: user.mfaLastVerified,
-            });
-        } catch (error: any) {
-            res.status(500).json({ error: 'Failed to get MFA status' });
+        const approval = await getLoginApproval(approvalId);
+        if (!approval || approval.userId !== userId) {
+          delete session.pendingMfa;
+          await saveSession(session).catch(() => {});
+          return res.status(401).json({ success: false, message: "Solicitud de aprobación inválida." });
         }
-    });
 
-    return router;
+        if (approval.status === "pending" && approval.expiresAt.getTime() <= now) {
+          await expireLoginApproval(approvalId).catch(() => {});
+          delete session.pendingMfa;
+          await saveSession(session).catch(() => {});
+          return res.status(401).json({ success: false, message: "La solicitud expiró. Intenta de nuevo." });
+        }
+
+        if (approval.status !== "approved") {
+          if (approval.status === "denied") {
+            delete session.pendingMfa;
+            await saveSession(session).catch(() => {});
+            return res.status(403).json({ success: false, message: "La solicitud fue rechazada." });
+          }
+          return res.status(401).json({ success: false, message: "Aún no se ha aprobado el inicio de sesión." });
+        }
+      }
+
+      const dbUser = await storage.getUser(userId).catch(() => undefined);
+      const preservedUser = pending.sessionUser && typeof pending.sessionUser === "object"
+        ? (pending.sessionUser as any)
+        : null;
+      const sessionUser = preservedUser || (dbUser ? buildSessionUserFromDbUser(dbUser) : null);
+      if (!sessionUser) {
+        delete session.pendingMfa;
+        await saveSession(session).catch(() => {});
+        return res.status(401).json({ success: false, message: "Usuario no encontrado." });
+      }
+
+      return req.login(sessionUser, async (err: any) => {
+        if (err) {
+          return res.status(500).json({ success: false, message: "Error al iniciar sesión." });
+        }
+
+        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+        session.authUserId = userId;
+        session.passport = session.passport || {};
+        session.passport.user = sessionUser;
+        delete session.pendingMfa;
+
+        try {
+          await authStorage.updateUserLogin(userId, {
+            ipAddress: req.ip || req.socket?.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null,
+          });
+          await storage.createAuditLog({
+            userId,
+            action: "user_login",
+            resource: "auth",
+            details: { email: dbUser?.email ?? null, via: "mfa" },
+            ipAddress: req.ip || req.socket?.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null,
+          } as any);
+        } catch {
+          // Ignore audit failures
+        }
+
+        await saveSession(session).catch(() => {});
+        return res.json({ success: true });
+      });
+    }
+  );
+
+  router.get(
+    "/approval/:id",
+    validateParams(z.object({ id: z.string().uuid() })),
+    async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId || userId.startsWith("anon_")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const approval = await getLoginApproval(req.params.id);
+      if (!approval) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      if (approval.userId !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Best-effort: update expired approvals.
+      if (approval.status === "pending" && approval.expiresAt.getTime() <= Date.now()) {
+        await expireLoginApproval(approval.id).catch(() => {});
+      }
+
+      return res.json({
+        id: approval.id,
+        status: approval.status,
+        createdAt: approval.createdAt.toISOString(),
+        expiresAt: approval.expiresAt.toISOString(),
+        decidedAt: approval.decidedAt ? approval.decidedAt.toISOString() : null,
+        metadata: approval.metadata || {},
+      });
+    }
+  );
+
+  router.post(
+    "/approval/:id/respond",
+    validateParams(z.object({ id: z.string().uuid() })),
+    validateBody(z.object({ decision: z.enum(["approved", "denied"]) })),
+    async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId || userId.startsWith("anon_")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const id = req.params.id;
+      const decision = req.body.decision as "approved" | "denied";
+      const decidedBySid = req.sessionID || null;
+
+      const result = await respondLoginApproval({ id, userId, decision, decidedBySid });
+      if (!result.updated) {
+        return res.status(409).json({ success: false, message: "La solicitud ya fue decidida o expiró." });
+      }
+
+      return res.json({ success: true, decision });
+    }
+  );
+
+  return router;
 }

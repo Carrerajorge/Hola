@@ -1459,6 +1459,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           const pipelineResult = await runPipeline({
             objective,
             conversationId,
+            userId: userId || undefined,
             onProgress: (update) => {
               onAgentProgress?.(update);
               if (update.detail?.browserSessionId) {
