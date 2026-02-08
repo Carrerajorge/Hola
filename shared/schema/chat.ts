@@ -3,6 +3,7 @@ import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./auth";
+import { workspaceGroups } from "./workspaceGroups";
 
 export const chats = pgTable("chats", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -152,6 +153,29 @@ export const insertChatShareSchema = createInsertSchema(chatShares);
 
 export type InsertChatShare = z.infer<typeof insertChatShareSchema>;
 export type ChatShare = typeof chatShares.$inferSelect;
+
+// Chat sharing to workspace groups - grants access to all current/future members of a group
+export const chatGroupShares = pgTable(
+    "chat_group_shares",
+    {
+        id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+        chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+        groupId: varchar("group_id").notNull().references(() => workspaceGroups.id, { onDelete: "cascade" }),
+        role: text("role").notNull().default("viewer"), // editor, viewer
+        invitedBy: varchar("invited_by"),
+        createdAt: timestamp("created_at").defaultNow().notNull(),
+    },
+    (table) => [
+        index("chat_group_shares_chat_idx").on(table.chatId),
+        index("chat_group_shares_group_idx").on(table.groupId),
+        uniqueIndex("chat_group_shares_chat_group_unique").on(table.chatId, table.groupId),
+    ]
+);
+
+export const insertChatGroupShareSchema = createInsertSchema(chatGroupShares);
+
+export type InsertChatGroupShare = z.infer<typeof insertChatGroupShareSchema>;
+export type ChatGroupShare = typeof chatGroupShares.$inferSelect;
 
 // Chat Participants for sharing chats
 export const chatParticipants = pgTable("chat_participants", {

@@ -74,7 +74,7 @@ function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRed
     }
 
     const config = RATE_LIMIT_CONFIGS[tier];
-    const redisClient = cache.getRedisClient();
+    const redisClient = cache.getConnectedRedisClient();
 
     let limiter: RateLimiterMemory | RateLimiterRedis;
 
@@ -181,7 +181,7 @@ export function createCustomRateLimiter(options: {
     keyPrefix: string;
     message?: string;
 }) {
-    const redisClient = cache.getRedisClient();
+    const redisClient = cache.getConnectedRedisClient();
     let limiter: RateLimiterMemory | RateLimiterRedis;
     const duration = Math.ceil(options.windowMs / 1000);
 

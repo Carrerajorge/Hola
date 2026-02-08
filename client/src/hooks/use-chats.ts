@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { trackWorkspaceEvent } from "@/lib/analytics";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -650,6 +651,21 @@ export function useChats() {
     setActiveChatId(id);
   }, []);
 
+  const trackChatMessageSent = useCallback((chatId: string, message: any, deduplicated?: boolean) => {
+    if (message?.role !== "user") return;
+    if (deduplicated) return;
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "chat_message_sent",
+      metadata: {
+        chatId,
+        contentLength: typeof message?.content === "string" ? message.content.length : 0,
+        attachmentsCount: Array.isArray(message?.attachments) ? message.attachments.length : 0,
+        hasAttachments: Array.isArray(message?.attachments) ? message.attachments.length > 0 : false,
+      },
+    });
+  }, []);
+
   const loadChatsFromServer = useCallback(async () => {
     try {
       const res = await fetch("/api/chats", {
@@ -765,7 +781,9 @@ export function useChats() {
 
       const serverChats = await loadChatsFromServer();
 
-      if (serverChats && serverChats.length > 0) {
+      // IMPORTANT: an empty array is still a valid server response (authoritative).
+      // Only fall back to localStorage when the server request failed (null).
+      if (serverChats) {
         setChats(serverChats);
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
@@ -774,7 +792,7 @@ export function useChats() {
           localStorage.removeItem(STORAGE_KEY);
         }
         // Only auto-select first chat if user hasn't manually selected/deselected
-        if (!userHasSelectedRef.current && !activeChatId) {
+        if (!userHasSelectedRef.current && !activeChatId && serverChats.length > 0) {
           setActiveChatId(serverChats[0]?.id || null);
         }
       } else {
@@ -926,6 +944,40 @@ export function useChats() {
     initChats();
   }, []);
 
+  // Allows other parts of the app (settings/privacy) to request a full server refresh.
+  useEffect(() => {
+    const handleRefresh = () => {
+      void (async () => {
+        setIsLoading(true);
+        try {
+          const serverChats = await loadChatsFromServer();
+          if (!serverChats) return;
+
+          setChats(serverChats);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
+          } catch (e) {
+            console.warn("Failed to cache chats to localStorage:", e);
+            localStorage.removeItem(STORAGE_KEY);
+          }
+
+          // If the active chat disappeared (archived/deleted), pick a sane fallback.
+          if (activeChatId && !serverChats.some((c) => c.id === activeChatId)) {
+            setActiveChatId(serverChats[0]?.id || null);
+          }
+          if (!activeChatId && !userHasSelectedRef.current) {
+            setActiveChatId(serverChats[0]?.id || null);
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+    };
+
+    window.addEventListener("refresh-chats", handleRefresh);
+    return () => window.removeEventListener("refresh-chats", handleRefresh);
+  }, [activeChatId, loadChatsFromServer]);
+
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
       // Use debounced save to prevent excessive writes during streaming
@@ -1009,6 +1061,7 @@ export function useChats() {
           // If response includes a run, track it for AI streaming
           if (res.ok) {
             const data = await res.json();
+            trackChatMessageSent(realChatId, msg, data?.deduplicated);
             if (data.run) {
               const run: ChatRun = {
                 id: data.run.id,
@@ -1225,6 +1278,7 @@ export function useChats() {
         // Handle run-based response for user messages
         if (res.ok) {
           const data = await res.json();
+          trackChatMessageSent(resolvedChatId, message, data?.deduplicated);
 
           // If response includes a run, track it for AI streaming
           if (data.run) {
@@ -1354,9 +1408,13 @@ export function useChats() {
     const chat = chats.find(c => c.id === chatId);
     const newArchived = !chat?.archived;
 
-    setChats(prev => prev.map(c =>
-      c.id === chatId ? { ...c, archived: newArchived } : c
-    ));
+    // Archived chats are removed from the main list and managed via Settings > Historial.
+    setChats(prev => {
+      if (newArchived) {
+        return prev.filter(c => c.id !== chatId);
+      }
+      return prev.map(c => (c.id === chatId ? { ...c, archived: newArchived } : c));
+    });
 
     try {
       await fetch(`/api/chats/${chatId}`, {
@@ -1365,6 +1423,7 @@ export function useChats() {
         credentials: "include",
         body: JSON.stringify({ archived: newArchived })
       });
+      window.dispatchEvent(new CustomEvent("refresh-chats"));
     } catch (error) {
       console.error("Error archiving chat:", error);
     }

@@ -54,10 +54,10 @@ const PUBLIC_SETTING_KEYS = [
   "date_format",
   "maintenance_mode",
 
-  // Branding
-  "primary_color",
-  "secondary_color",
-  "theme_mode",
+  // Branding (Removed to allow user override on client-side)
+  // "primary_color",
+  // "secondary_color",
+  // "theme_mode",
 
   // Users
   "allow_registration",

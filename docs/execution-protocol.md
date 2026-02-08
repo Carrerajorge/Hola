@@ -20,6 +20,9 @@ QUEUED → PLANNING → RUNNING → COMPLETED
 | `planning` | Generating execution plan |
 | `running` | Executing steps |
 | `verifying` | Validating results (optional) |
+| `replanning` | Generating a recovery plan after partial failure |
+| `awaiting_confirmation` | Paused waiting for explicit user confirmation (high-risk step) |
+| `cancelling` | Cancellation requested and in progress |
 | `completed` | All steps finished successfully |
 | `failed` | Execution error occurred |
 | `timeout` | Watchdog timeout triggered |

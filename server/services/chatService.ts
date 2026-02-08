@@ -419,7 +419,26 @@ export async function handleChatRequest(
     lastImageId?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, userId, images, onAgentProgress, gptSession, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
+  const {
+    useRag = true,
+    conversationId,
+    userId,
+    images,
+    onAgentProgress,
+    gptSession,
+    gptConfig,
+    documentMode: requestedDocumentMode,
+    figmaMode: requestedFigmaMode,
+    provider = DEFAULT_PROVIDER,
+    model = DEFAULT_MODEL,
+    attachmentContext = "",
+    forceDirectResponse = false,
+    hasRawAttachments = false,
+    lastImageBase64,
+    lastImageId
+  } = options;
+  let documentMode = requestedDocumentMode;
+  let figmaMode = requestedFigmaMode;
   const hasImages = images && images.length > 0;
 
   // FAST PATH: Check cache for simple greetings/messages
@@ -466,6 +485,15 @@ export async function handleChatRequest(
     canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
     voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
   };
+
+  // Canvas gating: if disabled, ignore any canvas-dependent modes (document editor, figma, etc).
+  if (!featureFlags.canvasEnabled) {
+    if (documentMode || figmaMode) {
+      console.log("[ChatService] Canvas disabled in user settings; ignoring documentMode/figmaMode");
+    }
+    documentMode = undefined;
+    figmaMode = false;
+  }
 
   // Tool Policy Enforcement Helper
   const enforcePolicyCheck = async (toolId: string, providerId: string): Promise<{ allowed: boolean; reason?: string }> => {
@@ -584,7 +612,10 @@ export async function handleChatRequest(
   if (lastUserMessage) {
     // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
     // Skip Gmail detection when user has attached a document (attachmentContext contains the file)
-    if (!documentMode && !figmaMode && !attachmentContext && userId && detectEmailIntent(lastUserMessage.content)) {
+    const hasExplicitGmailMention = lastUserMessage.content.toLowerCase().includes("@gmail");
+    const allowConnectorSearch = featureFlags.connectorSearchAuto || hasExplicitGmailMention;
+
+    if (!documentMode && !figmaMode && !attachmentContext && userId && allowConnectorSearch && detectEmailIntent(lastUserMessage.content)) {
       try {
         const emailResult = await handleEmailChatRequest(userId, lastUserMessage.content);
         if (emailResult.handled && emailResult.response) {
@@ -1553,7 +1584,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   // Web search: either forced by simple query OR gated by webSearchAuto feature flag
   // GATED: Only allowed when no attachments OR user explicitly requests web
   // Intent-aware: also triggers if intent engine detected a search/research intent
-  const shouldSearchWeb = forceWebSearch || featureFlags.webSearchAuto || intentSuggestsSearch;
+  const shouldSearchWeb = forceWebSearch || userExplicitlyRequestsWeb || featureFlags.webSearchAuto;
   if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && shouldSearchWeb) {
     const academicPolicyCheck = await enforcePolicyCheck("academic_search", "google_scholar");
     if (!academicPolicyCheck.allowed) {
@@ -1870,7 +1901,9 @@ plt.show()
 RESPONDE AHORA CON UN BLOQUE \`\`\`python QUE CREE LA GRÁFICA SOLICITADA.
 ` : '';
 
-  const documentCapabilitiesPrompt = wantsDocument ? `
+  const documentCapabilitiesPrompt = wantsDocument
+    ? featureFlags.canvasEnabled
+      ? `
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
 Puedes crear documentos Word, Excel y PowerPoint. Incluye en tu respuesta un bloque especial con el formato:
 
@@ -1887,6 +1920,10 @@ Para Excel: usa formato de tabla con | columna1 | columna2 | o CSV.
 Para PPT: usa ## para títulos de diapositivas y - para puntos.
 
 El usuario podrá descargar el documento generado directamente.` : `
+IMPORTANTE: El usuario pidió crear un documento, pero la función de Lienzo/Canvas está deshabilitada en su configuración.
+Explícale brevemente cómo activarla en Configuraciones > Personalización > Lienzo para poder generar Word/Excel/PPT.
+Mientras tanto, ofrece una alternativa: entregar el contenido directamente en el chat (texto/tabla) para que el usuario lo copie.
+` : `
 IMPORTANTE: Cuando el usuario pida un resumen, análisis o información, responde directamente en texto plano en el chat. 
 NO generes documentos Word/Excel/PPT a menos que el usuario lo pida EXPLÍCITAMENTE con frases como "crea un documento", "genera un Word", "haz un PowerPoint", etc.
 Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO como documento.`;

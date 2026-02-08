@@ -71,55 +71,63 @@ MEMORY_MAX_ATOMS=1000              # Maximum memory atoms
 
 ## API Endpoints
 
-### Tools Endpoints
+### Health
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/admin/agentic/tools` | List all tools |
-| GET | `/api/admin/agentic/tools/:id` | Get tool by ID |
-| GET | `/api/admin/agentic/tools/category/:category` | Get tools by category |
-| POST | `/api/admin/agentic/tools/:id/execute` | Execute a tool |
-| PATCH | `/api/admin/agentic/tools/:id/toggle` | Enable/disable tool |
-| GET | `/api/admin/agentic/tools/search?q=query` | Search tools |
+| GET | `/api/health` | Fast API health (version, memory, uptime) |
+| GET | `/api/health/live` | Liveness probe |
+| GET | `/api/health/ready` | Readiness probe (dependency summary) |
+| GET | `/health` | Service health |
+| GET | `/health/detailed` | Detailed health checks (DB/Redis/disk) |
 
-### Analysis Endpoints
+### Agent Mode (Chat Runs)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/admin/agentic/analyze` | Analyze prompt complexity |
-| POST | `/api/admin/agentic/intent` | Map intent to tools |
-| GET | `/api/admin/agentic/complexity/stats` | Get complexity statistics |
-
-### Orchestration Endpoints
+> Canonical agent-mode API (requires auth): `/api/agent/*`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/admin/agentic/orchestrate` | Execute orchestrated workflow |
-| GET | `/api/admin/agentic/orchestration/status/:id` | Get orchestration status |
-| POST | `/api/admin/agentic/orchestration/cancel/:id` | Cancel orchestration |
-| GET | `/api/admin/agentic/progress/:taskId` | Get progress for task |
+| POST | `/api/agent/runs` | Create/start an agent run |
+| GET | `/api/agent/runs/chat/:chatId` | Get latest run for a chat |
+| GET | `/api/agent/runs/:id` | Get run state (includes debug fields if run is still active in-memory) |
+| POST | `/api/agent/runs/:id/cancel` | Cancel run |
+| POST | `/api/agent/runs/:id/pause` | Pause run |
+| POST | `/api/agent/runs/:id/resume` | Resume run |
+| POST | `/api/agent/runs/:id/confirm` | Confirm a pending confirmation step |
+| POST | `/api/agent/runs/:id/retry` | Retry run from a step |
+| GET | `/api/agent/runs/:id/events` | List persisted run events |
+| GET | `/api/agent/runs/:id/events/stream` | SSE stream of run events |
+| GET | `/api/agent/runs/:id/stream` | SSE activity stream |
 
-### Memory & Gaps Endpoints
+### Legacy Agent API
+
+> Backwards-compatible legacy endpoints (no auth): `/api/agent-legacy/*`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/admin/agentic/memory` | Get compressed memory state |
-| POST | `/api/admin/agentic/memory/store` | Store memory atom |
-| GET | `/api/admin/agentic/gaps` | List detected gaps |
-| POST | `/api/admin/agentic/gaps` | Report a gap |
-| PATCH | `/api/admin/agentic/gaps/:id/resolve` | Resolve a gap |
+| POST | `/api/agent-legacy/runs` | Start legacy run |
+| GET | `/api/agent-legacy/runs/chat/:chatId` | Get legacy run by chat |
+| GET | `/api/agent-legacy/runs/:id` | Get legacy run |
+| POST | `/api/agent-legacy/runs/:id/cancel` | Cancel legacy run |
 
-### System Endpoints
+### Registry Orchestrator (Tools/Agents Catalog)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/health/live` | Liveness probe |
-| GET | `/health/ready` | Readiness probe |
-| GET | `/health` | Full health status |
-| GET | `/api/admin/agentic/metrics` | System metrics |
-| GET | `/api/admin/agentic/feature-flags` | Get feature flags |
-| PATCH | `/api/admin/agentic/feature-flags` | Update feature flags |
-| GET | `/api/admin/agentic/circuit-breakers` | Circuit breaker status |
+| GET | `/api/registry/status` | Registry initialization + health |
+| GET | `/api/registry/tools` | List registered tools |
+| GET | `/api/registry/tools/:name` | Get tool metadata |
+| GET | `/api/registry/tools/category/:category` | Filter tools by category |
+| GET | `/api/registry/agents` | List agents |
+| POST | `/api/registry/route` | Route a query to an agent/tools |
+| GET | `/api/registry/stats` | Registry stats (tools/agents/orchestrator) |
+
+### Complexity / Routing (Chat)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/chat/complexity` | Complexity analysis (score/category/signals + recommended path) |
+| POST | `/api/chat/route` | Routing decision (PARE) |
 
 ## Usage Examples
 

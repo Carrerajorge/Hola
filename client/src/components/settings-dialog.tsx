@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,6 +30,9 @@ import {
   Loader2,
   Check,
   Volume2,
+  MessageSquare,
+  FileText,
+  Share2,
   Link,
   Unlink,
   Clock,
@@ -44,25 +47,15 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { apiFetch } from "@/lib/apiClient";
 import { formatZonedDate, formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
-import {
-  Sparkles,
-  CheckSquare,
-  Users,
-  Package,
-  MessageSquare,
-  Zap,
-  Star,
-  Share2,
-  Heart,
-  Gift,
-  TrendingUp,
-  FileText
-} from "lucide-react";
+import { SchedulesManagerDialog } from "@/components/schedules-manager-dialog";
+import { SessionsManagerDialog } from "@/components/sessions-manager-dialog";
+import { saveAs } from "file-saver";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,8 +66,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { NotificationsControlPanels } from "@/components/settings/notifications-control-panels";
 
 type SettingsSection = "general" | "notifications" | "personalization" | "apps" | "schedules" | "data" | "security" | "account";
+type BuilderLinkKind = "website" | "linkedin" | "github";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -87,6 +82,30 @@ function mapPlatformDateFormatToUserDateFormat(
   if (fmt === "YYYY-MM-DD") return "yyyy-mm-dd";
   if (fmt === "MM/DD/YYYY") return "mm/dd/yyyy";
   return "dd/mm/yyyy";
+}
+
+function normalizeExternalUrl(candidate: string): string | null {
+  const trimmed = (candidate || "").trim();
+  if (!trimmed) return null;
+
+  // Add https:// when a user pastes a bare domain like "github.com/user".
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getUrlLabel(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 const menuItems: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
@@ -106,223 +125,6 @@ const voices = [
   { id: "juniper", name: "Juniper", description: "Voz clara y profesional" },
   { id: "breeze", name: "Breeze", description: "Voz suave y relajante" },
 ];
-
-interface NotificationEventType {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon?: string;
-}
-
-interface NotificationPreference {
-  id: string;
-  eventTypeId: string;
-  channels: string;
-  enabled: boolean;
-}
-
-const categoryLabels: Record<string, string> = {
-  ai_updates: "Actualizaciones de IA",
-  tasks: "Tareas",
-  social: "Social",
-  product: "Producto",
-};
-
-const categoryIcons: Record<string, React.ReactNode> = {
-  ai_updates: <Sparkles className="h-4 w-4" />,
-  tasks: <CheckSquare className="h-4 w-4" />,
-  social: <Users className="h-4 w-4" />,
-  product: <Package className="h-4 w-4" />,
-};
-
-const eventTypeIcons: Record<string, React.ReactNode> = {
-  ai_response: <MessageSquare className="h-4 w-4" />,
-  ai_suggestion: <Zap className="h-4 w-4" />,
-  task_completed: <CheckSquare className="h-4 w-4" />,
-  task_assigned: <FileText className="h-4 w-4" />,
-  task_reminder: <Bell className="h-4 w-4" />,
-  mention: <Star className="h-4 w-4" />,
-  share: <Share2 className="h-4 w-4" />,
-  follow: <Heart className="h-4 w-4" />,
-  new_feature: <Gift className="h-4 w-4" />,
-  tips: <TrendingUp className="h-4 w-4" />,
-};
-
-function NotificationsSection() {
-  const { user } = useAuth();
-  const userId = user?.id;
-  const queryClient = useQueryClient();
-
-  const { data: eventTypes, isLoading: isLoadingEventTypes } = useQuery<NotificationEventType[]>({
-    queryKey: ['/api/notification-event-types'],
-    queryFn: async () => {
-      const res = await fetch('/api/notification-event-types');
-      if (!res.ok) throw new Error('Failed to fetch event types');
-      return res.json();
-    },
-  });
-
-  const { data: preferences, isLoading: isLoadingPreferences } = useQuery<NotificationPreference[]>({
-    queryKey: ['/api/users', userId, 'notification-preferences'],
-    queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/notification-preferences`);
-      if (!res.ok) throw new Error('Failed to fetch preferences');
-      return res.json();
-    },
-    enabled: !!userId,
-  });
-
-  const updatePreference = useMutation({
-    mutationFn: async (data: { eventTypeId: string; channels?: string; enabled?: boolean }) => {
-      const res = await fetch(`/api/users/${userId}/notification-preferences`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error('Failed to update preference');
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'notification-preferences'] });
-    },
-  });
-
-  const getPreferenceForEventType = (eventTypeId: string): NotificationPreference | undefined => {
-    return preferences?.find(p => p.eventTypeId === eventTypeId);
-  };
-
-  const groupedEventTypes = eventTypes?.reduce((acc, eventType) => {
-    const category = eventType.category || 'other';
-    if (!acc[category]) {
-      acc[category] = [];
-    }
-    acc[category].push(eventType);
-    return acc;
-  }, {} as Record<string, NotificationEventType[]>) || {};
-
-  const categoryOrder = ['ai_updates', 'tasks', 'social', 'product'];
-
-  if (isLoadingEventTypes || isLoadingPreferences) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-xl font-semibold" data-testid="text-notifications-title">Preferencias de Notificaciones</h2>
-          <p className="text-sm text-muted-foreground mt-1" data-testid="text-notifications-description">
-            Configura cómo y cuándo recibir notificaciones
-          </p>
-        </div>
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" data-testid="spinner-loading" />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold" data-testid="text-notifications-title">Preferencias de Notificaciones</h2>
-        <p className="text-sm text-muted-foreground mt-1" data-testid="text-notifications-description">
-          Configura cómo y cuándo recibir notificaciones
-        </p>
-      </div>
-
-      {categoryOrder.map((category) => {
-        const categoryEventTypes = groupedEventTypes[category];
-        if (!categoryEventTypes || categoryEventTypes.length === 0) return null;
-
-        return (
-          <div key={category} className="space-y-3" data-testid={`section-category-${category}`}>
-            <div className="flex items-center gap-2">
-              {categoryIcons[category]}
-              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide" data-testid={`text-category-${category}`}>
-                {categoryLabels[category] || category}
-              </h3>
-            </div>
-
-            <div className="space-y-2">
-              {categoryEventTypes.map((eventType) => {
-                const preference = getPreferenceForEventType(eventType.id);
-                const channels = preference?.channels || 'none';
-                const enabled = preference?.enabled ?? true;
-
-                return (
-                  <div
-                    key={eventType.id}
-                    className="flex items-center justify-between py-3 border-b border-border last:border-b-0"
-                    data-testid={`row-notification-${eventType.id}`}
-                  >
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div className="mt-0.5 text-muted-foreground">
-                        {eventTypeIcons[eventType.id] || <Bell className="h-4 w-4" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm font-medium block" data-testid={`text-event-name-${eventType.id}`}>
-                          {eventType.name}
-                        </span>
-                        <span className="text-xs text-muted-foreground" data-testid={`text-event-description-${eventType.id}`}>
-                          {eventType.description}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      <Select
-                        value={channels}
-                        onValueChange={(value) => updatePreference.mutate({
-                          eventTypeId: eventType.id,
-                          channels: value
-                        })}
-                        disabled={!enabled}
-                      >
-                        <SelectTrigger
-                          className="w-36"
-                          data-testid={`select-channel-${eventType.id}`}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Ninguna</SelectItem>
-                          <SelectItem value="push">Push</SelectItem>
-                          <SelectItem value="email">Email</SelectItem>
-                          <SelectItem value="push_email">Push y Email</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Switch
-                        checked={enabled}
-                        onCheckedChange={(checked) => updatePreference.mutate({
-                          eventTypeId: eventType.id,
-                          enabled: checked
-                        })}
-                        data-testid={`switch-enabled-${eventType.id}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      <Separator />
-
-      <div className="flex items-center justify-between">
-        <a
-          href="/settings?tab=tasks"
-          className="text-sm text-primary hover:underline flex items-center gap-1"
-          data-testid="link-manage-tasks"
-        >
-          <CheckSquare className="h-4 w-4" />
-          Administrar tareas
-          <ChevronRight className="h-4 w-4" />
-        </a>
-      </div>
-    </div>
-  );
-}
 
 interface IntegrationProvider {
   id: string;
@@ -417,7 +219,22 @@ interface ConsentLogEntry {
 interface PrivacySettings {
   trainingOptIn: boolean;
   remoteBrowserDataAccess: boolean;
+  analyticsTracking: boolean;
+  chatHistoryEnabled: boolean;
 }
+
+type TwoFactorStatus = {
+  enabled: boolean;
+  verified: boolean;
+};
+
+type TwoFactorSetup = {
+  secret: string;
+  qrCodeUrl: string;
+  qrCodeImage: string;
+  backupCodes: string[];
+  message?: string;
+};
 
 function AppsSection() {
   const { user } = useAuth();
@@ -427,21 +244,29 @@ function AppsSection() {
   const { settings: platformSettings } = usePlatformSettings();
   const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [providerIconFailed, setProviderIconFailed] = useState<Record<string, boolean>>({});
+  const [maxParallelDraft, setMaxParallelDraft] = useState<string>("3");
 
-  const { data: integrationsData, isLoading: isLoadingIntegrations, refetch } = useQuery<IntegrationsData>({
+  const {
+    data: integrationsData,
+    isLoading: isLoadingIntegrations,
+    isError: isIntegrationsError,
+    error: integrationsError,
+    refetch
+  } = useQuery<IntegrationsData>({
     queryKey: ['/api/users', userId, 'integrations'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/integrations`);
+      const res = await fetch(`/api/users/${userId}/integrations`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch integrations');
       return res.json();
     },
     enabled: !!userId,
   });
 
-  const { data: logsData, isLoading: isLoadingLogs } = useQuery<ToolCallLog[]>({
+  const { data: logsData, isLoading: isLoadingLogs, isError: isLogsError } = useQuery<ToolCallLog[]>({
     queryKey: ['/api/users', userId, 'integrations', 'logs'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/integrations/logs?limit=10`);
+      const res = await fetch(`/api/users/${userId}/integrations/logs?limit=10`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch logs');
       return res.json();
     },
@@ -453,6 +278,7 @@ function AppsSection() {
       const res = await fetch(`/api/users/${userId}/integrations/policy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to update policy');
@@ -472,6 +298,7 @@ function AppsSection() {
       const res = await fetch(`/api/users/${userId}/integrations/${providerId}/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to connect');
       return res.json();
@@ -490,6 +317,7 @@ function AppsSection() {
       const res = await fetch(`/api/users/${userId}/integrations/${providerId}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to disconnect');
       return res.json();
@@ -507,6 +335,10 @@ function AppsSection() {
   const accounts = integrationsData?.accounts || [];
   const policy = integrationsData?.policy;
   const logs = logsData || [];
+
+  useEffect(() => {
+    setMaxParallelDraft(String(policy?.maxParallelCalls ?? 3));
+  }, [policy?.maxParallelCalls]);
 
   const isProviderConnected = (providerId: string) => {
     return accounts.some(a => a.providerId === providerId && a.status === 'active');
@@ -547,6 +379,34 @@ function AppsSection() {
     );
   }
 
+  if (isIntegrationsError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
+            Conecta y administra las aplicaciones que ILIAGPT puede usar
+          </p>
+        </div>
+        <div className="p-4 rounded-lg border bg-card flex items-start gap-3" data-testid="card-integrations-error">
+          <AlertCircle className="h-5 w-5 text-red-500 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">No se pudieron cargar las integraciones</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {integrationsError instanceof Error ? integrationsError.message : "Intenta de nuevo."}
+            </p>
+            <div className="mt-3">
+              <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-retry-integrations">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Reintentar
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -578,29 +438,55 @@ function AppsSection() {
               const connected = isProviderConnected(provider.id);
               const enabled = isProviderEnabled(provider.id);
               const account = accounts.find(a => a.providerId === provider.id);
+              const inactive = String(provider.isActive || "").toLowerCase().trim() !== "true";
+              const showRemoteIcon = !!provider.iconUrl && !providerIconFailed[provider.id];
 
               return (
                 <div
                   key={provider.id}
-                  className="flex items-center justify-between p-4 rounded-lg border bg-card"
+                  className={cn(
+                    "flex items-center justify-between p-4 rounded-lg border bg-card",
+                    inactive && "opacity-70"
+                  )}
                   data-testid={`card-provider-${provider.id}`}
                 >
                   <div className="flex items-center gap-4">
                     <div className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center",
+                      "w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden",
                       connected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
                     )}>
-                      {providerIcons[provider.id] || <AppWindow className="h-5 w-5" />}
+                      {showRemoteIcon ? (
+                        <img
+                          src={provider.iconUrl as string}
+                          alt={provider.name}
+                          className="h-6 w-6 object-contain"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={() => setProviderIconFailed((prev) => ({ ...prev, [provider.id]: true }))}
+                        />
+                      ) : (
+                        providerIcons[provider.id] || <AppWindow className="h-5 w-5" />
+                      )}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium" data-testid={`text-provider-name-${provider.id}`}>
                           {provider.name}
                         </span>
+                        {inactive && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                            Inactivo
+                          </span>
+                        )}
                         {connected && (
                           <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">
                             <CheckCircle2 className="h-3 w-3" />
                             Conectado
+                          </span>
+                        )}
+                        {connected && !enabled && (
+                          <span className="inline-flex items-center gap-1 text-xs text-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-300 px-2 py-0.5 rounded-full">
+                            Deshabilitado
                           </span>
                         )}
                       </div>
@@ -622,6 +508,7 @@ function AppsSection() {
                         <Switch
                           checked={enabled}
                           onCheckedChange={(checked) => toggleProviderEnabled(provider.id, checked)}
+                          disabled={inactive || updatePolicy.isPending}
                           data-testid={`switch-enable-${provider.id}`}
                         />
                       </div>
@@ -650,7 +537,7 @@ function AppsSection() {
                         variant="default"
                         size="sm"
                         onClick={() => connectProvider.mutate(provider.id)}
-                        disabled={connectProvider.isPending}
+                        disabled={connectProvider.isPending || inactive}
                         data-testid={`button-connect-${provider.id}`}
                       >
                         {connectProvider.isPending ? (
@@ -744,9 +631,24 @@ function AppsSection() {
                 type="number"
                 min={1}
                 max={10}
-                value={policy?.maxParallelCalls || 3}
-                onChange={(e) => updatePolicy.mutate({ maxParallelCalls: parseInt(e.target.value) || 3 })}
+                value={maxParallelDraft}
+                onChange={(e) => setMaxParallelDraft(e.target.value)}
+                onBlur={() => {
+                  const parsed = Number.parseInt(String(maxParallelDraft || "").trim(), 10);
+                  const next = Number.isFinite(parsed)
+                    ? Math.min(10, Math.max(1, parsed))
+                    : 3;
+                  if (next !== (policy?.maxParallelCalls ?? 3)) {
+                    updatePolicy.mutate({ maxParallelCalls: next });
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    (e.currentTarget as HTMLInputElement).blur();
+                  }
+                }}
                 className="w-20 text-center"
+                disabled={updatePolicy.isPending}
                 data-testid="input-max-parallel"
               />
             </div>
@@ -764,44 +666,53 @@ function AppsSection() {
           {isLoadingLogs && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </div>
 
-        {logs.length > 0 ? (
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {logs.map((log) => (
-              <div
-                key={log.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-muted/30 text-sm"
-                data-testid={`log-entry-${log.id}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "w-6 h-6 rounded-full flex items-center justify-center",
-                    log.status === 'success' ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" :
-                      log.status === 'error' ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" :
-                        "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
-                  )}>
-                    {log.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> :
-                      log.status === 'error' ? <XCircle className="h-3 w-3" /> :
-                        <Clock className="h-3 w-3" />}
+        {isLogsError && (
+          <div className="text-center py-4 text-muted-foreground" data-testid="text-logs-error">
+            <AlertCircle className="h-6 w-6 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No se pudieron cargar los registros</p>
+          </div>
+        )}
+
+        {!isLogsError && (
+          logs.length > 0 ? (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-muted/30 text-sm"
+                  data-testid={`log-entry-${log.id}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-6 h-6 rounded-full flex items-center justify-center",
+                      log.status === 'success' ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" :
+                        log.status === 'error' ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" :
+                          "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
+                    )}>
+                      {log.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> :
+                        log.status === 'error' ? <XCircle className="h-3 w-3" /> :
+                          <Clock className="h-3 w-3" />}
+                    </div>
+                    <div>
+                      <span className="font-medium">{log.toolId}</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {log.providerId}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="font-medium">{log.toolId}</span>
-                    <span className="text-xs text-muted-foreground ml-2">
-                      {log.providerId}
-                    </span>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {log.latencyMs && <span>{log.latencyMs}ms</span>}
+                    <span>{formatZonedTime(log.createdAt, { timeZone: platformTimeZone, includeSeconds: true })}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {log.latencyMs && <span>{log.latencyMs}ms</span>}
-                  <span>{formatZonedTime(log.createdAt, { timeZone: platformTimeZone, includeSeconds: true })}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-4 text-muted-foreground" data-testid="text-no-logs">
-            <Clock className="h-6 w-6 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No hay registros de llamadas recientes</p>
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-4 text-muted-foreground" data-testid="text-no-logs">
+              <Clock className="h-6 w-6 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No hay registros de llamadas recientes</p>
+            </div>
+          )
         )}
       </div>
     </div>
@@ -809,7 +720,7 @@ function AppsSection() {
 }
 
 function DataControlsSection() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -820,6 +731,7 @@ function DataControlsSection() {
   const [showSharedLinksDialog, setShowSharedLinksDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
 
   const { data: privacyData, isLoading: isLoadingPrivacy } = useQuery<{
     privacySettings: PrivacySettings;
@@ -888,14 +800,15 @@ function DataControlsSection() {
 
   const unarchiveChat = useMutation({
     mutationFn: async (chatId: string) => {
-      const res = await fetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to unarchive');
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
-      toast({ title: "Chat restaurado", description: "El chat ha sido restaurado." });
+      toast({ title: "Chat desarchivado", description: "El chat ha sido devuelto a tu lista." });
+      window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
   });
 
@@ -910,6 +823,7 @@ function DataControlsSection() {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
       toast({ title: "Chats archivados", description: `Se archivaron ${data.count} chats.` });
       setShowArchiveConfirm(false);
+      window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
   });
 
@@ -923,10 +837,71 @@ function DataControlsSection() {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
       toast({ title: "Chats eliminados", description: `Se eliminaron ${data.count} chats.` });
       setShowDeleteConfirm(false);
+      window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
   });
 
-  const privacySettings = privacyData?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false };
+  const downloadData = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch(`/api/user/export`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('Content-Disposition') || '';
+      const match = contentDisposition.match(/filename="([^"]+)"/i);
+      const filename = match?.[1] || `iliagpt-export-${Date.now()}.json`;
+      return { blob, filename };
+    },
+    onSuccess: ({ blob, filename }) => {
+      saveAs(blob, filename);
+      toast({ title: "Descarga lista", description: "Tu exportación fue generada." });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "No se pudo descargar tu información.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAccount = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch(`/api/user/account`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DELETE_MY_ACCOUNT' }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as any)?.error || 'Failed to delete account');
+      }
+      return data;
+    },
+    onSuccess: async () => {
+      toast({
+        title: "Cuenta eliminada",
+        description: "Tu cuenta fue programada para eliminación. Cerrando sesión...",
+      });
+      setShowDeleteAccountConfirm(false);
+      await logout();
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Error",
+        description: err?.message || "No se pudo eliminar la cuenta.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const privacySettings = privacyData?.privacySettings || {
+    trainingOptIn: false,
+    remoteBrowserDataAccess: false,
+    analyticsTracking: true,
+    chatHistoryEnabled: true,
+  };
 
   return (
     <div className="space-y-6">
@@ -937,16 +912,27 @@ function DataControlsSection() {
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-muted/50">
             <div className="flex-1 pr-4">
-              <span className="text-sm block">Mejora el modelo para todos</span>
-              <span className="text-xs text-muted-foreground">
-                Permite que tu contenido (prompts, respuestas, adjuntos) se use para mejorar los modelos de IA.
-              </span>
+              <span className="text-sm block">Compartir datos de uso</span>
+              <span className="text-xs text-muted-foreground">Ayuda a mejorar el servicio.</span>
             </div>
             <Switch
               checked={privacySettings.trainingOptIn}
               onCheckedChange={(checked) => updatePrivacy.mutate({ trainingOptIn: checked })}
-              disabled={updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-training-opt-in"
+            />
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-muted/50">
+            <div className="flex-1 pr-4">
+              <span className="text-sm block">Seguimiento de análisis</span>
+              <span className="text-xs text-muted-foreground">Estadísticas anónimas de uso.</span>
+            </div>
+            <Switch
+              checked={privacySettings.analyticsTracking}
+              onCheckedChange={(checked) => updatePrivacy.mutate({ analyticsTracking: checked })}
+              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              data-testid="switch-analytics-tracking"
             />
           </div>
 
@@ -960,7 +946,7 @@ function DataControlsSection() {
             <Switch
               checked={privacySettings.remoteBrowserDataAccess}
               onCheckedChange={(checked) => updatePrivacy.mutate({ remoteBrowserDataAccess: checked })}
-              disabled={updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-remote-browser"
             />
           </div>
@@ -992,8 +978,21 @@ function DataControlsSection() {
       <Separator />
 
       <div className="space-y-1">
-        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Gestión de chats</h3>
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Historial</h3>
         <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-muted/50">
+            <div className="flex-1 pr-4">
+              <span className="text-sm block">Guardar historial de chat</span>
+              <span className="text-xs text-muted-foreground">Conservar conversaciones anteriores.</span>
+            </div>
+            <Switch
+              checked={privacySettings.chatHistoryEnabled}
+              onCheckedChange={(checked) => updatePrivacy.mutate({ chatHistoryEnabled: checked })}
+              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              data-testid="switch-chat-history"
+            />
+          </div>
+
           <div className="flex items-center justify-between py-3 px-2">
             <div>
               <span className="text-sm block">Chats archivados</span>
@@ -1025,7 +1024,7 @@ function DataControlsSection() {
           </div>
 
           <div className="flex items-center justify-between py-3 px-2">
-            <span className="text-sm">Eliminar todos los chats</span>
+            <span className="text-sm">Borrar historial</span>
             <Button
               variant="outline"
               size="sm"
@@ -1034,7 +1033,61 @@ function DataControlsSection() {
               disabled={deleteAll.isPending}
               data-testid="button-delete-all"
             >
-              {deleteAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar todo"}
+              {deleteAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Borrar todo"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Tus datos</h3>
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between py-3 px-2">
+            <div>
+              <span className="text-sm block">Descargar mis datos</span>
+              <span className="text-xs text-muted-foreground">Exportar toda tu información.</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => downloadData.mutate()}
+              disabled={!userId || downloadData.isPending}
+              data-testid="button-download-data-settings"
+            >
+              {downloadData.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Descargar"}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2">
+            <div>
+              <span className="text-sm block">Política de privacidad</span>
+              <span className="text-xs text-muted-foreground">Leer términos completos.</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open("/privacy-policy", "_blank", "noopener,noreferrer")}
+              data-testid="button-privacy-policy-settings"
+            >
+              Ver
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900">
+            <div className="flex-1 pr-4">
+              <span className="text-sm block font-medium text-red-600 dark:text-red-400">Eliminar cuenta</span>
+              <span className="text-xs text-red-500/80">Esta acción es permanente e irreversible.</span>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowDeleteAccountConfirm(true)}
+              disabled={!userId || deleteAccount.isPending}
+              data-testid="button-delete-account-settings"
+            >
+              {deleteAccount.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar"}
             </Button>
           </div>
         </div>
@@ -1072,7 +1125,7 @@ function DataControlsSection() {
                       disabled={unarchiveChat.isPending}
                       data-testid={`button-unarchive-${chat.id}`}
                     >
-                      Restaurar
+                      Desarchivar
                     </Button>
                   </div>
                 ))}
@@ -1160,9 +1213,9 @@ function DataControlsSection() {
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar todos los chats?</AlertDialogTitle>
+            <AlertDialogTitle>¿Borrar historial?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción eliminará todos tus chats. Tendrás un período de recuperación antes de que se eliminen permanentemente.
+              Esto eliminará todas tus conversaciones del historial. Tendrás un período de recuperación antes de que se eliminen permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1171,7 +1224,28 @@ function DataControlsSection() {
               onClick={() => deleteAll.mutate()}
               className="bg-red-500 hover:bg-red-600"
             >
-              Eliminar todo
+              Borrar todo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeleteAccountConfirm} onOpenChange={setShowDeleteAccountConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar cuenta</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción es permanente e irreversible. Se cerrará tu sesión y tu cuenta será marcada para eliminación.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteAccount.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteAccount.mutate()}
+              disabled={deleteAccount.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteAccount.isPending ? "Eliminando..." : "Eliminar cuenta"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1180,10 +1254,370 @@ function DataControlsSection() {
   );
 }
 
+function normalizeTwoFactorCode(value: string): string {
+  return String(value || "").replace(/\s+/g, "").trim().toUpperCase();
+}
+
+function TwoFactorSection() {
+  const { isAuthenticated } = useAuth();
+  const { toast } = useToast();
+  const [status, setStatus] = useState<TwoFactorStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  const [code, setCode] = useState("");
+  const [backupCopied, setBackupCopied] = useState(false);
+  const [newBackupCodes, setNewBackupCodes] = useState<string[] | null>(null);
+
+  const loadStatus = async () => {
+    if (!isAuthenticated) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch("/api/2fa/status");
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudo cargar el estado de 2FA.");
+      }
+      setStatus({ enabled: Boolean(payload?.enabled), verified: Boolean(payload?.verified) });
+    } catch {
+      setStatus(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  const copyBackupCodes = async (codes: string[]) => {
+    if (!codes?.length) return;
+    try {
+      await navigator.clipboard.writeText(codes.join("\n"));
+      setBackupCopied(true);
+      setTimeout(() => setBackupCopied(false), 1500);
+      toast({ title: "Códigos copiados", description: "Guárdalos en un lugar seguro." });
+    } catch {
+      toast({ title: "Error", description: "No se pudieron copiar los códigos.", variant: "destructive" });
+    }
+  };
+
+  const startSetup = async () => {
+    setBusy(true);
+    setNewBackupCodes(null);
+    try {
+      const res = await apiFetch("/api/2fa/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudo iniciar la configuración de 2FA.");
+      }
+      setSetup(payload as TwoFactorSetup);
+      toast({ title: "2FA listo para configurar", description: "Escanea el QR y verifica el código." });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudo iniciar 2FA.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifySetup = async () => {
+    const normalized = normalizeTwoFactorCode(code);
+    if (normalized.length < 6) {
+      toast({ title: "Código inválido", description: "Ingresa un código válido.", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/2fa/verify-setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: normalized }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudo verificar el código.");
+      }
+      setSetup(null);
+      setCode("");
+      setStatus({ enabled: true, verified: true });
+      toast({ title: "2FA activado", description: "Tu cuenta ahora está protegida." });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudo verificar el código.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifySession = async () => {
+    const normalized = normalizeTwoFactorCode(code);
+    if (normalized.length < 6) {
+      toast({ title: "Código inválido", description: "Ingresa un código válido.", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/2fa/verify-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: normalized }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "Código inválido.");
+      }
+      setCode("");
+      setStatus((prev) => (prev ? { ...prev, verified: true } : { enabled: true, verified: true }));
+      toast({ title: "Sesión verificada", description: "Esta sesión ya está verificada." });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudo verificar.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disableTwoFactor = async () => {
+    const normalized = normalizeTwoFactorCode(code);
+    if (normalized.length < 6) {
+      toast({ title: "Código requerido", description: "Ingresa tu código 2FA para desactivar.", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/2fa/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: normalized }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudo desactivar 2FA.");
+      }
+      setSetup(null);
+      setCode("");
+      setNewBackupCodes(null);
+      setStatus({ enabled: false, verified: false });
+      toast({ title: "2FA desactivado", description: "Se desactivó la autenticación multifactor." });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudo desactivar 2FA.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerateBackupCodes = async () => {
+    const normalized = normalizeTwoFactorCode(code);
+    if (normalized.length < 6) {
+      toast({ title: "Código requerido", description: "Ingresa tu código 2FA para regenerar.", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/2fa/regenerate-backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: normalized }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.message || "No se pudieron regenerar los códigos.");
+      }
+      const codes = (payload?.backupCodes || []) as string[];
+      setNewBackupCodes(codes);
+      toast({ title: "Códigos regenerados", description: "Guárdalos en un lugar seguro." });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "No se pudieron regenerar.", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!isAuthenticated) {
+    return <div className="text-sm text-muted-foreground">Inicia sesión para usar 2FA.</div>;
+  }
+
+  const enabled = Boolean(status?.enabled);
+  const verified = Boolean(status?.verified);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex-1 pr-4">
+          <span className="text-sm block">Aplicación de autenticación (TOTP)</span>
+          <span className="text-xs text-muted-foreground">
+            Protege tu cuenta con un código de 6 dígitos desde Google Authenticator, Authy u otra app.
+          </span>
+        </div>
+        <span
+          className={cn(
+            "text-xs px-2 py-1 rounded-full border",
+            enabled ? "bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-900/50" : "bg-muted text-muted-foreground",
+          )}
+          data-testid="badge-2fa-status"
+        >
+          {loading ? "Cargando..." : enabled ? "Activado" : "Desactivado"}
+        </span>
+      </div>
+
+      {!enabled && !setup && (
+        <div className="flex items-center justify-end">
+          <Button variant="outline" onClick={() => void startSetup()} disabled={busy} data-testid="button-2fa-start">
+            Activar 2FA
+          </Button>
+        </div>
+      )}
+
+      {setup && (
+        <div className="space-y-4 rounded-lg border p-4">
+          <div className="text-sm font-medium">Escanea el QR</div>
+          <div className="text-xs text-muted-foreground">
+            Luego ingresa tu código de 6 dígitos para activar.
+          </div>
+          <div className="flex justify-center py-2">
+            <img src={setup.qrCodeImage} alt="QR 2FA" className="h-44 w-44 rounded bg-white p-2" />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">Códigos de respaldo</div>
+                <div className="text-xs text-muted-foreground">Guárdalos en un lugar seguro.</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyBackupCodes(setup.backupCodes || [])}
+                disabled={busy}
+                data-testid="button-2fa-copy-backup"
+              >
+                {backupCopied ? "Copiado" : "Copiar"}
+              </Button>
+            </div>
+            <pre className="text-xs bg-muted/40 rounded p-2 overflow-auto max-h-40" data-testid="pre-2fa-backup">
+              {(setup.backupCodes || []).join("\n")}
+            </pre>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Código</div>
+            <Input
+              inputMode="numeric"
+              placeholder="123456"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\s+/g, ""))}
+              maxLength={10}
+              disabled={busy}
+              data-testid="input-2fa-code"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={() => setSetup(null)} disabled={busy}>
+                Cancelar
+              </Button>
+              <Button onClick={() => void verifySetup()} disabled={busy} data-testid="button-2fa-verify-setup">
+                Verificar y activar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {enabled && !setup && (
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm">
+              {verified ? (
+                <span className="inline-flex items-center gap-2 text-green-700 dark:text-green-300">
+                  <CheckCircle2 className="h-4 w-4" /> Sesión verificada
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4" /> Sesión no verificada
+                </span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void loadStatus()} disabled={loading || busy}>
+              Actualizar
+            </Button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Código 2FA</div>
+              <Input
+                inputMode="numeric"
+                placeholder="123456"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\s+/g, ""))}
+                maxLength={10}
+                disabled={busy}
+                data-testid="input-2fa-code-existing"
+              />
+              <div className="text-xs text-muted-foreground">
+                Necesario para verificar esta sesión, desactivar 2FA o regenerar códigos.
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 justify-end">
+              {!verified && (
+                <Button variant="outline" onClick={() => void verifySession()} disabled={busy} data-testid="button-2fa-verify-session">
+                  Verificar esta sesión
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => void regenerateBackupCodes()} disabled={busy} data-testid="button-2fa-regenerate">
+                Regenerar códigos
+              </Button>
+              <Button
+                variant="outline"
+                className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                onClick={() => void disableTwoFactor()}
+                disabled={busy}
+                data-testid="button-2fa-disable"
+              >
+                Desactivar 2FA
+              </Button>
+            </div>
+          </div>
+
+          {newBackupCodes?.length ? (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">Nuevos códigos de respaldo</div>
+                  <div className="text-xs text-muted-foreground">Copialos y guárdalos.</div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void copyBackupCodes(newBackupCodes)}
+                  disabled={busy}
+                  data-testid="button-2fa-copy-new-backup"
+                >
+                  {backupCopied ? "Copiado" : "Copiar"}
+                </Button>
+              </div>
+              <pre className="text-xs bg-muted/40 rounded p-2 overflow-auto max-h-40" data-testid="pre-2fa-new-backup">
+                {newBackupCodes.join("\n")}
+              </pre>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
+  const [isLoggingOutAll, setIsLoggingOutAll] = useState(false);
+  const [schedulesManagerOpen, setSchedulesManagerOpen] = useState(false);
+  const [sessionsManagerOpen, setSessionsManagerOpen] = useState(false);
+  const [editingBuilderLink, setEditingBuilderLink] = useState<BuilderLinkKind | null>(null);
+  const [builderLinkDraft, setBuilderLinkDraft] = useState("");
 
   const { settings, updateSetting } = useSettingsContext();
   const { settings: platformSettings } = usePlatformSettings();
@@ -1223,10 +1657,36 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   };
 
   const handleLogoutAll = () => {
-    logout();
-    onOpenChange(false);
-    toast({ title: "Todas las sesiones cerradas", description: "Se han cerrado todas las sesiones activas." });
-    setShowLogoutAllConfirm(false);
+    (async () => {
+      if (!user?.id) {
+        handleLogout();
+        return;
+      }
+
+      try {
+        setIsLoggingOutAll(true);
+        const res = await fetch(`/api/users/${user.id}/sessions/logout-all`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          throw new Error((await res.text()) || res.statusText);
+        }
+      } catch (err: any) {
+        toast({
+          title: "Error",
+          description: err?.message || "No se pudieron cerrar todas las sesiones.",
+          variant: "destructive",
+        });
+        return;
+      } finally {
+        setIsLoggingOutAll(false);
+        setShowLogoutAllConfirm(false);
+      }
+
+      onOpenChange(false);
+      logout();
+    })();
   };
 
   const renderSectionContent = () => {
@@ -1663,7 +2123,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "notifications":
-        return <NotificationsSection />;
+        return <NotificationsControlPanels onOpenSchedules={() => setSchedulesManagerOpen(true)} />;
 
       case "personalization":
         return (
@@ -1834,6 +2294,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 </div>
                 <Switch
                   checked={settings.advancedVoice}
+                  disabled={!settings.voiceMode}
                   onCheckedChange={(checked) => updateSetting("advancedVoice", checked)}
                   data-testid="switch-advanced-voice"
                 />
@@ -1869,10 +2330,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </p>
             <Button
               variant="outline"
-              onClick={() => toast({
-                title: "Programaciones",
-                description: "Para programar ejecuciones, usa el menú ⋯ en una conversación. La vista de administración estará disponible pronto."
-              })}
+              onClick={() => setSchedulesManagerOpen(true)}
               data-testid="button-manage-schedules"
             >
               Administrar
@@ -1889,51 +2347,21 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <h2 className="text-xl font-semibold">Seguridad</h2>
 
             <div className="space-y-4">
-              <h3 className="text-base font-medium">Autenticación multifactor (MFA)</h3>
+              <h3 className="text-base font-medium">Autenticación multifactor (2FA)</h3>
+              <TwoFactorSection />
 
-              <div className="flex items-center justify-between py-2">
-                <div className="flex-1 pr-4">
-                  <span className="text-sm block">Aplicación de autenticación</span>
-                  <span className="text-xs text-muted-foreground">
-                    Usa códigos únicos desde una aplicación de autenticación.
-                  </span>
-                </div>
-                <Switch
-                  checked={settings.authApp}
-                  onCheckedChange={(checked) => updateSetting("authApp", checked)}
-                  data-testid="switch-auth-app"
-                />
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div className="flex-1 pr-4">
-                  <span className="text-sm block">Notificaciones push</span>
-                  <span className="text-xs text-muted-foreground">
-                    Aprueba los inicios de sesión con una notificación push enviada a tu dispositivo de confianza
-                  </span>
-                </div>
-                <Switch
-                  checked={settings.pushNotifications}
-                  onCheckedChange={(checked) => updateSetting("pushNotifications", checked)}
-                  data-testid="switch-push-notif"
-                />
-              </div>
+              <Separator />
 
               <button
                 className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
-                onClick={() => toast({
-                  title: "Dispositivos de confianza",
-                  description: "Esta vista estará disponible pronto."
-                })}
+                onClick={() => setSessionsManagerOpen(true)}
                 data-testid="security-trusted-devices"
               >
-                <span className="text-sm">Dispositivos de confianza</span>
+                <span className="text-sm">Sesiones y dispositivos</span>
                 <span className="text-sm text-muted-foreground flex items-center gap-1">
-                  1 <ChevronRight className="h-4 w-4" />
+                  Administrar <ChevronRight className="h-4 w-4" />
                 </span>
               </button>
-
-              <Separator />
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm">Cerrar la sesión en este dispositivo</span>
@@ -1977,7 +2405,134 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
         );
 
-      case "account":
+      case "account": {
+        const displayName =
+          user?.fullName ||
+          [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+          user?.username ||
+          user?.email?.split("@")[0] ||
+          "Usuario";
+
+        const previewByline = settings.showName ? displayName : "Usuario";
+
+        const getLinkValue = (kind: BuilderLinkKind): string => {
+          if (kind === "website") return settings.websiteDomain || "";
+          if (kind === "linkedin") return settings.linkedInUrl || "";
+          return settings.githubUrl || "";
+        };
+
+        const setLinkValue = (kind: BuilderLinkKind, value: string) => {
+          if (kind === "website") updateSetting("websiteDomain", value);
+          else if (kind === "linkedin") updateSetting("linkedInUrl", value);
+          else updateSetting("githubUrl", value);
+        };
+
+        const startEditLink = (kind: BuilderLinkKind) => {
+          setEditingBuilderLink(kind);
+          setBuilderLinkDraft(getLinkValue(kind));
+        };
+
+        const cancelEditLink = () => {
+          setEditingBuilderLink(null);
+          setBuilderLinkDraft("");
+        };
+
+        const saveEditLink = () => {
+          if (!editingBuilderLink) return;
+
+          const normalized = normalizeExternalUrl(builderLinkDraft);
+          if (!normalized) {
+            toast({
+              title: "URL inválida",
+              description: "Usa un enlace http/https (por ejemplo: https://github.com/usuario).",
+            });
+            return;
+          }
+
+          setLinkValue(editingBuilderLink, normalized);
+          cancelEditLink();
+        };
+
+        const openLink = (url: string) => {
+          const normalized = normalizeExternalUrl(url);
+          if (!normalized) {
+            toast({ title: "Enlace inválido", description: "Revisa la URL e intenta nuevamente." });
+            return;
+          }
+          window.open(normalized, "_blank", "noopener,noreferrer");
+        };
+
+        const renderLinkActions = (kind: BuilderLinkKind, url: string, addTestId: string) => {
+          if (editingBuilderLink === kind) {
+            return (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <Input
+                  value={builderLinkDraft}
+                  onChange={(e) => setBuilderLinkDraft(e.target.value)}
+                  placeholder="https://..."
+                  className="w-72"
+                  data-testid={`input-builder-link-${kind}`}
+                />
+                <Button size="sm" onClick={saveEditLink} data-testid={`button-save-builder-link-${kind}`}>
+                  Guardar
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancelEditLink} data-testid={`button-cancel-builder-link-${kind}`}>
+                  Cancelar
+                </Button>
+              </div>
+            );
+          }
+
+          if (!url) {
+            return (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => startEditLink(kind)}
+                data-testid={addTestId}
+              >
+                Agregar
+              </Button>
+            );
+          }
+
+          return (
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <span className="text-sm text-muted-foreground max-w-48 truncate">
+                {getUrlLabel(url)}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => openLink(url)}
+                data-testid={`button-open-builder-link-${kind}`}
+              >
+                Abrir
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => startEditLink(kind)}
+                data-testid={`button-edit-builder-link-${kind}`}
+              >
+                Editar
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-red-500 hover:text-red-600"
+                onClick={() => setLinkValue(kind, "")}
+                data-testid={`button-remove-builder-link-${kind}`}
+              >
+                Eliminar
+              </Button>
+            </div>
+          );
+        };
+
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Perfil de constructor de GPT</h2>
@@ -1991,12 +2546,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   <Box className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>
-                  <span className="text-sm font-medium block">
-                    {settings.nickname || "PlaceholderGPT"}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Por {settings.nickname || "Usuario"}
-                  </span>
+                  <span className="text-sm font-medium block">PlaceholderGPT</span>
+                  <span className="text-xs text-muted-foreground">Por {previewByline}</span>
                 </div>
               </div>
               <span className="text-sm text-muted-foreground">Vista previa</span>
@@ -2014,7 +2565,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 />
               </div>
               <div className="flex items-center justify-between py-2">
-                <span className="text-sm">{settings.nickname || "Usuario"}</span>
+                <span className="text-sm">{displayName}</span>
                 <Info className="h-4 w-4 text-muted-foreground" />
               </div>
             </div>
@@ -2024,84 +2575,28 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="space-y-4">
               <span className="font-medium">Enlaces</span>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 gap-3">
                 <div className="flex items-center gap-3">
                   <Globe className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm">Sitio web</span>
                 </div>
-                <Select
-                  value={settings.websiteDomain || "none"}
-                  onValueChange={(value) => updateSetting("websiteDomain", value === "none" ? "" : value)}
-                >
-                  <SelectTrigger className="w-48" data-testid="select-domain">
-                    <SelectValue placeholder="Seleccionar un dominio" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Ninguno</SelectItem>
-                    <SelectItem value="custom">Dominio personalizado</SelectItem>
-                  </SelectContent>
-                </Select>
+                {renderLinkActions("website", settings.websiteDomain, "button-add-website")}
               </div>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 gap-3">
                 <div className="flex items-center gap-3">
                   <Linkedin className="h-5 w-5 text-muted-foreground" />
                   <span className="text-sm">LinkedIn</span>
                 </div>
-                {settings.linkedInUrl ? (
-                  <div className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => updateSetting("linkedInUrl", "")}
-                    >
-                      Eliminar
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const url = prompt("Ingresa tu URL de LinkedIn:");
-                      if (url) updateSetting("linkedInUrl", url);
-                    }}
-                    data-testid="button-add-linkedin"
-                  >
-                    Agregar
-                  </Button>
-                )}
+                {renderLinkActions("linkedin", settings.linkedInUrl, "button-add-linkedin")}
               </div>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between py-2 gap-3">
                 <div className="flex items-center gap-3">
                   <Github className="h-5 w-5 text-muted-foreground" />
                   <span className="text-sm">GitHub</span>
                 </div>
-                {settings.githubUrl ? (
-                  <div className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => updateSetting("githubUrl", "")}
-                    >
-                      Eliminar
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const url = prompt("Ingresa tu URL de GitHub:");
-                      if (url) updateSetting("githubUrl", url);
-                    }}
-                    data-testid="button-add-github"
-                  >
-                    Agregar
-                  </Button>
-                )}
+                {renderLinkActions("github", settings.githubUrl, "button-add-github")}
               </div>
             </div>
 
@@ -2129,6 +2624,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </div>
           </div>
         );
+      }
 
       default:
         return null;
@@ -2188,16 +2684,27 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={isLoggingOutAll}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleLogoutAll}
               className="bg-red-500 hover:bg-red-600"
+              disabled={isLoggingOutAll}
             >
-              Cerrar todas las sesiones
+              {isLoggingOutAll ? "Cerrando..." : "Cerrar todas las sesiones"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <SchedulesManagerDialog
+        open={schedulesManagerOpen}
+        onOpenChange={setSchedulesManagerOpen}
+      />
+
+      <SessionsManagerDialog
+        open={sessionsManagerOpen}
+        onOpenChange={setSessionsManagerOpen}
+      />
     </>
   );
 }

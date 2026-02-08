@@ -1,137 +1,54 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 
-const BASE_URL = 'http://localhost:5000';
-
+const BASE_URL = process.env.TEST_API_BASE || "http://localhost:5000";
 const describeIntegration = process.env.TEST_API_BASE ? describe : describe.skip;
 
-describeIntegration('OrchestrationEngine API', () => {
-  describe('POST /api/agentic/orchestrate', () => {
-    it('should decompose a user-related task', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'list all users',
-          complexity: 3
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('subtasks');
-      expect(Array.isArray(data.subtasks)).toBe(true);
+describeIntegration("Registry Orchestration Routing API", () => {
+  it("POST /api/registry/route should classify intent and select tools", async () => {
+    const response = await fetch(`${BASE_URL}/api/registry/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "search for information about agent orchestration" }),
     });
 
-    it('should decompose a report-related task', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'generate a report for analytics',
-          complexity: 5
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('subtasks');
-      expect(data.subtasks.some((t: any) => t.id.includes('report'))).toBe(true);
-    });
+    expect(response.ok).toBe(true);
+    const data = await response.json();
 
-    it('should decompose security-related tasks', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'check security status',
-          complexity: 4
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('subtasks');
-    });
-
-    it('should return execution plan', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'create user and generate report',
-          complexity: 6
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('plan');
-      expect(data.plan).toHaveProperty('waves');
-      expect(data.plan).toHaveProperty('totalEstimatedTime');
-      expect(data.plan).toHaveProperty('maxParallelism');
-    });
+    expect(data).toHaveProperty("success", true);
+    expect(data.data).toHaveProperty("intent");
+    expect(data.data).toHaveProperty("agentName");
+    expect(Array.isArray(data.data.tools)).toBe(true);
   });
 
-  describe('POST /api/agentic/orchestrate/execute', () => {
-    it('should execute an orchestration plan', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'get dashboard metrics',
-          complexity: 3
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('result');
-      expect(data.result).toHaveProperty('success');
-      expect(data.result).toHaveProperty('completedTasks');
-      expect(data.result).toHaveProperty('executionTimeMs');
+  it("POST /api/registry/route should include a workflow for complex queries", async () => {
+    const response = await fetch(`${BASE_URL}/api/registry/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: "search for policies and then generate a report and also summarize key findings",
+      }),
     });
 
-    it('should handle multi-task orchestration', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'list users and check security and get analytics dashboard',
-          complexity: 7
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data.result.completedTasks).toBeGreaterThan(0);
-    });
+    expect(response.ok).toBe(true);
+    const data = await response.json();
 
-    it('should return combined results', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: 'analyze user data',
-          complexity: 4
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('combined');
-      expect(data.combined).toHaveProperty('success');
-      expect(data.combined).toHaveProperty('summary');
-    });
+    expect(data).toHaveProperty("success", true);
+    expect(data.data).toHaveProperty("intent");
+    expect(data.data).toHaveProperty("workflow");
+    expect(data.data.workflow).toHaveProperty("steps");
+    expect(Array.isArray(data.data.workflow.steps)).toBe(true);
   });
 
-  describe('GET /api/agentic/orchestrate/status', () => {
-    it('should return orchestration engine status', async () => {
-      const response = await fetch(`${BASE_URL}/api/agentic/orchestrate/status`);
-      
-      expect(response.ok).toBe(true);
-      const data = await response.json();
-      expect(data).toHaveProperty('status');
-      expect(data).toHaveProperty('maxConcurrent');
-    });
+  it("GET /api/registry/stats should return registry stats", async () => {
+    const response = await fetch(`${BASE_URL}/api/registry/stats`);
+
+    expect(response.ok).toBe(true);
+    const data = await response.json();
+
+    expect(data).toHaveProperty("success", true);
+    expect(data.data).toHaveProperty("tools");
+    expect(data.data).toHaveProperty("agents");
+    expect(data.data).toHaveProperty("orchestrator");
   });
 });
+

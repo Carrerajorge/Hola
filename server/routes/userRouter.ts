@@ -4,14 +4,20 @@ import { storage } from "../storage";
 import { db } from "../db";
 import { getSecureUserId } from "../lib/anonUserHelper";
 import { verifyAnonToken } from "../lib/anonToken";
-import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools, users } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { ensureUserRowExists } from "../lib/ensureUserRowExists";
+import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, users, chatSchedules, chats, sessions } from "@shared/schema";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { usageQuotaService } from "../services/usageQuotaService";
 import { AuthenticatedRequest, getUserId } from "../types/express";
 import { validateBody } from "../middleware/validateRequest";
 import { z } from "zod";
 import { requireAdmin } from "./admin/utils";
 import { auditLog, AuditActions } from "../services/auditLogger";
+import { ensureIntegrationCatalogSeeded, seedIntegrationCatalog } from "../services/integrationCatalog";
+import { invalidateIntegrationPolicyCache } from "../services/integrationPolicyCache";
+import { invalidateUserSettingsCache } from "../services/userSettingsCache";
+import { computeNextRunAt, normalizeTimeZone, parseTimeOfDay, type ChatScheduleType } from "../services/chatScheduleUtils";
+import { runChatScheduleNow } from "../services/chatScheduleRunner";
 
 export function createUserRouter() {
   const router = Router();
@@ -300,7 +306,12 @@ export function createUserRouter() {
           userProfile: {
             nickname: '',
             occupation: '',
-            bio: ''
+            bio: '',
+            showName: true,
+            linkedInUrl: '',
+            githubUrl: '',
+            websiteDomain: '',
+            receiveEmailComments: false,
           },
           featureFlags: {
             memoryEnabled: false,
@@ -351,6 +362,11 @@ export function createUserRouter() {
         }
       }
 
+      // Anonymous users can still have settings; ensure FK target exists.
+      if (id.startsWith("anon_")) {
+        await ensureUserRowExists(id);
+      }
+
       // Validated data is now in req.body (or req.validatedBody)
       const { responsePreferences, userProfile, featureFlags } = req.body;
 
@@ -358,9 +374,20 @@ export function createUserRouter() {
 
       if (responsePreferences) updates.responsePreferences = responsePreferences;
       if (userProfile) updates.userProfile = userProfile;
-      if (featureFlags) updates.featureFlags = featureFlags;
+      if (featureFlags) {
+        // Server-side normalization: keep feature flags consistent even if a client
+        // sends partial updates.
+        const normalized = { ...featureFlags } as any;
+        if (normalized.voiceEnabled === false) {
+          normalized.voiceAdvanced = false;
+        } else if (normalized.voiceAdvanced === true) {
+          normalized.voiceEnabled = true;
+        }
+        updates.featureFlags = normalized;
+      }
 
       const settings = await storage.upsertUserSettings(id, updates);
+      invalidateUserSettingsCache(id);
       res.json(settings);
     } catch (error: any) {
       console.error("Error updating user settings:", error);
@@ -368,10 +395,493 @@ export function createUserRouter() {
     }
   });
 
+  // ============================================================================
+  // Self Profile (basic account info)
+  // ============================================================================
+
+  const updateSelfProfileSchema = z
+    .object({
+      fullName: z.string().trim().min(1).max(200).optional(),
+      company: z.string().trim().max(200).nullable().optional(),
+    })
+    .refine((data) => Object.keys(data).length > 0, {
+      message: "At least one field must be provided for update",
+    });
+
+  router.patch("/api/users/:id/profile", validateBody(updateSelfProfileSchema), async (req, res) => {
+    try {
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const updates: any = { updatedAt: new Date() };
+
+      if (typeof req.body.fullName === "string") {
+        updates.fullName = req.body.fullName.trim();
+      }
+
+      if (req.body.company === null) {
+        updates.company = null;
+      } else if (typeof req.body.company === "string") {
+        const trimmed = req.body.company.trim();
+        updates.company = trimmed.length ? trimmed : null;
+      }
+
+      const updated = await storage.updateUser(id, updates);
+      if (!updated) return res.status(404).json({ error: "User not found" });
+
+      await auditLog(req, {
+        action: AuditActions.USER_UPDATED,
+        resource: "users",
+        resourceId: id,
+        details: { updates: { fullName: updates.fullName, company: updates.company } },
+        category: "user",
+        severity: "info",
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating self profile:", error);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // ============================================================================
+  // Programaciones (Chat Schedules)
+  // ============================================================================
+
+  const nonEmptyTrimmedString = z.string().trim().min(1);
+
+  const createScheduleSchema = z.object({
+    chatId: nonEmptyTrimmedString,
+    name: z.string().trim().min(1).optional(),
+    prompt: nonEmptyTrimmedString,
+    scheduleType: z.enum(["once", "daily", "weekly"]),
+    timeZone: z.string().trim().optional(),
+    isActive: z.boolean().optional(),
+    // once
+    runAt: z.string().datetime().optional(),
+    // daily/weekly (HH:MM)
+    timeOfDay: z.string().trim().optional(),
+    // weekly (0-6, Sunday=0)
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+  });
+
+  const updateScheduleSchema = z.object({
+    name: z.string().trim().min(1).optional(),
+    prompt: z.string().trim().min(1).optional(),
+    scheduleType: z.enum(["once", "daily", "weekly"]).optional(),
+    timeZone: z.string().trim().optional(),
+    isActive: z.boolean().optional(),
+    runAt: z.string().datetime().optional(),
+    timeOfDay: z.string().trim().optional(),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+  });
+
+  router.get("/api/users/:id/schedules", async (req, res) => {
+    try {
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const rows = await db
+        .select({
+          schedule: chatSchedules,
+          chatTitle: chats.title,
+        })
+        .from(chatSchedules)
+        .leftJoin(chats, eq(chatSchedules.chatId, chats.id))
+        .where(eq(chatSchedules.userId, id))
+        .orderBy(desc(chatSchedules.updatedAt));
+
+      res.json(
+        rows.map((r) => ({
+          ...r.schedule,
+          chatTitle: r.chatTitle || null,
+        })),
+      );
+    } catch (error: any) {
+      console.error("Error listing schedules:", error);
+      res.status(500).json({ error: "Failed to list schedules" });
+    }
+  });
+
+  router.post("/api/users/:id/schedules", validateBody(createScheduleSchema), async (req, res) => {
+    try {
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const { chatId, name, prompt, scheduleType, timeZone, isActive, runAt, timeOfDay, daysOfWeek } = req.body;
+
+      const chat = await storage.getChat(chatId);
+      if (!chat) return res.status(404).json({ error: "Chat not found" });
+      if (!chat.userId || chat.userId !== id) return res.status(403).json({ error: "Access denied" });
+
+      const tz = normalizeTimeZone(timeZone || "UTC");
+      const active = isActive ?? true;
+
+      let runAtDate: Date | null = null;
+      let normalizedTimeOfDay: string | null = null;
+      let normalizedDaysOfWeek: number[] | null = null;
+
+      if (scheduleType === "once") {
+        if (!runAt) return res.status(400).json({ error: "runAt is required for scheduleType=once" });
+        runAtDate = new Date(runAt);
+        if (!Number.isFinite(runAtDate.getTime())) return res.status(400).json({ error: "Invalid runAt" });
+        if (runAtDate.getTime() <= Date.now()) return res.status(400).json({ error: "runAt must be in the future" });
+      } else if (scheduleType === "daily") {
+        const parsed = parseTimeOfDay(timeOfDay);
+        if (!parsed) return res.status(400).json({ error: "timeOfDay must be HH:MM for scheduleType=daily" });
+        normalizedTimeOfDay = parsed.normalized;
+      } else if (scheduleType === "weekly") {
+        const parsed = parseTimeOfDay(timeOfDay);
+        if (!parsed) return res.status(400).json({ error: "timeOfDay must be HH:MM for scheduleType=weekly" });
+        if (!daysOfWeek || daysOfWeek.length === 0) {
+          return res.status(400).json({ error: "daysOfWeek is required for scheduleType=weekly" });
+        }
+        normalizedTimeOfDay = parsed.normalized;
+        normalizedDaysOfWeek = Array.from(new Set(daysOfWeek as number[])).sort((a: number, b: number) => a - b);
+      }
+
+      const nextRunAt = active
+        ? computeNextRunAt(
+            {
+              scheduleType: scheduleType as ChatScheduleType,
+              timeZone: tz,
+              runAt: runAtDate,
+              timeOfDay: normalizedTimeOfDay,
+              daysOfWeek: normalizedDaysOfWeek,
+            },
+            new Date(),
+          )
+        : null;
+
+      if (active && !nextRunAt) {
+        return res.status(400).json({ error: "Could not compute nextRunAt for this schedule" });
+      }
+
+      const [created] = await db
+        .insert(chatSchedules)
+        .values({
+          userId: id,
+          chatId,
+          name: name || "Programación",
+          prompt,
+          scheduleType,
+          timeZone: tz,
+          runAt: runAtDate,
+          timeOfDay: normalizedTimeOfDay,
+          daysOfWeek: normalizedDaysOfWeek,
+          isActive: active,
+          nextRunAt,
+        })
+        .returning();
+
+      res.json(created);
+    } catch (error: any) {
+      console.error("Error creating schedule:", error);
+      res.status(500).json({ error: "Failed to create schedule" });
+    }
+  });
+
+  router.put("/api/users/:id/schedules/:scheduleId", validateBody(updateScheduleSchema), async (req, res) => {
+    try {
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id, scheduleId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const [existing] = await db
+        .select()
+        .from(chatSchedules)
+        .where(and(eq(chatSchedules.id, scheduleId), eq(chatSchedules.userId, id)))
+        .limit(1);
+
+      if (!existing) return res.status(404).json({ error: "Schedule not found" });
+
+      const updates: any = {};
+      if (typeof req.body.name === "string") updates.name = req.body.name;
+      if (typeof req.body.prompt === "string") updates.prompt = req.body.prompt;
+      if (typeof req.body.scheduleType === "string") updates.scheduleType = req.body.scheduleType;
+      if (typeof req.body.timeZone === "string") updates.timeZone = normalizeTimeZone(req.body.timeZone);
+      if (typeof req.body.isActive === "boolean") updates.isActive = req.body.isActive;
+
+      const scheduleType = (updates.scheduleType || existing.scheduleType) as ChatScheduleType;
+      const tz = (updates.timeZone || existing.timeZone) as string;
+
+      let runAtDate: Date | null = existing.runAt;
+      let timeOfDayNorm: string | null = existing.timeOfDay;
+      let daysNorm: number[] | null = (existing.daysOfWeek as any) || null;
+
+      if (scheduleType === "once") {
+        if (req.body.runAt) {
+          runAtDate = new Date(req.body.runAt);
+          if (!Number.isFinite(runAtDate.getTime())) return res.status(400).json({ error: "Invalid runAt" });
+        }
+        timeOfDayNorm = null;
+        daysNorm = null;
+      }
+
+      if (scheduleType === "daily") {
+        if (req.body.timeOfDay) {
+          const parsed = parseTimeOfDay(req.body.timeOfDay);
+          if (!parsed) return res.status(400).json({ error: "timeOfDay must be HH:MM for scheduleType=daily" });
+          timeOfDayNorm = parsed.normalized;
+        }
+        runAtDate = null;
+        daysNorm = null;
+      }
+
+      if (scheduleType === "weekly") {
+        if (req.body.timeOfDay) {
+          const parsed = parseTimeOfDay(req.body.timeOfDay);
+          if (!parsed) return res.status(400).json({ error: "timeOfDay must be HH:MM for scheduleType=weekly" });
+          timeOfDayNorm = parsed.normalized;
+        }
+        if (req.body.daysOfWeek) {
+          if (req.body.daysOfWeek.length === 0) return res.status(400).json({ error: "daysOfWeek cannot be empty" });
+          daysNorm = Array.from(new Set(req.body.daysOfWeek as number[])).sort((a: number, b: number) => a - b);
+        }
+        runAtDate = null;
+      }
+
+      updates.runAt = runAtDate;
+      updates.timeOfDay = timeOfDayNorm;
+      updates.daysOfWeek = daysNorm;
+
+      const active = (typeof updates.isActive === "boolean" ? updates.isActive : existing.isActive) as boolean;
+      updates.nextRunAt = active
+        ? computeNextRunAt(
+            {
+              scheduleType,
+              timeZone: tz,
+              runAt: runAtDate,
+              timeOfDay: timeOfDayNorm,
+              daysOfWeek: daysNorm,
+            },
+            new Date(),
+          )
+        : null;
+
+      if (active && !updates.nextRunAt) {
+        return res.status(400).json({ error: "Could not compute nextRunAt for this schedule" });
+      }
+
+      // When a user re-enables a schedule, clear previous error state.
+      if (updates.isActive === true) {
+        updates.failureCount = 0;
+        updates.lastError = null;
+        updates.lockedAt = null;
+        updates.lockedBy = null;
+      }
+
+      updates.updatedAt = new Date();
+
+      const [updated] = await db
+        .update(chatSchedules)
+        .set(updates)
+        .where(and(eq(chatSchedules.id, scheduleId), eq(chatSchedules.userId, id)))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating schedule:", error);
+      res.status(500).json({ error: "Failed to update schedule" });
+    }
+  });
+
+  router.delete("/api/users/:id/schedules/:scheduleId", async (req, res) => {
+    try {
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id, scheduleId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      await db.delete(chatSchedules).where(and(eq(chatSchedules.id, scheduleId), eq(chatSchedules.userId, id)));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting schedule:", error);
+      res.status(500).json({ error: "Failed to delete schedule" });
+    }
+  });
+
+  router.post("/api/users/:id/schedules/:scheduleId/run", async (req, res) => {
+    try {
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id, scheduleId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const result = await runChatScheduleNow(id, scheduleId);
+      res.json(result);
+    } catch (error: any) {
+      const status = error?.statusCode || 500;
+      res.status(status).json({ error: error?.message || "Failed to run schedule" });
+    }
+  });
+
+  // ============================================================================
+  // Sesiones activas (Dispositivos de confianza)
+  // ============================================================================
+
+  router.get("/api/users/:id/sessions", async (req, res) => {
+    try {
+      const authUserId = getUserId(req);
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const currentSid = (req as any).sessionID as string | undefined;
+
+      const rows = await db
+        .select({
+          sid: sessions.sid,
+          expire: sessions.expire,
+          createdAt: sessions.createdAt,
+          updatedAt: sessions.updatedAt,
+          lastSeenAt: sessions.lastSeenAt,
+          sess: sessions.sess,
+        })
+        .from(sessions)
+        .where(eq(sessions.userId, id))
+        .orderBy(desc(sessions.updatedAt));
+
+      res.json({
+        currentSid: currentSid || null,
+        sessions: rows.map((r) => {
+          const device = (r.sess as any)?.device || null;
+          const userAgent = typeof device?.userAgent === "string" ? device.userAgent : "";
+          const ipPrefix = typeof device?.ipPrefix === "string" ? device.ipPrefix : "";
+          return {
+            sid: r.sid,
+            isCurrent: !!currentSid && r.sid === currentSid,
+            expire: r.expire,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
+            lastSeenAt: r.lastSeenAt,
+            device: device ? { userAgent, ipPrefix } : null,
+          };
+        }),
+      });
+    } catch (error: any) {
+      console.error("Error listing sessions:", error);
+      res.status(500).json({ error: "Failed to list sessions" });
+    }
+  });
+
+  router.post("/api/users/:id/sessions/revoke-others", async (req, res) => {
+    try {
+      const authUserId = getUserId(req);
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const currentSid = (req as any).sessionID as string | undefined;
+      if (!currentSid) return res.status(400).json({ error: "No current session" });
+
+      const deleted = await db
+        .delete(sessions)
+        .where(and(eq(sessions.userId, id), ne(sessions.sid, currentSid)))
+        .returning({ sid: sessions.sid });
+
+      await auditLog(req, {
+        action: "auth.sessions_revoked_others",
+        resource: "sessions",
+        details: { userId: id, count: deleted.length },
+        category: "security",
+        severity: "warning",
+      });
+
+      res.json({ success: true, count: deleted.length });
+    } catch (error: any) {
+      console.error("Error revoking other sessions:", error);
+      res.status(500).json({ error: "Failed to revoke other sessions" });
+    }
+  });
+
+  router.post("/api/users/:id/sessions/logout-all", async (req, res) => {
+    try {
+      const authUserId = getUserId(req);
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const deleted = await db
+        .delete(sessions)
+        .where(eq(sessions.userId, id))
+        .returning({ sid: sessions.sid });
+
+      // Best-effort: destroy current session + clear cookie too.
+      (req as any)?.session?.destroy?.(() => {});
+      res.clearCookie("siragpt.sid");
+
+      await auditLog(req, {
+        action: "auth.logout_all",
+        resource: "sessions",
+        details: { userId: id, count: deleted.length },
+        category: "security",
+        severity: "critical",
+      });
+
+      res.json({ success: true, count: deleted.length });
+    } catch (error: any) {
+      console.error("Error logging out all sessions:", error);
+      res.status(500).json({ error: "Failed to logout all sessions" });
+    }
+  });
+
+  router.delete("/api/users/:id/sessions/:sid", async (req, res) => {
+    try {
+      const authUserId = getUserId(req);
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+
+      const { id, sid } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const deleted = await db
+        .delete(sessions)
+        .where(and(eq(sessions.userId, id), eq(sessions.sid, sid)))
+        .returning({ sid: sessions.sid });
+
+      await auditLog(req, {
+        action: "auth.session_revoked",
+        resource: "sessions",
+        resourceId: sid,
+        details: { userId: id, deleted: deleted.length > 0 },
+        category: "security",
+        severity: "warning",
+      });
+
+      res.json({ success: true, deleted: deleted.length > 0 });
+    } catch (error: any) {
+      console.error("Error revoking session:", error);
+      res.status(500).json({ error: "Failed to revoke session" });
+    }
+  });
+
   router.get("/api/integrations/providers", async (req, res) => {
     try {
+      await ensureIntegrationCatalogSeeded().catch((err) => {
+        console.warn("[Integrations] Failed to auto-seed catalog:", err?.message || err);
+      });
       const providers = await storage.getIntegrationProviders();
-      res.json(providers);
+      // Never expose authConfig (can contain secrets) to clients.
+      res.json(providers.map(({ authConfig, ...safe }) => safe));
     } catch (error: any) {
       console.error("Error getting providers:", error);
       res.status(500).json({ error: "Failed to get providers" });
@@ -380,6 +890,9 @@ export function createUserRouter() {
 
   router.get("/api/integrations/tools", async (req, res) => {
     try {
+      await ensureIntegrationCatalogSeeded().catch((err) => {
+        console.warn("[Integrations] Failed to auto-seed catalog:", err?.message || err);
+      });
       const { providerId } = req.query;
       const tools = await storage.getIntegrationTools(providerId as string | undefined);
       res.json(tools);
@@ -391,113 +904,15 @@ export function createUserRouter() {
 
   router.post("/api/integrations/seed", requireCatalogSeedingEnabled, requireAdmin, async (req, res) => {
     try {
-      const providersToSeed = [
-        {
-          id: "github",
-          name: "GitHub",
-          description: "Control de versiones y colaboración de código",
-          iconUrl: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://github.com/login/oauth/authorize", tokenUrl: "https://github.com/login/oauth/access_token", scopes: ["repo", "user", "read:org"] },
-          category: "development",
-          isActive: "true"
-        },
-        {
-          id: "figma",
-          name: "Figma",
-          description: "Diseño colaborativo y prototipado",
-          iconUrl: "https://static.figma.com/app/icon/1/favicon.svg",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://www.figma.com/oauth", tokenUrl: "https://www.figma.com/api/oauth/token", scopes: ["file_read", "file_write"] },
-          category: "design",
-          isActive: "true"
-        },
-        {
-          id: "canva",
-          name: "Canva",
-          description: "Diseño gráfico y contenido visual",
-          iconUrl: "https://static.canva.com/static/images/canva-logo.svg",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://www.canva.com/api/oauth/authorize", tokenUrl: "https://www.canva.com/api/oauth/token", scopes: ["design:content:read", "design:content:write"] },
-          category: "design",
-          isActive: "true"
-        },
-        {
-          id: "slack",
-          name: "Slack",
-          description: "Comunicación y mensajería de equipo",
-          iconUrl: "https://a.slack-edge.com/80588/marketing/img/icons/icon_slack_hash_colored.png",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://slack.com/oauth/v2/authorize", tokenUrl: "https://slack.com/api/oauth.v2.access", scopes: ["channels:read", "chat:write", "users:read"] },
-          category: "communication",
-          isActive: "true"
-        },
-        {
-          id: "notion",
-          name: "Notion",
-          description: "Notas, documentación y gestión de proyectos",
-          iconUrl: "https://www.notion.so/images/logo-ios.png",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://api.notion.com/v1/oauth/authorize", tokenUrl: "https://api.notion.com/v1/oauth/token", scopes: [] },
-          category: "productivity",
-          isActive: "true"
-        },
-        {
-          id: "google_drive",
-          name: "Google Drive",
-          description: "Almacenamiento y documentos en la nube",
-          iconUrl: "https://ssl.gstatic.com/docs/doclist/images/drive_2022q3_32dp.png",
-          authType: "oauth2",
-          authConfig: { authUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token", scopes: ["https://www.googleapis.com/auth/drive.readonly"] },
-          category: "productivity",
-          isActive: "true"
-        }
-      ];
-
-      let insertedProviders = 0;
-      for (const provider of providersToSeed) {
-        const existing = await storage.getIntegrationProvider(provider.id);
-        if (!existing) {
-          await db.insert(integrationProviders).values(provider);
-          insertedProviders++;
-        }
-      }
-
-      const toolsToSeed = [
-        { id: "github:list_repos", providerId: "github", name: "Listar repositorios", description: "Lista los repositorios del usuario", requiredScopes: ["repo"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "github:create_issue", providerId: "github", name: "Crear issue", description: "Crea un nuevo issue en un repositorio", requiredScopes: ["repo"], dataAccessLevel: "write", confirmationRequired: "true" },
-        { id: "github:get_file", providerId: "github", name: "Obtener archivo", description: "Lee el contenido de un archivo", requiredScopes: ["repo"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "figma:get_file", providerId: "figma", name: "Obtener archivo", description: "Obtiene información de un archivo Figma", requiredScopes: ["file_read"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "figma:export_frame", providerId: "figma", name: "Exportar frame", description: "Exporta un frame como imagen", requiredScopes: ["file_read"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "canva:list_designs", providerId: "canva", name: "Listar diseños", description: "Lista los diseños del usuario", requiredScopes: ["design:content:read"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "canva:export_design", providerId: "canva", name: "Exportar diseño", description: "Exporta un diseño como imagen", requiredScopes: ["design:content:read"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "slack:send_message", providerId: "slack", name: "Enviar mensaje", description: "Envía un mensaje a un canal", requiredScopes: ["chat:write"], dataAccessLevel: "write", confirmationRequired: "true" },
-        { id: "slack:list_channels", providerId: "slack", name: "Listar canales", description: "Lista los canales disponibles", requiredScopes: ["channels:read"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "notion:search", providerId: "notion", name: "Buscar páginas", description: "Busca páginas en el workspace", requiredScopes: [], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "notion:get_page", providerId: "notion", name: "Obtener página", description: "Obtiene el contenido de una página", requiredScopes: [], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "google_drive:list_files", providerId: "google_drive", name: "Listar archivos", description: "Lista archivos en Drive", requiredScopes: ["https://www.googleapis.com/auth/drive.readonly"], dataAccessLevel: "read", confirmationRequired: "false" },
-        { id: "google_drive:get_file", providerId: "google_drive", name: "Obtener archivo", description: "Obtiene contenido de un archivo", requiredScopes: ["https://www.googleapis.com/auth/drive.readonly"], dataAccessLevel: "read", confirmationRequired: "false" }
-      ];
-
-      let insertedTools = 0;
-      for (const tool of toolsToSeed) {
-        const existing = await db.select().from(integrationTools).where(eq(integrationTools.id, tool.id));
-        if (existing.length === 0) {
-          await db.insert(integrationTools).values({ ...tool, isActive: "true" });
-          insertedTools++;
-        }
-      }
-
-      const providers = await storage.getIntegrationProviders();
-      const tools = await storage.getIntegrationTools();
+      const { insertedProviders, insertedTools, providersTotal, toolsTotal } = await seedIntegrationCatalog();
       await auditLog(req, {
         action: "system.integration_catalog_seeded",
         resource: "integration_catalog",
-        details: { insertedProviders, insertedTools, providersTotal: providers.length, toolsTotal: tools.length },
+        details: { insertedProviders, insertedTools, providersTotal, toolsTotal },
         category: "config",
         severity: "warning",
       });
-      res.json({ message: "Catalog seeded", providers: providers.length, tools: tools.length });
+      res.json({ message: "Catalog seeded", insertedProviders, insertedTools, providers: providersTotal, tools: toolsTotal });
     } catch (error: any) {
       console.error("Error seeding catalog:", error);
       res.status(500).json({ error: "Failed to seed catalog" });
@@ -512,20 +927,58 @@ export function createUserRouter() {
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
+      const sanitizeAccount = (account: any) => {
+        // Never return tokens/metadata to the client (UI only needs display identity).
+        return {
+          id: account?.id,
+          userId: account?.userId,
+          providerId: account?.providerId,
+          displayName: account?.displayName ?? null,
+          email: account?.email ?? null,
+          status: account?.status ?? null,
+        };
+      };
+
+      await ensureIntegrationCatalogSeeded().catch((err) => {
+        console.warn("[Integrations] Failed to auto-seed catalog:", err?.message || err);
+      });
+
       const [accounts, policy, providers] = await Promise.all([
         storage.getIntegrationAccounts(id),
         storage.getIntegrationPolicy(id),
-        storage.getIntegrationProviders()
+        // Use write DB schema for immediate consistency after seeding (read replicas can lag).
+        db.select().from(integrationProviders).orderBy(integrationProviders.name)
       ]);
 
-      res.json({ accounts, policy, providers });
+      res.json({
+        accounts: accounts.map(sanitizeAccount),
+        policy,
+        providers: providers.map(({ authConfig, ...safe }) => safe),
+      });
     } catch (error: any) {
       console.error("Error getting user integrations:", error);
       res.status(500).json({ error: "Failed to get integrations" });
     }
   });
 
-  router.put("/api/users/:id/integrations/policy", async (req, res) => {
+  const updateIntegrationPolicySchema = z.object({
+    enabledApps: z.array(z.string()).optional(),
+    enabledTools: z.array(z.string()).optional(),
+    disabledTools: z.array(z.string()).optional(),
+    resourceScopes: z.any().optional(),
+    autoConfirmPolicy: z.enum(["always", "ask", "never"]).optional(),
+    sandboxMode: z.preprocess((v) => {
+      if (v === true) return "true";
+      if (v === false) return "false";
+      return v;
+    }, z.enum(["true", "false"]).optional()),
+    maxParallelCalls: z.preprocess((v) => {
+      if (typeof v === "string" && v.trim() !== "") return Number.parseInt(v, 10);
+      return v;
+    }, z.number().int().min(1).max(10).optional()),
+  }).strict();
+
+  router.put("/api/users/:id/integrations/policy", validateBody(updateIntegrationPolicySchema), async (req, res) => {
     try {
       const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
@@ -535,6 +988,7 @@ export function createUserRouter() {
 
       const { enabledApps, enabledTools, disabledTools, resourceScopes, autoConfirmPolicy, sandboxMode, maxParallelCalls } = req.body;
 
+      const before = await storage.getIntegrationPolicy(id);
       const policy = await storage.upsertIntegrationPolicy(id, {
         enabledApps,
         enabledTools,
@@ -545,6 +999,33 @@ export function createUserRouter() {
         maxParallelCalls
       });
 
+      invalidateIntegrationPolicyCache(id);
+      void auditLog(req, {
+        action: "user.integration_policy_updated",
+        resource: "integration_policy",
+        details: {
+          changedFields: Object.keys(req.body || {}),
+          // Log summaries only (avoid large payloads).
+          enabledAppsCount: Array.isArray(policy.enabledApps) ? policy.enabledApps.length : 0,
+          enabledToolsCount: Array.isArray(policy.enabledTools) ? policy.enabledTools.length : 0,
+          disabledToolsCount: Array.isArray(policy.disabledTools) ? policy.disabledTools.length : 0,
+          autoConfirmPolicy: policy.autoConfirmPolicy,
+          sandboxMode: policy.sandboxMode,
+          maxParallelCalls: policy.maxParallelCalls,
+          before: before
+            ? {
+                enabledAppsCount: Array.isArray(before.enabledApps) ? before.enabledApps.length : 0,
+                enabledToolsCount: Array.isArray(before.enabledTools) ? before.enabledTools.length : 0,
+                disabledToolsCount: Array.isArray(before.disabledTools) ? before.disabledTools.length : 0,
+                autoConfirmPolicy: before.autoConfirmPolicy,
+                sandboxMode: before.sandboxMode,
+                maxParallelCalls: before.maxParallelCalls,
+              }
+            : null,
+        },
+        category: "config",
+        severity: "info",
+      });
       res.json(policy);
     } catch (error: any) {
       console.error("Error updating policy:", error);
@@ -560,13 +1041,62 @@ export function createUserRouter() {
       const { id, provider } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
+      await ensureIntegrationCatalogSeeded().catch((err) => {
+        console.warn("[Integrations] Failed to auto-seed catalog:", err?.message || err);
+      });
+
       const providerInfo = await storage.getIntegrationProvider(provider);
       if (!providerInfo) return res.status(404).json({ error: "Provider not found" });
+      if (String(providerInfo.isActive || "").toLowerCase().trim() !== "true") {
+        return res.status(409).json({ error: "Provider is inactive" });
+      }
 
+      // Minimal, robust behavior: mark provider as connected even if OAuth isn't implemented yet.
+      // This unblocks the UI wiring (connect/disconnect + enable/disable policy).
+      const existing = await storage.getIntegrationAccountByProvider(id, provider);
+      const alreadyConnected = !!existing && existing.status === "active";
+      const account = existing
+        ? (existing.status === "active"
+          ? existing
+          : await storage.updateIntegrationAccount(existing.id, { status: "active" as any }))
+        : await storage.createIntegrationAccount({
+          userId: id,
+          providerId: provider,
+          status: "active",
+          isDefault: "true",
+          metadata: {
+            connectedVia: "manual_stub",
+            note: "OAuth flow not yet implemented",
+            connectedAt: new Date().toISOString(),
+          },
+        } as any);
+
+      // Auto-enable the provider on connect (can still be toggled off in policy).
+      const policy = await storage.getIntegrationPolicy(id);
+      const enabledApps = Array.from(new Set([...(policy?.enabledApps || []), provider]));
+      await storage.upsertIntegrationPolicy(id, { enabledApps });
+      invalidateIntegrationPolicyCache(id);
+
+      void auditLog(req, {
+        action: "user.integration_connected",
+        resource: "integration_account",
+        details: { providerId: provider, authType: providerInfo.authType, alreadyConnected },
+        category: "config",
+        severity: "info",
+      });
       res.json({
-        message: "OAuth flow not yet implemented",
+        success: true,
+        message: alreadyConnected ? "Already connected" : "Connected",
         provider: providerInfo.name,
-        authType: providerInfo.authType
+        authType: providerInfo.authType,
+        account: {
+          id: account?.id,
+          userId: account?.userId,
+          providerId: account?.providerId,
+          displayName: account?.displayName ?? null,
+          email: account?.email ?? null,
+          status: account?.status ?? null,
+        },
       });
     } catch (error: any) {
       console.error("Error initiating connect:", error);
@@ -583,10 +1113,28 @@ export function createUserRouter() {
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const account = await storage.getIntegrationAccountByProvider(id, provider);
-      if (!account) return res.status(404).json({ error: "Account not found" });
+      if (account) {
+        await storage.deleteIntegrationAccount(account.id);
+      }
 
-      await storage.deleteIntegrationAccount(account.id);
-      res.json({ success: true });
+      // Best-effort: disable provider on disconnect.
+      const policy = await storage.getIntegrationPolicy(id);
+      if (policy?.enabledApps?.includes(provider)) {
+        await storage.upsertIntegrationPolicy(id, {
+          enabledApps: (policy.enabledApps || []).filter((p) => p !== provider),
+        });
+      }
+      invalidateIntegrationPolicyCache(id);
+
+      void auditLog(req, {
+        action: "user.integration_disconnected",
+        resource: "integration_account",
+        details: { providerId: provider, hadAccount: !!account },
+        category: "config",
+        severity: "info",
+      });
+
+      res.json({ success: true, alreadyDisconnected: !account });
     } catch (error: any) {
       console.error("Error disconnecting:", error);
       res.status(500).json({ error: "Failed to disconnect" });
@@ -603,7 +1151,19 @@ export function createUserRouter() {
 
       const limit = parseInt(req.query.limit as string) || 50;
       const logs = await storage.getToolCallLogs(id, limit);
-      res.json(logs);
+      // Keep this endpoint minimal: the UI only needs summary fields.
+      res.json(
+        logs.map((log) => ({
+          id: log.id,
+          toolId: log.toolId,
+          providerId: log.providerId,
+          status: log.status,
+          latencyMs: log.latencyMs,
+          errorCode: log.errorCode,
+          errorMessage: log.errorMessage,
+          createdAt: log.createdAt,
+        }))
+      );
     } catch (error: any) {
       console.error("Error getting logs:", error);
       res.status(500).json({ error: "Failed to get logs" });
@@ -612,16 +1172,28 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/privacy", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const settings = await storage.getUserSettings(id);
       const logs = await storage.getConsentLogs(id, 10);
+
+      // Merge defaults so newly added fields are always present even for older rows.
+      const defaultPrivacySettings = {
+        trainingOptIn: false,
+        remoteBrowserDataAccess: false,
+        analyticsTracking: true,
+        chatHistoryEnabled: true,
+      };
+      const mergedPrivacySettings = {
+        ...defaultPrivacySettings,
+        ...(settings?.privacySettings || {}),
+      };
       res.json({
-        privacySettings: settings?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false },
+        privacySettings: mergedPrivacySettings,
         consentHistory: logs
       });
     } catch (error: any) {
@@ -630,15 +1202,22 @@ export function createUserRouter() {
     }
   });
 
-  router.put("/api/users/:id/privacy", async (req, res) => {
+  const updatePrivacySettingsSchema = z.object({
+    trainingOptIn: z.boolean().optional(),
+    remoteBrowserDataAccess: z.boolean().optional(),
+    analyticsTracking: z.boolean().optional(),
+    chatHistoryEnabled: z.boolean().optional(),
+  });
+
+  router.put("/api/users/:id/privacy", validateBody(updatePrivacySettingsSchema), async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
-      const { trainingOptIn, remoteBrowserDataAccess } = req.body;
+      const { trainingOptIn, remoteBrowserDataAccess, analyticsTracking, chatHistoryEnabled } = req.body;
       const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
       const userAgent = req.headers['user-agent'] || undefined;
 
@@ -648,9 +1227,21 @@ export function createUserRouter() {
       if (remoteBrowserDataAccess !== undefined) {
         await storage.logConsent(id, 'remote_browser_access', String(remoteBrowserDataAccess), ipAddress, userAgent);
       }
+      if (analyticsTracking !== undefined) {
+        await storage.logConsent(id, 'analytics_tracking', String(analyticsTracking), ipAddress, userAgent);
+      }
+      if (chatHistoryEnabled !== undefined) {
+        await storage.logConsent(id, 'chat_history_enabled', String(chatHistoryEnabled), ipAddress, userAgent);
+      }
+
+      const privacySettingsUpdates: Record<string, boolean> = {};
+      if (trainingOptIn !== undefined) privacySettingsUpdates.trainingOptIn = trainingOptIn;
+      if (remoteBrowserDataAccess !== undefined) privacySettingsUpdates.remoteBrowserDataAccess = remoteBrowserDataAccess;
+      if (analyticsTracking !== undefined) privacySettingsUpdates.analyticsTracking = analyticsTracking;
+      if (chatHistoryEnabled !== undefined) privacySettingsUpdates.chatHistoryEnabled = chatHistoryEnabled;
 
       const settings = await storage.upsertUserSettings(id, {
-        privacySettings: { trainingOptIn: trainingOptIn ?? false, remoteBrowserDataAccess: remoteBrowserDataAccess ?? false }
+        privacySettings: privacySettingsUpdates
       });
 
       res.json(settings);
@@ -662,8 +1253,8 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/shared-links", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -678,8 +1269,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/shared-links", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -712,8 +1303,8 @@ export function createUserRouter() {
 
   router.delete("/api/users/:id/shared-links/:linkId", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -728,8 +1319,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/shared-links/:linkId/rotate", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -744,8 +1335,8 @@ export function createUserRouter() {
 
   router.patch("/api/users/:id/shared-links/:linkId", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -795,8 +1386,8 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/chats/archived", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -811,8 +1402,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/:chatId/unarchive", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -827,8 +1418,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/archive-all", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -843,8 +1434,8 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/chats/deleted", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -859,8 +1450,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/delete-all", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -883,8 +1474,8 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/:chatId/restore", async (req, res) => {
     try {
-      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
-      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      const authUserId = getUserId(req);
+      if (!authUserId || authUserId.startsWith("anon_")) return res.status(401).json({ error: "Unauthorized" });
 
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
@@ -1081,11 +1672,13 @@ export function createUserRouter() {
         return res.status(404).json({ error: "User not found" });
       }
 
+      const userSettings = await storage.getUserSettings(userId);
+
       // Collect all user data
-      const chats = await storage.getChatsByUserId(userId);
-      const messages = [];
+      const chats = await storage.getChats(userId);
+      const messages: any[] = [];
       for (const chat of chats.slice(0, 100)) { // Limit to last 100 chats
-        const chatMessages = await storage.getMessagesByChatId(chat.id);
+        const chatMessages = await storage.getChatMessages(chat.id, { orderBy: 'asc' });
         messages.push(...chatMessages);
       }
 
@@ -1115,7 +1708,8 @@ export function createUserRouter() {
           content: m.content,
           createdAt: m.createdAt
         })),
-        preferences: user.preferences || {}
+        preferences: user.preferences || {},
+        userSettings: userSettings || null
       };
 
       res.setHeader("Content-Type", "application/json");

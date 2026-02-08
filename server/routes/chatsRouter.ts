@@ -21,8 +21,10 @@ export function createChatsRouter() {
         return res.json([]);
       }
 
-      const chatList = await storage.getChats(userId);
-      res.json(chatList);
+      // Hide archived and deleted chats from the main list; they are managed via dedicated endpoints.
+      // OPTIMIZATION: Use DB-side filtering instead of fetching all chats
+      const visibleChats = await storage.getActiveChats(userId);
+      res.json(visibleChats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -112,6 +114,9 @@ export function createChatsRouter() {
     try {
       const { title, messages } = req.body;
       const userId = getOrCreateSecureUserId(req);
+      const chatHistoryEnabled = userId && !userId.startsWith("anon_")
+        ? (await storage.getUserSettings(userId))?.privacySettings?.chatHistoryEnabled ?? true
+        : true;
 
       // If messages provided with requestIds, check if any already exist (reconciliation scenario)
       if (messages && Array.isArray(messages) && messages.length > 0) {
@@ -140,11 +145,18 @@ export function createChatsRouter() {
             attachments: msg.attachments
           }))
         );
+        if (!chatHistoryEnabled) {
+          // Store the chat transiently (accessible by id) but hide it from history listings.
+          await storage.softDeleteChat(result.chat.id);
+        }
         return res.json({ ...result.chat, messages: result.messages });
       }
 
       // Simple chat creation without messages
       const chat = await storage.createChat({ title: title || "New Chat", userId });
+      if (!chatHistoryEnabled) {
+        await storage.softDeleteChat(chat.id);
+      }
       res.json(chat);
     } catch (error: any) {
       // Handle duplicate key constraint gracefully
@@ -190,7 +202,11 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const messages = await storage.getChatMessages(req.params.id);
+      // Pagination support
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      const before = req.query.before ? new Date(req.query.before as string) : undefined;
+
+      const messages = await storage.getChatMessages(req.params.id, { limit, before });
       // Also include conversationDocuments so the frontend can hydrate attachment display data
       const conversationDocs = await storage.getConversationDocuments(req.params.id);
       res.json({ ...chat, messages, conversationDocuments: conversationDocs, shareRole, isOwner });

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { apiFetch } from "@/lib/apiClient";
 
 type SetupResponse = {
   secret: string;
@@ -41,10 +42,9 @@ export function Admin2FAGate({
   const setup2fa = async () => {
     setIsBusy(true);
     try {
-      const res = await fetch("/api/2fa/setup", {
+      const res = await apiFetch("/api/2fa/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
       });
       const payload = (await res.json().catch(() => null)) as any;
       if (!res.ok) {
@@ -67,10 +67,9 @@ export function Admin2FAGate({
     }
     setIsBusy(true);
     try {
-      const res = await fetch("/api/2fa/verify-setup", {
+      const res = await apiFetch("/api/2fa/verify-setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ code: trimmed }),
       });
       const payload = await res.json().catch(() => null);
@@ -94,10 +93,9 @@ export function Admin2FAGate({
     }
     setIsBusy(true);
     try {
-      const res = await fetch("/api/2fa/verify-session", {
+      const res = await apiFetch("/api/2fa/verify-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ code: trimmed }),
       });
       const payload = await res.json().catch(() => null);
@@ -212,4 +210,3 @@ export function Admin2FAGate({
     </div>
   );
 }
-

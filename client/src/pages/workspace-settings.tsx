@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,21 +32,92 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { apiFetch } from "@/lib/apiClient";
-import { isAdminUser, isBillingManagerUser } from "@/lib/admin";
+import { trackWorkspaceEvent as trackAnalyticsEvent } from "@/lib/analytics";
+import { isAdminUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { CreditAlertsDialog } from "@/components/credit-alerts-dialog";
-import { BillingHelpDialog } from "@/components/billing-help-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { IdentityAccessSection } from "@/components/workspace-settings/IdentityAccessSection";
+import { WorkspaceGroupsSection } from "@/components/workspace-settings/WorkspaceGroupsSection";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
+
+type AnalyticsMetricKey = "userMessages" | "chatsCreated" | "tokensUsed" | "pageViews" | "actions";
+
+type AnalyticsMember = {
+  userId: string;
+  email: string | null;
+  displayName: string;
+  role: string | null;
+  lastLoginAt: string | null;
+  lastActiveAt: string | null;
+  chatsCreated: number;
+  userMessages: number;
+  tokensUsed: number;
+  pageViews: number;
+  actions: number;
+};
+
+type AnalyticsOverview = {
+  canViewAll: boolean;
+  days: number;
+  startDate: string;
+  endDate: string;
+  sessionsCount: number;
+  topPages: Array<{ page: string; count: number }>;
+  topActions: Array<{ action: string; count: number }>;
+  totals: {
+    members: number;
+    activeMembers: number;
+    chatsCreated: number;
+    userMessages: number;
+    tokensUsed: number;
+    pageViews: number;
+    actions: number;
+  };
+  byMember: AnalyticsMember[];
+  activityByDay: Array<{
+    date: string;
+    chatsCreated: number;
+    userMessages: number;
+    tokensUsed: number;
+    pageViews: number;
+    actions: number;
+  }>;
+};
+
+type WorkspaceRole = {
+  id: string;
+  roleKey: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  isCustom: boolean;
+  isEditable: boolean;
+};
+
+type PermissionDefinition = {
+  id: string;
+  label: string;
+  category: string;
+  description?: string;
+};
 
 const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings className="h-4 w-4" /> },
@@ -60,14 +131,23 @@ const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[
   { id: "identity", label: "Identidad y acceso", icon: <ShieldCheck className="h-4 w-4" /> },
 ];
 
+const analyticsMetricOptions: { value: AnalyticsMetricKey; label: string; color: string }[] = [
+  { value: "userMessages", label: "Mensajes de usuario", color: "#2563eb" },
+  { value: "chatsCreated", label: "Chats creados", color: "#0f766e" },
+  { value: "tokensUsed", label: "Tokens usados", color: "#b45309" },
+  { value: "pageViews", label: "Vistas de página", color: "#9333ea" },
+  { value: "actions", label: "Acciones", color: "#dc2626" },
+];
+
 export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const { user } = useAuth();
   const isAdmin = isAdminUser(user as any);
-  const canManageBilling = isBillingManagerUser(user as any);
-  const canManageWorkspace = canManageBilling;
+  const [canManageWorkspace, setCanManageWorkspace] = useState(false);
+  const [canManageRoles, setCanManageRoles] = useState(false);
+  const [canManageBilling, setCanManageBilling] = useState(false);
   const { toast } = useToast();
   const userDisplayName = user?.fullName || user?.username || "Tu cuenta";
   const userEmail = user?.email || "";
@@ -84,11 +164,35 @@ export default function WorkspaceSettingsPage() {
   const [workspaceId, setWorkspaceId] = useState<string>("");
   const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [membersFilter, setMembersFilter] = useState("");
+  const [analyticsDays, setAnalyticsDays] = useState<7 | 30 | 90>(30);
+  const [analyticsMetric, setAnalyticsMetric] = useState<AnalyticsMetricKey>("userMessages");
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsOverview | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [analyticsMemberFilter, setAnalyticsMemberFilter] = useState("");
+  const [analyticsMemberSort, setAnalyticsMemberSort] = useState<"activity" | "messages" | "tokens" | "recent">("activity");
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
-  const [billingHelpOpen, setBillingHelpOpen] = useState(false);
-  const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
+  const [addCreditsOpen, setAddCreditsOpen] = useState(false);
+  const [creditsTopupAmountUsd, setCreditsTopupAmountUsd] = useState<string>("5");
+  const [creditsTopupSubmitting, setCreditsTopupSubmitting] = useState(false);
+  const [roles, setRoles] = useState<WorkspaceRole[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [permissionsCatalog, setPermissionsCatalog] = useState<PermissionDefinition[]>([]);
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
+  const [roleDialogMode, setRoleDialogMode] = useState<"create" | "edit">("create");
+  const [roleEditingId, setRoleEditingId] = useState<string | null>(null);
+  const [roleName, setRoleName] = useState("");
+  const [roleDescription, setRoleDescription] = useState("");
+  const [rolePermissions, setRolePermissions] = useState<string[]>([]);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
+  const [inviteRole, setInviteRole] = useState<string>("team_member");
+  const [inviteSending, setInviteSending] = useState(false);
   const [planSelectKey, setPlanSelectKey] = useState(0);
   const [billingTab, setBillingTab] = useState<"plan" | "invoices">("plan");
   const [creditsOffset, setCreditsOffset] = useState(0);
@@ -100,6 +204,8 @@ export default function WorkspaceSettingsPage() {
     totalRequests: number;
     limitTokens: number | null;
     percentUsed: number | null;
+    extraCredits?: number;
+    extraCreditsNextExpiry?: string | null;
   } | null>(null);
   const [creditsLoading, setCreditsLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
@@ -130,7 +236,40 @@ export default function WorkspaceSettingsPage() {
     subscriptionStatus: string | null;
     subscriptionPeriodEnd: string | null;
     willDeactivate: boolean;
+    plan?: string;
+    monthsPaid?: number;
+    extraCredits?: number;
   } | null>(null);
+
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [members, setMembers] = useState<
+    {
+      id: string;
+      email: string | null;
+      fullName: string | null;
+      firstName: string | null;
+      lastName: string | null;
+      profileImageUrl?: string | null;
+      role: string | null;
+      status?: string | null;
+      createdAt: string | null;
+      lastLoginAt: string | null;
+    }[]
+  >([]);
+  const [canManageMembers, setCanManageMembers] = useState(false);
+  const [pendingInvitesLoading, setPendingInvitesLoading] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<
+    {
+      id: string;
+      email: string;
+      role: string;
+      status: string;
+      createdAt: string;
+      lastSentAt: string | null;
+      invitedByName?: string | null;
+      invitedByEmail?: string | null;
+    }[]
+  >([]);
 
   const deactivationDateLabel = useMemo(() => {
     return formatPeriodEndEs(billingStatus?.subscriptionPeriodEnd ?? null);
@@ -150,6 +289,74 @@ export default function WorkspaceSettingsPage() {
       setActiveSection(section);
     }
   }, [searchString]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const subscription = params.get("subscription");
+    const credits = params.get("credits");
+
+    if (!subscription && !credits) return;
+
+    // Clear one-time Stripe return params to avoid duplicate toasts on refresh.
+    params.delete("subscription");
+    params.delete("credits");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+
+    const refreshBilling = async () => {
+      try {
+        const res = await apiFetch("/api/billing/status");
+        if (res.ok) {
+          const data = await res.json();
+          setBillingStatus(data);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const refreshCredits = async () => {
+      try {
+        setCreditsOffset(0);
+        setCreditsLoading(true);
+        const res = await apiFetch(`/api/billing/credits/usage?offset=0`);
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || "No se pudo cargar el uso de créditos");
+        setCreditsUsage(data);
+      } catch (e: any) {
+        toast({
+          title: "Error",
+          description: e?.message || "No se pudo cargar el uso de créditos.",
+          variant: "destructive",
+        });
+      } finally {
+        setCreditsLoading(false);
+      }
+    };
+
+    if (subscription === "success") {
+      toast({ title: "Suscripción activada", description: "Tu plan fue actualizado correctamente." });
+      setActiveSection("billing");
+      setBillingTab("plan");
+      void refreshBilling();
+      void refreshCredits();
+      setInvoicesLoaded(false);
+    } else if (subscription === "cancelled") {
+      toast({ title: "Suscripción cancelada", description: "No se realizó ningún cargo." });
+    }
+
+    if (credits === "success") {
+      toast({ title: "Créditos agregados", description: "La compra se registró correctamente." });
+      setActiveSection("billing");
+      setBillingTab("plan");
+      void refreshBilling();
+      void refreshCredits();
+      setInvoicesLoaded(false);
+    } else if (credits === "cancelled") {
+      toast({ title: "Compra cancelada", description: "No se realizó ningún cargo." });
+    }
+  }, [searchString, toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,6 +384,10 @@ export default function WorkspaceSettingsPage() {
         setWorkspaceName(data.name || "");
         setLogoFileUuid(data.logoFileUuid || null);
         setMemberCount(typeof data.memberCount === "number" ? data.memberCount : null);
+        setCanManageWorkspace(!!data.canManageWorkspace);
+        setCanManageMembers(!!data.canManageMembers);
+        setCanManageRoles(!!data.canManageRoles);
+        setCanManageBilling(!!data.canManageBilling);
       } catch {
         // ignore
       }
@@ -218,6 +429,64 @@ export default function WorkspaceSettingsPage() {
     };
   }, [activeSection, creditsOffset, toast]);
 
+  const trackWorkspaceEvent = useCallback(async (payload: {
+    eventType: "page_view" | "action";
+    page?: string;
+    action?: string;
+    metadata?: Record<string, any>;
+  }) => {
+    await trackAnalyticsEvent(payload);
+  }, []);
+
+  useEffect(() => {
+    void trackWorkspaceEvent({
+      eventType: "page_view",
+      page: `workspace-settings/${activeSection}`,
+      metadata: { section: activeSection },
+    });
+  }, [activeSection, trackWorkspaceEvent]);
+
+  const loadAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+    try {
+      const res = await apiFetch(`/api/workspace/analytics/overview?days=${analyticsDays}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo cargar el análisis de usuario");
+      }
+      setAnalyticsData(data);
+    } catch (e: any) {
+      setAnalyticsError(e?.message || "No se pudo cargar el análisis de usuario");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [analyticsDays]);
+
+  useEffect(() => {
+    if (activeSection !== "analytics") return;
+    void loadAnalytics();
+  }, [activeSection, loadAnalytics]);
+
+  const formatNumber = (value: number | null | undefined) => {
+    if (typeof value !== "number") return "—";
+    return value.toLocaleString("es-ES");
+  };
+
+  const formatDateShort = (iso: string | null | undefined) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("es-ES", { month: "short", day: "numeric" });
+  };
+
+  const formatDateLong = (iso: string | null | undefined) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
   };
@@ -227,11 +496,9 @@ export default function WorkspaceSettingsPage() {
   const openStripePortal = async () => {
     if (!canManageBilling) {
       toast({
-        title: "Contactar administrador",
-        description: "Solo el administrador puede gestionar la facturación. Envía una solicitud desde aquí.",
+        title: "Permisos insuficientes",
+        description: "Solo propietarios o administradores de facturación pueden gestionar la facturación.",
       });
-      setBillingHelpAction("billing_portal");
-      setBillingHelpOpen(true);
       return;
     }
     try {
@@ -358,6 +625,85 @@ export default function WorkspaceSettingsPage() {
     return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
   };
 
+  const memberCountLabel = memberCount === null ? "—" : memberCount.toLocaleString("es-ES");
+  const memberCountUnit = memberCount === 1 ? "miembro" : "miembros";
+  const selectedMetric = useMemo(
+    () => analyticsMetricOptions.find((metric) => metric.value === analyticsMetric) ?? analyticsMetricOptions[0],
+    [analyticsMetric]
+  );
+  const currentUserId = user?.id ? String(user.id) : null;
+  const analyticsMembers = useMemo(() => {
+    const members = analyticsData?.byMember ?? [];
+    const filterValue = analyticsMemberFilter.trim().toLowerCase();
+    const filtered = filterValue
+      ? members.filter((member) => {
+          const name = String(member.displayName || "").toLowerCase();
+          const email = String(member.email || "").toLowerCase();
+          return name.includes(filterValue) || email.includes(filterValue);
+        })
+      : members;
+
+    const scored = filtered.map((member) => ({
+      member,
+      activityScore: member.chatsCreated + member.userMessages + member.pageViews + member.actions,
+      lastActiveAt: member.lastActiveAt || member.lastLoginAt || "",
+    }));
+
+    scored.sort((a, b) => {
+      switch (analyticsMemberSort) {
+        case "messages":
+          return b.member.userMessages - a.member.userMessages;
+        case "tokens":
+          return b.member.tokensUsed - a.member.tokensUsed;
+        case "recent":
+          return new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime();
+        case "activity":
+        default:
+          return b.activityScore - a.activityScore;
+      }
+    });
+
+    return scored.map((entry) => entry.member);
+  }, [analyticsData?.byMember, analyticsMemberFilter, analyticsMemberSort]);
+  const rolesByKey = useMemo(() => {
+    return new Map(roles.map((role) => [role.roleKey, role]));
+  }, [roles]);
+  const roleOptions = useMemo<WorkspaceRole[]>(() => {
+    if (roles.length > 0) return roles;
+    return [
+      {
+        id: "team_member",
+        roleKey: "team_member",
+        name: "Miembro",
+        description: null,
+        permissions: [],
+        isCustom: false,
+        isEditable: false,
+      },
+      {
+        id: "team_admin",
+        roleKey: "team_admin",
+        name: "Administrador",
+        description: null,
+        permissions: [],
+        isCustom: false,
+        isEditable: false,
+      },
+    ];
+  }, [roles]);
+  const permissionGroups = useMemo(() => {
+    const grouped = new Map<string, PermissionDefinition[]>();
+    for (const perm of permissionsCatalog) {
+      const list = grouped.get(perm.category) || [];
+      list.push(perm);
+      grouped.set(perm.category, list);
+    }
+    return Array.from(grouped.entries());
+  }, [permissionsCatalog]);
+  const permissionLabelById = useMemo(() => {
+    return new Map(permissionsCatalog.map((perm) => [perm.id, perm.label]));
+  }, [permissionsCatalog]);
+
   const handleLogoUpload = async (file: File) => {
     // Client-side validations
     const allowed = ["image/png", "image/jpeg", "image/webp"];
@@ -416,6 +762,370 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
+  const roleLabelEs = (roleRaw: string | null | undefined) => {
+    const roleKey = String(roleRaw || "").toLowerCase().trim();
+    const roleMatch = rolesByKey.get(roleKey);
+    if (roleMatch?.isCustom) return roleMatch.name;
+    switch (roleKey) {
+      case "superadmin":
+        return "Superadmin";
+      case "admin":
+        return "Admin del sistema";
+      case "workspace_owner":
+      case "owner":
+      case "team_admin":
+      case "workspace_admin":
+        return "Administrador";
+      case "billing_manager":
+        return "Facturación";
+      case "guest":
+        return "Invitado";
+      case "free":
+        return "Usuario gratuito";
+      case "pro":
+        return "Usuario Pro";
+      case "workspace_viewer":
+        return "Lector";
+      case "workspace_member":
+      case "team_member":
+      case "user":
+      default:
+        return "Miembro";
+    }
+  };
+
+  const getMemberDisplayName = (member: { fullName?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null; }) => {
+    const full = member.fullName?.trim();
+    if (full) return full;
+    const combined = `${member.firstName || ""} ${member.lastName || ""}`.trim();
+    if (combined) return combined;
+    return member.email || "Miembro";
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0] || "")
+      .join("")
+      .toUpperCase();
+  };
+
+  const loadMembers = async () => {
+    if (membersLoading) return;
+    setMembersLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/members");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudieron cargar los miembros");
+      setMembers(Array.isArray(data?.members) ? data.members : []);
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudieron cargar los miembros.",
+        variant: "destructive",
+      });
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
+  const loadRoles = async () => {
+    if (rolesLoading) return;
+    setRolesLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/roles");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudieron cargar los roles");
+      const nextRoles = Array.isArray(data?.roles) ? data.roles : [];
+      setRoles(nextRoles);
+      setPermissionsCatalog(Array.isArray(data?.permissions) ? data.permissions : []);
+      if (nextRoles.length > 0 && !nextRoles.find((r: WorkspaceRole) => r.roleKey === inviteRole)) {
+        setInviteRole(nextRoles[0].roleKey);
+      }
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudieron cargar los roles.",
+        variant: "destructive",
+      });
+    } finally {
+      setRolesLoading(false);
+    }
+  };
+
+  const loadPendingInvites = async () => {
+    if (!canManageMembers) return;
+    if (pendingInvitesLoading) return;
+    setPendingInvitesLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/invitations?status=pending");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudieron cargar las invitaciones");
+      setPendingInvites(Array.isArray(data?.invitations) ? data.invitations : []);
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudieron cargar las invitaciones.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingInvitesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection !== "members") return;
+    void loadMembers();
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "members") return;
+    if (!canManageMembers) return;
+    void loadPendingInvites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, canManageMembers]);
+
+  useEffect(() => {
+    if (activeSection !== "members" && activeSection !== "permissions") return;
+    void loadRoles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection]);
+
+  const inviteMember = async () => {
+    const emails = inviteEmails
+      .split(/[\s,;]+/g)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (emails.length === 0) return;
+    if (!canManageMembers) {
+      toast({
+        title: "Permisos insuficientes",
+        description: "Solo propietarios o administradores pueden invitar miembros.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setInviteSending(true);
+    try {
+      const res = await apiFetch("/api/workspace/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails, role: inviteRole, message: inviteMessage.trim() || undefined }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo enviar la invitación");
+
+      const results: Array<{ status?: string }> = Array.isArray(data?.results) ? data.results : [];
+      const invitedCount = results.filter((r) => r.status === "invited").length;
+      const failedCount = results.filter((r) => r.status && r.status !== "invited" && r.status !== "already_member").length;
+
+      toast({
+        title: invitedCount > 0 ? "Invitaciones enviadas" : "Invitación procesada",
+        description:
+          invitedCount > 0
+            ? `${invitedCount} invitación(es) enviada(s)${failedCount ? ` · ${failedCount} con error` : ""}.`
+            : "Sin nuevas invitaciones.",
+      });
+
+      setInviteEmails("");
+      setInviteMessage("");
+      if (!inviteRole) {
+        setInviteRole("team_member");
+      }
+      setInviteOpen(false);
+      await loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo enviar la invitación.",
+        variant: "destructive",
+      });
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const updateMemberRole = async (memberId: string, role: string) => {
+    if (!canManageMembers) return;
+    try {
+      const res = await apiFetch(`/api/workspace/members/${encodeURIComponent(memberId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo actualizar el rol");
+      toast({ title: "Rol actualizado" });
+      await loadMembers();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo actualizar el rol.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const resendInvite = async (inviteId: string) => {
+    if (!canManageMembers) return;
+    try {
+      const res = await apiFetch(`/api/workspace/invitations/${encodeURIComponent(inviteId)}/resend`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo reenviar");
+      toast({
+        title: "Invitación reenviada",
+        description: process.env.NODE_ENV === "production" ? undefined : (data?.magicLinkUrl ? `Link (dev): ${data.magicLinkUrl}` : undefined),
+      });
+      await loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo reenviar la invitación.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const revokeInvite = async (inviteId: string) => {
+    if (!canManageMembers) return;
+    try {
+      const res = await apiFetch(`/api/workspace/invitations/${encodeURIComponent(inviteId)}/revoke`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo revocar");
+      toast({ title: "Invitación revocada" });
+      await loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo revocar la invitación.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openCreateRoleDialog = () => {
+    setRoleDialogMode("create");
+    setRoleEditingId(null);
+    setRoleName("");
+    setRoleDescription("");
+    setRolePermissions([]);
+    setRoleDialogOpen(true);
+  };
+
+  const openEditRoleDialog = (role: WorkspaceRole) => {
+    setRoleDialogMode("edit");
+    setRoleEditingId(role.id);
+    setRoleName(role.name);
+    setRoleDescription(role.description || "");
+    setRolePermissions(Array.isArray(role.permissions) ? role.permissions : []);
+    setRoleDialogOpen(true);
+  };
+
+  const toggleRolePermission = (permId: string, checked: boolean) => {
+    setRolePermissions((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(permId);
+      } else {
+        next.delete(permId);
+      }
+      return Array.from(next);
+    });
+  };
+
+  const saveRole = async () => {
+    if (!canManageRoles) return;
+    if (!roleName.trim()) {
+      toast({ title: "Nombre requerido", description: "Ingresa un nombre para el rol." });
+      return;
+    }
+    setRoleSaving(true);
+    try {
+      const payload = {
+        name: roleName.trim(),
+        description: roleDescription.trim() || undefined,
+        permissions: rolePermissions,
+      };
+      const endpoint =
+        roleDialogMode === "edit" && roleEditingId
+          ? `/api/workspace/roles/${encodeURIComponent(roleEditingId)}`
+          : "/api/workspace/roles";
+      const method = roleDialogMode === "edit" ? "PUT" : "POST";
+      const res = await apiFetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo guardar el rol");
+      toast({ title: roleDialogMode === "edit" ? "Rol actualizado" : "Rol creado" });
+      setRoleDialogOpen(false);
+      await loadRoles();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo guardar el rol.",
+        variant: "destructive",
+      });
+    } finally {
+      setRoleSaving(false);
+    }
+  };
+
+  const deleteRole = async (role: WorkspaceRole) => {
+    if (!canManageRoles) return;
+    const confirmed = window.confirm(`¿Eliminar el rol \"${role.name}\"? Los miembros asignados volverán a \"Miembro\".`);
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`/api/workspace/roles/${encodeURIComponent(role.id)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo eliminar el rol");
+      toast({ title: "Rol eliminado" });
+      await loadRoles();
+      await loadMembers();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo eliminar el rol.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const startCreditsCheckout = async (amountUsd: number): Promise<boolean> => {
+    if (!canManageBilling) {
+      toast({
+        title: "Permisos insuficientes",
+        description: "Solo propietarios o administradores de facturación pueden comprar créditos.",
+        variant: "destructive",
+      });
+      return false;
+    }
+    try {
+      const res = await apiFetch("/api/billing/credits/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amountUsd }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "No se pudo iniciar el pago");
+      if (data?.url) {
+        window.location.href = data.url;
+        return true;
+      }
+      throw new Error("No se pudo iniciar el pago");
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo iniciar el pago.",
+        variant: "destructive",
+      });
+      return false;
+    }
+  };
+
   const renderContent = () => {
     switch (activeSection) {
 	      case "general":
@@ -431,21 +1141,11 @@ export default function WorkspaceSettingsPage() {
 	            {!canManageWorkspace && (
 	              <div className="rounded-lg border bg-muted/30 p-4 flex items-start justify-between gap-4">
 	                <div className="space-y-1">
-	                  <p className="text-sm font-medium">Solo administrador</p>
+	                  <p className="text-sm font-medium">Permisos insuficientes</p>
 	                  <p className="text-sm text-muted-foreground">
-	                    Para cambiar el nombre o el logotipo del espacio de trabajo, contacta al administrador.
+	                    Solo propietarios o administradores del espacio de trabajo pueden cambiar el nombre o el logotipo.
 	                  </p>
 	                </div>
-	                <Button
-	                  variant="outline"
-	                  onClick={() => {
-	                    setBillingHelpAction("workspace_settings");
-	                    setBillingHelpOpen(true);
-	                  }}
-	                  data-testid="button-workspace-contact-admin"
-	                >
-	                  Contactar administrador
-	                </Button>
 	              </div>
 	            )}
 
@@ -464,29 +1164,15 @@ export default function WorkspaceSettingsPage() {
 	                      data-testid="input-workspace-name"
 	                      placeholder="Espacio de trabajo"
 	                    />
-	                    {canManageWorkspace ? (
-	                      <Button
-	                        variant="outline"
-	                        size="sm"
-	                        disabled={isSavingWorkspace || !workspaceName.trim()}
-	                        onClick={handleSaveName}
-	                        data-testid="button-save-workspace-name"
-	                      >
-	                        Guardar
-	                      </Button>
-	                    ) : (
-	                      <Button
-	                        variant="outline"
-	                        size="sm"
-	                        onClick={() => {
-	                          setBillingHelpAction("workspace_name");
-	                          setBillingHelpOpen(true);
-	                        }}
-	                        data-testid="button-contact-admin-workspace-name"
-	                      >
-	                        Contactar administrador
-	                      </Button>
-	                    )}
+	                    <Button
+	                      variant="outline"
+	                      size="sm"
+	                      disabled={!canManageWorkspace || isSavingWorkspace || !workspaceName.trim()}
+	                      onClick={handleSaveName}
+	                      data-testid="button-save-workspace-name"
+	                    >
+	                      Guardar
+	                    </Button>
 	                  </div>
 	                </div>
 
@@ -499,33 +1185,26 @@ export default function WorkspaceSettingsPage() {
 	                    <Upload className="h-7 w-7 text-muted-foreground mb-2" />
 	                    <p className="text-sm text-muted-foreground">PNG/JPG/WebP, máx. 2MB</p>
 	                    <div className="mt-2">
-	                      {canManageWorkspace ? (
-	                        <label className="text-sm text-primary hover:underline cursor-pointer" data-testid="button-browse-files">
-	                          <input
-	                            type="file"
-	                            className="hidden"
-	                            accept="image/png,image/jpeg,image/webp"
-	                            onChange={(e) => {
-	                              const f = e.target.files?.[0];
-	                              if (f) handleLogoUpload(f);
-	                              e.target.value = '';
-	                            }}
-	                          />
-	                          {isUploading ? "Subiendo..." : "Explorar archivos"}
-	                        </label>
-	                      ) : (
-	                        <Button
-	                          variant="outline"
-	                          size="sm"
-	                          onClick={() => {
-	                            setBillingHelpAction("workspace_logo");
-	                            setBillingHelpOpen(true);
+	                      <label
+	                        className={cn(
+	                          "text-sm cursor-pointer",
+	                          canManageWorkspace ? "text-primary hover:underline" : "text-muted-foreground cursor-not-allowed"
+	                        )}
+	                        data-testid="button-browse-files"
+	                      >
+	                        <input
+	                          type="file"
+	                          className="hidden"
+	                          accept="image/png,image/jpeg,image/webp"
+	                          disabled={!canManageWorkspace || isUploading}
+	                          onChange={(e) => {
+	                            const f = e.target.files?.[0];
+	                            if (f) handleLogoUpload(f);
+	                            e.target.value = '';
 	                          }}
-	                          data-testid="button-contact-admin-workspace-logo"
-	                        >
-	                          Contactar administrador
-	                        </Button>
-	                      )}
+	                        />
+	                        {isUploading ? "Subiendo..." : "Explorar archivos"}
+	                      </label>
 	                    </div>
 	                    {logoFileUuid && (
 	                      <p className="mt-2 text-xs text-muted-foreground">Logo actualizado</p>
@@ -577,12 +1256,21 @@ export default function WorkspaceSettingsPage() {
           </div>
         );
 
-      case "members":
+      case "members": {
+        const filterValue = membersFilter.trim().toLowerCase();
+        const filteredMembers = members.filter((member) => {
+          if (!filterValue) return true;
+          const haystack = `${member.fullName || ""} ${member.firstName || ""} ${member.lastName || ""} ${member.email || ""}`.toLowerCase();
+          return haystack.includes(filterValue);
+        });
+
         return (
           <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-semibold">Miembros</h1>
-              <p className="text-sm text-muted-foreground">Empresa · 1 miembro</p>
+              <p className="text-sm text-muted-foreground">
+                Empresa · {memberCountLabel} {memberCountUnit}
+              </p>
             </div>
 
             <Tabs defaultValue="users" className="w-full">
@@ -615,17 +1303,58 @@ export default function WorkspaceSettingsPage() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input 
-                      placeholder="Filtrar por nombre" 
+                      placeholder="Filtrar por nombre o correo" 
                       className="pl-9 w-64"
+                      value={membersFilter}
+                      onChange={(e) => setMembersFilter(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = membersFilter.trim();
+                        if (!trimmed) return;
+                        void trackWorkspaceEvent({
+                          eventType: "action",
+                          action: "members_filter",
+                          metadata: { queryLength: trimmed.length },
+                        });
+                      }}
                       data-testid="input-filter-members"
                     />
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" className="gap-2" data-testid="button-invite-member">
+                    <Button
+                      variant="outline"
+                      className="gap-2"
+                      data-testid="button-invite-member"
+                      onClick={() => {
+                        void trackWorkspaceEvent({
+                          eventType: "action",
+                          action: "members_invite_clicked",
+                        });
+                        if (!canManageMembers) {
+                          toast({
+                            title: "Permisos insuficientes",
+                            description: "Solo propietarios o administradores pueden invitar miembros.",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+                        setInviteOpen(true);
+                      }}
+                      disabled={!canManageMembers}
+                    >
                       <Plus className="h-4 w-4" />
                       Invitar a un miembro
                     </Button>
-                    <Button variant="ghost" size="icon" data-testid="button-members-more">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      data-testid="button-members-more"
+                      onClick={() => {
+                        void trackWorkspaceEvent({
+                          eventType: "action",
+                          action: "members_more_opened",
+                        });
+                      }}
+                    >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </div>
@@ -634,30 +1363,118 @@ export default function WorkspaceSettingsPage() {
                 <div className="border rounded-lg">
                   <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
                     <span>Nombre</span>
-                    <span>Tipo de cuenta</span>
+                    <span>Rol</span>
                     <span>Fecha agregada</span>
                   </div>
-	                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
-	                    <div className="flex items-center gap-3">
-	                      <Avatar className="h-9 w-9">
-	                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">{userInitials}</AvatarFallback>
-	                      </Avatar>
-	                      <div>
-	                        <span className="text-sm font-medium block">{userDisplayName} (Tú)</span>
-	                        <span className="text-xs text-muted-foreground">{userEmail}</span>
-	                      </div>
-	                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">Propietario</span>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  {membersLoading ? (
+                    <div className="px-4 py-8 text-sm text-muted-foreground text-center">Cargando miembros...</div>
+                  ) : filteredMembers.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+                      No se encontraron miembros con ese filtro.
                     </div>
-                    <span className="text-sm">28 ago 2025</span>
-                  </div>
+                  ) : (
+                    <div className="divide-y">
+                      {filteredMembers.map((member) => {
+                        const displayName = getMemberDisplayName(member);
+                        const initials = getInitials(displayName);
+                        const isSelf = String(member.id) === currentUserId;
+                        const roleValue = member.role || "team_member";
+                        const roleKeyLower = String(roleValue || "").toLowerCase().trim();
+                        const isSystemAdminTarget = roleKeyLower === "admin" || roleKeyLower === "superadmin";
+                        const canEditRole = canManageMembers && !isSelf && (!isSystemAdminTarget || isAdmin);
+
+                        return (
+                          <div key={member.id} className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-9 w-9">
+                                <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">{initials}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <span className="text-sm font-medium block">
+                                  {displayName}
+                                  {isSelf ? " (Tú)" : ""}
+                                </span>
+                                <span className="text-xs text-muted-foreground">{member.email || "—"}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {canEditRole ? (
+                                <Select
+                                  value={roleValue}
+                                  onValueChange={(value) => void updateMemberRole(String(member.id), value)}
+                                >
+                                  <SelectTrigger className="w-56" data-testid={`select-member-role-${member.id}`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {roleOptions.map((role) => (
+                                      <SelectItem key={role.roleKey} value={role.roleKey}>
+                                        {roleLabelEs(role.roleKey)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <span className="text-sm">{roleLabelEs(roleValue)}</span>
+                              )}
+                            </div>
+                            <span className="text-sm">{formatDateShort(member.createdAt)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </TabsContent>
 
               <TabsContent value="pending-invites" className="mt-6">
-                <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
+                {!canManageMembers ? (
+                  <p className="text-sm text-muted-foreground">No tienes permisos para ver invitaciones.</p>
+                ) : pendingInvitesLoading ? (
+                  <p className="text-sm text-muted-foreground">Cargando invitaciones...</p>
+                ) : pendingInvites.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
+                ) : (
+                  <div className="border rounded-lg">
+                    <div className="grid grid-cols-4 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+                      <span>Correo</span>
+                      <span>Rol</span>
+                      <span>Invitado por</span>
+                      <span>Enviado</span>
+                    </div>
+                    {pendingInvites.map((inv) => (
+                      <div key={inv.id} className="grid grid-cols-4 gap-4 px-4 py-3 items-center border-b last:border-b-0">
+                        <div className="text-sm">
+                          <div className="font-medium">{inv.email}</div>
+                          <div className="text-xs text-muted-foreground">{inv.status}</div>
+                        </div>
+                        <span className="text-sm">{roleLabelEs(inv.role)}</span>
+                        <span className="text-sm text-muted-foreground">{inv.invitedByName || inv.invitedByEmail || "—"}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm text-muted-foreground">{formatDateShort(inv.lastSentAt || inv.createdAt)}</span>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void resendInvite(inv.id)}
+                              data-testid={`button-resend-invite-${inv.id}`}
+                            >
+                              Reenviar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void revokeInvite(inv.id)}
+                              data-testid={`button-revoke-invite-${inv.id}`}
+                            >
+                              Revocar
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </TabsContent>
 
               <TabsContent value="pending-requests" className="mt-6">
@@ -666,6 +1483,7 @@ export default function WorkspaceSettingsPage() {
             </Tabs>
           </div>
         );
+      }
 
       case "permissions":
         return (
@@ -688,10 +1506,83 @@ export default function WorkspaceSettingsPage() {
               </TabsList>
 
               <TabsContent value="workspace" className="mt-6 space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-medium">Roles del espacio de trabajo</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Define roles personalizados y asigna permisos a tus colaboradores.
+                      </p>
+                    </div>
+                    {canManageRoles ? (
+                      <Button variant="outline" size="sm" onClick={openCreateRoleDialog}>
+                        Crear rol
+                      </Button>
+                    ) : null}
+                  </div>
+
+                  {rolesLoading ? (
+                    <p className="text-sm text-muted-foreground">Cargando roles...</p>
+                  ) : roles.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No hay roles configurados.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {roles.map((role) => {
+                        const labels = role.permissions.map((perm) => permissionLabelById.get(perm) || perm);
+                        const visible = labels.slice(0, 4);
+                        const extra = labels.length - visible.length;
+                        return (
+                          <div key={role.roleKey} className="border rounded-lg p-4 flex items-start justify-between gap-4">
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">{roleLabelEs(role.roleKey)}</span>
+                                <Badge variant={role.isCustom ? "default" : "secondary"} className="text-[10px] uppercase tracking-wide">
+                                  {role.isCustom ? "Personalizado" : "Predeterminado"}
+                                </Badge>
+                              </div>
+                              {role.description ? (
+                                <p className="text-xs text-muted-foreground">{role.description}</p>
+                              ) : null}
+                              {labels.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {visible.map((label) => (
+                                    <Badge key={label} variant="outline" className="text-[10px]">
+                                      {label}
+                                    </Badge>
+                                  ))}
+                                  {extra > 0 ? (
+                                    <Badge variant="outline" className="text-[10px]">
+                                      +{extra} permisos
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">Sin permisos asignados.</p>
+                              )}
+                            </div>
+                            {role.isCustom && canManageRoles ? (
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={() => openEditRoleDialog(role)}>
+                                  Editar
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => deleteRole(role)}>
+                                  Eliminar
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input 
-                    placeholder="Buscar 13 permisos" 
+                    placeholder={`Buscar ${permissionsCatalog.length || 0} permisos`} 
                     className="pl-9 w-64"
                     data-testid="input-search-permissions"
                   />
@@ -895,22 +1786,11 @@ export default function WorkspaceSettingsPage() {
             {!canManageBilling && (
               <div className="rounded-lg border bg-muted/30 p-4 flex items-start justify-between gap-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">Solo administrador</p>
+                  <p className="text-sm font-medium">Permisos insuficientes</p>
                   <p className="text-sm text-muted-foreground">
-                    Este espacio de trabajo está conectado al panel de administración. Para cambiar el plan, administrar facturación o configurar alertas,
-                    contacta al administrador.
+                    Solo propietarios o administradores de facturación pueden cambiar el plan, administrar facturación o configurar alertas.
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setBillingHelpAction("workspace_billing");
-                    setBillingHelpOpen(true);
-                  }}
-                  data-testid="button-billing-contact-admin"
-                >
-                  Contactar administrador
-                </Button>
               </div>
             )}
 
@@ -950,6 +1830,9 @@ export default function WorkspaceSettingsPage() {
                           : billingStatus?.subscriptionStatus === "active"
                             ? `Activo${deactivationDateLabel ? ` · Renueva el ${deactivationDateLabel}` : ""}`
                             : "Sin suscripción activa"}
+                        {typeof billingStatus?.monthsPaid === "number" && billingStatus.monthsPaid > 0
+                          ? ` · ${billingStatus.monthsPaid} mes${billingStatus.monthsPaid === 1 ? "" : "es"} pagando`
+                          : ""}
                       </p>
 	                  </div>
 	                    {canManageBilling ? (
@@ -977,15 +1860,8 @@ export default function WorkspaceSettingsPage() {
 	                        </SelectContent>
 	                      </Select>
 	                    ) : (
-	                      <Button
-	                        variant="outline"
-	                        onClick={() => {
-	                          setBillingHelpAction("manage_plan");
-	                          setBillingHelpOpen(true);
-	                        }}
-	                        data-testid="button-contact-admin-manage-plan"
-	                      >
-	                        Contactar administrador
+	                      <Button variant="outline" disabled data-testid="button-manage-plan-disabled">
+	                        Administrar plan
 	                      </Button>
 	                    )}
 	                  </div>
@@ -1040,14 +1916,7 @@ export default function WorkspaceSettingsPage() {
 	                              <DropdownMenuItem onSelect={() => void openStripePortal()}>Administrar facturación</DropdownMenuItem>
 	                            </>
 	                          ) : (
-	                            <DropdownMenuItem
-	                              onSelect={() => {
-	                                setBillingHelpAction("billing_menu");
-	                                setBillingHelpOpen(true);
-	                              }}
-	                            >
-	                              Contactar administrador
-	                            </DropdownMenuItem>
+	                            <DropdownMenuItem disabled>Sin permisos</DropdownMenuItem>
 	                          )}
 	                          {isAdmin && <DropdownMenuItem onSelect={() => setLocation("/admin")}>Abrir panel admin</DropdownMenuItem>}
 	                        </DropdownMenuContent>
@@ -1086,6 +1955,13 @@ export default function WorkspaceSettingsPage() {
                       <span className="text-muted-foreground"> créditos usados</span>
                     )}
                   </p>
+
+                  {(creditsUsage?.extraCredits ?? 0) > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Créditos extra disponibles: <span className="font-semibold">{(creditsUsage?.extraCredits ?? 0).toLocaleString()}</span>
+                      {creditsUsage?.extraCreditsNextExpiry ? ` · Vencen a partir del ${formatInvoiceDate(creditsUsage.extraCreditsNextExpiry)}` : ""}
+                    </p>
+                  ) : null}
                 </div>
 
 	                <div className="border rounded-lg p-6">
@@ -1100,15 +1976,12 @@ export default function WorkspaceSettingsPage() {
 	                      variant="outline"
 	                      data-testid="button-add-credits"
 	                      onClick={() => {
-	                        if (canManageBilling) {
-	                          setUpgradeOpen(true);
-	                          return;
-	                        }
-	                        setBillingHelpAction("add_credits");
-	                        setBillingHelpOpen(true);
+	                        if (!canManageBilling) return;
+	                        setAddCreditsOpen(true);
 	                      }}
+	                      disabled={!canManageBilling}
 	                    >
-	                      {canManageBilling ? "Agregar créditos" : "Contactar administrador"}
+	                      Agregar créditos
 	                    </Button>
 	                  </div>
 	                </div>
@@ -1127,15 +2000,12 @@ export default function WorkspaceSettingsPage() {
 	                      variant="outline"
 	                      data-testid="button-manage-alerts"
 	                      onClick={() => {
-	                        if (canManageBilling) {
-	                          setAlertsOpen(true);
-	                          return;
-	                        }
-	                        setBillingHelpAction("credit_alerts");
-	                        setBillingHelpOpen(true);
+	                        if (!canManageBilling) return;
+	                        setAlertsOpen(true);
 	                      }}
+	                      disabled={!canManageBilling}
 	                    >
-	                      {canManageBilling ? "Administrar" : "Contactar administrador"}
+	                      Administrar
 	                    </Button>
 	                  </div>
 	                </div>
@@ -1145,18 +2015,8 @@ export default function WorkspaceSettingsPage() {
                 {!canManageBilling ? (
                   <div className="border rounded-lg p-6">
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      Solo el administrador puede ver y descargar facturas.
+                      Solo propietarios o administradores de facturación pueden ver y descargar facturas.
                     </p>
-                    <div className="flex justify-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void openStripePortal()}
-                        data-testid="button-open-billing-portal"
-                      >
-                        Contactar administrador
-                      </Button>
-                    </div>
                   </div>
                 ) : (
                   <>
@@ -1698,31 +2558,401 @@ export default function WorkspaceSettingsPage() {
       case "groups":
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Grupos</h1>
-            <p className="text-sm text-muted-foreground">
-              Administra los grupos de tu espacio de trabajo.
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Grupos</h1>
+              <p className="text-sm text-muted-foreground">
+                Administra los grupos de tu espacio de trabajo.
+              </p>
+            </div>
+
+            <WorkspaceGroupsSection canManage={canManageMembers} />
           </div>
         );
 
-      case "analytics":
+      case "analytics": {
+        const totals = analyticsData?.totals;
+        const activityData = analyticsData?.activityByDay ?? [];
+        const members = analyticsMembers;
+        const hasRawMembers = (analyticsData?.byMember ?? []).length > 0;
+        const sessionsCount = analyticsData?.sessionsCount ?? 0;
+        const topPages = analyticsData?.topPages ?? [];
+        const topActions = analyticsData?.topActions ?? [];
+        const periodLabel = analyticsData
+          ? `${formatDateShort(analyticsData.startDate)} - ${formatDateShort(analyticsData.endDate)}`
+          : `Últimos ${analyticsDays} días`;
+
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Análisis de usuario</h1>
-            <p className="text-sm text-muted-foreground">
-              Visualiza estadísticas y análisis de uso.
-            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold">Análisis de usuario</h1>
+                <p className="text-sm text-muted-foreground">
+                  Visualiza estadísticas y análisis de uso del equipo.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={String(analyticsDays)}
+                  onValueChange={(value) => {
+                    const nextDays = Number(value);
+                    if (![7, 30, 90].includes(nextDays)) return;
+                    setAnalyticsDays(nextDays as 7 | 30 | 90);
+                    void trackWorkspaceEvent({
+                      eventType: "action",
+                      action: "analytics_period_change",
+                      metadata: { days: nextDays },
+                    });
+                  }}
+                >
+                  <SelectTrigger className="w-36" data-testid="select-analytics-days">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">Últimos 7 días</SelectItem>
+                    <SelectItem value="30">Últimos 30 días</SelectItem>
+                    <SelectItem value="90">Últimos 90 días</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  disabled={analyticsLoading}
+                  onClick={() => {
+                    void loadAnalytics();
+                    void trackWorkspaceEvent({ eventType: "action", action: "analytics_refresh" });
+                  }}
+                  data-testid="button-analytics-refresh"
+                >
+                  {analyticsLoading ? "Actualizando..." : "Actualizar"}
+                </Button>
+              </div>
+            </div>
+
+            {!analyticsData?.canViewAll && (
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                Solo puedes ver tu propia actividad. Para ver al equipo completo, solicita acceso de administrador.
+              </div>
+            )}
+
+            {analyticsError && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                {analyticsError}
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Miembros totales</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.members)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Miembros activos</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.activeMembers)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Sesiones únicas</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(sessionsCount)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Chats creados</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.chatsCreated)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Mensajes de usuario</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.userMessages)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Tokens usados</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.tokensUsed)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Vistas de página</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.pageViews)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Acciones registradas</CardDescription>
+                  <CardTitle className="text-2xl">{formatNumber(totals?.actions)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-xs text-muted-foreground">{periodLabel}</CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle>Actividad diaria</CardTitle>
+                  <CardDescription>Selecciona una métrica para revisar la evolución.</CardDescription>
+                </div>
+                <Select
+                  value={analyticsMetric}
+                  onValueChange={(value) => {
+                    setAnalyticsMetric(value as AnalyticsMetricKey);
+                    void trackWorkspaceEvent({
+                      eventType: "action",
+                      action: "analytics_metric_change",
+                      metadata: { metric: value },
+                    });
+                  }}
+                >
+                  <SelectTrigger className="w-52" data-testid="select-analytics-metric">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {analyticsMetricOptions.map((metric) => (
+                      <SelectItem key={metric.value} value={metric.value}>
+                        {metric.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </CardHeader>
+              <CardContent>
+                {analyticsLoading && !analyticsData ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-6 w-32" />
+                    <Skeleton className="h-56 w-full" />
+                  </div>
+                ) : activityData.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-8 text-center">
+                    No hay actividad registrada en este periodo.
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={activityData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={(value) => formatDateShort(String(value))}
+                          stroke="hsl(var(--muted-foreground))"
+                          fontSize={12}
+                        />
+                        <YAxis
+                          tickFormatter={(value) => formatNumber(Number(value))}
+                          stroke="hsl(var(--muted-foreground))"
+                          fontSize={12}
+                        />
+                        <Tooltip
+                          formatter={(value) => [formatNumber(Number(value)), selectedMetric.label]}
+                          labelFormatter={(label) => formatDateLong(String(label))}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey={selectedMetric.value}
+                          stroke={selectedMetric.color}
+                          strokeWidth={2.5}
+                          dot={{ r: 2 }}
+                          activeDot={{ r: 4 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Top páginas</CardTitle>
+                  <CardDescription>Las rutas más visitadas en el periodo.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {analyticsLoading && !analyticsData ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-4 w-52" />
+                      <Skeleton className="h-4 w-44" />
+                    </div>
+                  ) : topPages.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Sin datos de páginas visitadas.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {topPages.map((page) => (
+                        <div key={page.page} className="flex items-center justify-between text-sm">
+                          <span className="truncate max-w-[70%]">{page.page}</span>
+                          <span className="text-muted-foreground">{formatNumber(page.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Top acciones</CardTitle>
+                  <CardDescription>Acciones más comunes del equipo.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {analyticsLoading && !analyticsData ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-4 w-52" />
+                      <Skeleton className="h-4 w-44" />
+                    </div>
+                  ) : topActions.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">Sin acciones registradas.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {topActions.map((action) => (
+                        <div key={action.action} className="flex items-center justify-between text-sm">
+                          <span className="truncate max-w-[70%]">{action.action}</span>
+                          <span className="text-muted-foreground">{formatNumber(action.count)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardHeader className="space-y-3">
+                <div>
+                  <CardTitle>Miembros</CardTitle>
+                  <CardDescription>Detalle de uso por miembro en el periodo seleccionado.</CardDescription>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar miembro"
+                      className="pl-9 w-64"
+                      value={analyticsMemberFilter}
+                      onChange={(e) => setAnalyticsMemberFilter(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = analyticsMemberFilter.trim();
+                        if (!trimmed) return;
+                        void trackWorkspaceEvent({
+                          eventType: "action",
+                          action: "analytics_member_filter",
+                          metadata: { queryLength: trimmed.length },
+                        });
+                      }}
+                      data-testid="input-analytics-member-filter"
+                    />
+                  </div>
+                  <Select
+                    value={analyticsMemberSort}
+                    onValueChange={(value) => {
+                      setAnalyticsMemberSort(value as "activity" | "messages" | "tokens" | "recent");
+                      void trackWorkspaceEvent({
+                        eventType: "action",
+                        action: "analytics_member_sort",
+                        metadata: { sort: value },
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-48" data-testid="select-analytics-member-sort">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="activity">Ordenar por actividad</SelectItem>
+                      <SelectItem value="messages">Ordenar por mensajes</SelectItem>
+                      <SelectItem value="tokens">Ordenar por tokens</SelectItem>
+                      <SelectItem value="recent">Ordenar por reciente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {analyticsLoading && !analyticsData ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-6 w-40" />
+                    <Skeleton className="h-32 w-full" />
+                  </div>
+                ) : members.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-6 text-center">
+                    {hasRawMembers
+                      ? "No se encontraron miembros con ese filtro."
+                      : "No hay miembros con actividad registrada."}
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Miembro</TableHead>
+                        <TableHead>Rol</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead>Chats</TableHead>
+                        <TableHead>Mensajes</TableHead>
+                        <TableHead>Tokens</TableHead>
+                        <TableHead>Vistas</TableHead>
+                        <TableHead>Acciones</TableHead>
+                        <TableHead>Última actividad</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {members.map((member) => {
+                        const isActive =
+                          member.chatsCreated > 0 ||
+                          member.userMessages > 0 ||
+                          member.pageViews > 0 ||
+                          member.actions > 0;
+                        const displayName = member.displayName || "—";
+                        const displayEmail = member.email || "—";
+                        const lastActive = member.lastActiveAt || member.lastLoginAt;
+                        return (
+                          <TableRow key={member.userId}>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-sm">
+                                  {displayName}
+                                  {currentUserId && currentUserId === member.userId ? " (Tú)" : ""}
+                                </span>
+                                <span className="text-xs text-muted-foreground">{displayEmail}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                                {member.role || "member"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={isActive ? "success" : "outline"}>{isActive ? "Activo" : "Inactivo"}</Badge>
+                            </TableCell>
+                            <TableCell>{formatNumber(member.chatsCreated)}</TableCell>
+                            <TableCell>{formatNumber(member.userMessages)}</TableCell>
+                            <TableCell>{formatNumber(member.tokensUsed)}</TableCell>
+                            <TableCell>{formatNumber(member.pageViews)}</TableCell>
+                            <TableCell>{formatNumber(member.actions)}</TableCell>
+                            <TableCell>{formatDateLong(lastActive)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </div>
         );
+      }
 
       case "identity":
         return (
-          <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Identidad y acceso</h1>
-            <p className="text-sm text-muted-foreground">
-              Configura la identidad y el acceso de tu espacio de trabajo.
-            </p>
-          </div>
+          <IdentityAccessSection isAdmin={isAdmin} />
         );
 
       default:
@@ -1730,11 +2960,221 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
+  const CREDITS_PER_USD = 100_000;
+  const topupAmountNumber = Number(creditsTopupAmountUsd);
+  const topupAmountIsInt = Number.isFinite(topupAmountNumber) && Number.isInteger(topupAmountNumber);
+  const topupAmountValid =
+    topupAmountIsInt && topupAmountNumber >= 5 && topupAmountNumber <= 5000 && topupAmountNumber % 5 === 0;
+  const topupCreditsPreview = topupAmountValid ? topupAmountNumber * CREDITS_PER_USD : null;
+
+  let topupAmountError: string | null = null;
+  if (addCreditsOpen) {
+    if (!creditsTopupAmountUsd.trim()) topupAmountError = "Ingresa un monto.";
+    else if (!Number.isFinite(topupAmountNumber)) topupAmountError = "Monto inválido.";
+    else if (!topupAmountIsInt) topupAmountError = "Debe ser un número entero.";
+    else if (topupAmountNumber < 5) topupAmountError = "El mínimo es $5.";
+    else if (topupAmountNumber > 5000) topupAmountError = "El máximo es $5000.";
+    else if (topupAmountNumber % 5 !== 0) topupAmountError = "Debe ser múltiplo de $5.";
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <UpgradePlanDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
       <CreditAlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
-      <BillingHelpDialog open={billingHelpOpen} onOpenChange={setBillingHelpOpen} action={billingHelpAction} />
+      <Dialog
+        open={addCreditsOpen}
+        onOpenChange={(open) => {
+          setAddCreditsOpen(open);
+          if (open) {
+            setCreditsTopupAmountUsd("5");
+            setCreditsTopupSubmitting(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Agregar créditos</DialogTitle>
+            <DialogDescription>
+              El mínimo es $5 y debe ser múltiplo de $5. Los créditos son válidos durante 12 meses.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="credits-amount">Monto (USD)</Label>
+              <Input
+                id="credits-amount"
+                inputMode="numeric"
+                type="number"
+                min={5}
+                step={5}
+                max={5000}
+                value={creditsTopupAmountUsd}
+                disabled={creditsTopupSubmitting}
+                onChange={(e) => setCreditsTopupAmountUsd(e.target.value)}
+              />
+              {topupAmountError ? <p className="text-xs text-destructive">{topupAmountError}</p> : null}
+              {topupCreditsPreview !== null ? (
+                <p className="text-xs text-muted-foreground">
+                  Recibirás aproximadamente <span className="font-medium">{topupCreditsPreview.toLocaleString()}</span>{" "}
+                  créditos.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {[5, 10, 25, 50].map((amt) => (
+                <Button
+                  key={amt}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={creditsTopupSubmitting}
+                  onClick={() => setCreditsTopupAmountUsd(String(amt))}
+                >
+                  ${amt}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setAddCreditsOpen(false)} disabled={creditsTopupSubmitting}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!topupAmountValid) return;
+                setCreditsTopupSubmitting(true);
+                const ok = await startCreditsCheckout(topupAmountNumber);
+                setCreditsTopupSubmitting(false);
+                if (ok) setAddCreditsOpen(false);
+              }}
+              disabled={!topupAmountValid || creditsTopupSubmitting}
+            >
+              {creditsTopupSubmitting ? "Redirigiendo..." : "Continuar a pago"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Invitar miembros</DialogTitle>
+            <DialogDescription>
+              Agrega uno o varios correos separados por coma, espacio o salto de línea.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="invite-emails">Correos</Label>
+              <Textarea
+                id="invite-emails"
+                placeholder="ana@empresa.com, juan@empresa.com"
+                value={inviteEmails}
+                onChange={(e) => setInviteEmails(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rol asignado</Label>
+              <Select value={inviteRole} onValueChange={setInviteRole}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {roleOptions.map((role) => (
+                    <SelectItem key={role.roleKey} value={role.roleKey}>
+                      {roleLabelEs(role.roleKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="invite-message">Mensaje (opcional)</Label>
+              <Textarea
+                id="invite-message"
+                placeholder="Añade un mensaje para tus colaboradores..."
+                value={inviteMessage}
+                onChange={(e) => setInviteMessage(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void inviteMember()} disabled={inviteSending || !inviteEmails.trim()}>
+              {inviteSending ? "Enviando..." : "Enviar invitaciones"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{roleDialogMode === "edit" ? "Editar rol" : "Crear rol"}</DialogTitle>
+            <DialogDescription>
+              Define los permisos que tendrán los colaboradores con este rol.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="role-name">Nombre del rol</Label>
+              <Input
+                id="role-name"
+                placeholder="Ej: Analista, Editor, Operaciones"
+                value={roleName}
+                onChange={(e) => setRoleName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role-description">Descripción</Label>
+              <Textarea
+                id="role-description"
+                placeholder="Describe el alcance del rol (opcional)"
+                value={roleDescription}
+                onChange={(e) => setRoleDescription(e.target.value)}
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Permisos</Label>
+              <div className="border rounded-lg p-4 max-h-72 overflow-auto space-y-4">
+                {permissionGroups.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay permisos disponibles.</p>
+                ) : (
+                  permissionGroups.map(([category, perms]) => (
+                    <div key={category} className="space-y-2">
+                      <p className="text-sm font-medium">{category}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {perms.map((perm) => (
+                          <label key={perm.id} className="flex items-start gap-2 text-sm">
+                            <Checkbox
+                              checked={rolePermissions.includes(perm.id)}
+                              onCheckedChange={(checked) => toggleRolePermission(perm.id, checked === true)}
+                            />
+                            <span>{perm.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={() => setRoleDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void saveRole()} disabled={roleSaving || !roleName.trim()}>
+              {roleSaving ? "Guardando..." : "Guardar rol"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Self-serve workspace settings: no "contact admin" modal. */}
       {showDeactivationBanner && (
         <div className="flex justify-end px-6 py-3">
           <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
@@ -1745,15 +3185,17 @@ export default function WorkspaceSettingsPage() {
                 Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación{deactivationDateLabel ? ` el ${deactivationDateLabel}.` : "."}
               </span>
             </div>
-	              <Button
-	                variant="outline"
-	                size="sm"
-	                className="ml-2 flex-shrink-0"
-	                data-testid="button-reactivate"
-	                onClick={() => void openStripePortal()}
-	              >
-	                {canManageBilling ? "Reactivar" : "Contactar administrador"}
-	              </Button>
+	              {canManageBilling ? (
+	                <Button
+	                  variant="outline"
+	                  size="sm"
+	                  className="ml-2 flex-shrink-0"
+	                  data-testid="button-reactivate"
+	                  onClick={() => void openStripePortal()}
+	                >
+	                  Reactivar
+	                </Button>
+	              ) : null}
           </div>
         </div>
       )}
