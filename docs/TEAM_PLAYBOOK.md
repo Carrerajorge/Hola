@@ -20,3 +20,12 @@ gh auth setup-git
 cd /home/<user>/.openclaw/workspace/Hola
 git checkout main
 git pull
+```
+
+## Primer PR de prueba
+- **agent-verify:** corre el flujo de verificación local (tests/build) antes de subir nada:
+  - `./scripts/agent-verify.sh`
+- **agent-checkpoint:** crea un checkpoint (commit) con etiqueta + resumen para dejar trazabilidad:
+  - `./scripts/agent-checkpoint.sh "PR-TEST" "Playbook actualizado, tests/build OK"`
+- **agent-pr:** abre el PR vía GitHub CLI (`gh`) y te devuelve el link para compartir/revisar:
+  - `./scripts/agent-pr.sh`
