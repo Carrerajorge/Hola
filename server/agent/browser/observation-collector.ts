@@ -1,5 +1,7 @@
 import { browserSessionManager } from "./session-manager";
 import { Observation, PageState, NetworkRequest } from "./types";
+import { selectorSanitizer, SelectorSanitizer } from "./security/selector-sanitizer";
+import { browserAuditLogger } from "./security/audit-logger";
 
 export interface StructuredData {
   metaTags: Record<string, string>;
@@ -65,8 +67,8 @@ class ObservationCollector {
 
     return {
       title: state.title,
-      description: state.metaTags["description"] || 
-                   structured.openGraph["description"] || 
+      description: state.metaTags["description"] ||
+                   structured.openGraph["description"] ||
                    structured.twitterCard["description"] || "",
       mainContent: state.visibleText,
       structuredData: structured,
@@ -76,20 +78,51 @@ class ObservationCollector {
     };
   }
 
+  /**
+   * Extract data from the page using CSS selectors.
+   * All selectors are validated and sanitized before use to prevent injection.
+   */
   async extractDataBySelector(
-    sessionId: string, 
+    sessionId: string,
     selectors: Record<string, string>
   ): Promise<Record<string, string | null>> {
     const session = browserSessionManager.getSession(sessionId);
     if (!session) return {};
 
+    // Validate all selectors first
+    const sanitizedSelectors: Record<string, string> = {};
+    for (const [key, selector] of Object.entries(selectors)) {
+      const validation = selectorSanitizer.validate(selector);
+      if (!validation.valid) {
+        browserAuditLogger.logSelectorBlocked(
+          sessionId,
+          selector,
+          validation.reason || "validation_failed"
+        );
+        // Skip invalid selectors instead of failing entirely
+        continue;
+      }
+      sanitizedSelectors[key] = validation.sanitizedSelector || selector;
+    }
+
+    if (Object.keys(sanitizedSelectors).length === 0) {
+      return {};
+    }
+
+    // Pass sanitized selectors as JSON data rather than interpolating into script
     const result = await browserSessionManager.evaluate(sessionId, `
       (function() {
-        const selectors = ${JSON.stringify(selectors)};
-        const result = {};
-        for (const [key, selector] of Object.entries(selectors)) {
-          const el = document.querySelector(selector);
-          result[key] = el ? el.textContent?.trim() || el.getAttribute('value') || null : null;
+        var selectors = ${JSON.stringify(sanitizedSelectors)};
+        var result = {};
+        for (var key in selectors) {
+          if (selectors.hasOwnProperty(key)) {
+            try {
+              var el = document.querySelector(selectors[key]);
+              result[key] = el ? (el.textContent || "").trim() || el.getAttribute('value') || null : null;
+            } catch(e) {
+              result[key] = null;
+            }
+          }
         }
         return result;
       })()
@@ -98,34 +131,89 @@ class ObservationCollector {
     return result.success ? result.data : {};
   }
 
+  /**
+   * Extract table data from the page.
+   * The table selector is validated to prevent CSS injection.
+   */
   async extractTable(sessionId: string, tableSelector: string): Promise<string[][]> {
+    // Validate the selector
+    const validation = selectorSanitizer.validate(tableSelector);
+    if (!validation.valid) {
+      browserAuditLogger.logSelectorBlocked(
+        sessionId,
+        tableSelector,
+        validation.reason || "validation_failed"
+      );
+      return [];
+    }
+
+    const safeSelector = validation.sanitizedSelector || tableSelector;
+
+    // Use JSON.stringify to safely embed the selector, preventing injection
     const result = await browserSessionManager.evaluate(sessionId, `
       (function() {
-        const table = document.querySelector('${tableSelector}');
-        if (!table) return [];
-        
-        const rows = [];
-        table.querySelectorAll('tr').forEach(tr => {
-          const cells = [];
-          tr.querySelectorAll('th, td').forEach(cell => {
-            cells.push(cell.textContent?.trim() || '');
-          });
-          if (cells.length > 0) rows.push(cells);
-        });
-        return rows;
+        var selector = ${JSON.stringify(safeSelector)};
+        try {
+          var table = document.querySelector(selector);
+          if (!table) return [];
+
+          var rows = [];
+          var maxRows = 500;
+          var trs = table.querySelectorAll('tr');
+          for (var i = 0; i < Math.min(trs.length, maxRows); i++) {
+            var cells = [];
+            var tds = trs[i].querySelectorAll('th, td');
+            for (var j = 0; j < tds.length; j++) {
+              cells.push((tds[j].textContent || '').trim().slice(0, 1000));
+            }
+            if (cells.length > 0) rows.push(cells);
+          }
+          return rows;
+        } catch(e) {
+          return [];
+        }
       })()
     `);
 
     return result.success ? result.data : [];
   }
 
+  /**
+   * Extract list data from the page.
+   * The list selector is validated to prevent CSS injection.
+   */
   async extractList(sessionId: string, listSelector: string): Promise<string[]> {
+    // Validate the selector
+    const validation = selectorSanitizer.validate(listSelector);
+    if (!validation.valid) {
+      browserAuditLogger.logSelectorBlocked(
+        sessionId,
+        listSelector,
+        validation.reason || "validation_failed"
+      );
+      return [];
+    }
+
+    const safeSelector = validation.sanitizedSelector || listSelector;
+
+    // Use JSON.stringify to safely embed the selector
     const result = await browserSessionManager.evaluate(sessionId, `
       (function() {
-        const list = document.querySelector('${listSelector}');
-        if (!list) return [];
-        
-        return Array.from(list.querySelectorAll('li')).map(li => li.textContent?.trim() || '');
+        var selector = ${JSON.stringify(safeSelector)};
+        try {
+          var list = document.querySelector(selector);
+          if (!list) return [];
+
+          var items = list.querySelectorAll('li');
+          var result = [];
+          var maxItems = 200;
+          for (var i = 0; i < Math.min(items.length, maxItems); i++) {
+            result.push((items[i].textContent || '').trim().slice(0, 1000));
+          }
+          return result;
+        } catch(e) {
+          return [];
+        }
       })()
     `);
 
