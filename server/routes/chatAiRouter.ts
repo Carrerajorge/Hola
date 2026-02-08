@@ -658,7 +658,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, images, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
       const effectiveUserId = getOrCreateSecureUserId(req);
 
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
@@ -1231,10 +1231,37 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
+      let formattedMessages: Array<{ role: "user" | "assistant" | "system"; content: any }> = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      // IMAGE SUPPORT: If images are provided (base64 data URLs), inject them into the last user message
+      // for multimodal/vision processing (same format as /api/chat endpoint)
+      const hasImages = images && Array.isArray(images) && images.length > 0;
+      if (hasImages) {
+        console.log(`[Stream] Processing ${images.length} image(s) for multimodal input`);
+        const imageContents = images.map((img: string) => ({
+          type: "image_url" as const,
+          image_url: { url: img }
+        }));
+
+        const lastUserIdx = formattedMessages.map(m => m.role).lastIndexOf("user");
+        if (lastUserIdx >= 0) {
+          formattedMessages = formattedMessages.map((msg, idx) => {
+            if (idx === lastUserIdx) {
+              return {
+                role: msg.role,
+                content: [
+                  ...imageContents,
+                  { type: "text" as const, text: msg.content || "Analiza esta imagen" }
+                ]
+              };
+            }
+            return msg;
+          });
+        }
+      }
 
       // GUARD: Block image generation when attachments are present
       if (hasAttachments && attachmentsCount > 0) {

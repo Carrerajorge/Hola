@@ -4254,6 +4254,13 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
+        }
+
+        // -----------------------------------------------------------------------
+        // FILE HANDLING & CHAT STREAMING (runs for ALL messages, not just image generation)
+        // This block was previously inside `if (shouldGenerateImage)`, which caused
+        // document and image uploads to be silently skipped when shouldGenerateImage was false.
+        // -----------------------------------------------------------------------
           const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
@@ -4437,23 +4444,33 @@ IMPORTANTE:
             // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
             if (hasDocumentAttachments) {
               console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
-              const analyzeResponse = await fetch("/api/analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  messages: finalChatHistory,
-                  attachments: streamAttachments,
-                  conversationId: chatId
-                }),
-                signal: abortControllerRef.current?.signal
-              });
 
-              if (!analyzeResponse.ok) {
-                const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
-                throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+              // Use pre-fetched result if available (computed earlier to avoid race conditions)
+              let analyzeResult = preFetchedAnalysisResult;
+
+              if (!analyzeResult) {
+                // Fallback: fetch analysis if pre-fetch didn't run or failed
+                console.log("[handleSubmit] DATA_MODE: No pre-fetched result, fetching /api/analyze now");
+                const analyzeResponse = await fetch("/api/analyze", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    messages: finalChatHistory,
+                    attachments: streamAttachments,
+                    conversationId: chatId
+                  }),
+                  signal: abortControllerRef.current?.signal
+                });
+
+                if (!analyzeResponse.ok) {
+                  const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+                  throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+                }
+
+                analyzeResult = await analyzeResponse.json();
+              } else {
+                console.log("[handleSubmit] DATA_MODE: Using pre-fetched analysis result");
               }
-
-              const analyzeResult = await analyzeResponse.json();
 
               // Create assistant message with analysis results
               const analysisMsg: Message = {
@@ -4481,6 +4498,11 @@ IMPORTANTE:
             // DEBUG: Log selectedDocTool value before making request
             console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
+            // Extract image data URLs for multimodal/vision support
+            const imageDataUrlsForStream = currentUploadedFiles
+              .filter(f => f.type.startsWith("image/") && f.dataUrl)
+              .map(f => f.dataUrl as string);
+
             const response = await fetch("/api/chat/stream", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
@@ -4490,6 +4512,7 @@ IMPORTANTE:
                 conversationId: effectiveStreamChatId,
                 chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                images: imageDataUrlsForStream.length > 0 ? imageDataUrlsForStream : undefined,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null
               }),
@@ -5056,7 +5079,6 @@ IMPORTANTE:
             }, 15);
 
           }
-        }
 
 
         //   if (error?.name === "AbortError") {
