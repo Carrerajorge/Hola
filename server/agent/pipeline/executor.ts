@@ -112,13 +112,16 @@ export class PipelineExecutor {
 
       if (result.status === "failed" && !step.optional) {
         const hasRecovery = plan.steps.slice(i + 1).some(s =>
-          s.dependsOn?.includes(step.id) === false
+          !s.dependsOn?.includes(step.id)
         );
         if (!hasRecovery) {
           break;
         }
       }
     }
+
+    // Clean up cancelled run tracking to prevent memory leak
+    this.cancelledRuns.delete(plan.runId);
 
     return { results, artifacts: Array.from(artifacts.values()) };
   }
@@ -193,12 +196,14 @@ export class PipelineExecutor {
       try {
         const timeout = step.timeout || tool.timeout || this.config.defaultTimeout;
 
+        let timeoutTimer: ReturnType<typeof setTimeout>;
         const result = await Promise.race([
           tool.execute(context, resolvedParams),
-          new Promise<ToolResult>((_, reject) =>
-            setTimeout(() => reject(new Error("Step timeout")), timeout)
-          )
+          new Promise<ToolResult>((_, reject) => {
+            timeoutTimer = setTimeout(() => reject(new Error("Step timeout")), timeout);
+          })
         ]);
+        clearTimeout(timeoutTimer!);
 
         const completedAt = new Date();
 
@@ -392,14 +397,48 @@ export class PipelineExecutor {
   }
 
   private evaluateCondition(condition: string, variables: Map<string, any>): boolean {
-    const varObj: Record<string, any> = {};
-    variables.forEach((value, key) => {
-      varObj[key] = value;
-    });
-
     try {
-      const fn = new Function(...Object.keys(varObj), `return ${condition}`);
-      return Boolean(fn(...Object.values(varObj)));
+      // Safe condition evaluation without code injection via new Function()
+      // Only supports simple comparisons: "var == value", "var != value", "var > value", etc.
+      const trimmed = condition.trim();
+
+      // Boolean variable check: "varName" or "!varName"
+      if (/^!?\w+$/.test(trimmed)) {
+        const negate = trimmed.startsWith("!");
+        const varName = negate ? trimmed.slice(1) : trimmed;
+        const val = variables.get(varName);
+        return negate ? !val : Boolean(val);
+      }
+
+      // Comparison: "varName op value"
+      const match = trimmed.match(/^(\w+)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+)$/);
+      if (match) {
+        const [, varName, op, rawValue] = match;
+        const left = variables.get(varName);
+        let right: any = rawValue.trim();
+        // Parse right-hand side
+        if (right === "true") right = true;
+        else if (right === "false") right = false;
+        else if (right === "null") right = null;
+        else if (right === "undefined") right = undefined;
+        else if (/^-?\d+(\.\d+)?$/.test(right)) right = Number(right);
+        else if (/^["'].*["']$/.test(right)) right = right.slice(1, -1);
+
+        switch (op) {
+          case "===": return left === right;
+          case "!==": return left !== right;
+          case "==": return left == right;
+          case "!=": return left != right;
+          case ">": return left > right;
+          case "<": return left < right;
+          case ">=": return left >= right;
+          case "<=": return left <= right;
+        }
+      }
+
+      // Unsupported condition format — default to true to not block execution
+      console.warn(`[PipelineExecutor] Unsupported condition format: "${condition}"`);
+      return true;
     } catch {
       return true;
     }
