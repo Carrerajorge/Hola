@@ -1,4 +1,5 @@
 import { chromium, Browser, BrowserContext } from "playwright";
+import { pdfConcurrencyLimiter, validatePdfBuffer, logDocumentEvent } from "./documentSecurity";
 
 export interface PdfMargin {
   top?: string;
@@ -32,6 +33,15 @@ const DEFAULT_OPTIONS: PdfOptions = {
   preferCSSPageSize: false,
 };
 
+// Maximum PDF output size (50MB)
+const MAX_PDF_SIZE = 50 * 1024 * 1024;
+
+// Page load timeout (30 seconds)
+const PAGE_LOAD_TIMEOUT = 30_000;
+
+// PDF generation timeout (60 seconds)
+const PDF_GENERATION_TIMEOUT = 60_000;
+
 let browserInstance: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
@@ -43,6 +53,14 @@ async function getBrowser(): Promise<Browser> {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-sync",
+        "--disable-translate",
+        "--no-first-run",
+        "--single-process",
+        "--disable-web-security=false",
       ],
     });
   }
@@ -141,13 +159,47 @@ function validateHtml(html: string): void {
   if (html.length > maxSize) {
     throw new Error(`HTML content exceeds maximum size of ${maxSize / 1024 / 1024}MB`);
   }
+
+  // Block dangerous HTML patterns
+  const dangerousPatterns = [
+    /<script\b[^>]*>[\s\S]*?<\/script>/gi,  // Script tags
+    /javascript:/gi,                          // JavaScript URLs
+    /on\w+\s*=/gi,                           // Event handlers (onclick, onerror, etc.)
+    /data:text\/html/gi,                     // Data URLs with HTML
+  ];
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(html)) {
+      throw new Error("HTML content contains potentially dangerous elements");
+    }
+  }
+}
+
+/**
+ * Sanitize HTML for PDF rendering: strip scripts and event handlers
+ * but preserve layout and styling needed for PDF output.
+ */
+function sanitizeHtmlForPdf(html: string): string {
+  return html
+    // Remove script tags and content
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    // Remove event handler attributes
+    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    // Remove javascript: URLs
+    .replace(/javascript\s*:/gi, "blocked:")
+    // Remove data:text/html URLs
+    .replace(/data:text\/html/gi, "data:blocked");
 }
 
 export async function generatePdfFromHtml(
   html: string,
   options?: PdfOptions
 ): Promise<Buffer> {
+  const startTime = Date.now();
   validateHtml(html);
+
+  // Sanitize HTML to remove dangerous elements
+  const sanitizedHtml = sanitizeHtmlForPdf(html);
 
   const mergedOptions: PdfOptions = {
     ...DEFAULT_OPTIONS,
@@ -158,45 +210,52 @@ export async function generatePdfFromHtml(
     },
   };
 
-  if (process.env.ENABLE_BACKGROUND_JOBS === "true") {
-    // Import dynamically to avoid circular dependency issues if any
-    const { dispatchPdfGeneration } = await import("./jobService");
-    // Note: This changes the return type contract if we were strictly typed to Buffer.
-    // In a real app, we'd handle this by returning a JobId or Promise<Buffer> that waits.
-    // For this refactor, we are keeping synchronous behavior unless explicitly offloaded.
-    // IF we want to force offload:
-    // await dispatchPdfGeneration({ html, options: mergedOptions, outputFilename: "output.pdf" });
-    // throw new Error("PDF Generation started in background"); 
+  // Enforce concurrency limits for PDF generation (browser resources are expensive)
+  const acquired = await pdfConcurrencyLimiter.acquire();
+  if (!acquired) {
+    logDocumentEvent({
+      timestamp: new Date().toISOString(),
+      event: "rate_limit_exceeded",
+      docType: "pdf",
+    });
+    throw new Error("Too many concurrent PDF generations. Please try again.");
+  }
 
-    // OPTIONAL: logic to decide if we wait or dispatch. 
-    // For now, let's keep direct execution as default to not break existing flows,
-    // but log that we COULD dispatch.
+  if (process.env.ENABLE_BACKGROUND_JOBS === "true") {
     console.log("[pdfGeneration] Background jobs enabled, but direct execution requested for immediate response.");
   }
+
+  logDocumentEvent({
+    timestamp: new Date().toISOString(),
+    event: "generate_start",
+    docType: "pdf",
+    details: { htmlSize: sanitizedHtml.length },
+  });
 
   let context: BrowserContext | null = null;
 
   try {
     const browser = await getBrowser();
-    context = await browser.newContext();
+    context = await browser.newContext({
+      // Block external resource loading for security
+      javaScriptEnabled: false,
+    });
     const page = await context.newPage();
 
-    const wrappedHtml = wrapHtmlWithStyles(html);
-    await page.setContent(wrappedHtml, {
-      waitUntil: "networkidle",
-      timeout: 30000,
+    // Block external network requests - only allow inline content
+    await page.route("**/*", (route) => {
+      const url = route.request().url();
+      if (url.startsWith("data:") || url === "about:blank") {
+        route.continue();
+      } else {
+        route.abort("blockedbyclient");
+      }
     });
 
-    await page.waitForLoadState("domcontentloaded");
-
-    await page.evaluate(() => {
-      return new Promise<void>((resolve) => {
-        if (document.readyState === "complete") {
-          resolve();
-        } else {
-          window.addEventListener("load", () => resolve());
-        }
-      });
+    const wrappedHtml = wrapHtmlWithStyles(sanitizedHtml);
+    await page.setContent(wrappedHtml, {
+      waitUntil: "domcontentloaded",
+      timeout: PAGE_LOAD_TIMEOUT,
     });
 
     const pdfOptions: Parameters<typeof page.pdf>[0] = {
@@ -215,10 +274,41 @@ export async function generatePdfFromHtml(
     }
 
     const pdfBuffer = await page.pdf(pdfOptions);
+    const resultBuffer = Buffer.from(pdfBuffer);
 
-    return Buffer.from(pdfBuffer);
+    // Validate generated PDF
+    if (resultBuffer.length > MAX_PDF_SIZE) {
+      throw new Error(`Generated PDF exceeds maximum size of ${MAX_PDF_SIZE / 1024 / 1024}MB`);
+    }
+
+    const pdfValidation = validatePdfBuffer(resultBuffer);
+    if (!pdfValidation.valid) {
+      throw new Error(`Generated PDF is invalid: ${pdfValidation.errors.join("; ")}`);
+    }
+
+    if (pdfValidation.warnings.length > 0) {
+      console.warn("[pdfGeneration] Warnings:", pdfValidation.warnings);
+    }
+
+    logDocumentEvent({
+      timestamp: new Date().toISOString(),
+      event: "generate_success",
+      docType: "pdf",
+      durationMs: Date.now() - startTime,
+      details: { bufferSize: resultBuffer.length },
+    });
+
+    return resultBuffer;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logDocumentEvent({
+      timestamp: new Date().toISOString(),
+      event: "generate_failure",
+      docType: "pdf",
+      durationMs: Date.now() - startTime,
+      details: { error: errorMessage },
+    });
 
     if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
       throw new Error(`PDF generation timed out: ${errorMessage}`);
@@ -230,6 +320,8 @@ export async function generatePdfFromHtml(
 
     throw new Error(`PDF generation failed: ${errorMessage}`);
   } finally {
+    pdfConcurrencyLimiter.release();
+
     if (context) {
       await context.close().catch((err) => {
         console.error("[pdfGeneration] Error closing browser context:", err);

@@ -144,38 +144,95 @@ Responde SOLO con el código JavaScript de la función createDocument, sin expli
     }
 }
 
+// Maximum allowed code length (50KB)
+const MAX_CODE_LENGTH = 50 * 1024;
+
+// Maximum execution time (10 seconds)
+const EXECUTION_TIMEOUT_MS = 10_000;
+
+// Maximum generated buffer size (50MB)
+const MAX_BUFFER_SIZE = 50 * 1024 * 1024;
+
+// Patterns that indicate dangerous code attempting to escape the sandbox
+const FORBIDDEN_PATTERNS = [
+    /\bprocess\b/,
+    /\brequire\b/,
+    /\bimport\b/,
+    /\bglobal\b/,
+    /\bglobalThis\b/,
+    /\b__dirname\b/,
+    /\b__filename\b/,
+    /\bchild_process\b/,
+    /\bexecSync\b/,
+    /\bexecFile\b/,
+    /\bspawn\b/,
+    /\beval\b/,
+    /\bFunction\s*\(/,
+    /\bconstructor\s*\[/,
+    /\b__proto__\b/,
+    /\bprototype\b/,
+    /\bProxy\b/,
+    /\bReflect\b/,
+    /\bfs\b/,
+    /\bnet\b/,
+    /\bhttp\b/,
+    /\bhttps\b/,
+    /\bdgram\b/,
+    /\bchild_process\b/,
+    /\bcluster\b/,
+    /\bworker_threads\b/,
+    /\bvm\b/,
+    /\bfetch\b/,
+    /\bXMLHttpRequest\b/,
+    /\bWebSocket\b/,
+    /\bsetTimeout\b/,
+    /\bsetInterval\b/,
+    /\bsetImmediate\b/,
+    /\bnew\s+Function\b/,
+];
+
 /**
- * Execute generated DOCX code in a sandbox and return the buffer
+ * Validate code for dangerous patterns before execution
+ */
+function validateCodeSafety(code: string): { safe: boolean; violations: string[] } {
+    const violations: string[] = [];
+
+    if (code.length > MAX_CODE_LENGTH) {
+        violations.push(`Code exceeds maximum length of ${MAX_CODE_LENGTH} characters (got ${code.length})`);
+    }
+
+    for (const pattern of FORBIDDEN_PATTERNS) {
+        if (pattern.test(code)) {
+            violations.push(`Forbidden pattern detected: ${pattern.source}`);
+        }
+    }
+
+    // Check for string escape attempts (e.g., constructing forbidden words via concatenation)
+    const suspiciousStringConcat = /\[\s*['"`]c['"`]\s*\+\s*['"`]o['"`]\s*\+\s*['"`]n['"`]/i;
+    if (suspiciousStringConcat.test(code)) {
+        violations.push("Suspicious string concatenation detected");
+    }
+
+    return { safe: violations.length === 0, violations };
+}
+
+/**
+ * Execute generated DOCX code in a sandboxed VM context and return the buffer
  */
 export async function executeDocxCode(code: string): Promise<Buffer> {
     console.log('[DocxCodeGenerator] Executing generated code...');
-    console.log('[DocxCodeGenerator] Code preview:', code.substring(0, 200));
+    console.log('[DocxCodeGenerator] Code length:', code.length, 'chars');
+
+    // Step 1: Validate code safety
+    const safetyCheck = validateCodeSafety(code);
+    if (!safetyCheck.safe) {
+        console.error('[DocxCodeGenerator] Code safety check FAILED:', safetyCheck.violations);
+        throw new Error(`Code rejected by security validator: ${safetyCheck.violations.join('; ')}`);
+    }
 
     try {
-        // Create a function that has access to docx classes
-        const createDocFn = new Function(
-            'Document',
-            'Packer',
-            'Paragraph',
-            'TextRun',
-            'AlignmentType',
-            'Table',
-            'TableRow',
-            'TableCell',
-            'WidthType',
-            'BorderStyle',
-            'HeadingLevel',
-            'convertInchesToTwip',
-            `
-            return (async () => {
-                ${code}
-                return await createDocument();
-            })();
-            `
-        );
-
-        // Execute with all docx classes available
-        const doc = await createDocFn(
+        // Step 2: Create isolated VM context with only docx classes available
+        const sandbox = {
             Document,
             Packer,
             Paragraph,
@@ -187,8 +244,73 @@ export async function executeDocxCode(code: string): Promise<Buffer> {
             WidthType,
             BorderStyle,
             HeadingLevel,
-            convertInchesToTwip
-        );
+            convertInchesToTwip,
+            // Provide a safe console for debugging
+            console: {
+                log: (...args: unknown[]) => console.log('[Sandbox]', ...args),
+                error: (...args: unknown[]) => console.error('[Sandbox]', ...args),
+                warn: (...args: unknown[]) => console.warn('[Sandbox]', ...args),
+            },
+            // Provide Promise so async/await works
+            Promise,
+            Array,
+            Object,
+            String,
+            Number,
+            Boolean,
+            Math,
+            Date,
+            JSON,
+            Map,
+            Set,
+            Error,
+            TypeError,
+            RangeError,
+            parseInt,
+            parseFloat,
+            isNaN,
+            isFinite,
+            undefined,
+            NaN,
+            Infinity,
+        };
+
+        const context = vm.createContext(sandbox, {
+            name: 'docx-sandbox',
+            codeGeneration: {
+                strings: false,  // Disable eval() and new Function()
+                wasm: false,     // Disable WebAssembly
+            },
+        });
+
+        // Step 3: Wrap code in an async IIFE and execute within the VM
+        const wrappedCode = `
+            (async () => {
+                ${code}
+                if (typeof createDocument !== 'function') {
+                    throw new Error('createDocument function is not defined');
+                }
+                return await createDocument();
+            })();
+        `;
+
+        const script = new vm.Script(wrappedCode, {
+            filename: 'user-document-code.js',
+        });
+
+        // Step 4: Execute with timeout
+        const resultPromise = script.runInContext(context, {
+            timeout: EXECUTION_TIMEOUT_MS,
+            displayErrors: true,
+        });
+
+        // Handle the async result with a race against timeout
+        const doc = await Promise.race([
+            resultPromise,
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Document generation timed out')), EXECUTION_TIMEOUT_MS)
+            ),
+        ]);
 
         if (!doc) {
             throw new Error('Document creation returned null');
@@ -196,16 +318,26 @@ export async function executeDocxCode(code: string): Promise<Buffer> {
 
         console.log('[DocxCodeGenerator] Document created, packing to buffer...');
 
-        // Pack the document to buffer
-        const buffer = await Packer.toBuffer(doc);
+        // Step 5: Pack the document to buffer
+        const buffer = await Packer.toBuffer(doc as typeof Document.prototype);
+
+        // Step 6: Validate buffer size
+        if (buffer.length > MAX_BUFFER_SIZE) {
+            throw new Error(`Generated document exceeds maximum size of ${MAX_BUFFER_SIZE / 1024 / 1024}MB`);
+        }
 
         console.log(`[DocxCodeGenerator] Generated buffer size: ${buffer.length} bytes`);
 
         return buffer;
     } catch (error: any) {
         console.error('[DocxCodeGenerator] Execution error:', error.message);
-        console.error('[DocxCodeGenerator] Stack:', error.stack);
-        throw new Error(`Failed to execute document code: ${error.message}`);
+
+        // Sanitize error messages to avoid leaking internal paths
+        const sanitizedMessage = error.message
+            .replace(/\/[^\s:]+/g, '[path]')
+            .replace(/at\s+.+:\d+:\d+/g, '[stack]');
+
+        throw new Error(`Failed to execute document code: ${sanitizedMessage}`);
     }
 }
 
