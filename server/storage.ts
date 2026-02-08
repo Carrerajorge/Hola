@@ -201,7 +201,7 @@ export interface IStorage {
   getAllUsers(): Promise<User[]>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
   deleteUser(id: string): Promise<void>;
-  getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }>;
+  getUserStats(): Promise<{ total: number; active: number; newThisMonth: number; newLastMonth: number }>;
   // Admin: AI Models
   createAiModel(model: InsertAiModel): Promise<AiModel>;
   getAiModels(): Promise<AiModel[]>;
@@ -214,7 +214,7 @@ export interface IStorage {
   createPayment(payment: InsertPayment): Promise<Payment>;
   getPayments(): Promise<Payment[]>;
   updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined>;
-  getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }>;
+  getPaymentStats(): Promise<{ total: string; thisMonth: string; previousMonth: string; count: number }>;
   // Admin: Invoices
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
   getInvoices(): Promise<Invoice[]>;
@@ -1225,15 +1225,17 @@ export class MemStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }> {
+  async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number; newLastMonth: number }> {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const [row] = await dbRead
       .select({
         total: sql<number>`count(*)`,
         active: sql<number>`count(*) filter (where ${users.status} = 'active')`,
         newThisMonth: sql<number>`count(*) filter (where ${users.createdAt} >= ${monthStart})`,
+        newLastMonth: sql<number>`count(*) filter (where ${users.createdAt} >= ${lastMonthStart} and ${users.createdAt} < ${monthStart})`,
       })
       .from(users);
 
@@ -1241,6 +1243,7 @@ export class MemStorage implements IStorage {
       total: Number(row?.total ?? 0),
       active: Number(row?.active ?? 0),
       newThisMonth: Number(row?.newThisMonth ?? 0),
+      newLastMonth: Number(row?.newLastMonth ?? 0),
     };
   }
 
@@ -1360,14 +1363,16 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
+  async getPaymentStats(): Promise<{ total: string; thisMonth: string; previousMonth: string; count: number }> {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
     const [row] = await dbRead
       .select({
         total: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed'), 0)`,
         thisMonth: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed' and ${payments.createdAt} >= ${monthStart}), 0)`,
+        previousMonth: sql<number>`coalesce(sum((nullif(${payments.amount}, '')::numeric)) filter (where ${payments.status} = 'completed' and ${payments.createdAt} >= ${lastMonthStart} and ${payments.createdAt} < ${monthStart}), 0)`,
         count: sql<number>`count(*) filter (where ${payments.status} = 'completed')`,
       })
       .from(payments);
@@ -1375,6 +1380,7 @@ export class MemStorage implements IStorage {
     return {
       total: Number(row?.total ?? 0).toFixed(2),
       thisMonth: Number(row?.thisMonth ?? 0).toFixed(2),
+      previousMonth: Number(row?.previousMonth ?? 0).toFixed(2),
       count: Number(row?.count ?? 0),
     };
   }
