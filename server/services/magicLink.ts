@@ -27,7 +27,16 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
         if (!user) {
             const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
             if (!allowRegistration) {
-                return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+                // Allow signups when the email has a pending workspace invitation.
+                const emailNorm = email.toLowerCase().trim();
+                const pendingInvites = await db
+                    .select({ id: workspaceInvitations.id })
+                    .from(workspaceInvitations)
+                    .where(and(eq(workspaceInvitations.email, emailNorm), eq(workspaceInvitations.status, "pending")))
+                    .limit(1);
+                if (pendingInvites.length === 0) {
+                    return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+                }
             }
 
             // Create new user for magic link signup
@@ -114,28 +123,39 @@ export async function verifyMagicLink(token: string): Promise<{ success: boolean
                     .where(and(eq(workspaceInvitations.email, email), eq(workspaceInvitations.status, "pending")))
                     .orderBy(desc(workspaceInvitations.createdAt));
 
-                if (invites.length > 0) {
-                    const newest = invites[0];
-                    const targetOrgId = (newest as any).orgId;
-                    const targetRole = ((newest as any).role || "team_member") as string;
-
-                    const safeToAssignOrg = wasPending || !((user as any).orgId) || (user as any).orgId === "default";
-                    const safeToAssignRole = wasPending || ((user as any).role || "") === "user";
-
-                    if (safeToAssignOrg || (user as any).orgId === targetOrgId) {
-                        const patch: any = { updatedAt: new Date() };
-                        if (safeToAssignOrg) {
-                            patch.orgId = targetOrgId;
-                        }
-                        if (safeToAssignRole) {
-                            patch.role = targetRole;
-                        }
-                        await db.update(users).set(patch).where(eq(users.id, user.id));
-                    }
-
-                    const now = new Date();
-                    // Accept invitations for the chosen org, revoke others to avoid double-billing seats.
-                    await db
+	                if (invites.length > 0) {
+	                    const newest = invites[0];
+	                    const targetOrgId = (newest as any).orgId;
+	                    const targetRole = ((newest as any).role || "team_member") as string;
+	
+	                    const safeToAssignOrg = wasPending || !((user as any).orgId) || (user as any).orgId === "default";
+	                    const safeToAssignRole = wasPending || ((user as any).role || "") === "user";
+	                    const joinedTargetOrg = safeToAssignOrg || (user as any).orgId === targetOrgId;
+	
+	                    if (joinedTargetOrg) {
+	                        const patch: any = { updatedAt: new Date() };
+	                        if (safeToAssignOrg) {
+	                            patch.orgId = targetOrgId;
+	                        }
+	                        if (safeToAssignRole) {
+	                            patch.role = targetRole;
+	                        }
+	                        await db.update(users).set(patch).where(eq(users.id, user.id));
+	                    }
+	
+	                    // Grant invited accounts the Business ($25) plan unless they already have a higher plan.
+	                    try {
+	                        const currentPlan = String((user as any).plan || "free").toLowerCase().trim();
+	                        if (joinedTargetOrg && ["free", "go", "plus"].includes(currentPlan)) {
+	                            await db.update(users).set({ plan: "business", updatedAt: new Date() }).where(eq(users.id, user.id));
+	                        }
+	                    } catch (planErr) {
+	                        console.warn("[MagicLink] Failed to apply Business plan to invited user:", planErr);
+	                    }
+	
+	                    const now = new Date();
+	                    // Accept invitations for the chosen org, revoke others to avoid double-billing seats.
+	                    await db
                         .update(workspaceInvitations)
                         .set({ status: "accepted", acceptedAt: now })
                         .where(and(eq(workspaceInvitations.email, email), eq(workspaceInvitations.status, "pending"), eq(workspaceInvitations.orgId, targetOrgId)));

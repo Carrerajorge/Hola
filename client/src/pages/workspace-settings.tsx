@@ -1,14 +1,16 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { 
-  ArrowLeft, 
-  Settings, 
-  Users, 
-  Key, 
+	  ArrowLeft, 
+	  Settings, 
+	  Users, 
+	  Key, 
   CreditCard, 
   Bot, 
   AppWindow, 
@@ -20,13 +22,17 @@ import {
   AlertTriangle,
   Info,
   Search,
-  Plus,
-  MoreHorizontal,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Filter
-} from "lucide-react";
+	  Plus,
+	  MoreHorizontal,
+	  ChevronDown,
+	  ChevronLeft,
+	  ChevronRight,
+	  Filter,
+	  Loader2,
+	  RefreshCcw,
+	  Trash2
+	} from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
@@ -40,15 +46,46 @@ import { apiFetch } from "@/lib/apiClient";
 import { isAdminUser, isBillingManagerUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
-import { formatZonedDate, normalizeTimeZone } from "@/lib/platformDateTime";
+import { formatZonedDate, formatZonedIntl, normalizeTimeZone } from "@/lib/platformDateTime";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { CreditAlertsDialog } from "@/components/credit-alerts-dialog";
 import { BillingHelpDialog } from "@/components/billing-help-dialog";
+import type { Gpt } from "@/components/gpt-explorer";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
+
+type MembersTab = "users" | "pending-invites" | "pending-requests";
+
+type WorkspaceMemberRow = {
+  id: string;
+  email: string;
+  fullName: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+  role: string;
+  plan: string;
+  addedAt: string | null;
+};
+
+type WorkspaceInvitationRow = {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string | null;
+  lastSentAt: string | null;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+};
+
+type GptVisibility = "private" | "team" | "public";
+type GptAccessOption = "private" | "team" | "link" | "public";
+
+const GPT_OWNER_UNASSIGNED_VALUE = "__unassigned__";
 
 const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "General", icon: <Settings className="h-4 w-4" /> },
@@ -67,35 +104,65 @@ export default function WorkspaceSettingsPage() {
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const { user } = useAuth();
-  const { settings: platformSettings } = usePlatformSettings();
-  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
-  const platformDateFormat = platformSettings.date_format;
-  const isAdmin = isAdminUser(user as any);
-  const canManageBilling = isBillingManagerUser(user as any);
-  const canManageWorkspace = canManageBilling;
-  const { toast } = useToast();
-  const userDisplayName = user?.fullName || user?.username || "Tu cuenta";
-  const userEmail = user?.email || "";
-  const userInitials =
-    userDisplayName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
+	  const { settings: platformSettings } = usePlatformSettings();
+	  const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
+	  const platformDateFormat = platformSettings.date_format;
+	  const isAdmin = isAdminUser(user as any);
+		  const canManageBilling = isBillingManagerUser(user as any);
+		  const { toast } = useToast();
+		  const [workspaceCanManageServer, setWorkspaceCanManageServer] = useState(false);
+		  const canManageWorkspace = canManageBilling || workspaceCanManageServer;
+		  const userDisplayName = user?.fullName || user?.username || "Tu cuenta";
+		  const userEmail = user?.email || "";
+      const currentUserId = (user as any)?.claims?.sub || (user as any)?.id || null;
+	  const userInitials =
+	    userDisplayName
+	      .split(" ")
+	      .filter(Boolean)
+	      .slice(0, 2)
       .map((part) => part[0] || "")
       .join("")
       .toUpperCase() || "U";
   const [workspaceName, setWorkspaceName] = useState("");
   const [orgId, setOrgId] = useState<string>("");
   const [workspaceId, setWorkspaceId] = useState<string>("");
-  const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
-  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [alertsOpen, setAlertsOpen] = useState(false);
-  const [billingHelpOpen, setBillingHelpOpen] = useState(false);
-  const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
-  const [planSelectKey, setPlanSelectKey] = useState(0);
-  const [billingTab, setBillingTab] = useState<"plan" | "invoices">("plan");
+	  const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
+	  const [memberCount, setMemberCount] = useState<number | null>(null);
+	  const [membersTab, setMembersTab] = useState<MembersTab>("users");
+	  const [memberFilter, setMemberFilter] = useState("");
+	  const [membersLoading, setMembersLoading] = useState(false);
+	  const [membersError, setMembersError] = useState<string | null>(null);
+	  const [members, setMembers] = useState<WorkspaceMemberRow[]>([]);
+	  const [invitesLoading, setInvitesLoading] = useState(false);
+	  const [invitesError, setInvitesError] = useState<string | null>(null);
+	  const [pendingInvites, setPendingInvites] = useState<WorkspaceInvitationRow[]>([]);
+	  const [inviteOpen, setInviteOpen] = useState(false);
+	  const [inviteEmailsRaw, setInviteEmailsRaw] = useState("");
+		  const [inviteRole, setInviteRole] = useState<"team_member" | "team_admin">("team_member");
+		  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+		  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+		  const [upgradeOpen, setUpgradeOpen] = useState(false);
+		  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [gptsLoading, setGptsLoading] = useState(false);
+  const [gptsError, setGptsError] = useState<string | null>(null);
+  const [gpts, setGpts] = useState<Gpt[]>([]);
+  const [gptTab, setGptTab] = useState<"workspace" | "unassigned">("workspace");
+  const [gptQuery, setGptQuery] = useState("");
+  const [gptAccessFilter, setGptAccessFilter] = useState<"all" | GptAccessOption>("all");
+  const [gptSearchOpen, setGptSearchOpen] = useState(false);
+  const [gptPage, setGptPage] = useState(0);
+
+  const [gptAccessTarget, setGptAccessTarget] = useState<Gpt | null>(null);
+  const [gptAccessOption, setGptAccessOption] = useState<GptAccessOption>("private");
+  const [gptAccessSaving, setGptAccessSaving] = useState(false);
+
+      const [gptOwnerTarget, setGptOwnerTarget] = useState<Gpt | null>(null);
+      const [gptOwnerUserId, setGptOwnerUserId] = useState<string>("");
+      const [gptOwnerSaving, setGptOwnerSaving] = useState(false);
+	  const [billingHelpOpen, setBillingHelpOpen] = useState(false);
+	  const [billingHelpAction, setBillingHelpAction] = useState<string>("workspace_billing");
+	  const [planSelectKey, setPlanSelectKey] = useState(0);
+	  const [billingTab, setBillingTab] = useState<"plan" | "invoices">("plan");
   const [creditsOffset, setCreditsOffset] = useState(0);
   const [creditsUsage, setCreditsUsage] = useState<{
     cycleStart: string;
@@ -156,6 +223,13 @@ export default function WorkspaceSettingsPage() {
     }
   }, [searchString]);
 
+  const navigateToSection = (section: WorkspaceSection) => {
+    setActiveSection(section);
+    const params = new URLSearchParams(searchString);
+    params.set("section", section);
+    setLocation(`/workspace-settings?${params.toString()}`);
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -171,21 +245,22 @@ export default function WorkspaceSettingsPage() {
       }
     })();
 
-    (async () => {
-      try {
-        const res = await apiFetch("/api/workspace/me");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        setOrgId(data.orgId || "");
-        setWorkspaceId(data.workspaceId || "");
-        setWorkspaceName(data.name || "");
-        setLogoFileUuid(data.logoFileUuid || null);
-        setMemberCount(typeof data.memberCount === "number" ? data.memberCount : null);
-      } catch {
-        // ignore
-      }
-    })();
+	    (async () => {
+	      try {
+	        const res = await apiFetch("/api/workspace/me");
+	        if (!res.ok) return;
+	        const data = await res.json();
+	        if (cancelled) return;
+	        setOrgId(data.orgId || "");
+	        setWorkspaceId(data.workspaceId || "");
+	        setWorkspaceName(data.name || "");
+	        setLogoFileUuid(data.logoFileUuid || null);
+	        setMemberCount(typeof data.memberCount === "number" ? data.memberCount : null);
+	        setWorkspaceCanManageServer(!!data?.canManage);
+	      } catch {
+	        // ignore
+	      }
+	    })();
 
     return () => {
       cancelled = true;
@@ -223,8 +298,280 @@ export default function WorkspaceSettingsPage() {
     };
   }, [activeSection, creditsOffset, toast]);
 
+  const parseInviteEmails = (raw: string): string[] => {
+    const parts = String(raw || "")
+      .split(/[\s,;]+/g)
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+    return Array.from(new Set(parts));
+  };
+
+  const getMemberDisplayName = (m: WorkspaceMemberRow): string => {
+    const full = String(m.fullName || "").trim();
+    if (full) return full;
+    const first = String(m.firstName || "").trim();
+    const last = String(m.lastName || "").trim();
+    const combined = `${first} ${last}`.trim();
+    if (combined) return combined;
+    const username = String(m.username || "").trim();
+    if (username) return username;
+    const email = String(m.email || "").trim();
+    if (email) return email.split("@")[0] || email;
+    return "Miembro";
+  };
+
+  const getMemberInitials = (m: WorkspaceMemberRow): string => {
+    const name = getMemberDisplayName(m);
+    const letters = name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0] || "")
+      .join("")
+      .toUpperCase();
+    if (letters) return letters;
+    const email = String(m.email || "").trim();
+    if (email) return (email[0] || "U").toUpperCase();
+    return "U";
+  };
+
+  const getMemberRoleLabel = (m: WorkspaceMemberRow): string => {
+    const role = String(m.role || "user").toLowerCase().trim();
+    const email = String(m.email || "").toLowerCase().trim();
+    const isSelf = !!email && !!userEmail && email === String(userEmail).toLowerCase().trim();
+
+    if (isSelf && canManageWorkspace) return "Propietario";
+    if (role === "admin" || role === "superadmin" || role === "team_admin") return "Administrador";
+    if (role === "team_member" || role === "user") return "Miembro";
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : "Miembro";
+  };
+
+  const formatMemberDate = (iso: string | null): string => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return (
+      formatZonedIntl(d, {
+        timeZone: platformTimeZone,
+        locale: "es-ES",
+        options: { year: "numeric", month: "short", day: "numeric" },
+      }) || "—"
+    );
+  };
+
+  const filteredMembers = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((m) => {
+      const name = getMemberDisplayName(m);
+      const haystack = `${name} ${m.email || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [members, memberFilter]);
+
+  const loadMembers = async () => {
+    setMembersError(null);
+    setMembersLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/members");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudieron cargar los miembros");
+      }
+      const rows = Array.isArray(data?.members) ? (data.members as WorkspaceMemberRow[]) : [];
+      setMembers(rows);
+      if (typeof data?.memberCount === "number") setMemberCount(data.memberCount);
+    } catch (e: any) {
+      const msg = e?.message || "No se pudieron cargar los miembros.";
+      setMembersError(msg);
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
+  const loadPendingInvites = async () => {
+    setInvitesError(null);
+    setInvitesLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/invitations?status=pending");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("Solo los administradores pueden ver las invitaciones pendientes.");
+        }
+        throw new Error(data?.error || "No se pudieron cargar las invitaciones");
+      }
+      const rows = Array.isArray(data?.invitations) ? (data.invitations as WorkspaceInvitationRow[]) : [];
+      setPendingInvites(rows);
+    } catch (e: any) {
+      const msg = e?.message || "No se pudieron cargar las invitaciones.";
+      setInvitesError(msg);
+      setPendingInvites([]);
+    } finally {
+      setInvitesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection !== "members") return;
+    void loadMembers();
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "members") return;
+    if (membersTab !== "pending-invites") return;
+    if (!canManageWorkspace) {
+      setPendingInvites([]);
+      setInvitesError("Solo los administradores pueden ver las invitaciones pendientes.");
+      setInvitesLoading(false);
+      return;
+    }
+    void loadPendingInvites();
+  }, [activeSection, membersTab, canManageWorkspace]);
+
+  useEffect(() => {
+    if (!inviteOpen) return;
+    setInviteEmailsRaw("");
+    setInviteRole("team_member");
+    setInviteSubmitting(false);
+  }, [inviteOpen]);
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
+  };
+
+  const handleInviteSubmit = async () => {
+    if (!canManageWorkspace) {
+      toast({
+        title: "Contactar administrador",
+        description: "Solo el administrador puede invitar miembros. Envía una solicitud desde aquí.",
+      });
+      setBillingHelpAction("workspace_invite_member");
+      setBillingHelpOpen(true);
+      return;
+    }
+
+    const emails = parseInviteEmails(inviteEmailsRaw);
+    if (emails.length === 0) {
+      toast({
+        title: "Faltan correos",
+        description: "Agrega al menos un correo para invitar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setInviteSubmitting(true);
+    try {
+      const res = await apiFetch("/api/workspace/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emails, role: inviteRole }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error("Solo los administradores pueden invitar miembros.");
+        }
+        throw new Error(data?.error || "No se pudieron enviar las invitaciones");
+      }
+
+      const results = Array.isArray(data?.results) ? data.results : [];
+      const sentCount = results.filter((r: any) => r?.status === "sent").length;
+      const skippedCount = results.filter((r: any) => r?.status === "skipped").length;
+      const errorCount = results.filter((r: any) => r?.status === "error").length;
+
+      toast({
+        title: "Invitaciones creadas",
+        description: `Enviadas: ${sentCount}. Omitidas: ${skippedCount}. Errores: ${errorCount}.`,
+      });
+
+      setInviteOpen(false);
+      setMembersTab("pending-invites");
+      void loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudieron enviar las invitaciones.",
+        variant: "destructive",
+      });
+    } finally {
+      setInviteSubmitting(false);
+    }
+  };
+
+  const handleResendInvite = async (inviteId: string) => {
+    try {
+      const res = await apiFetch(`/api/workspace/invitations/${encodeURIComponent(inviteId)}/resend`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo reenviar la invitación");
+      }
+
+      if (data?.magicLinkUrl) {
+        await navigator.clipboard.writeText(String(data.magicLinkUrl));
+        toast({ title: "Enlace copiado", description: "El enlace de invitación fue copiado al portapapeles." });
+      } else {
+        toast({ title: "Invitación reenviada", description: "Se envió nuevamente la invitación." });
+      }
+
+      void loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo reenviar la invitación.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    try {
+      const res = await apiFetch(`/api/workspace/invitations/${encodeURIComponent(inviteId)}/revoke`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo revocar la invitación");
+      }
+      toast({ title: "Invitación revocada", description: "La invitación fue revocada." });
+      void loadPendingInvites();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo revocar la invitación.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMembersRefresh = () => {
+    void loadMembers();
+    if (membersTab === "pending-invites") {
+      if (!canManageWorkspace) {
+        setPendingInvites([]);
+        setInvitesError("Solo los administradores pueden ver las invitaciones pendientes.");
+        setInvitesLoading(false);
+        return;
+      }
+      void loadPendingInvites();
+    }
+  };
+
+  const handleCopyMemberEmails = async () => {
+    try {
+      const emails = filteredMembers
+        .map((m) => String(m.email || "").trim())
+        .filter(Boolean)
+        .join("\n");
+      if (!emails) {
+        toast({ title: "Nada que copiar", description: "No hay correos en la lista actual." });
+        return;
+      }
+      await navigator.clipboard.writeText(emails);
+      toast({ title: "Copiado", description: "Correos copiados al portapapeles." });
+    } catch {
+      toast({ title: "Error", description: "No se pudieron copiar los correos.", variant: "destructive" });
+    }
   };
 
   const { uploadFile, isUploading } = useCloudLibrary();
@@ -300,17 +647,60 @@ export default function WorkspaceSettingsPage() {
     void loadInvoices({ reset: true });
   }, [activeSection, billingTab, canManageBilling, invoicesLoaded]);
 
+  const loadMyGpts = useCallback(async () => {
+    if (gptsLoading) return;
+    setGptsError(null);
+    setGptsLoading(true);
+    try {
+      const res = await apiFetch("/api/workspace/gpts");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudieron cargar los GPTs");
+      }
+      if (typeof data?.canManage === "boolean" && data.canManage) {
+        setWorkspaceCanManageServer(true);
+      }
+      const rows = Array.isArray(data?.gpts) ? data.gpts : [];
+      setGpts(rows);
+    } catch (e: any) {
+      const msg = e?.message || "No se pudieron cargar los GPTs.";
+      setGptsError(msg);
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setGptsLoading(false);
+    }
+  }, [gptsLoading, toast]);
+
+  useEffect(() => {
+    if (activeSection !== "gpt") return;
+    void loadMyGpts();
+  }, [activeSection, loadMyGpts]);
+
+  useEffect(() => {
+    if (activeSection !== "gpt") return;
+    // Needed to show human-friendly constructor labels + enable owner transfer dialog.
+    if (members.length > 0 || membersLoading) return;
+    void loadMembers();
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (activeSection !== "gpt") return;
+    const onFocus = () => void loadMyGpts();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [activeSection, loadMyGpts]);
+
   const formatCycleShort = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
     return formatZonedDate(d, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false }) || "—";
   };
 
-  const planLabel = (planRaw: string | null | undefined) => {
-    const plan = String(planRaw || "free").toLowerCase().trim();
-    switch (plan) {
-      case "free":
-        return "Gratis";
+	  const planLabel = (planRaw: string | null | undefined) => {
+	    const plan = String(planRaw || "free").toLowerCase().trim();
+	    switch (plan) {
+	      case "free":
+	        return "Gratis";
       case "go":
         return "Go";
       case "plus":
@@ -325,13 +715,36 @@ export default function WorkspaceSettingsPage() {
         return "Admin";
       default:
         return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "Gratis";
-    }
-  };
+	    }
+	  };
 
-  const formatMoney = (amountCents: number | null | undefined, currency: string | null | undefined) => {
-    if (typeof amountCents !== "number") return "—";
-    const cur = String(currency || "usd").toUpperCase();
-    try {
+	  const planPriceUsd = (planRaw: string | null | undefined): number | null => {
+	    const plan = String(planRaw || "").toLowerCase().trim();
+	    switch (plan) {
+	      case "go":
+	        return 5;
+	      case "plus":
+	        return 10;
+	      case "pro":
+	        return 200;
+	      case "business":
+	        return 25;
+	      default:
+	        return null;
+	    }
+	  };
+
+	  const planLabelWithPrice = (planRaw: string | null | undefined): string => {
+	    const label = planLabel(planRaw);
+	    const price = planPriceUsd(planRaw);
+	    if (!price) return label;
+	    return `${label} ($${price})`;
+	  };
+
+	  const formatMoney = (amountCents: number | null | undefined, currency: string | null | undefined) => {
+	    if (typeof amountCents !== "number") return "—";
+	    const cur = String(currency || "usd").toUpperCase();
+	    try {
       return new Intl.NumberFormat("es-ES", { style: "currency", currency: cur }).format(amountCents / 100);
     } catch {
       return `${(amountCents / 100).toFixed(2)} ${cur}`;
@@ -421,11 +834,237 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
+  const memberById = useMemo(() => new Map(members.map((m) => [m.id, m] as const)), [members]);
+
+  const normalizeGptVisibility = (raw: unknown): GptVisibility => {
+    const vis = String(raw || "private").toLowerCase().trim();
+    if (vis === "public" || vis === "team" || vis === "private") return vis as GptVisibility;
+    return "private";
+  };
+
+  const normalizeGptPublished = (raw: unknown): boolean => {
+    if (typeof raw === "boolean") return raw;
+    const v = String(raw || "").toLowerCase().trim();
+    return v === "true" || v === "1" || v === "yes";
+  };
+
+  const normalizeGptAccessOption = (raw: unknown): GptAccessOption => {
+    const v = String(raw || "").toLowerCase().trim();
+    if (v === "private" || v === "team" || v === "link" || v === "public") return v as GptAccessOption;
+    return "private";
+  };
+
+  const gptAccessOptionForRow = (gpt: Gpt): GptAccessOption => {
+    const vis = normalizeGptVisibility(gpt.visibility);
+    const published = normalizeGptPublished((gpt as any)?.isPublished);
+    if (vis === "public") return published ? "public" : "link";
+    if (vis === "team") return "team";
+    return "private";
+  };
+
+  const formatGptDateShort = (iso: string | null | undefined) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return (
+      formatZonedIntl(d, {
+        timeZone: platformTimeZone,
+        locale: "en-US",
+        options: { month: "short", day: "numeric" },
+      }) ||
+      formatZonedDate(d, { timeZone: platformTimeZone, dateFormat: platformDateFormat, includeYear: false }) ||
+      "—"
+    );
+  };
+
+  const gptConstructorLabel = (gpt: Gpt) => {
+    if (!gpt.creatorId) return "Sin asignar";
+    if (currentUserId && gpt.creatorId === currentUserId) return userDisplayName;
+    const member = memberById.get(gpt.creatorId);
+    const label = String(member?.fullName || member?.username || member?.email || "").trim();
+    return label || gpt.creatorId;
+  };
+
+  const gptAccessLabel = (gpt: Gpt) => {
+    const published = normalizeGptPublished((gpt as any)?.isPublished);
+    if (published) return "Público";
+    const vis = String(gpt.visibility || "private").toLowerCase().trim();
+    if (vis === "public") return "Enlace";
+    if (vis === "team") return "Espacio de trabajo";
+    return "Privado";
+  };
+
+  const memberIds = useMemo(() => new Set(members.map((m) => m.id)), [members]);
+
+  const workspaceGpts = useMemo(() => {
+    if (members.length === 0) return gpts.filter((g) => !!g.creatorId);
+    return gpts.filter((g) => g.creatorId && memberIds.has(g.creatorId));
+  }, [gpts, members.length, memberIds]);
+
+  const unassignedGpts = useMemo(() => {
+    if (members.length === 0) return gpts.filter((g) => !g.creatorId);
+    return gpts.filter((g) => !g.creatorId || !memberIds.has(g.creatorId));
+  }, [gpts, members.length, memberIds]);
+
+  const filterGpts = useCallback((rows: Gpt[]) => {
+    const q = gptQuery.trim().toLowerCase();
+    const access = gptAccessFilter;
+    if (!q && access === "all") return rows;
+    return rows.filter((g) => {
+      if (access !== "all" && gptAccessOptionForRow(g) !== access) return false;
+      if (!q) return true;
+      const hay = `${g.name || ""} ${g.slug || ""} ${g.description || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [gptAccessFilter, gptQuery]);
+
+  const filteredWorkspaceGpts = useMemo(() => filterGpts(workspaceGpts), [filterGpts, workspaceGpts]);
+  const filteredUnassignedGpts = useMemo(() => filterGpts(unassignedGpts), [filterGpts, unassignedGpts]);
+
+  const GPT_PAGE_SIZE = 10;
+  const workspacePaging = useMemo(() => {
+    const pageCount = Math.max(1, Math.ceil(filteredWorkspaceGpts.length / GPT_PAGE_SIZE));
+    const clampedPage = Math.min(Math.max(0, gptPage), pageCount - 1);
+    const start = clampedPage * GPT_PAGE_SIZE;
+    return {
+      pageCount,
+      clampedPage,
+      pagedRows: filteredWorkspaceGpts.slice(start, start + GPT_PAGE_SIZE),
+    };
+  }, [filteredWorkspaceGpts, gptPage]);
+
+  const unassignedPaging = useMemo(() => {
+    const pageCount = Math.max(1, Math.ceil(filteredUnassignedGpts.length / GPT_PAGE_SIZE));
+    const clampedPage = Math.min(Math.max(0, gptPage), pageCount - 1);
+    const start = clampedPage * GPT_PAGE_SIZE;
+    return {
+      pageCount,
+      clampedPage,
+      pagedRows: filteredUnassignedGpts.slice(start, start + GPT_PAGE_SIZE),
+    };
+  }, [filteredUnassignedGpts, gptPage]);
+
+  const activeGptRows = gptTab === "unassigned" ? filteredUnassignedGpts : filteredWorkspaceGpts;
+  const activePaging = gptTab === "unassigned" ? unassignedPaging : workspacePaging;
+
+  useEffect(() => {
+    // Reset pagination when changing filters/tabs or re-entering the section.
+    setGptPage(0);
+  }, [activeSection, gptTab, gptQuery, gptAccessFilter]);
+
+  const canManageGpt = useCallback(
+    (gpt: Gpt) => {
+      if (workspaceCanManageServer || isAdmin) return true;
+      if (!currentUserId) return false;
+      return gpt.creatorId === currentUserId;
+    },
+    [currentUserId, isAdmin, workspaceCanManageServer]
+  );
+
+  const openGptAccessDialog = (gpt: Gpt) => {
+    setGptAccessTarget(gpt);
+    setGptAccessOption(gptAccessOptionForRow(gpt));
+  };
+
+  const openGptOwnerDialog = (gpt: Gpt) => {
+    setGptOwnerTarget(gpt);
+    setGptOwnerUserId(gpt.creatorId || (workspaceCanManageServer || isAdmin ? GPT_OWNER_UNASSIGNED_VALUE : ""));
+    if (members.length === 0 && !membersLoading) {
+      void loadMembers();
+    }
+  };
+
+  const saveGptAccess = async () => {
+    if (!gptAccessTarget) return;
+    if (!canManageGpt(gptAccessTarget)) {
+      toast({ title: "Sin permisos", description: "No puedes modificar este GPT.", variant: "destructive" });
+      return;
+    }
+
+    setGptAccessSaving(true);
+    try {
+      const updates =
+        gptAccessOption === "public"
+          ? { visibility: "public", isPublished: "true" }
+          : gptAccessOption === "link"
+            ? { visibility: "public", isPublished: "false" }
+            : gptAccessOption === "team"
+              ? { visibility: "team", isPublished: "false" }
+              : { visibility: "private", isPublished: "false" };
+
+      const res = await apiFetch(`/api/gpts/${encodeURIComponent(gptAccessTarget.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo actualizar el acceso");
+      }
+      setGpts((prev) => prev.map((g) => (g.id === data.id ? data : g)));
+      toast({ title: "Listo", description: "Acceso actualizado." });
+      setGptAccessTarget(null);
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo actualizar el acceso.",
+        variant: "destructive",
+      });
+    } finally {
+      setGptAccessSaving(false);
+    }
+  };
+
+  const saveGptOwner = async () => {
+    if (!gptOwnerTarget) return;
+    if (!gptOwnerUserId) {
+      toast({ title: "Falta propietario", description: "Selecciona un propietario.", variant: "destructive" });
+      return;
+    }
+    if (gptOwnerUserId === GPT_OWNER_UNASSIGNED_VALUE && !(workspaceCanManageServer || isAdmin)) {
+      toast({
+        title: "Sin permisos",
+        description: "Solo los administradores pueden dejar un GPT sin asignar.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!canManageGpt(gptOwnerTarget)) {
+      toast({ title: "Sin permisos", description: "No puedes modificar este GPT.", variant: "destructive" });
+      return;
+    }
+
+    setGptOwnerSaving(true);
+    try {
+      const nextCreatorId = gptOwnerUserId === GPT_OWNER_UNASSIGNED_VALUE ? null : gptOwnerUserId;
+      const res = await apiFetch(`/api/gpts/${encodeURIComponent(gptOwnerTarget.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ creatorId: nextCreatorId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudo actualizar el propietario");
+      }
+      toast({ title: "Listo", description: "Propietario actualizado." });
+      setGptOwnerTarget(null);
+      void loadMyGpts();
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.message || "No se pudo actualizar el propietario.",
+        variant: "destructive",
+      });
+    } finally {
+      setGptOwnerSaving(false);
+    }
+  };
+
   const renderContent = () => {
     switch (activeSection) {
-	      case "general":
-	        return (
-	          <div className="space-y-8">
+		      case "general":
+		        return (
+		          <div className="space-y-8">
 	            <div>
 	              <h1 className="text-2xl font-semibold">General</h1>
 	              <p className="text-sm text-muted-foreground mt-1">
@@ -582,100 +1221,271 @@ export default function WorkspaceSettingsPage() {
           </div>
         );
 
-      case "members":
-        return (
-          <div className="space-y-6">
-            <div>
-              <h1 className="text-2xl font-semibold">Miembros</h1>
-              <p className="text-sm text-muted-foreground">Empresa · 1 miembro</p>
-            </div>
+	      case "members":
+	        {
+	          const count = typeof memberCount === "number" ? memberCount : members.length;
+	          const countLabel =
+	            typeof count === "number" ? `${count} miembro${count === 1 ? "" : "s"}` : "— miembros";
 
-            <Tabs defaultValue="users" className="w-full">
-              <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0 gap-6">
-                <TabsTrigger 
-                  value="users" 
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
-                  data-testid="tab-users"
-                >
-                  Usuarios
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="pending-invites" 
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
-                  data-testid="tab-pending-invites"
-                >
-                  Invitaciones pendientes
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="pending-requests" 
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
-                  data-testid="tab-pending-requests"
-                >
-                  Solicitudes pendientes
-                </TabsTrigger>
-              </TabsList>
+	          return (
+	            <div className="space-y-6">
+	              <div className="flex items-start justify-between gap-4">
+	                <div>
+	                  <h1 className="text-2xl font-semibold">Miembros</h1>
+	                  <p className="text-sm text-muted-foreground">Empresa · {countLabel}</p>
+	                </div>
+	                <Button
+	                  variant="ghost"
+	                  size="icon"
+	                  onClick={handleMembersRefresh}
+	                  disabled={membersLoading || invitesLoading}
+	                  data-testid="button-members-refresh"
+	                  title="Recargar"
+	                >
+	                  <RefreshCcw className={cn("h-4 w-4", (membersLoading || invitesLoading) && "animate-spin")} />
+	                </Button>
+	              </div>
 
-              <TabsContent value="users" className="mt-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      placeholder="Filtrar por nombre" 
-                      className="pl-9 w-64"
-                      data-testid="input-filter-members"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" className="gap-2" data-testid="button-invite-member">
-                      <Plus className="h-4 w-4" />
-                      Invitar a un miembro
-                    </Button>
-                    <Button variant="ghost" size="icon" data-testid="button-members-more">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+	              <Tabs
+	                value={membersTab}
+	                onValueChange={(v) => setMembersTab(v as MembersTab)}
+	                className="w-full"
+	              >
+	                <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0 gap-6">
+	                  <TabsTrigger
+	                    value="users"
+	                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+	                    data-testid="tab-users"
+	                  >
+	                    <span className="inline-flex items-center gap-2">
+	                      <span>Usuarios</span>
+	                      {typeof count === "number" && <span className="text-xs text-muted-foreground">({count})</span>}
+	                    </span>
+	                  </TabsTrigger>
+	                  <TabsTrigger
+	                    value="pending-invites"
+	                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+	                    data-testid="tab-pending-invites"
+	                  >
+	                    <span className="inline-flex items-center gap-2">
+	                      <span>Invitaciones pendientes</span>
+	                      <span className="text-xs text-muted-foreground">({pendingInvites.length})</span>
+	                    </span>
+	                  </TabsTrigger>
+	                  <TabsTrigger
+	                    value="pending-requests"
+	                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+	                    data-testid="tab-pending-requests"
+	                  >
+	                    <span className="inline-flex items-center gap-2">
+	                      <span>Solicitudes pendientes</span>
+	                      <span className="text-xs text-muted-foreground">(0)</span>
+	                    </span>
+	                  </TabsTrigger>
+	                </TabsList>
 
-                <div className="border rounded-lg">
-                  <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
-                    <span>Nombre</span>
-                    <span>Tipo de cuenta</span>
-                    <span>Fecha agregada</span>
-                  </div>
-	                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
-	                    <div className="flex items-center gap-3">
-	                      <Avatar className="h-9 w-9">
-	                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">{userInitials}</AvatarFallback>
-	                      </Avatar>
-	                      <div>
-	                        <span className="text-sm font-medium block">{userDisplayName} (Tú)</span>
-	                        <span className="text-xs text-muted-foreground">{userEmail}</span>
-	                      </div>
+	                <TabsContent value="users" className="mt-6 space-y-4">
+	                  <div className="flex items-center justify-between gap-3">
+	                    <div className="relative flex-1 max-w-xs">
+	                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+	                      <Input
+	                        value={memberFilter}
+	                        onChange={(e) => setMemberFilter(e.target.value)}
+	                        placeholder="Filtrar por nombre"
+	                        className="pl-9 w-full"
+	                        data-testid="input-filter-members"
+	                      />
 	                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm">Propietario</span>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <span className="text-sm">28 ago 2025</span>
-                  </div>
-                </div>
-              </TabsContent>
+	                    <div className="flex items-center gap-2">
+		                      <Button
+		                        variant="outline"
+		                        className="gap-2"
+		                        onClick={() => {
+		                          if (!canManageWorkspace) {
+		                            toast({
+		                              title: "Contactar administrador",
+		                              description: "Solo el administrador puede invitar miembros. Envía una solicitud desde aquí.",
+		                            });
+		                            setBillingHelpAction("workspace_invite_member");
+		                            setBillingHelpOpen(true);
+		                            return;
+		                          }
+		                          setInviteOpen(true);
+		                        }}
+		                        data-testid="button-invite-member"
+		                      >
+	                        <Plus className="h-4 w-4" />
+	                        Invitar a un miembro
+	                      </Button>
 
-              <TabsContent value="pending-invites" className="mt-6">
-                <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
-              </TabsContent>
+	                      <DropdownMenu>
+	                        <DropdownMenuTrigger asChild>
+	                          <Button variant="ghost" size="icon" data-testid="button-members-more">
+	                            <MoreHorizontal className="h-4 w-4" />
+	                          </Button>
+	                        </DropdownMenuTrigger>
+	                        <DropdownMenuContent align="end">
+	                          <DropdownMenuItem onClick={handleMembersRefresh} data-testid="menu-members-refresh">
+	                            Recargar
+	                          </DropdownMenuItem>
+	                          <DropdownMenuItem onClick={() => void handleCopyMemberEmails()} data-testid="menu-members-copy-emails">
+	                            Copiar correos
+	                          </DropdownMenuItem>
+	                          <DropdownMenuItem
+	                            onClick={() => setMembersTab("pending-invites")}
+	                            data-testid="menu-members-pending-invites"
+	                          >
+	                            Ver invitaciones pendientes
+	                          </DropdownMenuItem>
+	                        </DropdownMenuContent>
+	                      </DropdownMenu>
+	                    </div>
+	                  </div>
 
-              <TabsContent value="pending-requests" className="mt-6">
-                <p className="text-sm text-muted-foreground">No hay solicitudes pendientes.</p>
-              </TabsContent>
-            </Tabs>
-          </div>
-        );
+	                  {membersError && (
+	                    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+	                      {membersError}
+	                    </div>
+	                  )}
 
-      case "permissions":
-        return (
-          <div className="space-y-6">
-            <div>
+	                  <div className="border rounded-lg overflow-hidden">
+	                    <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+	                      <span>Nombre</span>
+	                      <span>Tipo de cuenta</span>
+	                      <span>Fecha agregada</span>
+	                    </div>
+
+	                    {membersLoading ? (
+	                      <div className="px-4 py-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+	                        <Loader2 className="h-4 w-4 animate-spin" />
+	                        Cargando miembros...
+	                      </div>
+	                    ) : filteredMembers.length === 0 ? (
+	                      <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+	                        No hay miembros para mostrar.
+	                      </div>
+	                    ) : (
+	                      <div className="divide-y">
+	                        {filteredMembers.map((m) => {
+	                          const displayName = getMemberDisplayName(m);
+	                          const email = String(m.email || "").toLowerCase().trim();
+	                          const isSelf = !!email && !!userEmail && email === String(userEmail).toLowerCase().trim();
+
+	                          return (
+	                            <div
+	                              key={m.id}
+	                              className="grid grid-cols-3 gap-4 px-4 py-3 items-center hover:bg-muted/30"
+	                            >
+	                              <div className="flex items-center gap-3 min-w-0">
+	                                <Avatar className="h-9 w-9 flex-shrink-0">
+	                                  <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">
+	                                    {getMemberInitials(m)}
+	                                  </AvatarFallback>
+	                                </Avatar>
+	                                <div className="min-w-0">
+	                                  <span className="text-sm font-medium block truncate">
+	                                    {displayName}
+	                                    {isSelf ? " (Tú)" : ""}
+	                                  </span>
+	                                  <span className="text-xs text-muted-foreground block truncate">{m.email}</span>
+	                                </div>
+	                              </div>
+
+	                              <div className="space-y-0.5">
+	                                <span className="text-sm">{getMemberRoleLabel(m)}</span>
+	                                <span className="text-xs text-muted-foreground">Plan {planLabelWithPrice(m.plan)}</span>
+	                              </div>
+
+	                              <span className="text-sm text-muted-foreground">{formatMemberDate(m.addedAt)}</span>
+	                            </div>
+	                          );
+	                        })}
+	                      </div>
+	                    )}
+	                  </div>
+	                </TabsContent>
+
+	                <TabsContent value="pending-invites" className="mt-6 space-y-4">
+	                  {invitesError && (
+	                    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+	                      {invitesError}
+	                    </div>
+	                  )}
+
+	                  {!invitesError && (
+	                    <div className="border rounded-lg overflow-hidden">
+	                      <div className="grid grid-cols-5 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+	                        <span>Correo</span>
+	                        <span>Rol</span>
+	                        <span>Invitada</span>
+	                        <span>Último envío</span>
+	                        <span className="text-right">Acciones</span>
+	                      </div>
+
+	                      {invitesLoading ? (
+	                        <div className="px-4 py-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+	                          <Loader2 className="h-4 w-4 animate-spin" />
+	                          Cargando invitaciones...
+	                        </div>
+	                      ) : pendingInvites.length === 0 ? (
+	                        <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+	                          No hay invitaciones pendientes.
+	                        </div>
+	                      ) : (
+	                        <div className="divide-y">
+	                          {pendingInvites.map((inv) => {
+	                            const role = String(inv.role || "team_member").toLowerCase().trim();
+	                            const roleLabel = role === "team_admin" ? "Administrador" : "Miembro";
+
+	                            return (
+	                              <div
+	                                key={inv.id}
+	                                className="grid grid-cols-5 gap-4 px-4 py-3 items-center hover:bg-muted/30"
+	                              >
+	                                <span className="text-sm font-medium truncate">{inv.email}</span>
+	                                <span className="text-sm text-muted-foreground">{roleLabel}</span>
+	                                <span className="text-sm text-muted-foreground">{formatMemberDate(inv.createdAt)}</span>
+	                                <span className="text-sm text-muted-foreground">{formatMemberDate(inv.lastSentAt)}</span>
+	                                <div className="flex items-center justify-end gap-2">
+	                                  <Button
+	                                    variant="outline"
+	                                    size="sm"
+	                                    onClick={() => void handleResendInvite(inv.id)}
+	                                    data-testid={`button-invite-resend-${inv.id}`}
+	                                  >
+	                                    Reenviar
+	                                  </Button>
+	                                  <Button
+	                                    variant="ghost"
+	                                    size="icon"
+	                                    onClick={() => void handleRevokeInvite(inv.id)}
+	                                    data-testid={`button-invite-revoke-${inv.id}`}
+	                                    title="Revocar"
+	                                  >
+	                                    <Trash2 className="h-4 w-4" />
+	                                  </Button>
+	                                </div>
+	                              </div>
+	                            );
+	                          })}
+	                        </div>
+	                      )}
+	                    </div>
+	                  )}
+	                </TabsContent>
+
+	                <TabsContent value="pending-requests" className="mt-6">
+	                  <p className="text-sm text-muted-foreground">No hay solicitudes pendientes.</p>
+	                </TabsContent>
+	              </Tabs>
+	            </div>
+	          );
+	        }
+
+	      case "permissions":
+	        return (
+	          <div className="space-y-6">
+	            <div>
               <h1 className="text-2xl font-semibold">Permisos y roles</h1>
               <p className="text-sm text-muted-foreground">
                 Configura los permisos básicos para tu espacio de trabajo y personaliza el acceso con roles personalizados.
@@ -1298,15 +2108,6 @@ export default function WorkspaceSettingsPage() {
         );
 
       case "gpt":
-        const gptItems = [
-          { id: 1, name: "1.3 Discusiones de tesis. 2", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 508, created: "Jan 21", updated: "Dec 18", icon: "T20" },
-          { id: 2, name: "REALIDAD PROBLEMATICA LOCAL", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 400, created: "Jan 21", updated: "Dec 18", icon: "T20" },
-          { id: 3, name: "ANTECENTE DE TESIS", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 5779, created: "Jan 21", updated: "Dec 17", icon: "T20" },
-          { id: 4, name: "REALIDAD PROBLEMATICA GLOBAL", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 669, created: "Jan 21", updated: "Dec 17", icon: "T20" },
-          { id: 5, name: "BASES TEORICAS", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 821, created: "Jan 21", updated: "Dec 17", icon: "T20" },
-          { id: 6, name: "TSP CAPÍTULO III. - Problema actual.", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 73, created: "Feb 5", updated: "Dec 17", icon: "doc" },
-          { id: 7, name: "1.6. - Justificación", constructor: "Sin asignar", actions: "—", access: "Público", chats: 845, created: "Feb 20", updated: "Dec 17", icon: "doc" },
-        ];
         return (
           <div className="space-y-8">
             <h1 className="text-2xl font-semibold">GPT</h1>
@@ -1331,7 +2132,7 @@ export default function WorkspaceSettingsPage() {
             <div className="space-y-4">
               <h2 className="font-medium">GPT</h2>
               
-              <Tabs defaultValue="workspace" className="w-full">
+              <Tabs value={gptTab} onValueChange={(v) => setGptTab(v as "workspace" | "unassigned")} className="w-full">
                 <div className="flex items-center justify-between">
                   <TabsList className="bg-transparent border-b rounded-none h-auto p-0">
                     <TabsTrigger 
@@ -1339,25 +2140,117 @@ export default function WorkspaceSettingsPage() {
                       className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
                       data-testid="tab-gpt-workspace"
                     >
-                      Espacio de trabajo
+                      <span className="inline-flex items-center gap-2">
+                        <span>Espacio de trabajo</span>
+                        <span className="text-xs text-muted-foreground">({filteredWorkspaceGpts.length})</span>
+                      </span>
                     </TabsTrigger>
                     <TabsTrigger 
                       value="unassigned" 
                       className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
                       data-testid="tab-gpt-unassigned"
                     >
-                      Sin asignar
+                      <span className="inline-flex items-center gap-2">
+                        <span>Sin asignar</span>
+                        <span className="text-xs text-muted-foreground">({filteredUnassignedGpts.length})</span>
+                      </span>
                     </TabsTrigger>
                   </TabsList>
                   <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-filter">
-                      <Filter className="h-4 w-4" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => void loadMyGpts()}
+                      disabled={gptsLoading}
+                      data-testid="button-gpt-refresh"
+                      title="Actualizar"
+                    >
+                      <RefreshCcw className={cn("h-4 w-4", gptsLoading ? "animate-spin" : "")} />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-search">
-                      <Search className="h-4 w-4" />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-filter" title="Filtros">
+                          <Filter className={cn("h-4 w-4", gptAccessFilter !== "all" && "text-foreground")} />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 p-4" align="end" data-testid="popover-gpt-filter">
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <Label className="text-sm">Acceso</Label>
+                            <Select
+                              value={gptAccessFilter}
+                              onValueChange={(v) => {
+                                if (v === "all") return setGptAccessFilter("all");
+                                setGptAccessFilter(normalizeGptAccessOption(v));
+                              }}
+                            >
+                              <SelectTrigger className="w-full" data-testid="select-gpt-filter-access">
+                                <SelectValue placeholder="Todos" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">Todos</SelectItem>
+                                <SelectItem value="private">Privado</SelectItem>
+                                <SelectItem value="team">Espacio de trabajo</SelectItem>
+                                <SelectItem value="link">Enlace</SelectItem>
+                                <SelectItem value="public">Público</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="flex items-center justify-end">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setGptAccessFilter("all")}
+                              disabled={gptAccessFilter === "all"}
+                              data-testid="button-gpt-filter-clear"
+                            >
+                              Limpiar filtros
+                            </Button>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      data-testid="button-gpt-search"
+                      title="Buscar"
+                      onClick={() => {
+                        if (gptSearchOpen) setGptQuery("");
+                        setGptSearchOpen(!gptSearchOpen);
+                      }}
+                    >
+                      <Search className={cn("h-4 w-4", (gptSearchOpen || !!gptQuery.trim()) && "text-foreground")} />
                     </Button>
                   </div>
                 </div>
+
+                {gptSearchOpen && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="flex-1">
+                      <Input
+                        value={gptQuery}
+                        onChange={(e) => setGptQuery(e.target.value)}
+                        placeholder="Buscar por nombre, slug o descripción"
+                        data-testid="input-gpt-search"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setGptQuery("");
+                        setGptSearchOpen(false);
+                      }}
+                      data-testid="button-gpt-search-close"
+                    >
+                      Cerrar
+                    </Button>
+                  </div>
+                )}
 
                 <TabsContent value="workspace" className="mt-4">
                   <div className="border rounded-lg overflow-hidden">
@@ -1375,48 +2268,241 @@ export default function WorkspaceSettingsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {gptItems.map((item) => (
-                          <tr key={item.id} className="border-t hover:bg-muted/30">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className={cn(
-                                  "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold",
-                                  item.icon === "T20" ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"
-                                )}>
-                                  {item.icon === "T20" ? "T20" : "📄"}
-                                </div>
-                                <span className="font-medium text-primary hover:underline cursor-pointer">{item.name}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.constructor}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.actions}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.access}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.chats}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.created}</td>
-                            <td className="px-4 py-3 text-muted-foreground">{item.updated}</td>
-                            <td className="px-4 py-3">
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
+                        {gptsLoading ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Cargando...
+                              </span>
                             </td>
                           </tr>
-                        ))}
+                        ) : gptsError ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              {gptsError}
+                            </td>
+                          </tr>
+                        ) : filteredWorkspaceGpts.length === 0 ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              {gptQuery.trim() || gptAccessFilter !== "all"
+                                ? "No hay resultados en este momento."
+                                : canManageWorkspace
+                                  ? "Aún no se han creado GPTs en el espacio de trabajo."
+                                  : "Aún no has creado ningún GPT."}
+                            </td>
+                          </tr>
+                        ) : (
+                          workspacePaging.pagedRows.map((gpt) => (
+                            <tr key={gpt.id} className="border-t hover:bg-muted/30">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={cn(
+                                      "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold",
+                                      "bg-red-100 text-red-600"
+                                    )}
+                                  >
+                                    GPT
+                                  </div>
+                                  <span className="font-medium text-primary hover:underline cursor-pointer">
+                                    {gpt.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground">{gptConstructorLabel(gpt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">—</td>
+                              <td className="px-4 py-3 text-muted-foreground">{gptAccessLabel(gpt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{typeof gpt.usageCount === "number" ? gpt.usageCount : 0}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{formatGptDateShort(gpt.createdAt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{formatGptDateShort(gpt.updatedAt)}</td>
+                              <td className="px-4 py-3">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      data-testid={`button-gpt-row-actions-${gpt.id}`}
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      disabled={!canManageGpt(gpt)}
+                                      onSelect={() => openGptAccessDialog(gpt)}
+                                      data-testid={`menu-gpt-edit-access-${gpt.id}`}
+                                    >
+                                      Modificar acceso
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      disabled={!canManageGpt(gpt)}
+                                      onSelect={() => openGptOwnerDialog(gpt)}
+                                      data-testid={`menu-gpt-edit-owner-${gpt.id}`}
+                                    >
+                                      Modificar propietario
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="flex items-center justify-center gap-4 mt-4">
-                    <Button variant="ghost" size="sm" data-testid="button-gpt-prev">Anterior</Button>
-                    <span className="text-sm text-muted-foreground">Página 1</span>
-                    <Button variant="ghost" size="sm" className="font-medium" data-testid="button-gpt-next">Siguiente</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={gptsLoading || activePaging.clampedPage <= 0}
+                      onClick={() => setGptPage((p) => Math.max(0, p - 1))}
+                      data-testid="button-gpt-prev"
+                    >
+                      Anterior
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Página {activePaging.clampedPage + 1} de {activePaging.pageCount}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="font-medium"
+                      disabled={gptsLoading || activePaging.clampedPage >= activePaging.pageCount - 1}
+                      onClick={() => setGptPage((p) => Math.min(activePaging.pageCount - 1, p + 1))}
+                      data-testid="button-gpt-next"
+                    >
+                      Siguiente
+                    </Button>
                   </div>
                 </TabsContent>
 
                 <TabsContent value="unassigned" className="mt-4">
-                  <div className="border rounded-lg p-6">
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No hay GPTs sin asignar
-                    </p>
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr className="text-left text-muted-foreground">
+                          <th className="px-4 py-3 font-medium">Nombre</th>
+                          <th className="px-4 py-3 font-medium">Constructor</th>
+                          <th className="px-4 py-3 font-medium">Acciones personalizadas</th>
+                          <th className="px-4 py-3 font-medium">Quién tiene acceso</th>
+                          <th className="px-4 py-3 font-medium">Chats</th>
+                          <th className="px-4 py-3 font-medium">Creado</th>
+                          <th className="px-4 py-3 font-medium">Actualiz.</th>
+                          <th className="px-4 py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gptsLoading ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Cargando...
+                              </span>
+                            </td>
+                          </tr>
+                        ) : gptsError ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              {gptsError}
+                            </td>
+                          </tr>
+                        ) : filteredUnassignedGpts.length === 0 ? (
+                          <tr className="border-t">
+                            <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
+                              {gptQuery.trim() || gptAccessFilter !== "all"
+                                ? "No hay resultados en este momento."
+                                : "No hay GPTs sin asignar."}
+                            </td>
+                          </tr>
+                        ) : (
+                          unassignedPaging.pagedRows.map((gpt) => (
+                            <tr key={gpt.id} className="border-t hover:bg-muted/30">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={cn(
+                                      "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold",
+                                      "bg-red-100 text-red-600"
+                                    )}
+                                  >
+                                    GPT
+                                  </div>
+                                  <span className="font-medium text-primary hover:underline cursor-pointer">
+                                    {gpt.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground">{gptConstructorLabel(gpt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">—</td>
+                              <td className="px-4 py-3 text-muted-foreground">{gptAccessLabel(gpt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{typeof gpt.usageCount === "number" ? gpt.usageCount : 0}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{formatGptDateShort(gpt.createdAt)}</td>
+                              <td className="px-4 py-3 text-muted-foreground">{formatGptDateShort(gpt.updatedAt)}</td>
+                              <td className="px-4 py-3">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      data-testid={`button-gpt-row-actions-${gpt.id}`}
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      disabled={!canManageGpt(gpt)}
+                                      onSelect={() => openGptAccessDialog(gpt)}
+                                      data-testid={`menu-gpt-edit-access-${gpt.id}`}
+                                    >
+                                      Modificar acceso
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      disabled={!canManageGpt(gpt)}
+                                      onSelect={() => openGptOwnerDialog(gpt)}
+                                      data-testid={`menu-gpt-edit-owner-${gpt.id}`}
+                                    >
+                                      Modificar propietario
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-4 mt-4">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={gptsLoading || activePaging.clampedPage <= 0}
+                      onClick={() => setGptPage((p) => Math.max(0, p - 1))}
+                      data-testid="button-gpt-prev-unassigned"
+                    >
+                      Anterior
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Página {activePaging.clampedPage + 1} de {activePaging.pageCount}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="font-medium"
+                      disabled={gptsLoading || activePaging.clampedPage >= activePaging.pageCount - 1}
+                      onClick={() => setGptPage((p) => Math.min(activePaging.pageCount - 1, p + 1))}
+                      data-testid="button-gpt-next-unassigned"
+                    >
+                      Siguiente
+                    </Button>
                   </div>
                 </TabsContent>
               </Tabs>
@@ -1735,11 +2821,189 @@ export default function WorkspaceSettingsPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      <UpgradePlanDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
-      <CreditAlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
-      <BillingHelpDialog open={billingHelpOpen} onOpenChange={setBillingHelpOpen} action={billingHelpAction} />
+	  return (
+	    <div className="min-h-screen bg-background">
+	      <UpgradePlanDialog open={upgradeOpen} onOpenChange={setUpgradeOpen} />
+	      <CreditAlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
+	      <BillingHelpDialog open={billingHelpOpen} onOpenChange={setBillingHelpOpen} action={billingHelpAction} />
+	      <Dialog
+	        open={!!gptAccessTarget}
+	        onOpenChange={(open) => {
+	          if (!open) setGptAccessTarget(null);
+	        }}
+	      >
+	        <DialogContent className="sm:max-w-md" data-testid="dialog-gpt-access">
+	          <DialogHeader>
+	            <DialogTitle>Modificar acceso</DialogTitle>
+	            <DialogDescription>
+	              {gptAccessTarget ? `GPT: ${gptAccessTarget.name}` : "Configura quién puede acceder a este GPT."}
+	            </DialogDescription>
+	          </DialogHeader>
+	
+	          <div className="space-y-2">
+	            <Label className="text-sm">Quién tiene acceso</Label>
+	            <Select value={gptAccessOption} onValueChange={(v) => setGptAccessOption(normalizeGptAccessOption(v))}>
+	              <SelectTrigger className="w-full" data-testid="select-gpt-access-visibility">
+	                <SelectValue placeholder="Selecciona una opción" />
+	              </SelectTrigger>
+	              <SelectContent>
+	                <SelectItem value="private">Privado (solo tú)</SelectItem>
+	                <SelectItem value="team">Espacio de trabajo</SelectItem>
+	                <SelectItem value="link">Enlace</SelectItem>
+	                <SelectItem value="public">Público</SelectItem>
+	              </SelectContent>
+	            </Select>
+	            <p className="text-xs text-muted-foreground">
+	              Enlace: cualquiera con el enlace. Público: visible para cualquiera.
+	            </p>
+	          </div>
+	
+	          <DialogFooter>
+	            <Button variant="outline" onClick={() => setGptAccessTarget(null)} disabled={gptAccessSaving}>
+	              Cancelar
+	            </Button>
+	            <Button onClick={() => void saveGptAccess()} disabled={gptAccessSaving || !gptAccessTarget} data-testid="button-save-gpt-access">
+	              {gptAccessSaving ? (
+	                <span className="inline-flex items-center gap-2">
+	                  <Loader2 className="h-4 w-4 animate-spin" />
+	                  Guardando...
+	                </span>
+	              ) : (
+	                "Guardar"
+	              )}
+	            </Button>
+	          </DialogFooter>
+	        </DialogContent>
+	      </Dialog>
+	
+	      <Dialog
+	        open={!!gptOwnerTarget}
+	        onOpenChange={(open) => {
+	          if (!open) setGptOwnerTarget(null);
+	        }}
+	      >
+	        <DialogContent className="sm:max-w-md" data-testid="dialog-gpt-owner">
+	          <DialogHeader>
+	            <DialogTitle>Modificar propietario</DialogTitle>
+	            <DialogDescription>
+	              {gptOwnerTarget ? `GPT: ${gptOwnerTarget.name}` : "Transfiere el propietario de este GPT."}
+	            </DialogDescription>
+	          </DialogHeader>
+	
+	          <div className="space-y-2">
+	            <Label className="text-sm">Propietario</Label>
+	            {membersLoading ? (
+	              <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
+	                <Loader2 className="h-4 w-4 animate-spin" />
+	                Cargando miembros...
+	              </div>
+	            ) : members.length === 0 ? (
+	              <div className="space-y-2">
+	                <p className="text-sm text-muted-foreground">
+	                  No hay miembros cargados.
+	                </p>
+	                <Button variant="outline" size="sm" onClick={() => void loadMembers()} data-testid="button-reload-members">
+	                  Recargar miembros
+	                </Button>
+	              </div>
+	            ) : (
+	              <Select value={gptOwnerUserId} onValueChange={setGptOwnerUserId}>
+	                <SelectTrigger className="w-full" data-testid="select-gpt-owner">
+	                  <SelectValue placeholder="Selecciona un miembro" />
+	                </SelectTrigger>
+	                <SelectContent>
+                    {(workspaceCanManageServer || isAdmin) && (
+                      <SelectItem value={GPT_OWNER_UNASSIGNED_VALUE}>Sin asignar</SelectItem>
+                    )}
+	                  {members.map((m) => (
+	                    <SelectItem key={m.id} value={m.id}>
+	                      {getMemberDisplayName(m)} {m.email ? `(${m.email})` : ""}
+	                    </SelectItem>
+	                  ))}
+	                </SelectContent>
+	              </Select>
+	            )}
+	            {membersError && (
+	              <p className="text-xs text-destructive">
+	                {membersError}
+	              </p>
+	            )}
+	          </div>
+	
+	          <DialogFooter>
+	            <Button variant="outline" onClick={() => setGptOwnerTarget(null)} disabled={gptOwnerSaving}>
+	              Cancelar
+	            </Button>
+	            <Button onClick={() => void saveGptOwner()} disabled={gptOwnerSaving || !gptOwnerTarget} data-testid="button-save-gpt-owner">
+	              {gptOwnerSaving ? (
+	                <span className="inline-flex items-center gap-2">
+	                  <Loader2 className="h-4 w-4 animate-spin" />
+	                  Guardando...
+	                </span>
+	              ) : (
+	                "Guardar"
+	              )}
+	            </Button>
+	          </DialogFooter>
+	        </DialogContent>
+	      </Dialog>
+	      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+	        <DialogContent className="sm:max-w-lg">
+	          <DialogHeader>
+	            <DialogTitle>Invitar a un miembro</DialogTitle>
+            <DialogDescription>
+              Agrega correos de tu equipo. La invitación aparecerá en “Invitaciones pendientes”. Al aceptar la invitación, si el usuario no tiene un plan superior,
+              se le asignará Business ($25).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm">Correos</Label>
+              <Textarea
+                value={inviteEmailsRaw}
+                onChange={(e) => setInviteEmailsRaw(e.target.value)}
+                placeholder={"ana@empresa.com\nbob@empresa.com"}
+                className="min-h-[120px]"
+                disabled={inviteSubmitting}
+                data-testid="textarea-invite-emails"
+              />
+              <p className="text-xs text-muted-foreground">
+                Puedes pegar varios correos separados por comas, espacios o una línea por correo.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm">Rol</Label>
+              <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as "team_member" | "team_admin")}>
+                <SelectTrigger className="w-full" data-testid="select-invite-role">
+                  <SelectValue placeholder="Selecciona un rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="team_member">Miembro</SelectItem>
+                  <SelectItem value="team_admin">Administrador</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInviteOpen(false)} disabled={inviteSubmitting}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void handleInviteSubmit()} disabled={inviteSubmitting} data-testid="button-send-invites">
+              {inviteSubmitting ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enviando...
+                </span>
+              ) : (
+                "Enviar invitación"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {showDeactivationBanner && (
         <div className="flex justify-end px-6 py-3">
           <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
@@ -1778,14 +3042,14 @@ export default function WorkspaceSettingsPage() {
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
               <IliaGPTLogo size={24} />
             </div>
-            <span className="text-sm font-medium truncate">Espacio de trabajo de Jor...</span>
+            <span className="text-sm font-medium truncate">{workspaceName || "Espacio de trabajo"}</span>
           </div>
 
           <nav className="space-y-1">
             {menuItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => navigateToSection(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors",
                   activeSection === item.id 
