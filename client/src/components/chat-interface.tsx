@@ -1403,6 +1403,15 @@ export function ChatInterface({
     setAiProcessSteps,
   });
 
+  // Request a refresh of the AI-generated title after streaming completes.
+  // The server generates the title asynchronously, so we delay the fetch.
+  const requestTitleRefresh = useCallback((targetChatId: string | null | undefined) => {
+    if (!targetChatId || targetChatId.startsWith("pending-")) return;
+    window.dispatchEvent(new CustomEvent("refresh-chat-title", {
+      detail: { chatId: targetChatId, delay: 2500 }
+    }));
+  }, []);
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -2759,7 +2768,7 @@ export function ChatInterface({
         window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
       }
 
-      await streamChat.stream("/api/chat/stream", {
+      const emergencyResult = await streamChat.stream("/api/chat/stream", {
         chatId: effectiveChatIdForStream,
         body: {
           messages: [{ role: "user", content: cleanInput }],
@@ -2774,6 +2783,7 @@ export function ChatInterface({
           timestamp: new Date(),
         }),
       });
+      if (emergencyResult.ok) requestTitleRefresh(effectiveChatIdForStream);
       return;
     }
     
@@ -2867,7 +2877,7 @@ export function ChatInterface({
         window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
       }
 
-      await streamChat.stream("/api/chat/stream", {
+      const streamResult = await streamChat.stream("/api/chat/stream", {
         chatId: effectiveChatIdForStream,
         body: {
           messages: [{ role: "user", content: cleanInput }],
@@ -2891,6 +2901,7 @@ export function ChatInterface({
           timestamp: new Date(),
         }),
       });
+      if (streamResult.ok) requestTitleRefresh(effectiveChatIdForStream);
       return;
     }
 
@@ -3337,6 +3348,9 @@ export function ChatInterface({
                       artifact: data.artifact,
                       webSources: data.webSources,
                     });
+
+                    // Request AI-generated title refresh after streaming completes
+                    requestTitleRefresh(chatId);
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
                   }
@@ -3680,6 +3694,9 @@ export function ChatInterface({
 
           completeRun(superAgentMessageId, finalResult);
           setActiveRunId(null);
+
+          // Request AI-generated title refresh after Super Agent completes
+          requestTitleRefresh(chatId);
         }
 
       } catch (error) {
@@ -4711,6 +4728,9 @@ IMPORTANTE:
 
             agent.complete();
             abortControllerRef.current = null;
+
+            // Request AI-generated title refresh after streaming completes
+            requestTitleRefresh(effectiveStreamChatId);
 
           } else {
             // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
