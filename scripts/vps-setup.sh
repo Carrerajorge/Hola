@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # ILIAGPT - VPS Initial Setup Script
 # Run this ONCE on a fresh Ubuntu 22.04+ VPS
-# Usage: ssh root@69.62.98.126 'bash -s' < scripts/vps-setup.sh
+# Usage: ssh -i ~/.ssh/iliagpt_deploy root@100.93.79.71 'bash -s' < scripts/vps-setup.sh
 # ═══════════════════════════════════════════════════════════════
 
 set -euo pipefail

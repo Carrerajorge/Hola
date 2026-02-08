@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 REPO="Carrerajorge/Hola"
-VPS_IP="69.62.98.126"
+VPS_IP="100.93.79.71"
 
 echo "═══════════════════════════════════════════"
 echo "  ILIAGPT - GitHub Secrets Setup"

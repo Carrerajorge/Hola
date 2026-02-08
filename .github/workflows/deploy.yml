@@ -19,8 +19,9 @@ permissions:
   contents: read
 
 env:
-  VPS_HOST: 69.62.98.126
+  VPS_HOST: 100.93.79.71
   VPS_USER: root
+  VPS_PORT: "22"
   DEPLOY_PATH: /opt/hola
   COMPOSE_PROJECT: iliagpt
 
@@ -51,11 +52,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
