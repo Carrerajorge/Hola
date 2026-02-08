@@ -3095,7 +3095,7 @@ export function ChatInterface({
     // which triggers production mode directly on the backend
     const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
 
-    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected) {
+    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasFiles) {
       console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
 
       // Set thinking state
@@ -3367,8 +3367,9 @@ export function ChatInterface({
 
 
     // Check if this is a Super Agent research request with sources
+    // Skip when files are attached - super agent doesn't process file attachments
     const superAgentCheck = shouldUseSuperAgent(input);
-    if (superAgentCheck.use) {
+    if (superAgentCheck.use && !hasFiles) {
       console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
 
       const userInput = input;
@@ -4261,6 +4262,7 @@ export function ChatInterface({
         // This block was previously inside `if (shouldGenerateImage)`, which caused
         // document and image uploads to be silently skipped when shouldGenerateImage was false.
         // -----------------------------------------------------------------------
+          console.log(`[handleSubmit] File handling: ${currentUploadedFiles.length} files, shouldGenerateImage=${shouldGenerateImage}`);
           const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
@@ -4476,12 +4478,12 @@ IMPORTANTE:
               const analysisMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+                content: analyzeResult?.answer_text || "No se pudo analizar el documento.",
                 timestamp: new Date(),
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
-                ui_components: analyzeResult.ui_components || [],
-                documentAnalysis: analyzeResult.documentModel ? {
+                ui_components: analyzeResult?.ui_components || [],
+                documentAnalysis: analyzeResult?.documentModel ? {
                   documentModel: analyzeResult.documentModel,
                   insights: analyzeResult.insights || [],
                   suggestedQuestions: analyzeResult.suggestedQuestions || [],
@@ -5103,7 +5105,21 @@ IMPORTANTE:
         //   abortControllerRef.current = null;
         // }
       } catch (error: any) {
-        console.error("[handleSubmit] Error:", error);
+        if (error?.name === "AbortError") {
+          console.log("[handleSubmit] Request was aborted by user");
+        } else {
+          console.error("[handleSubmit] Error:", error);
+          // Show error message to user so they know the request failed
+          const errorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: `Lo siento, hubo un error al procesar tu mensaje: ${error?.message || "Error desconocido"}. Por favor intenta de nuevo.`,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          onSendMessage(errorMsg);
+        }
         setAiState("idle");
         setAiProcessSteps([]);
         abortControllerRef.current = null;
