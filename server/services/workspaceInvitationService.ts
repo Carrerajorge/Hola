@@ -65,7 +65,6 @@ export async function autoAcceptWorkspaceInvitationForUser(userId: string): Prom
   const isPendingUser = String((user as any).status || "") === "pending";
   const safeToAssignOrg = isPendingUser || !((user as any).orgId) || (user as any).orgId === "default";
   const safeToAssignRole = isPendingUser || normalizeRoleKey((user as any).role) === "user";
-  const joinedTargetOrg = safeToAssignOrg || String((user as any).orgId || "") === targetOrgId;
 
   const patch: any = { updatedAt: new Date() };
   if (safeToAssignOrg || (user as any).orgId === targetOrgId) {
@@ -79,16 +78,6 @@ export async function autoAcceptWorkspaceInvitationForUser(userId: string): Prom
 
   if (Object.keys(patch).length > 1) {
     await db.update(users).set(patch).where(eq(users.id, userId));
-  }
-
-  // Grant invited accounts the Business ($25) plan unless they already have a higher plan.
-  try {
-    const currentPlan = String((user as any).plan || "free").toLowerCase().trim();
-    if (joinedTargetOrg && ["free", "go", "plus"].includes(currentPlan)) {
-      await db.update(users).set({ plan: "business", updatedAt: new Date() }).where(eq(users.id, userId));
-    }
-  } catch (planErr) {
-    console.warn("[WorkspaceInvite] Failed to apply Business plan to invited user:", planErr);
   }
 
   const now = new Date();
