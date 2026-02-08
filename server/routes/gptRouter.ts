@@ -2,13 +2,73 @@ import { Router, Request } from "express";
 import { storage } from "../storage";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
+const PRIVILEGED_ROLES = new Set(["team_admin", "admin", "superadmin"]);
+
+async function isPrivilegedActor(req: Request): Promise<boolean> {
+  // 1) Try fast-path role from session/auth object.
+  const session = (req as any).session as any;
+  const roleRaw =
+    (req as any).user?.role ||
+    (req as any).user?.claims?.role ||
+    session?.passport?.user?.role ||
+    session?.passport?.user?.claims?.role ||
+    null;
+  const role = String(roleRaw || "").toLowerCase().trim();
+  if (role && PRIVILEGED_ROLES.has(role)) return true;
+
+  const adminEmail = String(process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+  const emailRaw =
+    (req as any).user?.claims?.email ||
+    (req as any).user?.email ||
+    session?.passport?.user?.claims?.email ||
+    session?.passport?.user?.email ||
+    null;
+  const email = String(emailRaw || "").toLowerCase().trim();
+  if (adminEmail && email && email === adminEmail) return true;
+
+  // 2) Fallback to DB user role/email.
+  const authUserId =
+    (req as any).user?.claims?.sub ||
+    (req as any).user?.id ||
+    session?.authUserId ||
+    session?.passport?.user?.claims?.sub ||
+    session?.passport?.user?.id ||
+    null;
+
+  try {
+    if (authUserId) {
+      const dbUser = await storage.getUser(String(authUserId));
+      const dbRole = String((dbUser as any)?.role || "").toLowerCase().trim();
+      if (dbRole && PRIVILEGED_ROLES.has(dbRole)) return true;
+      const dbEmail = String((dbUser as any)?.email || "").toLowerCase().trim();
+      if (adminEmail && dbEmail && dbEmail === adminEmail) return true;
+    } else if (email) {
+      const dbUser = await storage.getUserByEmail(email);
+      const dbRole = String((dbUser as any)?.role || "").toLowerCase().trim();
+      if (dbRole && PRIVILEGED_ROLES.has(dbRole)) return true;
+      const dbEmail = String((dbUser as any)?.email || "").toLowerCase().trim();
+      if (adminEmail && dbEmail && dbEmail === adminEmail) return true;
+    }
+  } catch {
+    // Ignore and treat as non-privileged.
+  }
+
+  return false;
+}
+
 async function canEditGpt(req: Request, gptId: string): Promise<{ allowed: boolean; gpt: any | null; error?: string }> {
   const gpt = await storage.getGpt(gptId);
   if (!gpt) {
     return { allowed: false, gpt: null, error: "GPT not found" };
   }
+  if (await isPrivilegedActor(req)) {
+    return { allowed: true, gpt };
+  }
   const currentUserId = getOrCreateSecureUserId(req);
-  if (gpt.creatorId && gpt.creatorId !== currentUserId) {
+  if (!gpt.creatorId) {
+    return { allowed: false, gpt, error: "Solo los administradores pueden modificar este GPT" };
+  }
+  if (gpt.creatorId !== currentUserId) {
     return { allowed: false, gpt, error: "Solo el creador puede modificar este GPT" };
   }
   return { allowed: true, gpt };
@@ -117,10 +177,8 @@ export function createGptRouter() {
         welcomeMessage, capabilities, conversationStarters, isPublished
       } = req.body;
 
-      // Get authenticated user ID
-      const session = req.session as any;
-      const userId = (req as any).user?.claims?.sub || (req as any).user?.id || session?.authUserId;
-      const creatorId = userId || null;
+      // Bind to authenticated id when available, otherwise a session-bound anon id.
+      const creatorId = getOrCreateSecureUserId(req);
 
       if (!name || !slug || !systemPrompt) {
         return res.status(400).json({ error: "name, slug, and systemPrompt are required" });
