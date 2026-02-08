@@ -23,21 +23,21 @@ let rateLimiterAi: RateLimiterRedis | RateLimiterMemory;
       rateLimiterGlobal = new RateLimiterRedis({
         storeClient: redisClient,
         keyPrefix: "middleware_global",
-        points: 100, // 100 peticiones
+        points: 200, // 200 peticiones
         duration: 60, // por 60 segundos por IP
       });
 
       rateLimiterAuth = new RateLimiterRedis({
         storeClient: redisClient,
         keyPrefix: "middleware_auth",
-        points: 5, // 5 intentos
+        points: 10, // 10 intentos
         duration: 60 * 15, // por 15 minutos (bloqueo fuerza bruta)
       });
-      
+
       rateLimiterAi = new RateLimiterRedis({
         storeClient: redisClient,
         keyPrefix: "middleware_ai",
-        points: 20, // 20 peticiones de IA
+        points: 60, // 60 peticiones de IA
         duration: 60, // por minuto
       });
     } else {
@@ -47,15 +47,15 @@ let rateLimiterAi: RateLimiterRedis | RateLimiterMemory;
     console.warn("[RateLimiter] Redis connection failed, falling back to Memory:", err);
     // Fallback a memoria si Redis falla o no está
     rateLimiterGlobal = new RateLimiterMemory({
-      points: 100,
+      points: 200,
       duration: 60,
     });
     rateLimiterAuth = new RateLimiterMemory({
-      points: 5,
+      points: 10,
       duration: 60 * 15,
     });
     rateLimiterAi = new RateLimiterMemory({
-      points: 20,
+      points: 60,
       duration: 60,
     });
   }

@@ -22,10 +22,10 @@ interface RetryOptions {
 }
 
 const defaultOptions: Required<Omit<RetryOptions, 'onRetry' | 'retryCondition'>> = {
-    maxAttempts: 3,
-    initialDelayMs: 1000,
-    maxDelayMs: 30000,
-    backoffMultiplier: 2,
+    maxAttempts: 2,
+    initialDelayMs: 250,
+    maxDelayMs: 5000,
+    backoffMultiplier: 1.5,
     jitter: true,
 };
 
@@ -158,8 +158,8 @@ export async function fetchWithRetry(
 
         return response;
     }, {
-        maxAttempts: 3,
-        initialDelayMs: 1000,
+        maxAttempts: 2,
+        initialDelayMs: 250,
         ...options,
     });
 }
@@ -195,9 +195,9 @@ export async function withCircuitBreaker<T>(
     }
 
     const breaker = new opossum.default(fn, {
-        timeout: options.timeout || 10000,
+        timeout: options.timeout || 8000,
         errorThresholdPercentage: options.errorThreshold || 50,
-        resetTimeout: options.resetTimeout || 30000,
+        resetTimeout: options.resetTimeout || 15000,
     });
 
     breaker.on('open', () => {
