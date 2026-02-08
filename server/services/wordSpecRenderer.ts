@@ -16,6 +16,11 @@ import {
   ExternalHyperlink,
   Math as DocxMath,
   MathRun,
+  Header,
+  Footer,
+  PageNumber,
+  VerticalAlign,
+  ShadingType,
 } from "docx";
 import { DocSpec, DocBlock, TitleBlock, TocBlock, NumberedBlock } from "../../shared/documentSpecs";
 import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
@@ -200,8 +205,10 @@ async function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fo
     rows.push(new TableRow({ children: headerCells }));
   }
 
-  for (const row of block.rows) {
+  for (let rowIdx = 0; rowIdx < block.rows.length; rowIdx++) {
+    const row = block.rows[rowIdx];
     const dataCells: TableCell[] = [];
+    const isEvenRow = rowIdx % 2 === 0;
     for (const cell of row) {
       dataCells.push(
         new TableCell({
@@ -210,11 +217,13 @@ async function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fo
               children: await tokensToChildren(String(cell ?? ""), fontConfig) as any,
             }),
           ],
+          shading: isEvenRow ? { fill: "F9FAFB", type: ShadingType.CLEAR, color: "auto" } : undefined,
+          verticalAlign: VerticalAlign.CENTER,
           borders: {
-            top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            top: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
+            bottom: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
+            left: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
+            right: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
           },
         })
       );
@@ -276,6 +285,43 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
     bodyElements.push(...await processBlock(block, fontConfig));
   }
 
+  // Build header with document title
+  const headerChildren: Paragraph[] = [
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: spec.title || "",
+          font: fontConfig.font,
+          size: 16,
+          color: "999999",
+          italics: true,
+        }),
+      ],
+      alignment: AlignmentType.RIGHT,
+    }),
+  ];
+
+  // Build footer with page numbers
+  const footerChildren: Paragraph[] = [
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: spec.author ? `${spec.author}  |  ` : "",
+          font: fontConfig.font,
+          size: 16,
+          color: "999999",
+        }),
+        new TextRun({
+          children: ["Page ", PageNumber.CURRENT, " of ", PageNumber.TOTAL_PAGES],
+          font: fontConfig.font,
+          size: 16,
+          color: "999999",
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+    }),
+  ];
+
   const doc = new Document({
     title: spec.title,
     creator: spec.author ?? undefined,
@@ -292,6 +338,28 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
               style: {
                 paragraph: {
                   indent: { left: 720, hanging: 360 },
+                },
+              },
+            },
+            {
+              level: 1,
+              format: "lowerLetter",
+              text: "%2)",
+              alignment: "start",
+              style: {
+                paragraph: {
+                  indent: { left: 1440, hanging: 360 },
+                },
+              },
+            },
+            {
+              level: 2,
+              format: "lowerRoman",
+              text: "%3.",
+              alignment: "start",
+              style: {
+                paragraph: {
+                  indent: { left: 2160, hanging: 360 },
                 },
               },
             },
@@ -317,6 +385,17 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
           run: { font: fontConfig.font, size: 56, bold: true },
           paragraph: { spacing: { after: 400 }, alignment: AlignmentType.CENTER },
         },
+        {
+          id: "Quote",
+          name: "Quote",
+          basedOn: "Normal",
+          next: "Normal",
+          run: { font: fontConfig.font, size: fontConfig.size, italics: true, color: "666666" },
+          paragraph: {
+            spacing: { before: 200, after: 200 },
+            indent: { left: 720 },
+          },
+        },
       ],
     },
     sections: [
@@ -330,6 +409,12 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
               left: convertInchesToTwip(1),
             },
           },
+        },
+        headers: {
+          default: new Header({ children: headerChildren }),
+        },
+        footers: {
+          default: new Footer({ children: footerChildren }),
         },
         children: bodyElements,
       },

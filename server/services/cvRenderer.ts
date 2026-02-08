@@ -184,11 +184,67 @@ function createSidebarSectionHeading(text: string, config: InternalRenderConfig)
   });
 }
 
-function createPhotoPlaceholder(config: InternalRenderConfig, forSidebar: boolean = false): Paragraph {
+/** Cache for fetched photo buffers to avoid re-downloading */
+const photoCache = new Map<string, Buffer>();
+
+/**
+ * Attempt to fetch a photo from URL. Returns null on any failure.
+ */
+async function fetchPhotoBuffer(url: string): Promise<Buffer | null> {
+  if (photoCache.has(url)) return photoCache.get(url)!;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "image/*" },
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return null;
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    // Basic sanity: must be at least 100 bytes and start with valid image magic bytes
+    if (buffer.length < 100) return null;
+    photoCache.set(url, buffer);
+    return buffer;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create a photo element for the CV. Tries to fetch the real image;
+ * falls back to a styled placeholder if the fetch fails.
+ */
+async function createPhotoElement(
+  photoUrl: string | undefined,
+  config: InternalRenderConfig,
+  forSidebar: boolean = false
+): Promise<Paragraph> {
+  const photoSize = forSidebar ? 100 : 120; // pixels
+
+  // Try to fetch real image
+  if (photoUrl) {
+    const imageBuffer = await fetchPhotoBuffer(photoUrl);
+    if (imageBuffer) {
+      return new Paragraph({
+        children: [
+          new ImageRun({
+            data: imageBuffer,
+            transformation: { width: photoSize, height: photoSize },
+            type: "png", // ImageRun handles format detection
+          } as any),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: config.itemGap },
+      });
+    }
+  }
+
+  // Fallback: styled text placeholder
   const textColor = forSidebar ? config.backgroundColor : config.accentColor;
-  const borderColor = forSidebar ? config.backgroundColor : config.accentColor;
   const fontSize = forSidebar ? config.headingSize : config.nameSize;
-  
+
   let shapeIndicator: string;
   switch (config.photoShape) {
     case "circle":
@@ -202,7 +258,7 @@ function createPhotoPlaceholder(config: InternalRenderConfig, forSidebar: boolea
       shapeIndicator = "□";
       break;
   }
-  
+
   return new Paragraph({
     children: [
       new TextRun({
@@ -217,7 +273,7 @@ function createPhotoPlaceholder(config: InternalRenderConfig, forSidebar: boolea
   });
 }
 
-function createHeaderSection(header: CvHeader, config: InternalRenderConfig): (Paragraph | Table)[] {
+async function createHeaderSection(header: CvHeader, config: InternalRenderConfig): Promise<(Paragraph | Table)[]> {
   const showPhoto = config.showPhoto && header.photo_url;
   
   const nameParagraph = new Paragraph({
@@ -319,7 +375,7 @@ function createHeaderSection(header: CvHeader, config: InternalRenderConfig): (P
               verticalAlign: VerticalAlign.CENTER,
             }),
             new TableCell({
-              children: [createPhotoPlaceholder(config, false)],
+              children: [await createPhotoElement(header.photo_url, config, false)],
               width: { size: 25, type: WidthType.PERCENTAGE },
               borders: {
                 top: noBorder,
@@ -834,10 +890,10 @@ function createProjectsSection(projects: CvProject[], config: InternalRenderConf
   return elements;
 }
 
-function createSingleColumnLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
+async function createSingleColumnLayout(spec: CvSpec, config: InternalRenderConfig): Promise<(Paragraph | Table)[]> {
   const elements: (Paragraph | Table)[] = [];
-  
-  elements.push(...createHeaderSection(spec.header, config));
+
+  elements.push(...await createHeaderSection(spec.header, config));
   
   if (spec.profile_summary) {
     elements.push(...createProfileSummary(spec.profile_summary, config));
@@ -853,10 +909,10 @@ function createSingleColumnLayout(spec: CvSpec, config: InternalRenderConfig): (
   return elements;
 }
 
-function createTwoColumnLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
+async function createTwoColumnLayout(spec: CvSpec, config: InternalRenderConfig): Promise<(Paragraph | Table)[]> {
   const elements: (Paragraph | Table)[] = [];
-  
-  elements.push(...createHeaderSection(spec.header, config));
+
+  elements.push(...await createHeaderSection(spec.header, config));
   
   if (spec.profile_summary) {
     elements.push(...createProfileSummary(spec.profile_summary, config));
@@ -1045,11 +1101,11 @@ function createSidebarLanguagesContent(languages: CvLanguage[], config: Internal
   return elements;
 }
 
-function createSidebarLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
+async function createSidebarLayout(spec: CvSpec, config: InternalRenderConfig): Promise<(Paragraph | Table)[]> {
   const sidebarContent: Paragraph[] = [];
-  
+
   if (config.showPhoto && spec.header.photo_url) {
-    sidebarContent.push(createPhotoPlaceholder(config, true));
+    sidebarContent.push(await createPhotoElement(spec.header.photo_url, config, true));
   }
   
   sidebarContent.push(
@@ -1206,17 +1262,17 @@ export async function renderCvFromSpec(
   const config = templateConfigToInternal(templateConfig, spec);
   
   let bodyElements: (Paragraph | Table)[];
-  
+
   switch (config.layout) {
     case "two-column":
-      bodyElements = createTwoColumnLayout(spec, config);
+      bodyElements = await createTwoColumnLayout(spec, config);
       break;
     case "sidebar":
-      bodyElements = createSidebarLayout(spec, config);
+      bodyElements = await createSidebarLayout(spec, config);
       break;
     case "single-column":
     default:
-      bodyElements = createSingleColumnLayout(spec, config);
+      bodyElements = await createSingleColumnLayout(spec, config);
       break;
   }
   

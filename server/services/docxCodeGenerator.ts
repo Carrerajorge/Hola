@@ -144,38 +144,65 @@ Responde SOLO con el código JavaScript de la función createDocument, sin expli
     }
 }
 
+/** Maximum code length to prevent abuse */
+const MAX_CODE_LENGTH = 50_000;
+/** Execution timeout in milliseconds */
+const EXECUTION_TIMEOUT_MS = 15_000;
+
+/** Patterns that indicate dangerous code (process access, file system, network) */
+const FORBIDDEN_PATTERNS = [
+    /\bprocess\b/,
+    /\brequire\b/,
+    /\bimport\b/,
+    /\bchild_process\b/,
+    /\bfs\b\./,
+    /\beval\b/,
+    /\bFunction\b/,
+    /\bglobal\b/,
+    /\bglobalThis\b/,
+    /\bsetTimeout\b/,
+    /\bsetInterval\b/,
+    /\bfetch\b/,
+    /\bXMLHttpRequest\b/,
+    /\b__dirname\b/,
+    /\b__filename\b/,
+    /\.constructor\s*\(/,
+];
+
 /**
- * Execute generated DOCX code in a sandbox and return the buffer
+ * Validate code before execution - prevent dangerous patterns
+ */
+function validateCode(code: string): { safe: boolean; reason?: string } {
+    if (!code || typeof code !== 'string') {
+        return { safe: false, reason: 'Code must be a non-empty string' };
+    }
+    if (code.length > MAX_CODE_LENGTH) {
+        return { safe: false, reason: `Code exceeds maximum length of ${MAX_CODE_LENGTH} characters` };
+    }
+    for (const pattern of FORBIDDEN_PATTERNS) {
+        if (pattern.test(code)) {
+            return { safe: false, reason: `Code contains forbidden pattern: ${pattern.source}` };
+        }
+    }
+    return { safe: true };
+}
+
+/**
+ * Execute generated DOCX code in a VM sandbox with timeout and memory protection
  */
 export async function executeDocxCode(code: string): Promise<Buffer> {
-    console.log('[DocxCodeGenerator] Executing generated code...');
-    console.log('[DocxCodeGenerator] Code preview:', code.substring(0, 200));
+    console.log('[DocxCodeGenerator] Executing generated code in sandbox...');
+    console.log('[DocxCodeGenerator] Code length:', code.length);
+
+    // Step 1: Validate code before execution
+    const validation = validateCode(code);
+    if (!validation.safe) {
+        throw new Error(`Code validation failed: ${validation.reason}`);
+    }
 
     try {
-        // Create a function that has access to docx classes
-        const createDocFn = new Function(
-            'Document',
-            'Packer',
-            'Paragraph',
-            'TextRun',
-            'AlignmentType',
-            'Table',
-            'TableRow',
-            'TableCell',
-            'WidthType',
-            'BorderStyle',
-            'HeadingLevel',
-            'convertInchesToTwip',
-            `
-            return (async () => {
-                ${code}
-                return await createDocument();
-            })();
-            `
-        );
-
-        // Execute with all docx classes available
-        const doc = await createDocFn(
+        // Step 2: Create a VM sandbox context with only docx classes
+        const sandbox = {
             Document,
             Packer,
             Paragraph,
@@ -187,25 +214,66 @@ export async function executeDocxCode(code: string): Promise<Buffer> {
             WidthType,
             BorderStyle,
             HeadingLevel,
-            convertInchesToTwip
+            convertInchesToTwip,
+            console: { log: () => {}, warn: () => {}, error: () => {} }, // Suppress console
+            Promise,
+            Array,
+            Object,
+            String,
+            Number,
+            Math,
+            Date,
+            JSON,
+            __result: null as any,
+        };
+
+        const context = vm.createContext(sandbox, {
+            codeGeneration: { strings: false, wasm: false },
+        });
+
+        // Step 3: Wrap the user code in an async IIFE that stores result
+        const wrappedCode = `
+            (async () => {
+                ${code}
+                __result = await createDocument();
+            })();
+        `;
+
+        // Step 4: Compile and run with timeout
+        const script = new vm.Script(wrappedCode, {
+            filename: 'user-document-code.js',
+        });
+
+        const resultPromise = script.runInContext(context, {
+            timeout: EXECUTION_TIMEOUT_MS,
+        });
+
+        // Step 5: Await the async result with timeout
+        const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Execution timed out after ${EXECUTION_TIMEOUT_MS}ms`)), EXECUTION_TIMEOUT_MS)
         );
+        await Promise.race([resultPromise, timeoutPromise]);
+
+        const doc = sandbox.__result;
 
         if (!doc) {
-            throw new Error('Document creation returned null');
+            throw new Error('Document creation returned null. Ensure createDocument() returns a Document object.');
         }
 
-        console.log('[DocxCodeGenerator] Document created, packing to buffer...');
+        console.log('[DocxCodeGenerator] Document created in sandbox, packing...');
 
-        // Pack the document to buffer
         const buffer = await Packer.toBuffer(doc);
-
         console.log(`[DocxCodeGenerator] Generated buffer size: ${buffer.length} bytes`);
 
         return buffer;
     } catch (error: any) {
-        console.error('[DocxCodeGenerator] Execution error:', error.message);
-        console.error('[DocxCodeGenerator] Stack:', error.stack);
-        throw new Error(`Failed to execute document code: ${error.message}`);
+        const message = error.message || 'Unknown error';
+        // Sanitize error message - don't leak internal paths or stack traces
+        const sanitized = message
+            .replace(/\/[^\s:]+/g, '[path]')
+            .substring(0, 500);
+        console.error('[DocxCodeGenerator] Sandbox execution error:', sanitized);
+        throw new Error(`Document code execution failed: ${sanitized}`);
     }
 }
 

@@ -302,14 +302,93 @@ function applyAutoFitForTable(
 function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: string): void {
   try {
     const position = parseCellReference(chart.position || "H2");
-    const cell = worksheet.getRow(position.row).getCell(position.col);
-    cell.value = `[Chart placeholder: ${chart.title || chart.type || 'Chart'} - Charts require manual creation in Excel]`;
-    cell.font = { italic: true, color: { argb: "FF808080" } };
+    const catRange = chart.categories_range;
+    const valRange = chart.values_range;
+
+    if (!catRange || !valRange) {
+      const cell = worksheet.getRow(position.row).getCell(position.col);
+      cell.value = `[Chart: ${chart.title || chart.type} - missing data ranges]`;
+      cell.font = { italic: true, color: { argb: "FF808080" } };
+      return;
+    }
+
+    // Attempt native ExcelJS chart API (available in exceljs >=4.3)
+    const ws = worksheet as any;
+    if (typeof ws.addChart === "function") {
+      const chartTypeMap: Record<string, string> = {
+        bar: "bar",
+        line: "line",
+        pie: "pie",
+        area: "area",
+        scatter: "scatter",
+      };
+      ws.addChart({
+        type: chartTypeMap[chart.type] || "bar",
+        title: chart.title || "",
+        legend: { position: "bottom" },
+        series: [{
+          categories: `'${sheetName}'!${catRange}`,
+          values: `'${sheetName}'!${valRange}`,
+          name: chart.title || "Series 1",
+        }],
+        axes: [
+          { type: "category", position: "bottom" },
+          { type: "value", position: "left" },
+        ],
+      }, {
+        tl: { col: position.col - 1, row: position.row - 1 },
+        br: { col: position.col + 7, row: position.row + 14 },
+      });
+      return;
+    }
+
+    // Fallback: rich formatted chart description block
+    const startRow = position.row;
+    const startCol = position.col;
+
+    const titleCell = worksheet.getRow(startRow).getCell(startCol);
+    titleCell.value = { richText: [
+      { text: "  ", font: {} },
+      { text: chart.title || "Chart", font: { bold: true, size: 12, color: { argb: "FF1A365D" } } },
+    ] } as any;
+
+    const typeCell = worksheet.getRow(startRow + 1).getCell(startCol);
+    typeCell.value = `Type: ${chart.type.toUpperCase()} | Data: ${catRange} vs ${valRange}`;
+    typeCell.font = { italic: true, size: 10, color: { argb: "FF718096" } };
+
+    const instrCell = worksheet.getRow(startRow + 2).getCell(startCol);
+    instrCell.value = "Select the data range and use Insert > Chart in Excel to visualize";
+    instrCell.font = { size: 9, color: { argb: "FF4A5568" } };
+
+    // Border box around chart area
+    for (let r = startRow; r <= startRow + 2; r++) {
+      for (let c = startCol; c <= startCol + 3; c++) {
+        const cell = worksheet.getRow(r).getCell(c);
+        cell.border = {
+          top: { style: "thin" as any, color: { argb: "FFE2E8F0" } },
+          bottom: { style: "thin" as any, color: { argb: "FFE2E8F0" } },
+          left: { style: "thin" as any, color: { argb: "FFE2E8F0" } },
+          right: { style: "thin" as any, color: { argb: "FFE2E8F0" } },
+        };
+        if (r === startRow) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF7FAFC" },
+          };
+        }
+      }
+    }
   } catch (error) {
-    console.warn(`[ExcelRenderer] Invalid chart position "${chart.position}", using default H2`);
-    const cell = worksheet.getRow(2).getCell(8);
-    cell.value = `[Chart: ${chart.title || chart.type || 'Chart'}]`;
-    cell.font = { italic: true, color: { argb: "FF808080" } };
+    console.warn(`[ExcelRenderer] Chart rendering failed for "${chart.title}":`, error);
+    try {
+      const pos = parseCellReference(chart.position || "H2");
+      const cell = worksheet.getRow(pos.row).getCell(pos.col);
+      cell.value = `[Chart: ${chart.title || chart.type || "Chart"}]`;
+      cell.font = { italic: true, color: { argb: "FF808080" } };
+    } catch {
+      // Silent fail
+    }
   }
 }
 

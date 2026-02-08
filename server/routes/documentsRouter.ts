@@ -22,6 +22,7 @@ import { excelSpecSchema, docSpecSchema, cvSpecSchema } from "../../shared/docum
 import { llmGateway } from "../lib/llmGateway";
 import { generateAgentToolsExcel } from "../lib/agentToolsGenerator";
 import { executeDocxCode } from "../services/docxCodeGenerator";
+import { generatePdfFromHtml } from "../services/pdfGeneration";
 import { requireNetworkAccessEnabled } from "../middleware/networkAccessGuard";
 
 export function createDocumentsRouter() {
@@ -656,13 +657,36 @@ Generate the command plan:`;
     }
   });
 
-  // PDF conversion endpoint (placeholder - would need libreoffice or similar)
+  // PDF conversion endpoint - converts HTML content to PDF via Playwright
   router.post("/convert-to-pdf", async (req, res) => {
     try {
-      // In production, use libreoffice headless or a PDF conversion service
-      // For now, return error to fall back to DOCX download
-      res.status(501).json({ error: "PDF conversion requires LibreOffice installation" });
+      const { html, options } = req.body;
+
+      if (!html || typeof html !== "string") {
+        return res.status(400).json({ error: "html field is required and must be a string" });
+      }
+
+      if (html.length > 10 * 1024 * 1024) {
+        return res.status(400).json({ error: "HTML content exceeds 10MB limit" });
+      }
+
+      const pdfOptions = {
+        format: options?.format || "A4",
+        margin: options?.margin || undefined,
+        landscape: options?.landscape || false,
+        printBackground: true,
+        scale: options?.scale || 1,
+      };
+
+      const pdfBuffer = await generatePdfFromHtml(html, pdfOptions as any);
+
+      const filename = options?.filename || `document_${Date.now()}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.send(pdfBuffer);
     } catch (error: any) {
+      console.error("PDF conversion error:", error.message);
       res.status(500).json({ error: "PDF conversion failed", details: error.message });
     }
   });
