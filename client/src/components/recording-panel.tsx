@@ -9,6 +9,7 @@ import {
   SILVER_ICON_BUTTON_DISABLED_TONE,
   SILVER_ICON_BUTTON_TONE,
 } from "@/lib/silver-ui";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 
 interface RecordingPanelProps {
   isRecording: boolean;
@@ -55,6 +56,9 @@ export function RecordingPanel({
   onAgentStop,
   isFilesLoading = false,
 }: RecordingPanelProps) {
+  const { settings } = useSettingsContext();
+  const voiceEnabled = !!settings.voiceMode;
+
   // Show stop button if either AI is processing OR agent is running
   const showStopButton = aiState !== "idle" || isAgentRunning;
 
@@ -176,25 +180,27 @@ export function RecordingPanel({
 
   return (
     <>
-      <Tooltip>
-      <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            onClick={onToggleRecording}
-            size="icon"
-            className={cn(
-              "h-9 w-9 sm:h-8 sm:w-8",
-              SILVER_ICON_BUTTON_BASE,
-              SILVER_ICON_BUTTON_TONE
-            )}
-            aria-label="Start voice dictation"
-            data-testid="button-voice-dictation"
-          >
-            <Mic className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Dictar texto</TooltipContent>
-      </Tooltip>
+      {voiceEnabled && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              onClick={onToggleRecording}
+              size="icon"
+              className={cn(
+                "h-9 w-9 sm:h-8 sm:w-8",
+                SILVER_ICON_BUTTON_BASE,
+                SILVER_ICON_BUTTON_TONE
+              )}
+              aria-label="Start voice dictation"
+              data-testid="button-voice-dictation"
+            >
+              <Mic className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Dictar texto</TooltipContent>
+        </Tooltip>
+      )}
 
       {showStopButton ? (
         <Button
@@ -239,24 +245,26 @@ export function RecordingPanel({
           </Button>
         </motion.div>
       ) : (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              onClick={onOpenVoiceChat}
-              size="icon"
-              className={cn(
-                "h-9 w-9 sm:h-8 sm:w-8",
-                SILVER_ICON_BUTTON_BASE,
-                SILVER_ICON_BUTTON_TONE
-              )}
-              aria-label="Start voice conversation mode"
-              data-testid="button-voice-chat-mode"
-            >
-              <AudioLines className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Modo conversación por voz</TooltipContent>
-        </Tooltip>
+        voiceEnabled ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onOpenVoiceChat}
+                size="icon"
+                className={cn(
+                  "h-9 w-9 sm:h-8 sm:w-8",
+                  SILVER_ICON_BUTTON_BASE,
+                  SILVER_ICON_BUTTON_TONE
+                )}
+                aria-label="Start voice conversation mode"
+                data-testid="button-voice-chat-mode"
+              >
+                <AudioLines className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Modo conversación por voz</TooltipContent>
+          </Tooltip>
+        ) : null
       )}
     </>
   );

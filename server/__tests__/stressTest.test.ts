@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import ExcelJS from 'exceljs';
 import path from 'path';
 import fs from 'fs';
@@ -8,6 +8,42 @@ const ROW_COUNT = 10000;
 
 describe('Stress Test - Large Excel File Processing', () => {
   const startTime = Date.now();
+
+  beforeAll(async () => {
+    if (fs.existsSync(LARGE_FIXTURE_PATH)) return;
+
+    fs.mkdirSync(path.dirname(LARGE_FIXTURE_PATH), { recursive: true });
+
+    const workbook = new ExcelJS.Workbook();
+
+    const salesSheet = workbook.addWorksheet('SalesData');
+    const headers = ['ID', 'Date', 'Product', 'Category', 'Quantity', 'UnitPrice', 'Total', 'Region', 'SalesRep'];
+    salesSheet.addRow(headers);
+
+    for (let id = 1; id <= ROW_COUNT; id++) {
+      const quantity = (id % 10) + 1;
+      const unitPrice = 9.99 + (id % 20);
+      const total = Math.round(quantity * unitPrice * 100) / 100;
+      salesSheet.addRow([
+        id,
+        new Date(2026, 0, 1 + (id % 28)),
+        `Product-${id % 100}`,
+        `Category-${id % 10}`,
+        quantity,
+        unitPrice,
+        total,
+        `Region-${id % 5}`,
+        `Rep-${id % 25}`,
+      ]);
+    }
+
+    const summarySheet = workbook.addWorksheet('Summary');
+    summarySheet.addRow(['Metric', 'Value']);
+    summarySheet.addRow(['Total Rows', String(ROW_COUNT)]);
+    summarySheet.addRow(['Generated At', new Date().toISOString()]);
+
+    await workbook.xlsx.writeFile(LARGE_FIXTURE_PATH);
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();

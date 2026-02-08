@@ -13,6 +13,7 @@
 import { users, userSettings, libraryStorage, type User } from "@shared/schema";
 import { db } from "../../db";
 import { eq, or, sql } from "drizzle-orm";
+import { autoAcceptWorkspaceInvitationForUser } from "../../services/workspaceInvitationService";
 
 export type UpsertUser = {
   id: string;
@@ -88,6 +89,13 @@ class AuthStorage implements IAuthStorage {
           timestamp: new Date().toISOString(),
         }));
         
+        // Best-effort: bind org/role if the user has a pending workspace invitation.
+        try {
+          await autoAcceptWorkspaceInvitationForUser(updatedUser.id);
+        } catch (e: any) {
+          console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${updatedUser.id}:`, e?.message || e);
+        }
+
         return updatedUser;
       }
       
@@ -124,6 +132,12 @@ class AuthStorage implements IAuthStorage {
             timestamp: new Date().toISOString(),
           }));
           
+          try {
+            await autoAcceptWorkspaceInvitationForUser(updatedUser.id);
+          } catch (e: any) {
+            console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${updatedUser.id}:`, e?.message || e);
+          }
+
           return updatedUser;
         }
       }
@@ -132,6 +146,7 @@ class AuthStorage implements IAuthStorage {
         .insert(users)
         .values({
           id: userData.id,
+          orgId: userData.id,
           email: userData.email,
           username: userData.username ?? (userData.email ? userData.email.split("@")[0] : null),
           fullName: userData.fullName,
@@ -140,7 +155,8 @@ class AuthStorage implements IAuthStorage {
           profileImageUrl: userData.profileImageUrl,
           authProvider: userData.authProvider ?? "email",
           emailVerified: userData.emailVerified ?? "false",
-          role: "user",
+          // Use a builtin workspace admin role by default so RBAC + workspace settings work out of the box.
+          role: userData.role ?? "team_admin",
           plan: "free",
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -158,6 +174,12 @@ class AuthStorage implements IAuthStorage {
         timestamp: new Date().toISOString(),
       }));
       
+      try {
+        await autoAcceptWorkspaceInvitationForUser(newUser.id);
+      } catch (e: any) {
+        console.warn(`[AuthStorage] Failed to auto-accept workspace invitation for user=${newUser.id}:`, e?.message || e);
+      }
+
       return newUser;
     } catch (error: any) {
       console.error(JSON.stringify({

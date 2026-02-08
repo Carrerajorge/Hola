@@ -93,6 +93,7 @@ import { LiveExecutionConsole } from "@/components/live-execution-console";
 import { PhaseNarrator } from "@/components/thinking-indicator";
 import { PlanViewer } from "@/components/agent/PlanViewer";
 import { detectClientIntent } from "@/lib/clientIntentDetector";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { RetrievalVis } from "@/components/retrieval-vis";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { formatZonedTime, normalizeTimeZone } from "@/lib/platformDateTime";
@@ -1674,6 +1675,7 @@ const AssistantMessage = memo(function AssistantMessage({
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
   const superAgentState = useSuperAgentRun(message.id);
   const { settings: platformSettings } = usePlatformSettings();
+  const { settings } = useSettingsContext();
 
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
@@ -1815,6 +1817,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 <CodeExecutionBlock
                   code={block.content.trim()}
                   language="python"
+                  autoRun={settings.codeInterpreter}
                 />
               </div>
             ) : block.content?.trim() ? (

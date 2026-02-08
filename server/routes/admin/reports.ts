@@ -5,7 +5,6 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 import ExcelJS from "exceljs";
 import * as fs from "node:fs/promises";
 import path from "node:path";
-import PDFDocument from "pdfkit";
 
 function toSafeDownloadBaseName(value: string | null | undefined): string {
     const input = (value || "").trim();
@@ -30,6 +29,8 @@ function toPdfText(value: unknown): string {
 }
 
 async function generateSimplePdfReport(title: string, rows: Array<Record<string, unknown>>): Promise<Buffer> {
+    // Lazy import to avoid hard startup dependency for servers that don't use PDF export.
+    const { default: PDFDocument } = await import("pdfkit");
     const doc = new PDFDocument({ size: "A4", margin: 50 });
     const chunks: Buffer[] = [];
 

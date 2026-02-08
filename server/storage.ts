@@ -130,10 +130,11 @@ export interface IStorage {
   createChat(chat: InsertChat): Promise<Chat>;
   getChat(id: string): Promise<Chat | undefined>;
   getChats(userId?: string): Promise<Chat[]>;
+  getActiveChats(userId: string): Promise<Chat[]>;
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
-  getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
+  getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string, metadata?: Record<string, any>): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
   searchMessages(userId: string, query: string): Promise<ChatMessage[]>;
@@ -639,6 +640,24 @@ export class MemStorage implements IStorage {
     return dbRead.select().from(chats).orderBy(desc(chats.updatedAt));
   }
 
+  async getActiveChats(userId: string): Promise<Chat[]> {
+    return dbRead
+      .select()
+      .from(chats)
+      .where(
+        and(
+          eq(chats.userId, userId),
+          // Handle legacy boolean vs string text column
+          or(
+            eq(chats.archived, "false"),
+            isNull(chats.archived)
+          ),
+          isNull(chats.deletedAt)
+        )
+      )
+      .orderBy(desc(chats.updatedAt));
+  }
+
   async updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined> {
     const [result] = await db.update(chats).set({ ...updates, updatedAt: new Date() }).where(eq(chats.id, id)).returning();
     return result;
@@ -666,14 +685,18 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
-    const { limit, offset, orderBy = 'asc' } = options || {};
-    // Cache key includes pagination params to avoid mixing pages
-    const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${orderBy}`;
+  async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
+    const { limit, offset, before, orderBy = 'asc' } = options || {};
+    // Cache key includes pagination params
+    const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${before?.getTime() || 'now'}:${orderBy}`;
 
-    // Cache for 10 seconds (short TTL because messages are added frequently)
     return cache.remember(cacheKey, 10, async () => {
       let query = dbRead.select().from(chatMessages).where(eq(chatMessages.chatId, chatId));
+
+      if (before) {
+        // Cursor pagination
+        query.where(and(eq(chatMessages.chatId, chatId), sql`${chatMessages.createdAt} < ${before.toISOString()}`));
+      }
 
       if (orderBy === 'desc') {
         query.orderBy(desc(chatMessages.createdAt));
@@ -689,12 +712,13 @@ export class MemStorage implements IStorage {
         query.offset(offset);
       }
 
-      return query;
+      return await query;
     });
   }
 
   async searchMessages(userId: string, query: string): Promise<ChatMessage[]> {
     // Sanitize query to avoid syntax errors in websearch_to_tsquery
+
     const sanitizedQuery = query.replace(/[^\w\sñáéíóúü]/gi, ' ').trim();
     if (!sanitizedQuery) return [];
 
@@ -704,6 +728,7 @@ export class MemStorage implements IStorage {
       FROM chat_messages m
       JOIN chats c ON m.chat_id = c.id
       WHERE c.user_id = ${userId}
+      AND c.deleted_at IS NULL
       AND m.search_vector @@ websearch_to_tsquery('spanish', ${sanitizedQuery})
       ORDER BY ts_rank(m.search_vector, websearch_to_tsquery('spanish', ${sanitizedQuery})) DESC
       LIMIT 50
@@ -1552,12 +1577,19 @@ export class MemStorage implements IStorage {
     const defaultUserProfile = {
       nickname: '',
       occupation: '',
-      bio: ''
+      bio: '',
+      showName: true,
+      linkedInUrl: '',
+      githubUrl: '',
+      websiteDomain: '',
+      receiveEmailComments: false,
     };
 
     const defaultPrivacySettings = {
       trainingOptIn: false,
-      remoteBrowserDataAccess: false
+      remoteBrowserDataAccess: false,
+      analyticsTracking: true,
+      chatHistoryEnabled: true,
     };
 
     const existing = await this.getUserSettings(userId);
@@ -1608,11 +1640,12 @@ export class MemStorage implements IStorage {
 
   // Integration Management
   async getIntegrationProviders(): Promise<IntegrationProvider[]> {
-    return dbRead.select().from(integrationProviders).orderBy(integrationProviders.name);
+    // Use primary DB for integration catalog reads to avoid replica-lag issues (UI expects immediate consistency).
+    return db.select().from(integrationProviders).orderBy(integrationProviders.name);
   }
 
   async getIntegrationProvider(id: string): Promise<IntegrationProvider | null> {
-    const [result] = await dbRead.select().from(integrationProviders).where(eq(integrationProviders.id, id));
+    const [result] = await db.select().from(integrationProviders).where(eq(integrationProviders.id, id));
     return result || null;
   }
 
@@ -1622,19 +1655,23 @@ export class MemStorage implements IStorage {
   }
 
   async getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]> {
-    return dbRead.select().from(integrationAccounts)
+    return db.select().from(integrationAccounts)
       .where(eq(integrationAccounts.userId, userId))
       .orderBy(desc(integrationAccounts.createdAt));
   }
 
   async getIntegrationAccount(id: string): Promise<IntegrationAccount | null> {
-    const [result] = await dbRead.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
+    const [result] = await db.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
     return result || null;
   }
 
   async getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null> {
-    const [result] = await dbRead.select().from(integrationAccounts)
-      .where(sql`${integrationAccounts.userId} = ${userId} AND ${integrationAccounts.providerId} = ${providerId}`);
+    const [result] = await db
+      .select()
+      .from(integrationAccounts)
+      .where(and(eq(integrationAccounts.userId, userId), eq(integrationAccounts.providerId, providerId)))
+      .orderBy(desc(integrationAccounts.createdAt))
+      .limit(1);
     return result || null;
   }
 
@@ -1657,15 +1694,15 @@ export class MemStorage implements IStorage {
 
   async getIntegrationTools(providerId?: string): Promise<IntegrationTool[]> {
     if (providerId) {
-      return dbRead.select().from(integrationTools)
+      return db.select().from(integrationTools)
         .where(eq(integrationTools.providerId, providerId))
         .orderBy(integrationTools.name);
     }
-    return dbRead.select().from(integrationTools).orderBy(integrationTools.name);
+    return db.select().from(integrationTools).orderBy(integrationTools.name);
   }
 
   async getIntegrationPolicy(userId: string): Promise<IntegrationPolicy | null> {
-    const [result] = await dbRead.select().from(integrationPolicies).where(eq(integrationPolicies.userId, userId));
+    const [result] = await db.select().from(integrationPolicies).where(eq(integrationPolicies.userId, userId));
     return result || null;
   }
 
@@ -1673,20 +1710,30 @@ export class MemStorage implements IStorage {
     const existing = await this.getIntegrationPolicy(userId);
 
     if (existing) {
+      const dedupeStrings = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return [];
+        const out: string[] = [];
+        const seen = new Set<string>();
+        for (const item of value) {
+          if (typeof item !== "string") continue;
+          const trimmed = item.trim();
+          if (!trimmed) continue;
+          if (seen.has(trimmed)) continue;
+          seen.add(trimmed);
+          out.push(trimmed);
+        }
+        return out;
+      };
+
       const mergedPolicy = {
-        enabledApps: policy.enabledApps
-          ? Array.from(new Set([...(existing.enabledApps || []), ...policy.enabledApps]))
-          : existing.enabledApps,
-        enabledTools: policy.enabledTools
-          ? Array.from(new Set([...(existing.enabledTools || []), ...policy.enabledTools]))
-          : existing.enabledTools,
-        disabledTools: policy.disabledTools
-          ? Array.from(new Set([...(existing.disabledTools || []), ...policy.disabledTools]))
-          : existing.disabledTools,
-        resourceScopes: policy.resourceScopes ?? existing.resourceScopes,
-        autoConfirmPolicy: policy.autoConfirmPolicy ?? existing.autoConfirmPolicy,
-        sandboxMode: policy.sandboxMode ?? existing.sandboxMode,
-        maxParallelCalls: policy.maxParallelCalls ?? existing.maxParallelCalls,
+        // Patch semantics: when a field is provided, replace it (do not union).
+        enabledApps: policy.enabledApps !== undefined ? dedupeStrings(policy.enabledApps) : existing.enabledApps,
+        enabledTools: policy.enabledTools !== undefined ? dedupeStrings(policy.enabledTools) : existing.enabledTools,
+        disabledTools: policy.disabledTools !== undefined ? dedupeStrings(policy.disabledTools) : existing.disabledTools,
+        resourceScopes: policy.resourceScopes !== undefined ? policy.resourceScopes : existing.resourceScopes,
+        autoConfirmPolicy: policy.autoConfirmPolicy !== undefined ? policy.autoConfirmPolicy : existing.autoConfirmPolicy,
+        sandboxMode: policy.sandboxMode !== undefined ? policy.sandboxMode : existing.sandboxMode,
+        maxParallelCalls: policy.maxParallelCalls !== undefined ? policy.maxParallelCalls : existing.maxParallelCalls,
         updatedAt: new Date()
       };
 
@@ -1718,7 +1765,7 @@ export class MemStorage implements IStorage {
   }
 
   async getToolCallLogs(userId: string, limit: number = 100): Promise<ToolCallLog[]> {
-    return dbRead.select().from(toolCallLogs)
+    return db.select().from(toolCallLogs)
       .where(eq(toolCallLogs.userId, userId))
       .orderBy(desc(toolCallLogs.createdAt))
       .limit(limit);
@@ -1795,7 +1842,7 @@ export class MemStorage implements IStorage {
   // Archived/Deleted Chats
   async getArchivedChats(userId: string): Promise<Chat[]> {
     return dbRead.select().from(chats)
-      .where(and(eq(chats.userId, userId), eq(chats.archived, 'true')))
+      .where(and(eq(chats.userId, userId), eq(chats.archived, 'true'), isNull(chats.deletedAt)))
       .orderBy(desc(chats.updatedAt));
   }
 
@@ -1808,7 +1855,7 @@ export class MemStorage implements IStorage {
   async archiveAllChats(userId: string): Promise<number> {
     const result = await db.update(chats)
       .set({ archived: 'true', updatedAt: new Date() })
-      .where(and(eq(chats.userId, userId), eq(chats.archived, 'false')))
+      .where(and(eq(chats.userId, userId), eq(chats.archived, 'false'), isNull(chats.deletedAt)))
       .returning();
     return result.length;
   }
@@ -2407,7 +2454,7 @@ export class MemStorage implements IStorage {
       { category: "general", key: "maintenance_mode", value: false, defaultValue: false, valueType: "boolean", description: "Enable maintenance mode" },
       { category: "branding", key: "primary_color", value: "#6366f1", defaultValue: "#6366f1", valueType: "string", description: "Primary brand color" },
       { category: "branding", key: "secondary_color", value: "#8b5cf6", defaultValue: "#8b5cf6", valueType: "string", description: "Secondary brand color" },
-      { category: "branding", key: "theme_mode", value: "dark", defaultValue: "dark", valueType: "string", description: "Default theme mode" },
+      { category: "branding", key: "theme_mode", value: "auto", defaultValue: "auto", valueType: "string", description: "Default theme mode" },
       { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
       { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
       { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },

@@ -9,18 +9,59 @@ import { searchScopus, ScopusArticle, isScopusConfigured } from "./scopusClient"
 import { searchPubMed, PubMedArticle, generatePubMedAPA7Citation, isPubMedConfigured } from "./pubmedClient";
 import { searchSciELO, SciELOArticle, generateSciELOAPA7Citation, isSciELOConfigured } from "./scieloClient";
 import { searchRedalyc, RedalycArticle, generateRedalycAPA7Citation, isRedalycConfigured } from "./redalycClient";
+import { searchOpenAlex, type AcademicCandidate } from "./openAlexClient";
+import { lookupDOI, type CrossRefMetadata } from "./crossrefClient";
+import { searchWos, type WosArticle, isWosConfigured } from "./wosClient";
 import * as XLSX from "xlsx";
 
 // =============================================================================
 // Types
 // =============================================================================
 
+export type ArticleField =
+    | "authors"
+    | "title"
+    | "year"
+    | "publicationDate"
+    | "journal"
+    | "abstract"
+    | "keywords"
+    | "language"
+    | "documentType"
+    | "doi"
+    | "url"
+    | "volume"
+    | "issue"
+    | "pages"
+    | "city"
+    | "country";
+
+export type FieldProvenanceSource =
+    | "scopus"
+    | "wos"
+    | "openalex"
+    | "duckduckgo"
+    | "pubmed"
+    | "scielo"
+    | "redalyc"
+    | "crossref"
+    | "generated"
+    | "inferred"
+    | "unknown";
+
+export interface FieldProvenance {
+    source: FieldProvenanceSource;
+    confidence: number; // 0..1
+    note?: string;
+}
+
 export interface UnifiedArticle {
     id: string;
-    source: "scopus" | "pubmed" | "scielo" | "redalyc";
+    source: "scopus" | "wos" | "openalex" | "duckduckgo" | "pubmed" | "scielo" | "redalyc";
     title: string;
     authors: string[];
     year: string;
+    publicationDate?: string;
     journal: string;
     abstract: string;
     keywords: string[];
@@ -33,14 +74,20 @@ export interface UnifiedArticle {
     documentType?: string;
     city?: string;
     country?: string;
+    institutionCountryCodes?: string[];
+    primaryInstitutionCountryCode?: string;
     citationCount?: number;
     apaCitation: string;
+    fieldProvenance?: Partial<Record<ArticleField, FieldProvenance>>;
 }
 
 export interface UnifiedSearchResult {
     articles: UnifiedArticle[];
     totalBySource: {
         scopus: number;
+        wos: number;
+        openalex: number;
+        duckduckgo: number;
         pubmed: number;
         scielo: number;
         redalyc: number;
@@ -55,7 +102,7 @@ export interface SearchOptions {
     maxPerSource?: number;
     startYear?: number;
     endYear?: number;
-    sources?: ("scopus" | "pubmed" | "scielo" | "redalyc")[];
+    sources?: ("scopus" | "wos" | "openalex" | "duckduckgo" | "pubmed" | "scielo" | "redalyc")[];
     language?: string;
     // Scopus-only: filter by affiliation country (e.g. ["Spain","Mexico"]).
     // Note: SciELO/Redalyc are already LatAm-focused; PubMed doesn't reliably expose affiliation country at search time.
@@ -75,6 +122,142 @@ function normalizeTitle(title: string): string {
         .substring(0, 100);
 }
 
+function normalizeText(text: string): string {
+    return (text || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+}
+
+function affilCountriesToOpenAlexCodes(affilCountries: string[] | undefined): string[] | undefined {
+    if (!affilCountries || affilCountries.length === 0) return undefined;
+
+    const map: Record<string, string> = {
+        argentina: "AR",
+        bolivia: "BO",
+        brazil: "BR",
+        brasil: "BR",
+        chile: "CL",
+        colombia: "CO",
+        "costa rica": "CR",
+        cuba: "CU",
+        "dominican republic": "DO",
+        "republica dominicana": "DO",
+        "república dominicana": "DO",
+        ecuador: "EC",
+        "el salvador": "SV",
+        guatemala: "GT",
+        honduras: "HN",
+        mexico: "MX",
+        méxico: "MX",
+        nicaragua: "NI",
+        panama: "PA",
+        panamá: "PA",
+        paraguay: "PY",
+        peru: "PE",
+        perú: "PE",
+        "puerto rico": "PR",
+        uruguay: "UY",
+        venezuela: "VE",
+        spain: "ES",
+        españa: "ES",
+        espana: "ES",
+    };
+
+    const codes: string[] = [];
+    for (const c of affilCountries) {
+        const key = normalizeText(c);
+        const code = map[key];
+        if (code) codes.push(code);
+    }
+
+    const unique = Array.from(new Set(codes));
+    return unique.length > 0 ? unique : undefined;
+}
+
+function inferCountryFromText(text: string): string | undefined {
+    const t = normalizeText(text);
+    if (!t) return undefined;
+
+    const patterns: Array<[RegExp, string]> = [
+        [/\b(espa(n|ñ)a|spain)\b/i, "Spain"],
+        [/\b(mexico|m[eé]xico)\b/i, "Mexico"],
+        [/\b(argentina)\b/i, "Argentina"],
+        [/\b(chile)\b/i, "Chile"],
+        [/\b(colombia)\b/i, "Colombia"],
+        [/\b(peru|per[uú])\b/i, "Peru"],
+        [/\b(brazil|brasil)\b/i, "Brazil"],
+        [/\b(uruguay)\b/i, "Uruguay"],
+        [/\b(venezuela)\b/i, "Venezuela"],
+        [/\b(guatemala)\b/i, "Guatemala"],
+        [/\b(honduras)\b/i, "Honduras"],
+        [/\b(nicaragua)\b/i, "Nicaragua"],
+        [/\b(paraguay)\b/i, "Paraguay"],
+        [/\b(ecuador)\b/i, "Ecuador"],
+        [/\b(bolivia)\b/i, "Bolivia"],
+        [/\b(costa rica)\b/i, "Costa Rica"],
+        [/\b(el salvador)\b/i, "El Salvador"],
+        [/\b(panama|panam[aá])\b/i, "Panama"],
+        [/\b(cuba)\b/i, "Cuba"],
+        [/\b(puerto rico)\b/i, "Puerto Rico"],
+        [/\b(dominican republic|rep(u|ú)blica dominicana)\b/i, "Dominican Republic"],
+    ];
+
+    for (const [re, country] of patterns) {
+        if (re.test(t)) return country;
+    }
+
+    return undefined;
+}
+
+const DOI_REGEX = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi;
+
+function extractDois(input: string): string[] {
+    const text = input || "";
+    const matches = text.match(DOI_REGEX) || [];
+    return matches
+        .map((m) => m.replace(/[\])}>,.;]+$/g, ""))
+        .map((m) => m.trim())
+        .filter(Boolean);
+}
+
+function extractDoiFromUrl(url: string): string | undefined {
+    const u = (url || "").trim();
+    if (!u) return undefined;
+    const m = u.match(/doi\.org\/(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/i);
+    return m?.[1]?.trim();
+}
+
+function convertCrossRefMetadataToUnified(meta: CrossRefMetadata, source: UnifiedArticle["source"]): UnifiedArticle {
+    const doi = (meta.doi || "").trim();
+    const url = meta.url || (doi ? `https://doi.org/${doi}` : "");
+    const year = meta.year ? String(meta.year) : "n.d.";
+
+    return {
+        id: `${source}_${doi || normalizeTitle(meta.title).slice(0, 32)}`,
+        source,
+        title: meta.title || "n.d.",
+        authors: meta.authors || [],
+        year,
+        publicationDate: meta.publicationDate || undefined,
+        journal: meta.journal || "n.d.",
+        abstract: meta.abstract || "",
+        keywords: meta.keywords || [],
+        doi: doi || undefined,
+        url,
+        volume: meta.volume || undefined,
+        issue: meta.issue || undefined,
+        pages: meta.pages || undefined,
+        language: meta.language || "en",
+        documentType: meta.documentType || "Article",
+        city: meta.city || "Unknown",
+        country: meta.country || "Unknown",
+        citationCount: meta.citationCount || 0,
+        apaCitation: "", // Filled below by generator for non-Scopus sources
+    };
+}
+
 // =============================================================================
 // Main Search Function
 // =============================================================================
@@ -91,7 +274,7 @@ export async function searchAllSources(
         maxPerSource = 30,
         startYear,
         endYear,
-        sources = ["scopus", "pubmed", "scielo", "redalyc"],
+        sources = ["scopus", "openalex", "pubmed", "scielo", "redalyc"],
         language,
         affilCountries
     } = options;
@@ -108,11 +291,17 @@ export async function searchAllSources(
 
     const results: {
         scopus: UnifiedArticle[];
+        wos: UnifiedArticle[];
+        openalex: UnifiedArticle[];
+        duckduckgo: UnifiedArticle[];
         pubmed: UnifiedArticle[];
         scielo: UnifiedArticle[];
         redalyc: UnifiedArticle[];
     } = {
         scopus: [],
+        wos: [],
+        openalex: [],
+        duckduckgo: [],
         pubmed: [],
         scielo: [],
         redalyc: []
@@ -137,6 +326,97 @@ export async function searchAllSources(
                 } catch (error: any) {
                     errors.push(`Scopus: ${error.message}`);
                     console.error(`[UnifiedSearch] Scopus error: ${error.message}`);
+                }
+            })()
+        );
+    }
+
+    // Web of Science (requires API key)
+    if (sources.includes("wos") && isWosConfigured()) {
+        searchPromises.push(
+            (async () => {
+                try {
+                    const wosResult = await searchWos(englishQuery, {
+                        maxResults: Math.min(50, maxPerSource),
+                        startYear,
+                        endYear,
+                    });
+                    results.wos = wosResult.articles.map((a) => convertWosToUnified(a));
+                    console.log(`[UnifiedSearch] WoS: ${results.wos.length} articles`);
+                } catch (error: any) {
+                    errors.push(`WoS: ${error.message}`);
+                    console.error(`[UnifiedSearch] WoS error: ${error.message}`);
+                }
+            })()
+        );
+    }
+
+    // OpenAlex (free)
+    if (sources.includes("openalex")) {
+        searchPromises.push(
+            (async () => {
+                try {
+                    const countryCodes = affilCountriesToOpenAlexCodes(affilCountries);
+                    const openAlexCandidates = await searchOpenAlex(englishQuery, {
+                        maxResults: Math.min(1000, Math.max(50, maxPerSource)),
+                        yearStart: startYear,
+                        yearEnd: endYear,
+                        countryCodes,
+                    });
+                    results.openalex = openAlexCandidates.map(c => convertOpenAlexToUnified(c));
+                    console.log(`[UnifiedSearch] OpenAlex: ${results.openalex.length} articles`);
+                } catch (error: any) {
+                    errors.push(`OpenAlex: ${error.message}`);
+                    console.error(`[UnifiedSearch] OpenAlex error: ${error.message}`);
+                }
+            })()
+        );
+    }
+
+    // DuckDuckGo (free) - best effort: discover DOIs and hydrate via Crossref
+    if (sources.includes("duckduckgo")) {
+        searchPromises.push(
+            (async () => {
+                try {
+                    const ddg = await import("duck-duck-scrape");
+                    const q = `${englishQuery} doi`;
+                    const searchResults = await ddg.search(q, { safeSearch: ddg.SafeSearchType.OFF });
+
+                    const dois: string[] = [];
+                    for (const r of (searchResults.results || [])) {
+                        const found = [
+                            ...extractDois(`${r.title || ""} ${r.description || ""}`),
+                            ...(extractDoiFromUrl(r.url || "") ? [extractDoiFromUrl(r.url || "")!] : []),
+                        ];
+                        for (const d of found) dois.push(d);
+                        if (dois.length >= maxPerSource * 2) break;
+                    }
+
+                    const uniqueDois = Array.from(new Set(dois.map((d) => d.trim()).filter(Boolean))).slice(0, Math.min(30, maxPerSource));
+
+                    const hydrated: UnifiedArticle[] = [];
+                    for (const d of uniqueDois) {
+                        const meta = await lookupDOI(d);
+                        if (!meta) continue;
+                        const ua = convertCrossRefMetadataToUnified(meta, "duckduckgo");
+                        ua.apaCitation = generateGenericAPA7Citation(ua);
+                        hydrated.push(ua);
+                    }
+
+                    // Filter by year range if provided
+                    const filtered = hydrated.filter((a) => {
+                        const y = parseInt(a.year || "", 10);
+                        if (!Number.isFinite(y)) return true;
+                        if (startYear && y < startYear) return false;
+                        if (endYear && y > endYear) return false;
+                        return true;
+                    });
+
+                    results.duckduckgo = filtered.slice(0, maxPerSource);
+                    console.log(`[UnifiedSearch] DuckDuckGo: ${results.duckduckgo.length} articles`);
+                } catch (error: any) {
+                    errors.push(`DuckDuckGo: ${error.message}`);
+                    console.error(`[UnifiedSearch] DuckDuckGo error: ${error.message}`);
                 }
             })()
         );
@@ -210,6 +490,9 @@ export async function searchAllSources(
     // Combine and deduplicate by DOI/title
     const allArticles = [
         ...results.scopus,
+        ...results.wos,
+        ...results.openalex,
+        ...results.duckduckgo,
         ...results.pubmed,
         ...results.scielo,
         ...results.redalyc
@@ -224,6 +507,9 @@ export async function searchAllSources(
         articles: finalArticles,
         totalBySource: {
             scopus: results.scopus.length,
+            wos: results.wos.length,
+            openalex: results.openalex.length,
+            duckduckgo: results.duckduckgo.length,
             pubmed: results.pubmed.length,
             scielo: results.scielo.length,
             redalyc: results.redalyc.length
@@ -259,6 +545,33 @@ function convertScopusToUnified(article: ScopusArticle): UnifiedArticle {
     };
 }
 
+function convertWosToUnified(article: WosArticle): UnifiedArticle {
+    const doi = (article.doi || "").trim();
+    const inferredCountry = inferCountryFromText(article.affiliations?.join("; ") || "") || "Unknown";
+
+    const unified: UnifiedArticle = {
+        id: `wos_${article.id}`,
+        source: "wos",
+        title: article.title || "n.d.",
+        authors: article.authors || [],
+        year: article.year ? String(article.year) : "n.d.",
+        journal: article.journal || "n.d.",
+        abstract: article.abstract || "",
+        keywords: article.keywords || [],
+        doi: doi || undefined,
+        url: doi ? `https://doi.org/${doi}` : article.wosUrl || "",
+        language: article.language || "en",
+        documentType: article.documentType || "Article",
+        country: inferredCountry,
+        city: "Unknown",
+        citationCount: article.citationCount || 0,
+        apaCitation: "",
+    };
+
+    unified.apaCitation = generateGenericAPA7Citation(unified);
+    return unified;
+}
+
 function convertPubMedToUnified(article: PubMedArticle): UnifiedArticle {
     return {
         id: `pubmed_${article.pmid}`,
@@ -281,14 +594,43 @@ function convertPubMedToUnified(article: PubMedArticle): UnifiedArticle {
     };
 }
 
+function convertOpenAlexToUnified(candidate: AcademicCandidate): UnifiedArticle {
+    const year = candidate.year && candidate.year > 0 ? String(candidate.year) : "n.d.";
+    const doi = (candidate.doi || "").trim();
+
+    return {
+        id: `openalex_${candidate.sourceId}`,
+        source: "openalex",
+        title: candidate.title || "n.d.",
+        authors: candidate.authors || [],
+        year,
+        publicationDate: candidate.publicationDate || undefined,
+        journal: candidate.journal || "n.d.",
+        abstract: candidate.abstract || "",
+        keywords: candidate.keywords || [],
+        doi: doi || undefined,
+        url: candidate.doiUrl || candidate.landingUrl || "",
+        language: candidate.language || "en",
+        documentType: candidate.documentType || "Article",
+        country: candidate.country || "Unknown",
+        city: candidate.city || "Unknown",
+        institutionCountryCodes: candidate.institutionCountryCodes || [],
+        primaryInstitutionCountryCode: candidate.primaryInstitutionCountryCode,
+        citationCount: candidate.citationCount || 0,
+        apaCitation: generateOpenAlexAPA7Citation(candidate),
+    };
+}
+
 function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
-    const country = scieloCollectionToCountry(article.collection);
+    const country = (article.country || "").trim() || scieloCollectionToCountry(article.collection);
+    const city = (article.city || "").trim() || "n.d.";
     return {
         id: `scielo_${article.scielo_id}`,
         source: "scielo",
         title: article.title,
         authors: article.authors,
         year: article.year,
+        publicationDate: article.publicationDate || undefined,
         journal: article.journal,
         abstract: article.abstract,
         keywords: article.keywords,
@@ -299,12 +641,13 @@ function convertSciELOToUnified(article: SciELOArticle): UnifiedArticle {
         language: article.language,
         documentType: "Article",
         country, // Derived from SciELO collection when possible
-        city: "n.d.",
+        city,
         apaCitation: generateSciELOAPA7Citation(article)
     };
 }
 
 function convertRedalycToUnified(article: RedalycArticle): UnifiedArticle {
+    const inferred = inferCountryFromText(`${article.country || ""} ${article.institution || ""}`) || (article.country || "");
     return {
         id: `redalyc_${article.redalyc_id}`,
         source: "redalyc",
@@ -320,10 +663,52 @@ function convertRedalycToUnified(article: RedalycArticle): UnifiedArticle {
         pages: article.pages,
         language: article.language,
         documentType: "Article",
-        country: "LatAm", // Redalyc is LatAm focused
+        country: inferred || "LatAm", // Redalyc is LatAm focused, try to infer when possible
         city: "n.d.",
         apaCitation: generateRedalycAPA7Citation(article)
     };
+}
+
+function generateGenericAPA7Citation(article: UnifiedArticle): string {
+    // Authors
+    const authors = article.authors || [];
+    let authorsStr = "";
+
+    if (authors.length === 0) {
+        authorsStr = "";
+    } else if (authors.length === 1) {
+        authorsStr = formatAuthorAPA(authors[0]);
+    } else if (authors.length === 2) {
+        authorsStr = `${formatAuthorAPA(authors[0])} & ${formatAuthorAPA(authors[1])}`;
+    } else if (authors.length <= 20) {
+        const allAuthors = authors.map(formatAuthorAPA);
+        authorsStr = allAuthors.slice(0, -1).join(", ") + ", & " + allAuthors[allAuthors.length - 1];
+    } else {
+        const first19 = authors.slice(0, 19).map(formatAuthorAPA);
+        authorsStr = first19.join(", ") + ", ... " + formatAuthorAPA(authors[authors.length - 1]);
+    }
+
+    const year = article.year ? `(${article.year})` : "(n.d.)";
+    const title = article.title?.endsWith(".") ? article.title : `${article.title}.`;
+
+    let journalPart = article.journal ? `*${article.journal}*` : "";
+    if (article.volume) {
+        journalPart += `, *${article.volume}*`;
+        if (article.issue) journalPart += `(${article.issue})`;
+    }
+    if (article.pages) {
+        journalPart += `${journalPart ? "," : ""} ${article.pages}`;
+    }
+
+    const cleanDoi = (article.doi || "").trim().replace(/^https?:\/\/doi\\.org\\//i, "");
+    const doiUrl = cleanDoi ? `https://doi.org/${cleanDoi}` : "";
+    const rawUrl = (article.url || "").trim();
+    const linkUrl = doiUrl || ((rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) ? rawUrl : "");
+
+    const journalSegment = journalPart ? ` ${journalPart}.` : "";
+    const linkSegment = linkUrl ? ` ${linkUrl}` : "";
+
+    return `${authorsStr} ${year}. ${title}${journalSegment}${linkSegment}`.trim();
 }
 
 function generateScopusAPA7Citation(article: ScopusArticle): string {
@@ -351,6 +736,34 @@ function generateScopusAPA7Citation(article: ScopusArticle): string {
     if (article.doi) {
         doiPart = ` https://doi.org/${article.doi}`;
     }
+
+    return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
+}
+
+function generateOpenAlexAPA7Citation(candidate: AcademicCandidate): string {
+    const authors = (candidate.authors || []).filter(Boolean);
+
+    let authorsStr = "";
+    if (authors.length === 0) {
+        authorsStr = "";
+    } else if (authors.length === 1) {
+        authorsStr = formatAuthorAPA(authors[0]);
+    } else if (authors.length === 2) {
+        authorsStr = `${formatAuthorAPA(authors[0])} & ${formatAuthorAPA(authors[1])}`;
+    } else if (authors.length <= 20) {
+        const allAuthors = authors.map(formatAuthorAPA);
+        authorsStr = allAuthors.slice(0, -1).join(", ") + ", & " + allAuthors[allAuthors.length - 1];
+    } else {
+        const first19 = authors.slice(0, 19).map(formatAuthorAPA);
+        authorsStr = first19.join(", ") + ", ... " + formatAuthorAPA(authors[authors.length - 1]);
+    }
+
+    const year = candidate.year ? `(${candidate.year})` : "(n.d.)";
+    const title = candidate.title?.endsWith(".") ? candidate.title : `${candidate.title}.`;
+    const journalPart = candidate.journal ? `*${candidate.journal}*` : "";
+
+    const doi = (candidate.doi || "").trim();
+    const doiPart = doi ? ` https://doi.org/${doi}` : "";
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
 }
@@ -426,6 +839,9 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
     // Group by source
     const bySource: Record<string, UnifiedArticle[]> = {
         scopus: [],
+        wos: [],
+        openalex: [],
+        duckduckgo: [],
         pubmed: [],
         scielo: [],
         redalyc: []
@@ -448,7 +864,7 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
     for (let i = 0; i < sortedArticles.length; i++) {
         const article = sortedArticles[i];
         lines.push(`${i + 1}. [${article.source.toUpperCase()}]`);
-        lines.push(article.apaCitation);
+        lines.push(article.apaCitation || generateGenericAPA7Citation(article));
         lines.push("");
     }
 
@@ -456,6 +872,9 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
     lines.push("");
     lines.push("Distribución por fuente:");
     lines.push(`  - Scopus: ${bySource.scopus.length} artículos`);
+    lines.push(`  - WoS: ${bySource.wos.length} artículos`);
+    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos`);
+    lines.push(`  - DuckDuckGo: ${bySource.duckduckgo.length} artículos`);
     lines.push(`  - PubMed: ${bySource.pubmed.length} artículos`);
     lines.push(`  - SciELO: ${bySource.scielo.length} artículos`);
     lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos`);
@@ -588,6 +1007,9 @@ export const unifiedArticleSearch = {
     generateAPACitationsList,
     generateExcelReport,
     isScopusConfigured,
+    isWosConfigured,
+    isOpenAlexConfigured: () => true,
+    isDuckDuckGoConfigured: () => true,
     isPubMedConfigured,
     isSciELOConfigured,
     isRedalycConfigured

@@ -1,8 +1,8 @@
 import express from "express";
-import request from "supertest";
 import { describe, it, expect, beforeEach } from "vitest";
 import { createUserRouter } from "../../server/routes/userRouter";
 import { createStripeRouter } from "../../server/routes/stripeRouter";
+import { createHttpTestClient } from "../helpers/httpTestClient";
 
 function makeApp() {
   const app = express();
@@ -20,30 +20,45 @@ describe("security hardening", () => {
 
   it("hides catalog seed endpoints by default (404)", async () => {
     const app = makeApp();
+    const { client, close } = await createHttpTestClient(app);
 
-    const res1 = await request(app).post("/api/integrations/seed").send({});
-    expect(res1.status).toBe(404);
-    expect(res1.body?.error).toBe("Not found");
+    try {
+      const res1 = await client.post("/api/integrations/seed").send({});
+      expect(res1.status).toBe(404);
+      expect(res1.body?.error).toBe("Not found");
 
-    const res2 = await request(app).post("/api/notification-event-types/seed").send({});
-    expect(res2.status).toBe(404);
-    expect(res2.body?.error).toBe("Not found");
+      const res2 = await client.post("/api/notification-event-types/seed").send({});
+      expect(res2.status).toBe(404);
+      expect(res2.body?.error).toBe("Not found");
+    } finally {
+      await close();
+    }
   });
 
   it("hides Stripe product seeding by default (404)", async () => {
     const app = makeApp();
+    const { client, close } = await createHttpTestClient(app);
 
-    const res = await request(app).post("/api/stripe/create-products").send({});
-    expect(res.status).toBe(404);
-    expect(res.body?.error).toBe("Not found");
+    try {
+      const res = await client.post("/api/stripe/create-products").send({});
+      expect(res.status).toBe(404);
+      expect(res.body?.error).toBe("Not found");
+    } finally {
+      await close();
+    }
   });
 
   it("rejects notification preferences access without auth (403)", async () => {
     const app = makeApp();
+    const { client, close } = await createHttpTestClient(app);
 
-    const res = await request(app).get("/api/users/user_123/notification-preferences");
-    expect(res.status).toBe(403);
-    expect(typeof res.body?.error).toBe("string");
+    try {
+      const res = await client.get("/api/users/user_123/notification-preferences");
+      expect(res.status).toBe(403);
+      expect(typeof res.body?.error).toBe("string");
+    } finally {
+      await close();
+    }
   });
 
   it("rejects Stripe billing portal access for non-billing-manager users (403)", async () => {
@@ -54,16 +69,27 @@ describe("security hardening", () => {
       next();
     });
     app.use(createStripeRouter());
+    const { client, close } = await createHttpTestClient(app);
 
-    const res = await request(app).post("/api/stripe/portal").send({});
-    expect(res.status).toBe(403);
-    expect(res.body?.code).toBe("PERMISSION_DENIED");
+    try {
+      const res = await client.post("/api/stripe/portal").send({});
+      expect(res.status).toBe(403);
+      expect(res.body?.code).toBe("PERMISSION_DENIED");
+    } finally {
+      await close();
+    }
   });
 
   it("requires authentication to list invoices (401)", async () => {
     const app = makeApp();
-    const res = await request(app).get("/api/billing/invoices");
-    expect(res.status).toBe(401);
+    const { client, close } = await createHttpTestClient(app);
+
+    try {
+      const res = await client.get("/api/billing/invoices");
+      expect(res.status).toBe(401);
+    } finally {
+      await close();
+    }
   });
 
   it("rejects invoice listing for non-billing-manager users (403)", async () => {
@@ -74,9 +100,14 @@ describe("security hardening", () => {
       next();
     });
     app.use(createStripeRouter());
+    const { client, close } = await createHttpTestClient(app);
 
-    const res = await request(app).get("/api/billing/invoices");
-    expect(res.status).toBe(403);
-    expect(res.body?.code).toBe("PERMISSION_DENIED");
+    try {
+      const res = await client.get("/api/billing/invoices");
+      expect(res.status).toBe(403);
+      expect(res.body?.code).toBe("PERMISSION_DENIED");
+    } finally {
+      await close();
+    }
   });
 });

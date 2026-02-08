@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { db } from "../db";
 import { users, magicLinks, workspaceInvitations } from "@shared/schema";
-import { eq, and, gt, desc, ne } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 import { getSettingValue } from "./settingsConfigService";
+import { autoAcceptWorkspaceInvitationForUser } from "./workspaceInvitationService";
 
 const MAGIC_LINK_EXPIRY_MINUTES = 15;
 
@@ -17,18 +18,19 @@ interface MagicLinkResult {
  */
 export async function createMagicLink(email: string): Promise<MagicLinkResult> {
     try {
+        const emailNorm = email.toLowerCase().trim();
+
         // Generate secure token
         const token = crypto.randomBytes(32).toString("hex");
         const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MINUTES * 60 * 1000);
 
         // Find or create user
-        let [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
+        let [user] = await db.select().from(users).where(eq(users.email, emailNorm)).limit(1);
 
         if (!user) {
             const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
             if (!allowRegistration) {
                 // Allow signups when the email has a pending workspace invitation.
-                const emailNorm = email.toLowerCase().trim();
                 const pendingInvites = await db
                     .select({ id: workspaceInvitations.id })
                     .from(workspaceInvitations)
@@ -40,11 +42,16 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
             }
 
             // Create new user for magic link signup
+            const newUserId = crypto.randomUUID();
             const [newUser] = await db.insert(users).values({
-                email: email.toLowerCase(),
-                firstName: email.split("@")[0],
+                id: newUserId,
+                // Each user starts with their own workspace by default.
+                // If they were invited to an existing workspace, we'll swap org/role on first login.
+                orgId: newUserId,
+                email: emailNorm,
+                firstName: emailNorm.split("@")[0],
                 lastName: "",
-                role: "user",
+                role: "team_admin",
                 status: "pending", // Will be activated on first magic link verification
                 emailVerified: "false",
             }).returning();
@@ -113,59 +120,8 @@ export async function verifyMagicLink(token: string): Promise<{ success: boolean
         if (wasPending) patch.status = "active";
         await db.update(users).set(patch).where(eq(users.id, user.id));
 
-        // If the user was invited to a workspace, accept the invitation and bind org/role.
         try {
-            const email = (user.email || "").toLowerCase();
-            if (email) {
-                const invites = await db
-                    .select()
-                    .from(workspaceInvitations)
-                    .where(and(eq(workspaceInvitations.email, email), eq(workspaceInvitations.status, "pending")))
-                    .orderBy(desc(workspaceInvitations.createdAt));
-
-	                if (invites.length > 0) {
-	                    const newest = invites[0];
-	                    const targetOrgId = (newest as any).orgId;
-	                    const targetRole = ((newest as any).role || "team_member") as string;
-	
-	                    const safeToAssignOrg = wasPending || !((user as any).orgId) || (user as any).orgId === "default";
-	                    const safeToAssignRole = wasPending || ((user as any).role || "") === "user";
-	                    const joinedTargetOrg = safeToAssignOrg || (user as any).orgId === targetOrgId;
-	
-	                    if (joinedTargetOrg) {
-	                        const patch: any = { updatedAt: new Date() };
-	                        if (safeToAssignOrg) {
-	                            patch.orgId = targetOrgId;
-	                        }
-	                        if (safeToAssignRole) {
-	                            patch.role = targetRole;
-	                        }
-	                        await db.update(users).set(patch).where(eq(users.id, user.id));
-	                    }
-	
-	                    // Grant invited accounts the Business ($25) plan unless they already have a higher plan.
-	                    try {
-	                        const currentPlan = String((user as any).plan || "free").toLowerCase().trim();
-	                        if (joinedTargetOrg && ["free", "go", "plus"].includes(currentPlan)) {
-	                            await db.update(users).set({ plan: "business", updatedAt: new Date() }).where(eq(users.id, user.id));
-	                        }
-	                    } catch (planErr) {
-	                        console.warn("[MagicLink] Failed to apply Business plan to invited user:", planErr);
-	                    }
-	
-	                    const now = new Date();
-	                    // Accept invitations for the chosen org, revoke others to avoid double-billing seats.
-	                    await db
-                        .update(workspaceInvitations)
-                        .set({ status: "accepted", acceptedAt: now })
-                        .where(and(eq(workspaceInvitations.email, email), eq(workspaceInvitations.status, "pending"), eq(workspaceInvitations.orgId, targetOrgId)));
-
-                    await db
-                        .update(workspaceInvitations)
-                        .set({ status: "revoked", revokedAt: now })
-                        .where(and(eq(workspaceInvitations.email, email), eq(workspaceInvitations.status, "pending"), ne(workspaceInvitations.orgId, targetOrgId)));
-                }
-            }
+            await autoAcceptWorkspaceInvitationForUser(user.id);
         } catch (e) {
             console.warn("[MagicLink] Failed to auto-accept workspace invitation:", e);
         }

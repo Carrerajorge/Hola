@@ -7,6 +7,8 @@ import React, { useEffect, useCallback } from 'react';
 import { X, CheckCircle, AlertCircle, MessageSquare } from 'lucide-react';
 import { useNotifications, useStreamingStore, BackgroundNotification } from '@/stores/streamingStore';
 import { playSuccessSound, playErrorSound } from '@/lib/notification-sound';
+import { useSettingsContext } from '@/contexts/SettingsContext';
+import { channelIncludesPush, isWithinQuietHours } from '@/lib/notification-preferences';
 
 interface BackgroundNotificationToastProps {
     notification: BackgroundNotification;
@@ -84,23 +86,58 @@ interface BackgroundNotificationContainerProps {
 }
 
 export function BackgroundNotificationContainer({ onNavigateToChat }: BackgroundNotificationContainerProps) {
-    const notifications = useNotifications();
-    const dismissNotification = useStreamingStore((s) => s.dismissNotification);
+  const notifications = useNotifications();
+  const dismissNotification = useStreamingStore((s) => s.dismissNotification);
+  const { settings } = useSettingsContext();
 
-    // Play sound when new notification arrives
-    useEffect(() => {
-        if (notifications.length > 0) {
-            const latest = notifications[notifications.length - 1];
-            if (Date.now() - latest.timestamp < 1000) {
-                // Only play for new notifications (less than 1 second old)
-                if (latest.type === 'completed') {
-                    playSuccessSound();
-                } else {
-                    playErrorSound();
-                }
-            }
+  const pushEnabled = channelIncludesPush(settings.notifResponses);
+  const quietNow = isWithinQuietHours({
+    enabled: settings.notifQuietHours,
+    start: settings.notifQuietStart,
+    end: settings.notifQuietEnd,
+  });
+
+  const allowInApp = settings.notifInApp && pushEnabled && !quietNow;
+  const allowDesktop = settings.notifDesktop && pushEnabled && !quietNow;
+
+  // Play sound when new notification arrives
+  useEffect(() => {
+    if (!settings.notifSound || !pushEnabled || quietNow) return;
+    if (notifications.length > 0) {
+      const latest = notifications[notifications.length - 1];
+      if (Date.now() - latest.timestamp < 1000) {
+        // Only play for new notifications (less than 1 second old)
+        if (latest.type === 'completed') {
+          playSuccessSound();
+        } else {
+          playErrorSound();
         }
-    }, [notifications.length]);
+      }
+    }
+  }, [notifications.length, pushEnabled, quietNow, settings.notifSound]);
+
+  // Send desktop notifications (only when tab is hidden)
+  useEffect(() => {
+    if (!allowDesktop) return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return;
+
+    if (notifications.length > 0) {
+      const latest = notifications[notifications.length - 1];
+      if (Date.now() - latest.timestamp < 1500) {
+        try {
+          new Notification(latest.type === 'completed' ? 'Tarea completada' : 'Error en la tarea', {
+            body: latest.chatTitle,
+            icon: '/favicon.png',
+            tag: `bg-${latest.type}`,
+          });
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, [allowDesktop, notifications.length]);
 
     const handleNavigate = useCallback((chatId: string) => {
         // Dispatch event to select chat
@@ -110,12 +147,12 @@ export function BackgroundNotificationContainer({ onNavigateToChat }: Background
         onNavigateToChat(chatId);
     }, [onNavigateToChat]);
 
-    if (notifications.length === 0) return null;
+  if (!allowInApp || notifications.length === 0) return null;
 
-    return (
-        <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-auto">
-            {notifications.slice(-3).map((notif) => (
-                <BackgroundNotificationToast
+  return (
+    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-auto">
+      {notifications.slice(-3).map((notif) => (
+        <BackgroundNotificationToast
                     key={notif.id}
                     notification={notif}
                     onDismiss={dismissNotification}

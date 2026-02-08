@@ -67,6 +67,9 @@ export function createChatRoutes(): Router {
         complexity_score: result.score,
         category: result.category,
         signals: result.signals,
+        recommended_path: result.recommended_path,
+        estimated_tokens: result.estimated_tokens,
+        dimensions: result.dimensions,
       });
     } catch (error: any) {
       console.error("[ChatRoutes] Complexity analysis error:", error);

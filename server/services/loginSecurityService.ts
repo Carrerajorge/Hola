@@ -35,7 +35,7 @@ async function getLimiter(): Promise<RateLimiterAbstract> {
 
   if (!needsRebuild) return limiter!;
 
-  const redisClient = cache.getRedisClient();
+  const redisClient = cache.getConnectedRedisClient();
   limiter = redisClient
     ? new RateLimiterRedis({
         storeClient: redisClient,
@@ -85,4 +85,3 @@ export async function resetLoginAttempts(email: string, ip: string): Promise<voi
     // ignore
   }
 }
-

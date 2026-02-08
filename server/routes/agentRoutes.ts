@@ -95,7 +95,8 @@ export function createAgentModeRouter() {
                 status: newStatus,
                 currentStepIndex: progress.currentStepIndex,
                 totalSteps: progress.totalSteps,
-                completedSteps: progress.stepResults.filter((r: any) => r.success).length,
+                // Count finished steps, not just successes (failed steps are also "completed" from a progress POV).
+                completedSteps: progress.stepResults.length,
               };
 
               if (progress.plan) {
@@ -174,16 +175,25 @@ export function createAgentModeRouter() {
         }
       })();
 
-      res.status(201).json({
+      const createResponse = {
         id: newRun.id,
-        runId: newRun.id,
+        chatId: newRun.chatId,
         status: "queued",
+        currentStepIndex: 0,
+        totalSteps: 0,
+        completedSteps: 0,
         steps: [],
         artifacts: [],
         plan: null,
-        summary: null,
-        error: null,
-      });
+        summary: undefined,
+        error: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        createdAt: newRun.createdAt.toISOString(),
+      };
+
+      const validatedResponse = validateOrThrow(RunResponseSchema, createResponse, "POST /runs response");
+      res.status(201).json(validatedResponse);
     } catch (error: any) {
       if (error instanceof ValidationError) {
         return res.status(400).json({
@@ -193,6 +203,102 @@ export function createAgentModeRouter() {
       }
       console.error("[AgentRoutes] Error creating run:", error);
       res.status(500).json({ error: "Failed to create agent run" });
+    }
+  });
+
+  router.get("/runs/chat/:chatId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { chatId } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.chatId, chatId))
+        .orderBy(desc(agentModeRuns.createdAt))
+        .limit(1);
+
+      if (!run) {
+        return res.json(null);
+      }
+
+      const steps = await db.select()
+        .from(agentModeSteps)
+        .where(eq(agentModeSteps.runId, run.id))
+        .orderBy(agentModeSteps.stepIndex);
+
+      const planSteps = (run.plan as AgentPlan)?.steps || [];
+
+      const mergedSteps = planSteps.map((planStep: any, index: number) => {
+        const dbStep = steps.find(s => s.stepIndex === index);
+        if (dbStep) {
+          return {
+            stepIndex: dbStep.stepIndex,
+            toolName: dbStep.toolName,
+            description: planStep.description,
+            status: dbStep.status,
+            output: dbStep.toolOutput,
+            error: dbStep.error,
+            startedAt: dbStep.startedAt,
+            completedAt: dbStep.completedAt,
+          };
+        }
+        return {
+          stepIndex: index,
+          toolName: planStep.toolName,
+          description: planStep.description,
+          status: index < (run.currentStepIndex || 0) ? "pending" :
+            index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
+          output: null,
+          error: null,
+          startedAt: null,
+          completedAt: null,
+        };
+      });
+
+      const response: any = {
+        id: run.id,
+        chatId: run.chatId,
+        status: run.status,
+        plan: run.plan,
+        currentStepIndex: run.currentStepIndex ?? 0,
+        totalSteps: run.totalSteps ?? planSteps.length,
+        completedSteps: run.completedSteps ?? 0,
+        steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
+          stepIndex: s.stepIndex,
+          toolName: s.toolName,
+          description: null,
+          status: s.status,
+          output: s.toolOutput,
+          error: s.error,
+          startedAt: s.startedAt,
+          completedAt: s.completedAt,
+        })),
+        artifacts: (run.artifacts as ToolArtifact[]) || [],
+        summary: run.summary,
+        error: run.error,
+        startedAt: run.startedAt?.toISOString(),
+        completedAt: run.completedAt?.toISOString(),
+        createdAt: run.createdAt.toISOString(),
+      };
+
+      // If this run is still active in-memory, include richer debug fields for the AgentPanel tabs.
+      const activeOrchestrator = agentManager.getOrchestrator(run.id);
+      if (activeOrchestrator) {
+        response.eventStream = activeOrchestrator.getEventStream?.() || [];
+        response.todoList = activeOrchestrator.getTodoList?.() || [];
+        response.workspaceFiles = activeOrchestrator.getWorkspaceFiles
+          ? Object.fromEntries(activeOrchestrator.getWorkspaceFiles())
+          : {};
+      }
+
+      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/chat/${chatId} response`);
+      res.json(validatedResponse);
+    } catch (error: any) {
+      if (error instanceof ValidationError) {
+        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
+        return res.status(500).json({ error: "Internal response validation failed" });
+      }
+      console.error("[AgentRoutes] Error getting chat run:", error);
+      res.status(500).json({ error: "Failed to get agent run for chat" });
     }
   });
 
@@ -242,7 +348,7 @@ export function createAgentModeRouter() {
         };
       });
 
-      const response = {
+      const response: any = {
         id: run.id,
         chatId: run.chatId,
         status: run.status,
@@ -267,6 +373,16 @@ export function createAgentModeRouter() {
         completedAt: run.completedAt?.toISOString(),
         createdAt: run.createdAt.toISOString(),
       };
+
+      // If this run is still active in-memory, include richer debug fields for the AgentPanel tabs.
+      const activeOrchestrator = agentManager.getOrchestrator(run.id);
+      if (activeOrchestrator) {
+        response.eventStream = activeOrchestrator.getEventStream?.() || [];
+        response.todoList = activeOrchestrator.getTodoList?.() || [];
+        response.workspaceFiles = activeOrchestrator.getWorkspaceFiles
+          ? Object.fromEntries(activeOrchestrator.getWorkspaceFiles())
+          : {};
+      }
 
       const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/${id} response`);
       res.json(validatedResponse);

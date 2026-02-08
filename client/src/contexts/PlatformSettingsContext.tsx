@@ -40,7 +40,7 @@ const FALLBACK_SETTINGS: PlatformSettings = {
 
   primary_color: "#6366f1",
   secondary_color: "#8b5cf6",
-  theme_mode: "dark",
+  theme_mode: "auto",
 
   allow_registration: true,
   require_email_verification: false,
@@ -147,7 +147,10 @@ export function PlatformSettingsProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     // Branding variables used by shadcn/ui theme.
     applyBrandingCss(settings);
-    document.documentElement.dataset.platformThemeMode = settings.theme_mode;
+    
+    // REMOVED: Do not force theme mode from platform settings. 
+    // Let user preferences (SettingsContext) handle light/dark mode.
+    // document.documentElement.dataset.platformThemeMode = settings.theme_mode;
   }, [settings.primary_color, settings.secondary_color, settings.theme_mode]);
 
   return (

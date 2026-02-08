@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
-import request from "supertest";
+import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
 const insertReturningQueue: any[] = [];
 const updateReturningQueue: any[] = [];
@@ -83,12 +83,17 @@ describe("skillsRouter", () => {
     }));
 
     const app = await createTestApp();
-    const res = await request(app).get("/api/skills");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/skills");
 
-    expect(res.status).toBe(200);
-    expect(res.body.skills).toHaveLength(1);
-    expect(res.body.skills[0].id).toBe("skill_1");
-    expect(res.body.skills[0].triggers).toEqual(["foo"]);
+      expect(res.status).toBe(200);
+      expect(res.body.skills).toHaveLength(1);
+      expect(res.body.skills[0].id).toBe("skill_1");
+      expect(res.body.skills[0].triggers).toEqual(["foo"]);
+    } finally {
+      await close();
+    }
   });
 
   it("GET /api/skills/active returns active skill id from user preferences", async () => {
@@ -101,10 +106,15 @@ describe("skillsRouter", () => {
     }));
 
     const app = await createTestApp();
-    const res = await request(app).get("/api/skills/active");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/skills/active");
 
-    expect(res.status).toBe(200);
-    expect(res.body.activeSkillId).toBe("skill_active");
+      expect(res.status).toBe(200);
+      expect(res.body.activeSkillId).toBe("skill_active");
+    } finally {
+      await close();
+    }
   });
 
   it("PUT /api/skills/active stores activeSkillId under preferences.skills.activeSkillId", async () => {
@@ -118,18 +128,23 @@ describe("skillsRouter", () => {
     updateReturningQueue.push([{ id: "user_test" }]);
 
     const app = await createTestApp();
-    const res = await request(app)
-      .put("/api/skills/active")
-      .send({ activeSkillId: "skill_active_2" });
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client
+        .put("/api/skills/active")
+        .send({ activeSkillId: "skill_active_2" });
 
-    expect(res.status).toBe(200);
-    expect(res.body.activeSkillId).toBe("skill_active_2");
+      expect(res.status).toBe(200);
+      expect(res.body.activeSkillId).toBe("skill_active_2");
 
-    expect(lastUpdatePatch?.preferences).toEqual({
-      other: 1,
-      skills: { foo: "bar", activeSkillId: "skill_active_2" },
-    });
-    expect(lastUpdatePatch?.updatedAt instanceof Date).toBe(true);
+      expect(lastUpdatePatch?.preferences).toEqual({
+        other: 1,
+        skills: { foo: "bar", activeSkillId: "skill_active_2" },
+      });
+      expect(lastUpdatePatch?.updatedAt instanceof Date).toBe(true);
+    } finally {
+      await close();
+    }
   });
 
   it("POST /api/skills creates a skill", async () => {
@@ -149,27 +164,37 @@ describe("skillsRouter", () => {
     insertReturningQueue.push([createdRow]);
 
     const app = await createTestApp();
-    const res = await request(app).post("/api/skills").send({
-      name: "Nuevo",
-      description: "Desc",
-      instructions: "Instr",
-      category: "custom",
-      enabled: true,
-      features: ["f1"],
-      triggers: ["t1"],
-    });
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.post("/api/skills").send({
+        name: "Nuevo",
+        description: "Desc",
+        instructions: "Instr",
+        category: "custom",
+        enabled: true,
+        features: ["f1"],
+        triggers: ["t1"],
+      });
 
-    expect(res.status).toBe(201);
-    expect(res.body.skill.id).toBe("skill_2");
-    expect(res.body.skill.triggers).toEqual(["t1"]);
+      expect(res.status).toBe(201);
+      expect(res.body.skill.id).toBe("skill_2");
+      expect(res.body.skill.triggers).toEqual(["t1"]);
+    } finally {
+      await close();
+    }
   });
 
   it("PUT /api/skills/:id returns 404 when skill not found", async () => {
     updateReturningQueue.push([]);
     const app = await createTestApp();
-    const res = await request(app).put("/api/skills/does-not-exist").send({ description: "x" });
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe("Skill not found");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.put("/api/skills/does-not-exist").send({ description: "x" });
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Skill not found");
+    } finally {
+      await close();
+    }
   });
 
   it("PUT /api/skills/:id converts triggers to DB shape", async () => {
@@ -189,20 +214,30 @@ describe("skillsRouter", () => {
     updateReturningQueue.push([updatedRow]);
 
     const app = await createTestApp();
-    const res = await request(app).put("/api/skills/skill_3").send({ triggers: ["x"] });
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.put("/api/skills/skill_3").send({ triggers: ["x"] });
 
-    expect(res.status).toBe(200);
-    expect(res.body.skill.id).toBe("skill_3");
-    expect(res.body.skill.triggers).toEqual(["x"]);
-    expect(lastUpdatePatch?.triggers).toEqual([{ type: "keyword", value: "x", priority: 0 }]);
+      expect(res.status).toBe(200);
+      expect(res.body.skill.id).toBe("skill_3");
+      expect(res.body.skill.triggers).toEqual(["x"]);
+      expect(lastUpdatePatch?.triggers).toEqual([{ type: "keyword", value: "x", priority: 0 }]);
+    } finally {
+      await close();
+    }
   });
 
   it("DELETE /api/skills/:id returns 404 when missing", async () => {
     deleteReturningQueue.push([]);
     const app = await createTestApp();
-    const res = await request(app).delete("/api/skills/skill_404");
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe("Skill not found");
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.delete("/api/skills/skill_404");
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe("Skill not found");
+    } finally {
+      await close();
+    }
   });
 
 	it("POST /api/skills/import skips duplicate names (case-insensitive)", async () => {
@@ -228,19 +263,24 @@ describe("skillsRouter", () => {
     insertReturningQueue.push([insertedRow]);
 
     const app = await createTestApp();
-    const res = await request(app)
-      .post("/api/skills/import")
-      .send({
-        skills: [
-          { name: "Dup", description: "d", instructions: "i", category: "custom", enabled: true, features: [], triggers: [] },
-          { name: "New", description: "d", instructions: "i", category: "custom", enabled: true, features: [], triggers: ["k"] },
-        ],
-      });
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client
+        .post("/api/skills/import")
+        .send({
+          skills: [
+            { name: "Dup", description: "d", instructions: "i", category: "custom", enabled: true, features: [], triggers: [] },
+            { name: "New", description: "d", instructions: "i", category: "custom", enabled: true, features: [], triggers: ["k"] },
+          ],
+        });
 
-    expect(res.status).toBe(200);
-    expect(res.body.imported).toHaveLength(1);
-    expect(res.body.imported[0].name).toBe("New");
-		expect(res.body.skipped).toBe(1);
+      expect(res.status).toBe(200);
+      expect(res.body.imported).toHaveLength(1);
+      expect(res.body.imported[0].name).toBe("New");
+		  expect(res.body.skipped).toBe(1);
+    } finally {
+      await close();
+    }
 	});
 
 	it("POST /api/skills/ensure returns existing skill by name (case-insensitive)", async () => {
@@ -267,14 +307,19 @@ describe("skillsRouter", () => {
 		}));
 
 		const app = await createTestApp();
-		const res = await request(app)
-			.post("/api/skills/ensure")
-			.send({ name: "mi skill", prompt: "haz algo" });
+		const { client, close } = await createHttpTestClient(app);
+		try {
+			const res = await client
+				.post("/api/skills/ensure")
+				.send({ name: "mi skill", prompt: "haz algo" });
 
-		expect(res.status).toBe(200);
-		expect(res.body.created).toBe(false);
-		expect(res.body.skill?.id).toBe("skill_exist");
-		expect(generateSkillFromPromptMock).not.toHaveBeenCalled();
+			expect(res.status).toBe(200);
+			expect(res.body.created).toBe(false);
+			expect(res.body.skill?.id).toBe("skill_exist");
+			expect(generateSkillFromPromptMock).not.toHaveBeenCalled();
+		} finally {
+			await close();
+		}
 	});
 
 	it("POST /api/skills/ensure creates skill when missing", async () => {
@@ -311,13 +356,18 @@ describe("skillsRouter", () => {
 		insertReturningQueue.push([createdRow]);
 
 		const app = await createTestApp();
-		const res = await request(app)
-			.post("/api/skills/ensure")
-			.send({ name: "Mi Skill", prompt: "haz algo" });
+		const { client, close } = await createHttpTestClient(app);
+		try {
+			const res = await client
+				.post("/api/skills/ensure")
+				.send({ name: "Mi Skill", prompt: "haz algo" });
 
-		expect(res.status).toBe(201);
-		expect(res.body.created).toBe(true);
-		expect(res.body.skill?.id).toBe("skill_created");
-		expect(generateSkillFromPromptMock).toHaveBeenCalledTimes(1);
+			expect(res.status).toBe(201);
+			expect(res.body.created).toBe(true);
+			expect(res.body.skill?.id).toBe("skill_created");
+			expect(generateSkillFromPromptMock).toHaveBeenCalledTimes(1);
+		} finally {
+			await close();
+		}
 	});
 });

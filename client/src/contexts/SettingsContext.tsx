@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useSettings, applyTheme, applyAccentColor, UserSettings } from "@/hooks/use-settings";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
+import { setSoundEnabled } from "@/lib/notification-sound";
 
 interface SettingsContextType {
   settings: UserSettings;
@@ -30,6 +31,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const { settings: platformSettings } = usePlatformSettings();
 
   useEffect(() => {
+    // Enforce a simple invariant: advanced voice requires voice mode.
+    // This prevents "advancedVoice=true" from lingering if voiceMode is later disabled
+    // (e.g. from an older local storage state).
+    if (!settings.voiceMode && settings.advancedVoice) {
+      updateSettings({ advancedVoice: false });
+    }
+  }, [settings.voiceMode, settings.advancedVoice, updateSettings]);
+
+  useEffect(() => {
     // Platform theme mode is global; users can only override when platform is "auto".
     const effectiveAppearance: UserSettings["appearance"] =
       platformSettings.theme_mode === "dark"
@@ -44,8 +54,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const handleChange = () => {
       if (effectiveAppearance === "system") {
         applyTheme("system");
-        // Do not override platform branding colors.
-        applyAccentColor("default");
+        applyAccentColor(settings.accentColor);
       }
     };
 
@@ -54,9 +63,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [settings.appearance, settings.accentColor, platformSettings.theme_mode]);
 
   useEffect(() => {
-    // Platform branding controls --primary/--ring. Always clear per-user overrides.
-    applyAccentColor("default");
+    // Apply per-user accent color after platform branding. This lets users pick an accent
+    // while keeping platform primary/secondary as the default.
+    applyAccentColor(settings.accentColor);
   }, [platformSettings.primary_color, platformSettings.secondary_color, settings.accentColor, settings.appearance]);
+
+  useEffect(() => {
+    setSoundEnabled(settings.notifSound);
+  }, [settings.notifSound]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -122,7 +136,28 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.highContrast, settings.reducedMotion, settings.fontSize, settings.density]);
 
+  const wrappedUpdateSettings = (updates: Partial<UserSettings>) => {
+    const normalized: Partial<UserSettings> = { ...updates };
+    // If voice mode is disabled, advanced voice must be disabled as well.
+    if (normalized.voiceMode === false) {
+      normalized.advancedVoice = false;
+    } else if (normalized.advancedVoice === true) {
+      // Enabling advanced voice should enable voice mode too.
+      normalized.voiceMode = true;
+    }
+    updateSettings(normalized);
+  };
+
   const wrappedUpdateSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
+    if (key === "voiceMode" && value === false) {
+      wrappedUpdateSettings({ voiceMode: false, advancedVoice: false });
+      return;
+    }
+    if (key === "advancedVoice" && value === true) {
+      wrappedUpdateSettings({ voiceMode: true, advancedVoice: true });
+      return;
+    }
+
     updateSetting(key, value);
 
     if (key === "appearance") {
@@ -145,7 +180,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     <SettingsContext.Provider value={{
       settings,
       updateSetting: wrappedUpdateSetting,
-      updateSettings,
+      updateSettings: wrappedUpdateSettings,
       resetSettings,
       syncSettingsToServer,
       loadSettingsFromServer,

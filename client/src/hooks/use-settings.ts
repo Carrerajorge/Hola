@@ -46,6 +46,12 @@ export interface UserSettings {
   notifTasks: "push" | "email" | "push_email" | "none";
   notifProjects: "push" | "email" | "push_email" | "none";
   notifRecommendations: "push" | "email" | "push_email" | "none";
+  notifInApp: boolean;
+  notifSound: boolean;
+  notifDesktop: boolean;
+  notifQuietHours: boolean;
+  notifQuietStart: string; // HH:MM
+  notifQuietEnd: string; // HH:MM
   
   // Personalization
   styleAndTone: "default" | "formal" | "casual" | "concise";
@@ -90,6 +96,12 @@ interface ApiUserSettings {
     nickname: string;
     occupation: string;
     bio: string;
+    // Builder profile (optional for backwards compatibility)
+    showName?: boolean;
+    linkedInUrl?: string;
+    githubUrl?: string;
+    websiteDomain?: string;
+    receiveEmailComments?: boolean;
   };
   featureFlags: {
     memoryEnabled: boolean;
@@ -139,6 +151,12 @@ const defaultSettings: UserSettings = {
   notifTasks: "push_email",
   notifProjects: "email",
   notifRecommendations: "push_email",
+  notifInApp: true,
+  notifSound: true,
+  notifDesktop: false,
+  notifQuietHours: false,
+  notifQuietStart: "22:00",
+  notifQuietEnd: "08:00",
   
   // Personalization
   styleAndTone: "default",
@@ -180,7 +198,12 @@ function loadSettings(): UserSettings {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      return { ...defaultSettings, ...parsed };
+      const merged = { ...defaultSettings, ...parsed };
+
+      // Legacy: older UI stored a sentinel value ("custom") instead of an actual URL.
+      if (merged.websiteDomain === "custom") merged.websiteDomain = "";
+
+      return merged;
     }
   } catch (e) {
     console.error("Failed to load settings:", e);
@@ -206,6 +229,11 @@ function mapLocalToApiSettings(settings: UserSettings): Omit<ApiUserSettings, 'u
       nickname: settings.nickname,
       occupation: settings.occupation,
       bio: settings.aboutYou,
+      showName: settings.showName,
+      linkedInUrl: settings.linkedInUrl,
+      githubUrl: settings.githubUrl,
+      websiteDomain: settings.websiteDomain,
+      receiveEmailComments: settings.receiveEmailComments,
     },
     featureFlags: {
       memoryEnabled: settings.allowMemories,
@@ -227,6 +255,11 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
     nickname: apiSettings.userProfile?.nickname || '',
     occupation: apiSettings.userProfile?.occupation || '',
     aboutYou: apiSettings.userProfile?.bio || '',
+    showName: apiSettings.userProfile?.showName ?? true,
+    linkedInUrl: apiSettings.userProfile?.linkedInUrl || '',
+    githubUrl: apiSettings.userProfile?.githubUrl || '',
+    websiteDomain: apiSettings.userProfile?.websiteDomain || '',
+    receiveEmailComments: apiSettings.userProfile?.receiveEmailComments ?? false,
     allowMemories: apiSettings.featureFlags?.memoryEnabled ?? true,
     allowRecordings: apiSettings.featureFlags?.recordingHistoryEnabled ?? false,
     webSearch: apiSettings.featureFlags?.webSearchAuto ?? true,

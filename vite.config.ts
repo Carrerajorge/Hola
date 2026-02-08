@@ -9,6 +9,11 @@ import { metaImagesPlugin } from "./vite-plugin-meta-images";
 export default defineConfig(async () => {
   const isProd = process.env.NODE_ENV === "production";
   const isReplit = process.env.REPL_ID !== undefined;
+  const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] || "0", 10);
+  // Workbox bundles/minifies the SW with Rollup+Terser in production mode. That
+  // path can fail under some sandboxed/newer Node runtimes, so we fall back to
+  // development mode there (still generates a valid SW, just not minified).
+  const workboxMode = nodeMajor >= 22 ? "development" : "production";
 
   const replitPlugins =
     !isProd && isReplit
@@ -48,6 +53,7 @@ export default defineConfig(async () => {
           ],
         },
         workbox: {
+          mode: workboxMode,
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
           // Don't cache API requests - let them pass through to the network

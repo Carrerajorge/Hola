@@ -51,6 +51,7 @@ import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import "@/components/ui/glass-effects.css";
 
 interface UploadedFile {
@@ -204,6 +205,9 @@ export function Composer({
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
+  const { settings } = useSettingsContext();
+  const webSearchEnabled = !!settings.webSearch;
+  const canvasEnabled = !!settings.canvas;
 
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
 
@@ -615,6 +619,7 @@ export function Composer({
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+                disabled={!webSearchEnabled}
               >
                 <Search className="h-4 w-4" />
                 Web Search
@@ -665,7 +670,12 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                onClick={() => { setSelectedTool("web"); onCloseSidebar?.(); }}
+                disabled={!webSearchEnabled}
+                onClick={() => {
+                  if (!webSearchEnabled) return;
+                  setSelectedTool("web");
+                  onCloseSidebar?.();
+                }}
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-cyan-100 dark:bg-cyan-900/30">
                   <Globe className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
@@ -682,71 +692,80 @@ export function Composer({
                 </div>
                 Generar imagen
               </Button>
-
-              <HoverCard openDelay={100} closeDelay={100}>
-                <HoverCardTrigger asChild>
-                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
-                    <span className="flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Crear documento
-                    </span>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </HoverCardTrigger>
-                <HoverCardContent side="right" align="start" className="w-48 p-2">
-                  <div className="grid gap-1">
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("word")}
-                      data-testid="button-create-word"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
-                        <span className="text-white text-xs font-bold">W</span>
-                      </div>
-                      Documento Word
+              {canvasEnabled ? (
+                <HoverCard openDelay={100} closeDelay={100}>
+                  <HoverCardTrigger asChild>
+                    <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
+                      <span className="flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Crear documento
+                      </span>
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("excel")}
-                      data-testid="button-create-excel"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
-                        <span className="text-white text-xs font-bold">X</span>
-                      </div>
-                      Hoja Excel
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("ppt")}
-                      data-testid="button-create-ppt"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
-                        <span className="text-white text-xs font-bold">P</span>
-                      </div>
-                      Presentación PPT
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
-                        <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
-                          <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
-                          <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
-                          <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
-                          <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
-                          <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
-                        </svg>
-                      </div>
-                      Diagrama Figma
-                    </Button>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
+                  </HoverCardTrigger>
+                  <HoverCardContent side="right" align="start" className="w-48 p-2">
+                    <div className="grid gap-1">
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("word")}
+                        data-testid="button-create-word"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
+                          <span className="text-white text-xs font-bold">W</span>
+                        </div>
+                        Documento Word
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("excel")}
+                        data-testid="button-create-excel"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
+                          <span className="text-white text-xs font-bold">X</span>
+                        </div>
+                        Hoja Excel
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => openBlankDocEditor("ppt")}
+                        data-testid="button-create-ppt"
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
+                          <span className="text-white text-xs font-bold">P</span>
+                        </div>
+                        Presentación PPT
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                        onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
+                          <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
+                            <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
+                            <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
+                            <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
+                            <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
+                            <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
+                          </svg>
+                        </div>
+                        Diagrama Figma
+                      </Button>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              ) : (
+                <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item" disabled>
+                  <span className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Crear documento
+                  </span>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
 
               <Button
                 variant="ghost"

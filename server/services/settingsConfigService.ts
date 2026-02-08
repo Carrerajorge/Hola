@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS_MAP: Record<string, any> = {
   // Branding
   primary_color: "#6366f1",
   secondary_color: "#8b5cf6",
-  theme_mode: "dark",
+  theme_mode: "auto",
 
   // Users
   allow_registration: true,
@@ -54,10 +54,10 @@ const PUBLIC_SETTING_KEYS = [
   "date_format",
   "maintenance_mode",
 
-  // Branding
-  "primary_color",
-  "secondary_color",
-  "theme_mode",
+  // Branding (Removed to allow user override on client-side)
+  // "primary_color",
+  // "secondary_color",
+  // "theme_mode",
 
   // Users
   "allow_registration",

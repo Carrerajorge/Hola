@@ -18,6 +18,7 @@ import {
     type Artifact,
     type DocumentIntent,
 } from '../agent/production';
+import { exportAcademicArticlesFromPrompt } from './academicArticlesExport';
 
 // ============================================================================
 // Types
@@ -85,6 +86,17 @@ function requiresSearchFirst(message: string): boolean {
     return SEARCH_FIRST_PATTERNS.some(pattern => pattern.test(message));
 }
 
+// Specialized workflow: "buscarme N articulos cientificos ... en excel ... y citas APA en word"
+function isAcademicArticlesExportRequest(message: string): boolean {
+    const wantsAcademic =
+        /\b(art[ií]culos?|paper(?:s)?|estudio(?:s)?|investigaci[óo]n(?:es)?|scopus|scielo|pubmed|wos|web\s*of\s*science)\b/i.test(message);
+    const wantsCount =
+        /\b(?:buscarme|buscame|dame|necesito|encuentra(?:me)?)\b/i.test(message) && /\b\d{2,3}\b/.test(message);
+    const wantsFile =
+        /\b(excel|xlsx|word|docx)\b/i.test(message);
+    return wantsAcademic && wantsCount && wantsFile;
+}
+
 function wantsArtifactOutput(message: string): boolean {
     const lower = message.toLowerCase();
     // If user mentions any concrete output format/action, we should allow production pipeline.
@@ -112,7 +124,7 @@ export function isProductionIntent(intentResult: IntentResult | null, message?: 
     return PRODUCTION_INTENTS.includes(intentResult.intent as any);
 }
 
-export function getDeliverables(intentResult: IntentResult): ('word' | 'excel' | 'ppt' | 'pdf')[] {
+export function getDeliverables(intentResult: IntentResult, message?: string): ('word' | 'excel' | 'ppt' | 'pdf')[] {
     const deliverables: ('word' | 'excel' | 'ppt' | 'pdf')[] = [];
 
     switch (intentResult.intent) {
@@ -132,13 +144,15 @@ export function getDeliverables(intentResult: IntentResult): ('word' | 'excel' |
 
     // Check for compound requests in slots
     const topic = intentResult.slots.topic?.toLowerCase() || '';
-    if (topic.includes('excel') || topic.includes('hoja de cálculo') || topic.includes('spreadsheet')) {
+    const combined = `${topic} ${message || ''}`.toLowerCase();
+
+    if (combined.includes('excel') || combined.includes('hoja de cálculo') || combined.includes('spreadsheet')) {
         if (!deliverables.includes('excel')) deliverables.push('excel');
     }
-    if (topic.includes('presentación') || topic.includes('presentation') || topic.includes('ppt')) {
+    if (combined.includes('presentación') || combined.includes('presentation') || combined.includes('ppt')) {
         if (!deliverables.includes('ppt')) deliverables.push('ppt');
     }
-    if (topic.includes('word') || topic.includes('documento') || topic.includes('document')) {
+    if (combined.includes('word') || combined.includes('documento') || combined.includes('document') || combined.includes('docx')) {
         if (!deliverables.includes('word')) deliverables.push('word');
     }
 
@@ -254,7 +268,7 @@ export async function handleProductionRequest(
     console.log(`[ProductionHandler] Topic: ${intentResult.slots.topic || message}`);
 
     const runId = uuidv4();
-    const deliverables = getDeliverables(intentResult);
+    const deliverables = getDeliverables(intentResult, message);
 
     console.log(`[ProductionHandler] Deliverables: ${deliverables.join(', ')}`);
 
@@ -278,6 +292,158 @@ export async function handleProductionRequest(
     });
 
     try {
+        // ============================================================================
+        // ACADEMIC ARTICLES EXPORT (fast path)
+        // ============================================================================
+        if (isAcademicArticlesExportRequest(message)) {
+            writeSse(res, 'production_event', {
+                type: 'stage_start',
+                stage: 'research',
+                progress: 0,
+                message: 'Iniciando busqueda de articulos cientificos (Scopus/OpenAlex/SciELO/Redalyc)...',
+                timestamp: Date.now(),
+            });
+
+            const exportResult = await exportAcademicArticlesFromPrompt(message);
+
+            writeSse(res, 'production_event', {
+                type: 'stage_complete',
+                stage: 'research',
+                progress: 100,
+                message: `Busqueda completada: ${exportResult.stats.totalReturned}/${exportResult.stats.totalRequested} articulos`,
+                timestamp: Date.now(),
+            });
+
+            const artifacts: Artifact[] = [];
+
+            if (deliverables.includes('excel')) {
+                artifacts.push({
+                    type: 'excel',
+                    filename: `articulos_cientificos_${Date.now()}.xlsx`,
+                    buffer: exportResult.excelBuffer,
+                    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    size: exportResult.excelBuffer.length,
+                    metadata: { sheetCount: 1 },
+                });
+            }
+
+            if (deliverables.includes('word')) {
+                artifacts.push({
+                    type: 'word',
+                    filename: `referencias_apa7_${Date.now()}.docx`,
+                    buffer: exportResult.wordBuffer,
+                    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    size: exportResult.wordBuffer.length,
+                    metadata: { pageCount: undefined, wordCount: undefined },
+                });
+            }
+
+            // Save artifacts and generate download URLs
+            const artifactsWithUrls: Array<{ type: string; filename: string; downloadUrl: string; size: number }> = [];
+
+            for (const artifact of artifacts) {
+                const stored = await saveArtifact(artifact, runId, userId, chatId);
+                artifact.downloadUrl = stored.downloadUrl;
+
+                artifactsWithUrls.push({
+                    type: artifact.type,
+                    filename: artifact.filename,
+                    downloadUrl: stored.downloadUrl,
+                    size: artifact.size,
+                });
+
+                writeSse(res, 'artifact', {
+                    type: artifact.type,
+                    filename: artifact.filename,
+                    downloadUrl: stored.downloadUrl,
+                    size: artifact.size,
+                    library: stored.library,
+                });
+            }
+
+            const sourcesLine = Object.entries(exportResult.stats.bySource)
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => `${k} (${v})`)
+                .join(', ') || 'n/a';
+
+            const yearsLine = exportResult.plan.yearFrom && exportResult.plan.yearTo
+                ? `${exportResult.plan.yearFrom}-${exportResult.plan.yearTo}`
+                : 'n/a';
+
+            const regionLine = [
+                exportResult.plan.region.latam ? 'Latinoamerica' : null,
+                exportResult.plan.region.spain ? 'Espana' : null,
+            ].filter(Boolean).join(' + ') || 'n/a';
+
+            const coverage = exportResult.stats.coverage;
+            const fmtCoverage = (label: string, c: { present: number; missing: number }) => {
+                const total = c.present + c.missing;
+                const pct = total ? Math.round((c.present / total) * 100) : 0;
+                return `${label} ${c.present}/${total} (${pct}%)`;
+            };
+
+            const coverageLine = [
+                fmtCoverage('DOI', coverage.doi),
+                fmtCoverage('Abstract', coverage.abstract),
+                fmtCoverage('Keywords', coverage.keywords),
+                fmtCoverage('Journal', coverage.journal),
+                fmtCoverage('Language', coverage.language),
+                fmtCoverage('Document Type', coverage.documentType),
+                fmtCoverage('City', coverage.city),
+                fmtCoverage('Country', coverage.country),
+            ].join(' | ');
+
+            const notesBlock = exportResult.stats.notes?.length
+                ? ['', '**Notas:**', ...exportResult.stats.notes.map(n => `- ${n}`)].join('\n')
+                : '';
+
+            const artifactLinks = artifactsWithUrls.map(a => {
+                const icon = getArtifactIcon(a.type);
+                return `- ${icon} [${a.filename}](${a.downloadUrl}) (${formatSize(a.size)})`;
+            }).join('\n');
+
+            const summary = [
+                '## 📚 Exportacion Academica Completada',
+                '',
+                artifactLinks,
+                '',
+                `**Tema:** ${exportResult.plan.topicQuery || message}`,
+                `**Rango de anos:** ${yearsLine}`,
+                `**Region:** ${regionLine}`,
+                `**Articulos:** ${exportResult.stats.totalReturned}/${exportResult.stats.totalRequested}`,
+                `**Fuentes:** ${sourcesLine}`,
+                `**Cobertura:** ${coverageLine}`,
+                notesBlock,
+            ].join('\n');
+
+            writeSse(res, 'production_complete', {
+                runId,
+                success: true,
+                artifactsCount: artifacts.length,
+                summary,
+                timestamp: Date.now(),
+            });
+
+            // Send summary as regular chat content for display
+            writeSse(res, 'chunk', {
+                content: summary,
+                sequenceId: 1,
+                requestId: runId,
+                runId,
+            });
+
+            writeSse(res, 'done', {
+                sequenceId: 2,
+                requestId: runId,
+                runId,
+                timestamp: Date.now(),
+            });
+
+            res.end();
+
+            return { handled: true };
+        }
+
         const pipelineIntent: DocumentIntent =
             intentResult.intent === 'CREATE_PRESENTATION'
                 ? 'presentation'

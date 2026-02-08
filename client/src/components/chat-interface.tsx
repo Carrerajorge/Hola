@@ -115,6 +115,7 @@ import { MessageFeedback } from "@/components/message-feedback";
 import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
+import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
@@ -249,6 +250,7 @@ interface ChatInterfaceProps {
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
+  chatTitle?: string | null;
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
@@ -342,6 +344,7 @@ export function ChatInterface({
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
+  chatTitle,
   onOpenApps,
   onUpdateMessageAttachments,
   onEditMessageAndTruncate,
@@ -373,6 +376,7 @@ export function ChatInterface({
   selectedProjectId
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { settings } = useSettingsContext();
   const {
     projects,
     getProject
@@ -455,9 +459,19 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, setUploadedFilesState] = useState<UploadedFile[]>([]);
   // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
   const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  const setUploadedFiles = useCallback((value: React.SetStateAction<UploadedFile[]>) => {
+    setUploadedFilesState((prev: UploadedFile[]) => {
+      const next =
+        typeof value === "function"
+          ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
+          : value;
+      uploadedFilesRef.current = next;
+      return next;
+    });
+  }, []);
   const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -504,9 +518,32 @@ export function ChatInterface({
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
 
+  // Keep UI state consistent with Settings toggles (disable features when turned off).
   useEffect(() => {
-    uploadedFilesRef.current = uploadedFiles;
-  }, [uploadedFiles]);
+    if (!settings.webSearch && selectedTool === "web") {
+      setSelectedTool(null);
+    }
+  }, [settings.webSearch, selectedTool]);
+
+  useEffect(() => {
+    if (!settings.voiceMode) {
+      if (isVoiceChatOpen) setIsVoiceChatOpen(false);
+      if (isRecording || isPaused) stopVoiceRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.voiceMode]);
+
+  useEffect(() => {
+    if (!settings.canvas) {
+      if (activeDocEditor) {
+        void closeDocEditor();
+      } else if (selectedDocTool) {
+        setSelectedDocTool(null);
+      }
+      if (minimizedDocument) setMinimizedDocument(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.canvas]);
 
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
@@ -825,7 +862,7 @@ export function ChatInterface({
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
-  const [isGmailActive, setIsGmailActive] = useState(true);
+  const isGmailActive = !!settings.connectorSearch;
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
@@ -881,7 +918,7 @@ export function ChatInterface({
     if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
       streamingChatIdRef.current = currentChatId;
       if (currentChatId) {
-        startRun(currentChatId);
+        startRun(currentChatId, undefined, undefined, chatTitle || undefined);
       }
     }
 
@@ -901,7 +938,7 @@ export function ChatInterface({
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId, startRun, updateStatus, completeRun]);
+  }, [aiState, chatId, chatTitle, startRun, updateStatus, completeRun]);
 
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
@@ -2781,7 +2818,7 @@ export function ChatInterface({
     }
 
     // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
+    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
@@ -2789,7 +2826,7 @@ export function ChatInterface({
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
-    const hasFiles = uploadedFiles.length > 0;
+    const hasFiles = uploadedFilesRef.current.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
@@ -2866,12 +2903,43 @@ export function ChatInterface({
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const attachments = uploadedFiles.map((f: any) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type,
-          spreadsheetData: f.spreadsheetData
-        }));
+        const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+
+        // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+        const attachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.type,
+            type: f.type,
+            storagePath: f.storagePath,
+            path: f.storagePath,
+            size: f.size,
+            metadata: {
+              spreadsheetData: f.spreadsheetData,
+              analysisId: f.analysisId,
+            },
+          }));
+
+        const messageAttachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            name: f.name,
+            documentType: (() => {
+              if (f.type.startsWith("image/")) return undefined;
+              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              return "word";
+            })() as "word" | "excel" | "ppt" | "pdf",
+            mimeType: f.type,
+            imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
+            storagePath: f.storagePath,
+            fileId: f.id,
+            spreadsheetData: f.spreadsheetData,
+          }));
 
         // Generate a unique message ID for tracking in the store
         const agentMessageId = `agent-${Date.now()}`;
@@ -2883,6 +2951,9 @@ export function ChatInterface({
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
+          requestId: generateRequestId(),
+          skipRun: true, // Agent mode: persist message but don't create a normal chat run
+          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
         };
         // Show message immediately (optimistic update)
         setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
@@ -3650,7 +3721,7 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately
     const userInput = input;
-    const currentUploadedFiles = [...uploadedFiles];
+    const currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = Date.now().toString();
 
     // Reset UI state immediately
@@ -3711,12 +3782,21 @@ export function ChatInterface({
 
 
       const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
-      const agentAttachments = readyFiles.map((f: any) => ({
-        id: f.id,
-        name: f.name,
-        type: f.type,
-        spreadsheetData: f.spreadsheetData
-      }));
+      const agentAttachments = readyFiles
+        .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+        .map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.type,
+          type: f.type,
+          storagePath: f.storagePath,
+          path: f.storagePath,
+          size: f.size,
+          metadata: {
+            spreadsheetData: f.spreadsheetData,
+            analysisId: f.analysisId,
+          },
+        }));
 
       const agentMessageId = `agent-${Date.now()}`;
       setCurrentAgentMessageId(agentMessageId);
@@ -3737,7 +3817,7 @@ export function ChatInterface({
           });
 
           // Optimistic message already added above! just notify parent/server if needed
-          onSendMessage(userMsg);
+          onSendMessage({ ...userMsg, skipRun: true });
 
           setSelectedTool(null);
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
@@ -3927,9 +4007,9 @@ export function ChatInterface({
       // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
       if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
         // Create file context from uploaded files
-        if (uploadedFiles.length > 0) {
+        if (currentUploadedFiles.length > 0) {
           // Add file context if files are present
-          const fileContext = uploadedFiles
+          const fileContext = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => ({
               name: f.name,
@@ -4087,7 +4167,7 @@ export function ChatInterface({
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
-          console.log(`[ChatInterface] Files attached (${uploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+          console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
         }
 
         // Generate image if needed
@@ -4179,7 +4259,7 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
-          const fileContents = uploadedFiles
+          const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
             .join("\n\n");
@@ -4194,7 +4274,7 @@ export function ChatInterface({
           }));
 
           // Extract image data URLs from current files
-          const imageDataUrls = uploadedFiles
+          const imageDataUrls = currentUploadedFiles
             .filter(f => f.type.startsWith("image/") && f.dataUrl)
             .map(f => f.dataUrl as string);
 
@@ -4338,7 +4418,7 @@ IMPORTANTE:
             };
 
             // Build attachments array for streaming endpoint
-            const streamAttachments = uploadedFiles
+            const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
                 type: f.type.startsWith("image/") ? "image" as const :
@@ -4355,7 +4435,7 @@ IMPORTANTE:
               }));
 
             // Robust document detection using both mimeType AND file extension
-            const hasDocumentAttachments = uploadedFiles
+            const hasDocumentAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .some(f => isDocumentFile(f.type, f.name));
 

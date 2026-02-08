@@ -21,3 +21,27 @@ import { vi } from 'vitest';
 
 // Example: Mock console.log to reduce noise if desired
 // vi.spyOn(console, 'log').mockImplementation(() => {});
+
+// Supertest binds ephemeral servers to 0.0.0.0 by default when passed an Express app.
+// Some sandboxed environments disallow binding to all interfaces. Patch Supertest to
+// bind to 127.0.0.1 for portability across dev/CI/sandboxes.
+import { createRequire } from "node:module";
+import { Server as HttpsServer } from "node:https";
+
+try {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Test = require("supertest/lib/test");
+  if (Test?.prototype?.serverAddress) {
+    Test.prototype.serverAddress = function serverAddress(app: any, path: string) {
+      const addr = app.address?.();
+      if (!addr) this._server = app.listen(0, "127.0.0.1");
+      const port = app.address().port;
+      const protocol = app instanceof HttpsServer ? "https" : "http";
+      return `${protocol}://127.0.0.1:${port}${path}`;
+    };
+  }
+} catch {
+  // Best-effort patch; if supertest internals change, tests can still opt into
+  // manual server binding via tests/helpers/httpTestClient.ts.
+}

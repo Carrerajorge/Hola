@@ -26,6 +26,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const { settings } = useSettingsContext();
+  const advancedVoiceEnabled = !!settings.advancedVoice;
 
   const speechLocale = useMemo(() => {
     const code = settings.spokenLanguage;
@@ -74,6 +75,15 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       cleanupAudio();
     };
   }, [open]);
+
+  // If advanced voice is disabled, make sure we don't keep advanced inputs active.
+  useEffect(() => {
+    if (!advancedVoiceEnabled) {
+      if (isCameraActive) stopCamera();
+      if (inputMode === "uploading") setInputMode("idle");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advancedVoiceEnabled]);
 
   const cleanupAudio = () => {
     if (animationFrameRef.current) {
@@ -241,6 +251,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
   // File upload functions
   const handleFileUpload = () => {
+    if (!advancedVoiceEnabled) return;
     fileInputRef.current?.click();
   };
 
@@ -377,6 +388,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   };
 
   const handleCameraToggle = () => {
+    if (!advancedVoiceEnabled) return;
     if (isCameraActive) {
       stopCamera();
     } else {
@@ -630,59 +642,63 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
             transition={{ delay: 0.2 }}
             className="absolute bottom-16 flex items-center gap-6"
           >
-            {/* Camera/Video button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <motion.button
-                  onClick={handleCameraToggle}
-                  disabled={isListening || isProcessing}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className={cn(
-                    "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
-                    "focus:outline-none focus:ring-4 focus:ring-white/20",
-                    isCameraActive
-                      ? "bg-red-500 text-white shadow-lg shadow-red-500/40"
-                      : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
-                  )}
-                  data-testid="button-camera-input"
-                >
-                  {isCameraActive ? <VideoOff className="h-7 w-7" /> : <Video className="h-7 w-7" />}
-                </motion.button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
-                {isCameraActive ? "Detener cámara" : "Iniciar cámara"}
-              </TooltipContent>
-            </Tooltip>
+            {advancedVoiceEnabled && (
+              <>
+                {/* Camera/Video button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <motion.button
+                      onClick={handleCameraToggle}
+                      disabled={isListening || isProcessing}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className={cn(
+                        "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                        "focus:outline-none focus:ring-4 focus:ring-white/20",
+                        isCameraActive
+                          ? "bg-red-500 text-white shadow-lg shadow-red-500/40"
+                          : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
+                      )}
+                      data-testid="button-camera-input"
+                    >
+                      {isCameraActive ? <VideoOff className="h-7 w-7" /> : <Video className="h-7 w-7" />}
+                    </motion.button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+                    {isCameraActive ? "Detener cámara" : "Iniciar cámara"}
+                  </TooltipContent>
+                </Tooltip>
 
-            {/* Upload/Attach button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <motion.button
-                  onClick={handleFileUpload}
-                  disabled={isListening || isProcessing || isCameraActive}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className={cn(
-                    "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
-                    "focus:outline-none focus:ring-4 focus:ring-white/20",
-                    inputMode === "uploading"
-                      ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40"
-                      : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
-                  )}
-                  data-testid="button-upload-input"
-                >
-                  {inputMode === "uploading" ? (
-                    <Loader2 className="h-7 w-7 animate-spin" />
-                  ) : (
-                    <Upload className="h-7 w-7" />
-                  )}
-                </motion.button>
-              </TooltipTrigger>
-              <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
-                Adjuntar archivo
-              </TooltipContent>
-            </Tooltip>
+                {/* Upload/Attach button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <motion.button
+                      onClick={handleFileUpload}
+                      disabled={isListening || isProcessing || isCameraActive}
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className={cn(
+                        "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                        "focus:outline-none focus:ring-4 focus:ring-white/20",
+                        inputMode === "uploading"
+                          ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40"
+                          : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
+                      )}
+                      data-testid="button-upload-input"
+                    >
+                      {inputMode === "uploading" ? (
+                        <Loader2 className="h-7 w-7 animate-spin" />
+                      ) : (
+                        <Upload className="h-7 w-7" />
+                      )}
+                    </motion.button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+                    Adjuntar archivo
+                  </TooltipContent>
+                </Tooltip>
+              </>
+            )}
 
             {/* Microphone button */}
             <Tooltip>

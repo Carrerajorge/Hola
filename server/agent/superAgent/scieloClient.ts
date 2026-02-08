@@ -12,6 +12,7 @@ export interface SciELOArticle {
     title: string;
     authors: string[];
     year: string;
+    publicationDate?: string;
     journal: string;
     abstract: string;
     keywords: string[];
@@ -21,6 +22,8 @@ export interface SciELOArticle {
     pages?: string;
     language: string;
     collection: string;
+    city?: string;
+    country?: string;
     url: string;
 }
 
@@ -37,6 +40,180 @@ const SCIELO_SEARCH = "https://search.scielo.org/api/v2/search";
 
 // Rate limiting
 const REQUEST_DELAY_MS = 300;
+const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; IliaGPT/1.0)").trim();
+
+const DEFAULT_COLLECTIONS = [
+    // LatAm (SciELO Network)
+    "arg", "bol", "bra", "chl", "col", "cri", "cub", "ecu", "mex", "nic", "pan", "per", "pry", "ury", "ven",
+    // Spain
+    "spa",
+    // Some deployments use "scl" for Brazil
+    "scl",
+];
+
+const STOPWORDS = new Set([
+    // Spanish
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "al", "a", "en", "con", "por",
+    "para", "sobre", "y", "o", "que", "como", "su", "sus", "es", "son", "fue", "fueron", "ser", "se",
+    "entre", "hacia", "desde", "hasta",
+    // Portuguese
+    "o", "a", "os", "as", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das", "em", "por", "para",
+    "sobre", "e", "ou", "que", "como", "se", "sua", "suas", "entre", "ate", "até",
+    // English
+    "the", "and", "or", "of", "in", "on", "for", "with", "to", "from", "by", "as", "into", "this", "that",
+]);
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeText(text: string): string {
+    return (text || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\w\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function stripHtml(text: string): string {
+    return (text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function buildQueryTerms(query: string): string[] {
+    const tokens = normalizeText(query)
+        .split(/\s+/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .filter((t) => t.length >= 3)
+        .filter((t) => !STOPWORDS.has(t));
+    return Array.from(new Set(tokens));
+}
+
+function matchesQuery(text: string, terms: string[], minMatches: number): boolean {
+    if (terms.length === 0) return true;
+    const hay = normalizeText(text);
+    if (!hay) return false;
+    let hits = 0;
+    for (const t of terms) {
+        if (hay.includes(t)) {
+            hits++;
+            if (hits >= minMatches) return true;
+        }
+    }
+    return false;
+}
+
+function pickLangText(entries: any, prefer: Array<"es" | "pt" | "en">, valueKey: string = "_"): string {
+    const list = Array.isArray(entries) ? entries : [];
+    if (list.length === 0) return "";
+
+    const byLang: Record<string, string> = {};
+    for (const e of list) {
+        const lang = String(e?.l || "").trim().toLowerCase();
+        const v = stripHtml(String((valueKey && e?.[valueKey]) || e?._ || e?.a || ""));
+        if (!lang || !v) continue;
+        if (!byLang[lang]) byLang[lang] = v;
+    }
+
+    for (const lang of prefer) {
+        const v = byLang[lang];
+        if (v) return v;
+    }
+
+    // Fallback: first non-empty value
+    for (const e of list) {
+        const v = stripHtml(String((valueKey && e?.[valueKey]) || e?._ || e?.a || ""));
+        if (v) return v;
+    }
+    return "";
+}
+
+function pickTitleV(titleObj: any, field: string): string {
+    const v = titleObj?.[field];
+    const list = Array.isArray(v) ? v : [];
+    for (const e of list) {
+        const s = stripHtml(String(e?._ || ""));
+        if (s) return s;
+    }
+    return "";
+}
+
+function parseArticleMetaAuthors(articleObj: any): string[] {
+    const list = Array.isArray(articleObj?.v10) ? articleObj.v10 : [];
+    const out: string[] = [];
+    for (const a of list) {
+        const surname = String(a?.s || "").trim();
+        const given = String(a?.n || "").trim();
+        if (surname && given) out.push(`${surname}, ${given}`.trim());
+        else if (surname) out.push(surname);
+    }
+    return out;
+}
+
+function parseArticleMetaKeywords(articleObj: any, prefer: Array<"es" | "pt" | "en"> = ["es", "pt", "en"]): string[] {
+    const list = Array.isArray(articleObj?.v85) ? articleObj.v85 : [];
+    const bucket: Record<string, string[]> = { es: [], pt: [], en: [] };
+    const other: string[] = [];
+    for (const k of list) {
+        const kw = stripHtml(String(k?.k || "")).trim();
+        if (!kw) continue;
+        if (/^nd$/i.test(kw)) continue;
+        const lang = String(k?.l || "").trim().toLowerCase();
+        if (lang && bucket[lang]) bucket[lang].push(kw);
+        else other.push(kw);
+    }
+
+    for (const lang of prefer) {
+        if (bucket[lang].length > 0) return Array.from(new Set(bucket[lang]));
+    }
+    return Array.from(new Set([...other, ...bucket.es, ...bucket.pt, ...bucket.en])).filter(Boolean);
+}
+
+function parseArticleMetaPages(articleObj: any): string {
+    const list = Array.isArray(articleObj?.v14) ? articleObj.v14 : [];
+    let first = "";
+    let last = "";
+    for (const p of list) {
+        if (!first && p?.f) first = String(p.f).trim();
+        if (!last && p?.l) last = String(p.l).trim();
+    }
+    if (first && last && first !== last) return `${first}-${last}`;
+    return first || last || "";
+}
+
+function iso2ToCountryName(iso2: string): string {
+    const c = (iso2 || "").trim().toUpperCase();
+    const map: Record<string, string> = {
+        AR: "Argentina",
+        BO: "Bolivia",
+        BR: "Brazil",
+        CL: "Chile",
+        CO: "Colombia",
+        CR: "Costa Rica",
+        CU: "Cuba",
+        DO: "Dominican Republic",
+        EC: "Ecuador",
+        ES: "Spain",
+        GT: "Guatemala",
+        HN: "Honduras",
+        MX: "Mexico",
+        NI: "Nicaragua",
+        PA: "Panama",
+        PE: "Peru",
+        PR: "Puerto Rico",
+        PY: "Paraguay",
+        UY: "Uruguay",
+        VE: "Venezuela",
+        ZAF: "South Africa",
+        ZA: "South Africa",
+    };
+    return map[c] || iso2 || "";
+}
 
 /**
  * Search SciELO for articles
@@ -79,6 +256,8 @@ export async function searchSciELO(
         const response = await fetch(`${SCIELO_SEARCH}?${params}`, {
             headers: {
                 "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+                "Referer": "https://search.scielo.org/",
             },
         });
 
@@ -130,56 +309,94 @@ async function searchSciELOArticleMeta(
         collection?: string;
     } = {}
 ): Promise<SciELOSearchResult> {
-    const { maxResults = 25, collection = "scl" } = options;
+    const { maxResults = 25, startYear, endYear, collection } = options;
     const startTime = Date.now();
 
     try {
-        // ArticleMeta requires collection parameter
-        const params = new URLSearchParams({
-            collection: collection,
-            limit: maxResults.toString(),
-            offset: "0",
-        });
+        // ArticleMeta payloads are huge; cap to keep latency and bandwidth bounded.
+        const target = Math.min(60, Math.max(1, maxResults));
 
-        const response = await fetch(`${SCIELO_ARTICLEMETA}/article/?${params}`, {
-            headers: {
-                "Accept": "application/json",
-            },
-        });
+        const collections = (collection ? [collection] : DEFAULT_COLLECTIONS).map((c) => (c || "").trim()).filter(Boolean);
+        const terms = buildQueryTerms(query);
+        const minMatches = terms.length >= 6 ? 2 : 1;
 
-        if (!response.ok) {
-            console.error(`[SciELO ArticleMeta] Failed: ${response.status}`);
-            return {
-                articles: [],
-                totalResults: 0,
-                query,
-                searchTime: Date.now() - startTime
-            };
-        }
-
-        const data = await response.json();
         const articles: SciELOArticle[] = [];
+        const seen = new Set<string>();
 
-        const objects = data.objects || [];
-        for (const obj of objects) {
-            // Filter by query terms
-            const searchText = JSON.stringify(obj).toLowerCase();
-            const queryTerms = query.toLowerCase().split(/\s+/);
-            const matches = queryTerms.some(term => searchText.includes(term));
+        const perPage = 3;
+        const maxPagesPerCollection = 3; // 9 objects per collection max
+        const wallBudgetMs = (() => {
+            const raw = process.env.SCIELO_ARTICLEMETA_TIME_BUDGET_MS;
+            const n = raw ? parseInt(raw, 10) : 12_000;
+            return Number.isFinite(n) && n > 0 ? n : 12_000;
+        })();
+        const maxRequests = (() => {
+            const raw = process.env.SCIELO_ARTICLEMETA_MAX_REQUESTS;
+            const n = raw ? parseInt(raw, 10) : 25;
+            return Number.isFinite(n) && n > 0 ? n : 25;
+        })();
+        let requestCount = 0;
 
-            if (matches) {
-                const article = parseArticleMetaObject(obj);
-                if (article) {
-                    articles.push(article);
+        outer: for (const col of collections) {
+            for (let page = 0; page < maxPagesPerCollection && articles.length < target; page++) {
+                if (Date.now() - startTime > wallBudgetMs) break outer;
+                if (requestCount >= maxRequests) break outer;
+                requestCount++;
+
+                const params = new URLSearchParams({
+                    collection: col,
+                    limit: String(perPage),
+                    offset: String(page * perPage),
+                });
+
+                const response = await fetch(`${SCIELO_ARTICLEMETA}/articles/?${params}`, {
+                    headers: {
+                        "Accept": "application/json",
+                        "User-Agent": USER_AGENT,
+                    },
+                });
+
+                if (!response.ok) {
+                    console.error(`[SciELO ArticleMeta] Failed: ${response.status} (collection=${col})`);
+                    break;
                 }
+
+                const data = await response.json();
+                const objects = Array.isArray(data.objects) ? data.objects : [];
+                if (objects.length === 0) break;
+
+                for (const obj of objects) {
+                    const article = parseArticleMetaObject(obj);
+                    if (!article) continue;
+
+                    if (seen.has(article.scielo_id)) continue;
+
+                    const y = parseInt((article.year || "").trim(), 10);
+                    if (startYear && Number.isFinite(y) && y < startYear) continue;
+                    if (endYear && Number.isFinite(y) && y > endYear) continue;
+
+                    const hay = `${article.title} ${article.abstract} ${(article.keywords || []).join(" ")} ${article.journal}`;
+                    if (!matchesQuery(hay, terms, minMatches)) continue;
+
+                    seen.add(article.scielo_id);
+                    articles.push(article);
+                    if (articles.length >= target) break;
+                }
+
+                await sleep(Math.min(REQUEST_DELAY_MS, 150));
+
+                // If fewer than perPage objects were returned, we reached the end.
+                if (objects.length < perPage) break;
             }
+
+            if (articles.length >= target) break;
         }
 
         return {
-            articles: articles.slice(0, maxResults),
-            totalResults: data.meta?.total_count || articles.length,
+            articles: articles.slice(0, target),
+            totalResults: articles.length,
             query,
-            searchTime: Date.now() - startTime
+            searchTime: Date.now() - startTime,
         };
 
     } catch (error: any) {
@@ -239,40 +456,67 @@ function parseSciELODocument(doc: any): SciELOArticle | null {
 
 function parseArticleMetaObject(obj: any): SciELOArticle | null {
     try {
-        const pid = obj.code || "";
-        const titleData = obj.title || {};
-        const title = titleData.es || titleData.en || titleData.pt || Object.values(titleData)[0] || "";
+        const pid = String(obj?.code || "").trim();
+        if (!pid) return null;
 
-        const abstractData = obj.abstract || {};
-        const abstractText = abstractData.es || abstractData.en || abstractData.pt || Object.values(abstractData)[0] || "";
+        const articleObj = obj?.article || {};
+        const title = pickLangText(articleObj?.v12, ["es", "pt", "en"], "_");
+        const abstractText = pickLangText(articleObj?.v83, ["es", "pt", "en"], "a");
+        const authors = parseArticleMetaAuthors(articleObj);
+        const keywords = parseArticleMetaKeywords(articleObj);
 
-        // Authors
-        const authors: string[] = [];
-        if (obj.authors) {
-            for (const author of obj.authors) {
-                const surname = author.surname || "";
-                const givenNames = author.given_names || "";
-                if (surname) {
-                    authors.push(`${surname}, ${givenNames}`.trim());
-                }
-            }
-        }
+        const year = String(obj?.publication_year || obj?.publicationYear || "").trim();
+        const publicationDate = String(obj?.publication_date || obj?.publicationDate || "").trim();
+        const collection = String(obj?.collection || "").trim();
+
+        // Journal metadata lives under obj.title
+        const titleObj = obj?.title || {};
+        const journal =
+            pickTitleV(titleObj, "v100") ||
+            pickTitleV(titleObj, "v130") ||
+            pickTitleV(titleObj, "v150") ||
+            pickTitleV(titleObj, "v151") ||
+            pickTitleV(titleObj, "v230") ||
+            "";
+
+        const city = pickTitleV(titleObj, "v490") || "";
+        const countryIso = pickTitleV(titleObj, "v310") || "";
+        const country = iso2ToCountryName(countryIso) || "";
+
+        const volume = pickLangText(articleObj?.v31, ["es", "pt", "en"], "_");
+        const issue = pickLangText(articleObj?.v32, ["es", "pt", "en"], "_");
+        const pages = parseArticleMetaPages(articleObj);
+
+        // URL from fulltexts.html/pdf
+        const fulltexts = obj?.fulltexts || {};
+        const html = fulltexts?.html || {};
+        const pdf = fulltexts?.pdf || {};
+        const url =
+            String(html?.es || html?.pt || html?.en || "") ||
+            String(pdf?.es || pdf?.pt || pdf?.en || "") ||
+            "";
+
+        // Language: infer from title v12 first element
+        const lang = String((Array.isArray(articleObj?.v12) ? articleObj.v12?.[0]?.l : "") || "").trim() || "es";
 
         return {
             scielo_id: pid,
-            title: typeof title === "string" ? title : "",
+            title: title || "",
             authors,
-            year: obj.publication_year || "",
-            journal: obj.journal?.title || obj.journal_title || "",
-            abstract: typeof abstractText === "string" ? abstractText : "",
-            keywords: obj.keywords?.es || obj.keywords?.en || [],
-            doi: obj.doi || "",
-            volume: obj.volume || "",
-            issue: obj.issue || "",
-            pages: obj.start_page ? `${obj.start_page}-${obj.end_page || ""}` : "",
-            language: obj.original_language || "es",
-            collection: obj.collection || "",
-            url: `https://www.scielo.br/scielo.php?pid=${pid}&script=sci_arttext`
+            year: year || "",
+            publicationDate: publicationDate || undefined,
+            journal: journal || "",
+            abstract: abstractText || "",
+            keywords,
+            doi: "",
+            volume: volume || "",
+            issue: issue || "",
+            pages: pages || "",
+            language: lang,
+            collection: collection || "",
+            city: city || undefined,
+            country: country || undefined,
+            url: url || "",
         };
     } catch {
         return null;

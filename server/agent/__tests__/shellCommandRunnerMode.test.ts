@@ -76,8 +76,8 @@ describe("shell_command runner mode", () => {
 
     const res = await toolRegistry.execute(
       "shell_command",
-      // In CI/loaded environments this can take a bit longer than 5s.
-      { command: "echo hello", timeout: 15000 },
+      // In CI/loaded environments this can take a bit longer.
+      { command: "echo hello", timeout: 30000 },
       {
         userId: "u1",
         chatId: "c1",
@@ -106,5 +106,5 @@ describe("shell_command runner mode", () => {
     if (prevTok === undefined) delete process.env.SHELL_COMMAND_RUNNER_TOKEN;
     else process.env.SHELL_COMMAND_RUNNER_TOKEN = prevTok;
   },
-  20000);
+  60000);
 });

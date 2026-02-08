@@ -2,7 +2,8 @@ import { Router, Request } from "express";
 import { storage } from "../storage";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
-const PRIVILEGED_ROLES = new Set(["team_admin", "admin", "superadmin"]);
+// Keep in sync with workspace admin role keys used elsewhere (workspace settings/RBAC).
+const PRIVILEGED_ROLES = new Set(["team_admin", "workspace_admin", "workspace_owner", "owner", "admin", "superadmin"]);
 
 async function isPrivilegedActor(req: Request): Promise<boolean> {
   // 1) Try fast-path role from session/auth object.
@@ -505,8 +506,12 @@ export function createGptRouter() {
       }
 
       let creator = null;
+      let creatorSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
       if (gpt.creatorId) {
         creator = await storage.getUser(gpt.creatorId);
+        if (creator) {
+          creatorSettings = await storage.getUserSettings(creator.id);
+        }
       }
 
       const conversationCount = await storage.getGptConversationCount(req.params.id);
@@ -517,12 +522,22 @@ export function createGptRouter() {
         relatedGpts = allCreatorGpts.filter(g => g.id !== gpt.id).slice(0, 10);
       }
 
+      const creatorProfile = creatorSettings?.userProfile ?? null;
+
       res.json({
         gpt,
         creator: creator ? {
           id: creator.id,
-          name: creator.fullName || creator.username || creator.email?.split('@')[0] || 'Usuario',
-          avatar: creator.profileImageUrl
+          name: creatorProfile?.showName === false
+            ? (creatorProfile?.nickname || 'Creador')
+            : (creator.fullName || creator.username || creator.email?.split('@')[0] || 'Usuario'),
+          avatar: creator.profileImageUrl,
+          links: {
+            website: creatorProfile?.websiteDomain || null,
+            linkedIn: creatorProfile?.linkedInUrl || null,
+            github: creatorProfile?.githubUrl || null,
+          },
+          receiveEmailComments: creatorProfile?.receiveEmailComments ?? false,
         } : null,
         conversationCount,
         relatedGpts

@@ -5,12 +5,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { ScheduleDialog } from "@/components/schedule-dialog";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import {
     ChevronDown,
     Pencil,
     Info,
     Settings,
+    Calendar,
     EyeOff,
     Pin,
     Link,
@@ -91,6 +93,8 @@ export function ChatHeader({
 }: ChatHeaderProps) {
     const { toast } = useToast();
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+    const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+    const currentInput = useChatStore((s) => s.input);
     const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
 
     // Model grouping logic
@@ -120,6 +124,7 @@ export function ChatHeader({
 
 
     return (
+        <>
         <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14">
             <div className="flex items-center gap-2">
                 {!isSidebarOpen && (
@@ -289,6 +294,14 @@ export function ChatHeader({
                             <Download className="h-4 w-4 mr-2" />
                             Descargar
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onClick={() => setIsScheduleDialogOpen(true)}
+                            disabled={!chatId || chatId.startsWith("pending-")}
+                            data-testid="menu-schedule-chat"
+                        >
+                            <Calendar className="h-4 w-4 mr-2" />
+                            Programar
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                             onClick={(e) => chatId && onArchiveChat?.(chatId, e)}
@@ -321,5 +334,14 @@ export function ChatHeader({
             </div>
             <UpgradePlanDialog open={isUpgradeDialogOpen} onOpenChange={setIsUpgradeDialogOpen} />
         </header>
+        {chatId && !chatId.startsWith("pending-") && (
+            <ScheduleDialog
+                open={isScheduleDialogOpen}
+                onOpenChange={setIsScheduleDialogOpen}
+                chatId={chatId}
+                defaultPrompt={currentInput}
+            />
+        )}
+        </>
     );
 }
