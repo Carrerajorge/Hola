@@ -844,12 +844,6 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
-      }
-
 	      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
 	      const subscriptionStatusRaw = (dbUser as any)?.subscriptionStatus || null;
       const inferredStatus =
@@ -916,12 +910,6 @@ export function createStripeRouter() {
       const userId = getEffectiveUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
-      }
-
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const offsetMonths = z
@@ -1024,12 +1012,6 @@ export function createStripeRouter() {
       const userId = getEffectiveUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
-      }
-
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const parsedBody = z
@@ -1162,12 +1144,6 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
-      }
-
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
         // Avoid leaking user existence details and keep behavior consistent in environments
@@ -1198,12 +1174,6 @@ export function createStripeRouter() {
       const userId = getEffectiveUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
-      }
-
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const parsedBody = z
@@ -1284,12 +1254,6 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
-      }
-
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
         return res.status(404).json({ error: "User not found" });
@@ -1363,12 +1327,6 @@ export function createStripeRouter() {
       const userId = getEffectiveUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Debes iniciar sesión" });
-      }
-
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
-      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
-      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
-        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
       const parsedBody = z
@@ -1497,13 +1455,13 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
+            // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
       const sessionRoleKey = normalizeRoleKey(getActorRole(req));
       if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      // Rely on DB-backed permissions. Session-embedded roles can be stale.
+// Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const parsedQuery = z
         .object({
@@ -1609,13 +1567,13 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
+            // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
       const sessionRoleKey = normalizeRoleKey(getActorRole(req));
       if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      // Rely on DB-backed permissions. Session-embedded roles can be stale.
+// Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
