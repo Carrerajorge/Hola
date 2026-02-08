@@ -252,6 +252,9 @@ export function createWorkspaceRouter() {
           lastName: users.lastName,
           profileImageUrl: users.profileImageUrl,
           role: users.role,
+          plan: users.plan,
+          subscriptionStatus: users.subscriptionStatus,
+          subscriptionPlan: users.subscriptionPlan,
           status: users.status,
           createdAt: users.createdAt,
           lastLoginAt: users.lastLoginAt,
@@ -260,19 +263,53 @@ export function createWorkspaceRouter() {
         .where(and(eq(users.orgId, actor.orgId), isNull(users.deletedAt)))
         .orderBy(asc(users.createdAt));
 
+      // Prefer the accepted invitation timestamp as "added at" when available.
+      const acceptedInvites = await db
+        .select({
+          email: workspaceInvitations.email,
+          acceptedAt: workspaceInvitations.acceptedAt,
+        })
+        .from(workspaceInvitations)
+        .where(and(eq(workspaceInvitations.orgId, actor.orgId), eq(workspaceInvitations.status, "accepted")));
+
+      const acceptedAtByEmail = new Map<string, Date>();
+      for (const row of acceptedInvites) {
+        const email = String(row.email || "").toLowerCase().trim();
+        if (!email) continue;
+        if (row.acceptedAt instanceof Date && !Number.isNaN(row.acceptedAt.getTime())) {
+          acceptedAtByEmail.set(email, row.acceptedAt);
+        }
+      }
+
       res.json({
-        members: members.map((m) => ({
-          id: String(m.id),
-          email: m.email ? String(m.email) : null,
-          fullName: m.fullName ? String(m.fullName) : null,
-          firstName: m.firstName ? String(m.firstName) : null,
-          lastName: m.lastName ? String(m.lastName) : null,
-          profileImageUrl: m.profileImageUrl ? String(m.profileImageUrl) : null,
-          role: m.role ? normalizeRoleKey(String(m.role)) : null,
-          status: m.status ? String(m.status) : null,
-          createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
-          lastLoginAt: m.lastLoginAt ? new Date(m.lastLoginAt).toISOString() : null,
-        })),
+        members: members.map((m) => {
+          const emailNorm = String(m.email || "").toLowerCase().trim();
+          const effectivePlan =
+            String(m.subscriptionStatus || "").toLowerCase().trim() === "active" && m.subscriptionPlan
+              ? String(m.subscriptionPlan)
+              : m.plan
+                ? String(m.plan)
+                : null;
+
+          const acceptedAt = emailNorm ? acceptedAtByEmail.get(emailNorm) : null;
+          const createdAt = m.createdAt ? new Date(m.createdAt) : null;
+          const addedAt = acceptedAt || createdAt;
+
+          return {
+            id: String(m.id),
+            email: m.email ? String(m.email) : null,
+            fullName: m.fullName ? String(m.fullName) : null,
+            firstName: m.firstName ? String(m.firstName) : null,
+            lastName: m.lastName ? String(m.lastName) : null,
+            profileImageUrl: m.profileImageUrl ? String(m.profileImageUrl) : null,
+            role: m.role ? normalizeRoleKey(String(m.role)) : null,
+            plan: effectivePlan,
+            addedAt: addedAt ? addedAt.toISOString() : null,
+            status: m.status ? String(m.status) : null,
+            createdAt: createdAt ? createdAt.toISOString() : null,
+            lastLoginAt: m.lastLoginAt ? new Date(m.lastLoginAt).toISOString() : null,
+          };
+        }),
       });
     } catch (e: any) {
       console.error("[Workspace] GET /members error:", e);

@@ -251,6 +251,8 @@ export default function WorkspaceSettingsPage() {
       lastName: string | null;
       profileImageUrl?: string | null;
       role: string | null;
+      plan?: string | null;
+      addedAt?: string | null;
       status?: string | null;
       createdAt: string | null;
       lastLoginAt: string | null;
@@ -588,6 +590,28 @@ export default function WorkspaceSettingsPage() {
       default:
         return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "Gratis";
     }
+  };
+
+  const planPriceUsd = (planRaw: string | null | undefined): number | null => {
+    const plan = String(planRaw || "").toLowerCase().trim();
+    switch (plan) {
+      case "go":
+        return 5;
+      case "plus":
+        return 10;
+      case "business":
+        return 25;
+      case "pro":
+        return 200;
+      default:
+        return null;
+    }
+  };
+
+  const planLabelWithPrice = (planRaw: string | null | undefined): string => {
+    const label = planLabel(planRaw);
+    const price = planPriceUsd(planRaw);
+    return price ? `${label} ($${price})` : label;
   };
 
   const formatMoney = (amountCents: number | null | undefined, currency: string | null | undefined) => {
@@ -1302,11 +1326,11 @@ export default function WorkspaceSettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input 
-                      placeholder="Filtrar por nombre o correo" 
-                      className="pl-9 w-64"
-                      value={membersFilter}
-                      onChange={(e) => setMembersFilter(e.target.value)}
+	                    <Input 
+	                      placeholder="Filtrar por nombre" 
+	                      className="pl-9 w-64"
+	                      value={membersFilter}
+	                      onChange={(e) => setMembersFilter(e.target.value)}
                       onBlur={() => {
                         const trimmed = membersFilter.trim();
                         if (!trimmed) return;
@@ -1360,12 +1384,12 @@ export default function WorkspaceSettingsPage() {
                   </div>
                 </div>
 
-                <div className="border rounded-lg">
-                  <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
-                    <span>Nombre</span>
-                    <span>Rol</span>
-                    <span>Fecha agregada</span>
-                  </div>
+	                <div className="border rounded-lg">
+	                  <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+	                    <span>Nombre</span>
+	                    <span>Tipo de cuenta</span>
+	                    <span>Fecha agregada</span>
+	                  </div>
                   {membersLoading ? (
                     <div className="px-4 py-8 text-sm text-muted-foreground text-center">Cargando miembros...</div>
                   ) : filteredMembers.length === 0 ? (
@@ -1397,31 +1421,36 @@ export default function WorkspaceSettingsPage() {
                                 <span className="text-xs text-muted-foreground">{member.email || "—"}</span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {canEditRole ? (
-                                <Select
-                                  value={roleValue}
-                                  onValueChange={(value) => void updateMemberRole(String(member.id), value)}
-                                >
-                                  <SelectTrigger className="w-56" data-testid={`select-member-role-${member.id}`}>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {roleOptions.map((role) => (
-                                      <SelectItem key={role.roleKey} value={role.roleKey}>
-                                        {roleLabelEs(role.roleKey)}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : (
-                                <span className="text-sm">{roleLabelEs(roleValue)}</span>
-                              )}
-                            </div>
-                            <span className="text-sm">{formatDateShort(member.createdAt)}</span>
-                          </div>
-                        );
-                      })}
+	                            <div className="space-y-0.5">
+	                              <div className="flex items-center gap-2">
+	                                {canEditRole ? (
+	                                  <Select
+	                                    value={roleValue}
+	                                    onValueChange={(value) => void updateMemberRole(String(member.id), value)}
+	                                  >
+	                                    <SelectTrigger className="w-56" data-testid={`select-member-role-${member.id}`}>
+	                                      <SelectValue />
+	                                    </SelectTrigger>
+	                                    <SelectContent>
+	                                      {roleOptions.map((role) => (
+	                                        <SelectItem key={role.roleKey} value={role.roleKey}>
+	                                          {roleLabelEs(role.roleKey)}
+	                                        </SelectItem>
+	                                      ))}
+	                                    </SelectContent>
+	                                  </Select>
+	                                ) : (
+	                                  <span className="text-sm">{roleLabelEs(roleValue)}</span>
+	                                )}
+	                              </div>
+	                              <span className="text-xs text-muted-foreground">
+	                                Plan {planLabelWithPrice(member.plan)}
+	                              </span>
+	                            </div>
+	                            <span className="text-sm">{formatDateShort(member.addedAt || member.createdAt)}</span>
+	                          </div>
+	                        );
+	                      })}
                     </div>
                   )}
                 </div>

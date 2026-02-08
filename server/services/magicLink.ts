@@ -18,17 +18,27 @@ interface MagicLinkResult {
  */
 export async function createMagicLink(email: string): Promise<MagicLinkResult> {
     try {
+        const emailNorm = email.toLowerCase().trim();
+
         // Generate secure token
         const token = crypto.randomBytes(32).toString("hex");
         const expiresAt = new Date(Date.now() + MAGIC_LINK_EXPIRY_MINUTES * 60 * 1000);
 
         // Find or create user
-        let [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
+        let [user] = await db.select().from(users).where(eq(users.email, emailNorm)).limit(1);
 
         if (!user) {
             const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
             if (!allowRegistration) {
-                return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+                // Allow signups when the email has a pending workspace invitation.
+                const pendingInvites = await db
+                    .select({ id: workspaceInvitations.id })
+                    .from(workspaceInvitations)
+                    .where(and(eq(workspaceInvitations.email, emailNorm), eq(workspaceInvitations.status, "pending")))
+                    .limit(1);
+                if (pendingInvites.length === 0) {
+                    return { success: false, error: "El registro está deshabilitado. Contacta al administrador." };
+                }
             }
 
             // Create new user for magic link signup
@@ -38,8 +48,8 @@ export async function createMagicLink(email: string): Promise<MagicLinkResult> {
                 // Each user starts with their own workspace by default.
                 // If they were invited to an existing workspace, we'll swap org/role on first login.
                 orgId: newUserId,
-                email: email.toLowerCase(),
-                firstName: email.split("@")[0],
+                email: emailNorm,
+                firstName: emailNorm.split("@")[0],
                 lastName: "",
                 role: "team_admin",
                 status: "pending", // Will be activated on first magic link verification
