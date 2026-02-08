@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { db } from "../db";
-import { users, magicLinks } from "@shared/schema";
+import { users, magicLinks, workspaceInvitations } from "@shared/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { getSettingValue } from "./settingsConfigService";
 import { autoAcceptWorkspaceInvitationForUser } from "./workspaceInvitationService";
