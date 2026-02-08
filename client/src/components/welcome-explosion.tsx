@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Sparkles, Zap, Brain, Rocket, Stars } from 'lucide-react';
 
 interface Particle {
@@ -19,9 +19,11 @@ interface Firework {
   x: number;
   y: number;
   targetY: number;
+  speed: number;
   color: string;
   exploded: boolean;
   particles: Particle[];
+  trail: { x: number; y: number; alpha: number }[];
 }
 
 const COLORS = [
@@ -33,6 +35,14 @@ const COLORS = [
   '#F97316', // Warm Orange
 ];
 
+// Target physics at 60fps — all values are per-second for frame-rate independence
+const TARGET_FPS = 60;
+const GRAVITY = 0.06 * TARGET_FPS;         // ~3.6 px/s²
+const VELOCITY_DAMPING = Math.pow(0.985, TARGET_FPS); // per-second damping
+const LIFE_DECAY = 0.018 * TARGET_FPS;     // ~1.08 per second
+const RISE_SPEED = 11 * TARGET_FPS;        // ~660 px/s
+const CONFETTI_GRAVITY = 0.015 * TARGET_FPS;
+
 export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<'explosion' | 'welcome' | 'features' | 'ready'>('explosion');
@@ -40,9 +50,20 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
   const fireworksRef = useRef<Firework[]>([]);
   const confettiRef = useRef<Particle[]>([]);
   const animationRef = useRef<number>();
-  const startTimeRef = useRef(Date.now());
+  const phaseRef = useRef<'explosion' | 'welcome' | 'features' | 'ready'>('explosion');
+  const onCompleteRef = useRef(onComplete);
+  const lastFrameTimeRef = useRef<number>(0);
+  const initedRef = useRef(false);
+
+  // Keep refs in sync without triggering effect re-runs
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
   useEffect(() => {
+    // Guard against double-initialization (React StrictMode)
+    if (initedRef.current) return;
+    initedRef.current = true;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -60,23 +81,26 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
     window.addEventListener('resize', resizeCanvas);
 
     const createFirework = (): Firework => {
+      const screenH = window.innerHeight;
       return {
         x: Math.random() * window.innerWidth,
-        y: window.innerHeight + 10,
-        targetY: Math.random() * (window.innerHeight * 0.4) + window.innerHeight * 0.1,
+        y: screenH + 10,
+        targetY: Math.random() * (screenH * 0.4) + screenH * 0.1,
+        speed: RISE_SPEED * (0.85 + Math.random() * 0.3),
         color: COLORS[Math.floor(Math.random() * COLORS.length)],
         exploded: false,
-        particles: []
+        particles: [],
+        trail: []
       };
     };
 
     const explodeFirework = (fw: Firework) => {
-      const particleCount = 45 + Math.floor(Math.random() * 20);
+      const particleCount = 35 + Math.floor(Math.random() * 15);
       for (let i = 0; i < particleCount; i++) {
         const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.2;
-        const speed = 2 + Math.random() * 4;
+        const speed = (2 + Math.random() * 4) * TARGET_FPS;
         const color = Math.random() > 0.3 ? fw.color : COLORS[Math.floor(Math.random() * COLORS.length)];
-        
+
         fw.particles.push({
           x: fw.x,
           y: fw.y,
@@ -88,7 +112,7 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
           life: 1,
           type: Math.random() > 0.75 ? 'star' : 'spark',
           rotation: Math.random() * Math.PI * 2,
-          rotationSpeed: (Math.random() - 0.5) * 0.2
+          rotationSpeed: (Math.random() - 0.5) * 0.2 * TARGET_FPS
         });
       }
     };
@@ -97,60 +121,61 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
       return {
         x: Math.random() * window.innerWidth,
         y: -20,
-        vx: (Math.random() - 0.5) * 2.5,
-        vy: 1.5 + Math.random() * 3,
+        vx: (Math.random() - 0.5) * 2.5 * TARGET_FPS,
+        vy: (1.5 + Math.random() * 3) * TARGET_FPS,
         size: 5 + Math.random() * 6,
         color: COLORS[Math.floor(Math.random() * COLORS.length)],
         alpha: 1,
         life: 1,
         type: 'confetti',
         rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.2
+        rotationSpeed: (Math.random() - 0.5) * 0.2 * TARGET_FPS
       };
     };
 
-    // Initial fireworks burst
-    for (let i = 0; i < 6; i++) {
-      setTimeout(() => {
+    // Staggered initial fireworks — slight delay for canvas to settle
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 0; i < 5; i++) {
+      timeouts.push(setTimeout(() => {
         fireworksRef.current.push(createFirework());
-      }, i * 160);
+      }, 100 + i * 200));
     }
 
-    // Continuous confetti
+    // Confetti spawner using refs to avoid stale closures
     const confettiInterval = setInterval(() => {
-      if (phase === 'explosion') {
-        for (let i = 0; i < 2; i++) {
-          confettiRef.current.push(createConfetti());
-        }
+      if (phaseRef.current === 'explosion') {
+        confettiRef.current.push(createConfetti());
       }
-    }, 160);
+    }, 200);
 
-    // More fireworks waves
-    setTimeout(() => {
-      for (let i = 0; i < 4; i++) {
-        setTimeout(() => {
-          fireworksRef.current.push(createFirework());
-        }, i * 220);
-      }
-    }, 700);
-
-    setTimeout(() => {
+    // Second wave
+    timeouts.push(setTimeout(() => {
       for (let i = 0; i < 3; i++) {
-        setTimeout(() => {
+        timeouts.push(setTimeout(() => {
           fireworksRef.current.push(createFirework());
-        }, i * 260);
+        }, i * 280));
       }
-    }, 1300);
+    }, 900));
 
-    // Phase transitions
-    setTimeout(() => setShowContent(true), 350);
-    setTimeout(() => setPhase('welcome'), 800);
-    setTimeout(() => setPhase('features'), 1900);
-    setTimeout(() => setPhase('ready'), 3200);
-    setTimeout(() => onComplete?.(), 4800);
+    // Third wave
+    timeouts.push(setTimeout(() => {
+      for (let i = 0; i < 2; i++) {
+        timeouts.push(setTimeout(() => {
+          fireworksRef.current.push(createFirework());
+        }, i * 300));
+      }
+    }, 1500));
+
+    // Phase transitions — content appears after first explosions
+    timeouts.push(setTimeout(() => setShowContent(true), 600));
+    timeouts.push(setTimeout(() => setPhase('welcome'), 1000));
+    timeouts.push(setTimeout(() => setPhase('features'), 2100));
+    timeouts.push(setTimeout(() => setPhase('ready'), 3400));
+    timeouts.push(setTimeout(() => onCompleteRef.current?.(), 5000));
 
     const drawStar = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, rotation: number, color: string, alpha: number) => {
       ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.translate(x, y);
       ctx.rotate(rotation);
       ctx.beginPath();
@@ -165,32 +190,65 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
         ctx.lineTo(Math.cos(innerAngle) * size * 0.4, Math.sin(innerAngle) * size * 0.4);
       }
       ctx.closePath();
-      ctx.fillStyle = color + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+      ctx.fillStyle = color;
       ctx.fill();
       ctx.restore();
     };
 
-    const animate = () => {
-      const elapsed = Date.now() - startTimeRef.current;
+    const drawGlow = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string, alpha: number) => {
+      // Use globalAlpha instead of embedding alpha in color strings per gradient stop
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.78;
+      const gradient = ctx.createRadialGradient(x, y, 0, x, y, size * 2.2);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(x, y, size * 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      ctx.restore();
+
+      // Draw core
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const animate = (timestamp: number) => {
+      // Calculate delta time in seconds, capped to prevent spiral-of-death
+      if (lastFrameTimeRef.current === 0) lastFrameTimeRef.current = timestamp;
+      const rawDt = (timestamp - lastFrameTimeRef.current) / 1000;
+      const dt = Math.min(rawDt, 1 / 30); // Cap at ~30fps equivalent step
+      lastFrameTimeRef.current = timestamp;
+
+      const elapsed = timestamp - startTimestamp;
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
       // Update and draw fireworks
       fireworksRef.current = fireworksRef.current.filter(fw => {
         if (!fw.exploded) {
-          fw.y -= 11;
-          
+          // Frame-rate independent rise
+          fw.y -= fw.speed * dt;
+
           // Draw trail
           ctx.beginPath();
           ctx.arc(fw.x, fw.y, 3, 0, Math.PI * 2);
           ctx.fillStyle = fw.color;
           ctx.fill();
-          
+
           // Draw sparkle trail
           for (let i = 0; i < 3; i++) {
+            ctx.save();
+            ctx.globalAlpha = 0.5;
             ctx.beginPath();
             ctx.arc(fw.x + (Math.random() - 0.5) * 5, fw.y + i * 8, 1.6 - i * 0.45, 0, Math.PI * 2);
-            ctx.fillStyle = fw.color + '80';
+            ctx.fillStyle = fw.color;
             ctx.fill();
+            ctx.restore();
           }
 
           if (fw.y <= fw.targetY) {
@@ -200,35 +258,22 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
           return true;
         }
 
-        // Update explosion particles
+        // Update explosion particles with delta-time
         fw.particles = fw.particles.filter(p => {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vy += 0.06; // gravity
-          p.vx *= 0.985;
-          p.life -= 0.018;
-          p.alpha = p.life;
-          p.rotation += p.rotationSpeed;
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += GRAVITY * dt;
+          p.vx *= Math.pow(VELOCITY_DAMPING, dt);
+          p.life -= LIFE_DECAY * dt;
+          p.alpha = Math.max(0, p.life);
+          p.rotation += p.rotationSpeed * dt;
 
           if (p.life <= 0) return false;
 
           if (p.type === 'star') {
             drawStar(ctx, p.x, p.y, p.size, p.rotation, p.color, p.alpha);
           } else {
-            // Draw glow
-            const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.2);
-            gradient.addColorStop(0, p.color + Math.floor(p.alpha * 200).toString(16).padStart(2, '0'));
-            gradient.addColorStop(1, p.color + '00');
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size * 2.2, 0, Math.PI * 2);
-            ctx.fillStyle = gradient;
-            ctx.fill();
-
-            // Draw core
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fillStyle = p.color + Math.floor(p.alpha * 255).toString(16).padStart(2, '0');
-            ctx.fill();
+            drawGlow(ctx, p.x, p.y, p.size, p.color, p.alpha);
           }
 
           return true;
@@ -237,12 +282,12 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
         return fw.particles.length > 0 || !fw.exploded;
       });
 
-      // Update and draw confetti
+      // Update and draw confetti with delta-time
       confettiRef.current = confettiRef.current.filter(c => {
-        c.x += c.vx + Math.sin(c.y * 0.02) * 0.35;
-        c.y += c.vy;
-        c.rotation += c.rotationSpeed;
-        c.vy += 0.015;
+        c.x += (c.vx + Math.sin(c.y * 0.02) * 0.35 * TARGET_FPS) * dt;
+        c.y += c.vy * dt;
+        c.rotation += c.rotationSpeed * dt;
+        c.vy += CONFETTI_GRAVITY * dt;
 
         if (c.y > window.innerHeight + 20) return false;
 
@@ -256,21 +301,25 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
         return true;
       });
 
-      if (elapsed < 5200) {
+      if (elapsed < 5500) {
         animationRef.current = requestAnimationFrame(animate);
       }
     };
 
-    animate();
+    const startTimestamp = performance.now();
+    lastFrameTimeRef.current = 0;
+    animationRef.current = requestAnimationFrame(animate);
 
     return () => {
       window.removeEventListener('resize', resizeCanvas);
       clearInterval(confettiInterval);
+      timeouts.forEach(t => clearTimeout(t));
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [onComplete, phase]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden text-white">
@@ -326,7 +375,7 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
             <div
               key={feature.label}
               className={`flex items-center gap-3 px-5 py-3 rounded-full bg-white/5 backdrop-blur border border-white/10 transform transition-all duration-500`}
-              style={{ 
+              style={{
                 transitionDelay: `${idx * 100}ms`,
                 animation: phase === 'features' || phase === 'ready' ? `fade-up 0.6s ease-out ${idx * 120}ms both` : 'none'
               }}
@@ -384,11 +433,11 @@ export function useFirstVisit() {
     }
   }, []);
 
-  const completeWelcome = () => {
+  const completeWelcome = useCallback(() => {
     localStorage.setItem('iliagpt_welcomed', 'true');
     setShowExplosion(false);
     setIsFirstVisit(false);
-  };
+  }, []);
 
   return { isFirstVisit, showExplosion, completeWelcome };
 }
