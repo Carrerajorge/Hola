@@ -32,6 +32,8 @@ import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
+import calendarOAuthRouter from "./routes/calendarOAuthRouter";
+import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
@@ -314,6 +316,8 @@ export async function registerRoutes(
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
+  app.use("/api/oauth/google/calendar", calendarOAuthRouter);
+  app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
 

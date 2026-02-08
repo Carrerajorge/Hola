@@ -8,10 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { 
-  ArrowLeft, 
-  User, 
-  Mail, 
+import {
+  ArrowLeft,
+  User,
+  Mail,
   Building,
   Calendar,
   MessageSquare,
@@ -27,12 +27,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { getPlanLabel } from "@/lib/planUtils";
-import { cn } from "@/lib/utils";
 import { isAdminUser } from "@/lib/admin";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { channelIncludesEmail } from "@/lib/notification-preferences";
 import { apiFetch } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
+import { ServiceConnectionPanel } from "@/components/service-connection-panel";
 
 export default function ProfilePage() {
   const [, setLocation] = useLocation();
@@ -51,12 +51,6 @@ export default function ProfilePage() {
     { label: "Chats", value: "24", icon: MessageSquare },
     { label: "Documentos", value: "12", icon: FileText },
     { label: "Skills activos", value: "8", icon: Zap },
-  ];
-
-  const connectedServices = [
-    { name: "Gmail", connected: false, icon: "📧" },
-    { name: "Google Forms", connected: false, icon: "📋" },
-    { name: "Figma", connected: false, icon: "🎨" },
   ];
 
   const quickActions = [
@@ -254,28 +248,8 @@ export default function ProfilePage() {
               Servicios conectados
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {connectedServices.map((service, i) => (
-              <div key={service.name}>
-                <div className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl">{service.icon}</span>
-                    <span className="font-medium">{service.name}</span>
-                  </div>
-                  <Badge 
-                    variant={service.connected ? "default" : "outline"}
-                    className={cn(
-                      service.connected 
-                        ? "bg-green-500/10 text-green-600 border-green-500/20" 
-                        : "text-muted-foreground"
-                    )}
-                  >
-                    {service.connected ? "Conectado" : "No conectado"}
-                  </Badge>
-                </div>
-                {i < connectedServices.length - 1 && <Separator />}
-              </div>
-            ))}
+          <CardContent>
+            <ServiceConnectionPanel />
           </CardContent>
         </Card>
 
