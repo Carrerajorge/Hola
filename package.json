@@ -240,7 +240,6 @@
     "unist-util-visit": "^5.0.0",
     "vaul": "^1.1.2",
     "vite-plugin-pwa": "^1.2.0",
-    "vitest": "^4.0.16",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
@@ -283,7 +282,8 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "5.6.3",
-    "vite": "^7.1.9"
+    "vite": "^7.1.9",
+    "vitest": "^4.0.18"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
