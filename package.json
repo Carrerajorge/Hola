@@ -18,6 +18,8 @@
     "test:agentic": "vitest run tests/agentic",
     "test:agentic:integration": "bash ./scripts/test-agentic-integration.sh",
     "test:all": "bash ./scripts/test-all.sh",
+    "verify": "bash ./scripts/agent-verify.sh",
+    "verify:sandbox": "AGENT_VERIFY_SKIP_TESTS=true bash ./scripts/agent-verify.sh",
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list",
     "test:e2e": "npx playwright test --reporter=html"
   },
