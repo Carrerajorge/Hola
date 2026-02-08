@@ -48,6 +48,7 @@ import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
+import { createAttachmentRouter } from "./routes/attachmentRouter";
 import redisSSERouter from "./routes/redisSSERouter";
 import streamingResumeRouter from "./routes/streamingResumeRouter";
 import superAgentRouter from "./routes/superAgentRoutes";
@@ -298,6 +299,7 @@ export async function registerRoutes(
   app.use("/api/ppt", pptExportRouter);
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
+  app.use("/api/attachments", createAttachmentRouter());
   app.use("/api", createGptRouter());
   app.use("/api/documents", createDocumentsRouter());
   app.use("/api/admin", createAdminRouter());

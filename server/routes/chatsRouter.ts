@@ -4,6 +4,9 @@ import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { sanitizeMessageContent } from "../lib/markdownSanitizer";
+import { db } from "../db";
+import { messageAttachments as messageAttachmentsTable, attachments as attachmentsTable } from "../../shared/schema";
+import { eq, inArray, sql } from "drizzle-orm";
 
 // Higher body limit middleware for message creation endpoints.
 // The global limit is 1MB, but messages with attachment metadata can be larger.
@@ -209,7 +212,43 @@ export function createChatsRouter() {
       const messages = await storage.getChatMessages(req.params.id, { limit, before });
       // Also include conversationDocuments so the frontend can hydrate attachment display data
       const conversationDocs = await storage.getConversationDocuments(req.params.id);
-      res.json({ ...chat, messages, conversationDocuments: conversationDocs, shareRole, isOwner });
+
+      // Rehydrate persistent attachments for all messages in this chat
+      let messageAttachmentMap: Record<string, any[]> = {};
+      try {
+        const messageIds = messages.map(m => m.id);
+        if (messageIds.length > 0) {
+          const linked = await db
+            .select({
+              messageId: messageAttachmentsTable.messageId,
+              attachment: attachmentsTable,
+              displayOrder: messageAttachmentsTable.displayOrder,
+            })
+            .from(messageAttachmentsTable)
+            .innerJoin(attachmentsTable, eq(messageAttachmentsTable.attachmentId, attachmentsTable.id))
+            .where(inArray(messageAttachmentsTable.messageId, messageIds));
+
+          for (const row of linked) {
+            if (!messageAttachmentMap[row.messageId]) {
+              messageAttachmentMap[row.messageId] = [];
+            }
+            messageAttachmentMap[row.messageId].push({
+              attachment_id: row.attachment.id,
+              file_name: row.attachment.fileName,
+              mime_type: row.attachment.mimeType,
+              file_size: row.attachment.fileSize,
+              sha256: row.attachment.sha256,
+              signed_url: row.attachment.signedUrl,
+              pipeline_status: row.attachment.pipelineStatus,
+              display_order: row.displayOrder,
+            });
+          }
+        }
+      } catch (attachErr: any) {
+        console.warn("[Chats] Failed to rehydrate attachments:", attachErr.message);
+      }
+
+      res.json({ ...chat, messages, conversationDocuments: conversationDocs, messageAttachments: messageAttachmentMap, shareRole, isOwner });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

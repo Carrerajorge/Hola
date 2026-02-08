@@ -6,6 +6,10 @@ import { getOrCreateSession, getEnforcedModel, getSessionById, type GptSessionCo
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
+import { getAttachmentContextForChat } from "../services/attachmentRetrieval";
+import { db } from "../db";
+import { messageAttachments as messageAttachmentsTable, attachments as attachmentsTable } from "../../shared/schema";
+import { eq, inArray } from "drizzle-orm";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
 import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext, pareIdempotencyGuard, pareAnalyzeSchemaValidator } from "../middleware";
@@ -198,7 +202,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, attachment_ids: attachmentIds, lastImageBase64, lastImageId, session_id } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -306,9 +310,29 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       let attachmentContext = "";
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const hasAttachmentIds = Array.isArray(attachmentIds) && attachmentIds.length > 0;
 
-      if (hasAttachments) {
-        console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
+      // ──── NEW ATTACHMENT PIPELINE: Use hybrid retrieval when attachment_ids present ────
+      if (hasAttachmentIds) {
+        try {
+          const lastMsg = [...messages].reverse().find((m: any) => m.role === "user");
+          const queryText = lastMsg?.content || "";
+
+          if (queryText && conversationId) {
+            const retrievalResult = await getAttachmentContextForChat(conversationId, queryText, 6000);
+            if (retrievalResult.formattedContext) {
+              attachmentContext = retrievalResult.formattedContext;
+              console.log(`[Chat API] Hybrid retrieval: ${retrievalResult.totalChunks} chunks from ${attachmentIds.length} attachment(s)`);
+            }
+          }
+        } catch (retrievalError: any) {
+          console.error("[Chat API] Hybrid retrieval error:", retrievalError.message);
+        }
+      }
+
+      // ──── LEGACY ATTACHMENT FLOW: Fallback when attachment_ids not provided ────
+      if (hasAttachments && !attachmentContext) {
+        console.log(`[Chat API] Processing ${attachments.length} attachment(s) (legacy flow)`);
         try {
           const extractedContents: { extracted: Awaited<ReturnType<typeof extractAttachmentContent>>; attachment: Attachment }[] = [];
           for (const attachment of attachments as Attachment[]) {
@@ -658,7 +682,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, attachment_ids: attachmentIds, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
       const effectiveUserId = getOrCreateSecureUserId(req);
 
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
@@ -1230,6 +1254,64 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           return res.end();
         }
       }
+
+      // ──── NEW ATTACHMENT PIPELINE: hybrid retrieval via attachment_ids ────
+      // When the client sends attachment_ids (from the Attachment API), use
+      // hybrid BM25+vector retrieval instead of raw batch extraction.
+      const hasAttachmentIds = Array.isArray(attachmentIds) && attachmentIds.length > 0;
+
+      if (hasAttachmentIds && !attachmentContext) {
+        try {
+          const effectiveChatIdForRetrieval = chatId || conversationId;
+          const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user");
+          const queryText = lastUserMsg?.content || "";
+
+          if (queryText) {
+            const retrievalResult = await getAttachmentContextForChat(
+              effectiveChatIdForRetrieval || "",
+              queryText,
+              6000 // token budget
+            );
+
+            if (retrievalResult.formattedContext) {
+              attachmentContext = retrievalResult.formattedContext;
+              console.log(`[Stream] Hybrid retrieval: ${retrievalResult.totalChunks} chunks, ~${retrievalResult.tokenEstimate} tokens from ${attachmentIds.length} attachment(s)`);
+            }
+          }
+
+          // Emit attachment metadata as SSE event so frontend can track persistent IDs
+          writeSse(res, "attachments", {
+            attachment_ids: attachmentIds,
+            retrieval_chunks: 0, // will be updated after retrieval
+          });
+        } catch (retrievalError: any) {
+          console.error("[Stream] Hybrid retrieval error:", retrievalError.message);
+          // Fall through to legacy batch processing (already handled above)
+        }
+      }
+
+      // Link attachment_ids to the user message for persistence (fire-and-forget)
+      if (hasAttachmentIds && chatId) {
+        void (async () => {
+          try {
+            // Get the latest user message ID from the run
+            const msgId = claimedRun?.userMessageId;
+            if (msgId) {
+              for (let i = 0; i < attachmentIds.length; i++) {
+                await db.insert(messageAttachmentsTable).values({
+                  messageId: msgId,
+                  attachmentId: attachmentIds[i],
+                  displayOrder: i,
+                }).onConflictDoNothing();
+              }
+              console.log(`[Stream] Linked ${attachmentIds.length} attachment(s) to message ${msgId}`);
+            }
+          } catch (linkError: any) {
+            console.error("[Stream] Error linking attachments to message:", linkError.message);
+          }
+        })();
+      }
+      // ──── END NEW ATTACHMENT PIPELINE ────
 
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
