@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 
+// ---------------------------------------------------------------------------
+// Types & Constants
+// ---------------------------------------------------------------------------
+
 interface Particle {
   x: number;
   y: number;
@@ -10,6 +14,7 @@ interface Particle {
   color: string;
   alpha: number;
   life: number;
+  active: boolean;
 }
 
 const COLORS = [
@@ -23,113 +28,182 @@ const COLORS = [
   '#6366F1', // Indigo
 ];
 
+const BASE_FPS = 60;
+const LIFE_DECAY = 0.003 * BASE_FPS;  // per-second
+const MAX_DT = 1 / 30;
+const POOL_SIZE = 80;
+const SPAWN_CHANCE_PER_S = 0.15 * BASE_FPS; // probability normalised to per-second
+
+const prefersReducedMotion =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+// ---------------------------------------------------------------------------
+// Particle pool
+// ---------------------------------------------------------------------------
+
+function createPool(n: number): Particle[] {
+  const pool: Particle[] = [];
+  for (let i = 0; i < n; i++) {
+    pool.push({ x: 0, y: 0, vx: 0, vy: 0, size: 0, color: '', alpha: 0, life: 0, active: false });
+  }
+  return pool;
+}
+
+function acquire(pool: Particle[]): Particle | null {
+  for (let i = 0; i < pool.length; i++) {
+    if (!pool[i].active) { pool[i].active = true; return pool[i]; }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function WelcomeAnimation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const particlesRef = useRef<Particle[]>([]);
-  const animationRef = useRef<number>();
+  const initedRef = useRef(false);
 
   useEffect(() => {
+    if (initedRef.current) return;
+    initedRef.current = true;
+
+    if (prefersReducedMotion) return; // skip animation entirely
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
+    // ---- Sizing ----
     const resizeCanvas = () => {
-      canvas.width = canvas.offsetWidth * window.devicePixelRatio;
-      canvas.height = canvas.offsetHeight * window.devicePixelRatio;
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
-
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    const createParticle = (): Particle => {
-      const canvasWidth = canvas.offsetWidth;
-      return {
-        x: Math.random() * canvasWidth,
-        y: -10,
-        vx: (Math.random() - 0.5) * 2,
-        vy: Math.random() * 3 + 1,
-        size: Math.random() * 4 + 2,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)],
-        alpha: Math.random() * 0.6 + 0.4,
-        life: 1,
-      };
+    // ---- Pool & particles ----
+    const pool = createPool(POOL_SIZE);
+
+    const initParticle = (p: Particle, y?: number) => {
+      const w = canvas.offsetWidth;
+      p.x = Math.random() * w;
+      p.y = y !== undefined ? y : -10;
+      p.vx = ((Math.random() - 0.5) * 2) * BASE_FPS;
+      p.vy = (Math.random() * 3 + 1) * BASE_FPS;
+      p.size = Math.random() * 4 + 2;
+      p.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+      p.alpha = Math.random() * 0.6 + 0.4;
+      p.life = 1;
     };
 
-    // Initialize particles
+    // Seed initial particles spread across viewport
     for (let i = 0; i < 50; i++) {
-      const particle = createParticle();
-      particle.y = Math.random() * canvas.offsetHeight;
-      particlesRef.current.push(particle);
+      const p = acquire(pool);
+      if (!p) break;
+      initParticle(p, Math.random() * canvas.offsetHeight);
     }
 
-    const animate = () => {
-      const canvasWidth = canvas.offsetWidth;
-      const canvasHeight = canvas.offsetHeight;
+    // ---- Visibility ----
+    let paused = false;
+    let lastFrameTime = 0;
 
-      ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    const handleVisibility = () => {
+      if (document.hidden) {
+        paused = true;
+      } else {
+        paused = false;
+        lastFrameTime = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
-      // Add new particles occasionally
-      if (Math.random() < 0.15) {
-        particlesRef.current.push(createParticle());
+    // ---- Animation loop ----
+    let animId = 0;
+
+    const animate = (now: number) => {
+      if (paused) { animId = requestAnimationFrame(animate); return; }
+
+      if (lastFrameTime === 0) lastFrameTime = now;
+      const dt = Math.min((now - lastFrameTime) / 1000, MAX_DT);
+      lastFrameTime = now;
+
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      // Spawn new particles (probability scaled by dt)
+      if (Math.random() < SPAWN_CHANCE_PER_S * dt) {
+        const p = acquire(pool);
+        if (p) initParticle(p);
       }
 
-      // Update and draw particles
-      particlesRef.current = particlesRef.current.filter(particle => {
-        particle.x += particle.vx;
-        particle.y += particle.vy;
-        particle.life -= 0.003;
-        particle.alpha = particle.life * 0.8;
+      // Update & draw
+      for (let i = 0; i < pool.length; i++) {
+        const p = pool[i];
+        if (!p.active) continue;
 
-        if (particle.life <= 0 || particle.y > canvasHeight + 20) {
-          return false;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= LIFE_DECAY * dt;
+        p.alpha = p.life * 0.8;
+
+        if (p.life <= 0 || p.y > h + 20) {
+          p.active = false;
+          continue;
         }
 
-        // Draw glow effect
-        const gradient = ctx.createRadialGradient(
-          particle.x, particle.y, 0,
-          particle.x, particle.y, particle.size * 3
-        );
-        gradient.addColorStop(0, particle.color + Math.floor(particle.alpha * 255).toString(16).padStart(2, '0'));
-        gradient.addColorStop(1, particle.color + '00');
-
+        // Glow
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+        g.addColorStop(0, p.color);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(particle.x, particle.y, particle.size * 3, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
+        ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
 
-        // Draw core
+        // Core
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
         ctx.beginPath();
-        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-        ctx.fillStyle = particle.color + Math.floor(particle.alpha * 255).toString(16).padStart(2, '0');
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+      }
 
-        return true;
-      });
-
-      animationRef.current = requestAnimationFrame(animate);
+      animId = requestAnimationFrame(animate);
     };
 
-    animate();
+    animId = requestAnimationFrame(animate);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('resize', resizeCanvas);
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      cancelAnimationFrame(animId);
     };
   }, []);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden">
-      {/* Particle Canvas */}
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none"
-        style={{ opacity: 0.7 }}
-      />
+      {/* Particle canvas */}
+      {!prefersReducedMotion && (
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ opacity: 0.7 }}
+        />
+      )}
 
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-6 px-4">
@@ -170,7 +244,7 @@ export function WelcomeAnimation() {
 
         {/* Call to Action */}
         <p className="text-muted-foreground/80 text-sm mt-4">
-          Escribe tu primera pregunta para comenzar ✨
+          Escribe tu primera pregunta para comenzar
         </p>
       </div>
 
