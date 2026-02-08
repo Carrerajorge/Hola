@@ -1455,7 +1455,13 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Rely on DB-backed permissions. Session-embedded roles can be stale.
+            // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
+      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
+      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+// Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const parsedQuery = z
         .object({
@@ -1474,9 +1480,16 @@ export function createStripeRouter() {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      const canManageBilling = await canManageBillingForDbUser(dbUser);
+      let canManageBilling = false;
+      try {
+        canManageBilling = await canManageBillingForDbUser(dbUser);
+      } catch {
+        // fail-closed: si no podemos resolver permisos, negamos acceso
+        canManageBilling = false;
+      }
       if (!canManageBilling) {
-        await auditLog(req, {
+        try {
+          await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
           resource: "billing.invoices",
           resourceId: userId,
@@ -1484,6 +1497,9 @@ export function createStripeRouter() {
           category: "security",
           severity: "warning",
         });
+        } catch {
+          // best-effort (no bloquear el 403)
+        }
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
@@ -1551,7 +1567,13 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión" });
       }
 
-      // Rely on DB-backed permissions. Session-embedded roles can be stale.
+            // Fail-closed: if the session/claims role is clearly non-billing, deny before touching DB/Stripe.
+      const sessionRoleKey = normalizeRoleKey(getActorRole(req));
+      if (sessionRoleKey && !["billing_manager", "team_admin", "admin", "superadmin"].includes(sessionRoleKey)) {
+        return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+      }
+
+// Rely on DB-backed permissions. Session-embedded roles can be stale.
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
       if (!dbUser) {
@@ -1560,9 +1582,16 @@ export function createStripeRouter() {
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 
-      const canManageBilling = await canManageBillingForDbUser(dbUser);
+      let canManageBilling = false;
+      try {
+        canManageBilling = await canManageBillingForDbUser(dbUser);
+      } catch {
+        // fail-closed: si no podemos resolver permisos, negamos acceso
+        canManageBilling = false;
+      }
       if (!canManageBilling) {
-        await auditLog(req, {
+        try {
+          await auditLog(req, {
           action: AuditActions.SECURITY_ALERT,
           resource: "stripe.billing_portal",
           resourceId: userId,
@@ -1570,6 +1599,9 @@ export function createStripeRouter() {
           category: "security",
           severity: "warning",
         });
+        } catch {
+          // best-effort (no bloquear el 403)
+        }
         return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
       }
 

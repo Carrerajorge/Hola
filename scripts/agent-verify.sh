@@ -1,6 +1,3 @@
-mkdir -p scripts
-
-cat > scripts/agent-verify.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -16,6 +13,3 @@ npm run test:run
 
 echo "==> build"
 npm run build
-EOF
-
-chmod +x scripts/agent-verify.sh

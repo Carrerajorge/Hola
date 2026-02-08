@@ -1,4 +1,3 @@
-cat > scripts/agent-checkpoint.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -24,6 +23,3 @@ git add docs/SPEC_PROGRESS.md docs/WORKLOG.md || true
 if ! git diff --cached --quiet; then
   git commit -m "docs: checkpoint ${SPEC_POINT:-progress}" || true
 fi
-EOF
-
-chmod +x scripts/agent-checkpoint.sh
