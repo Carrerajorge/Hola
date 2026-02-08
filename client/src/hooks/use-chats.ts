@@ -1009,7 +1009,6 @@ export function useChats() {
     window.addEventListener("refresh-chat-title", handleTitleRefresh);
     return () => window.removeEventListener("refresh-chat-title", handleTitleRefresh);
   }, []);
-
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
       // Use debounced save to prevent excessive writes during streaming

@@ -193,13 +193,13 @@ function GlobalKeyboardShortcuts() {
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 
 function Router() {
+  const HOME_ROUTE_REGEX = /^\/(?:chat(?:\/[^/]+)?)?\/?$/;
   return (
     <GlobalErrorBoundary>
       <Suspense fallback={<PageLoader />}>
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
-            <Route path="/" component={Home} />
-            <Route path="/chat/:id" component={ChatPageRedirect} />
+            <Route path={HOME_ROUTE_REGEX} component={Home} />
             <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
             <Route path="/login/approve" component={LoginApprovePage} />
