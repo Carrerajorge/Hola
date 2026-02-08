@@ -15,7 +15,7 @@ import { getSecureUserId } from '../lib/anonUserHelper';
 const RATE_LIMIT_CONFIGS = {
     // Chat endpoints - more generous
     chat: {
-        points: 60,          // 60 requests
+        points: 1000,          // 60 requests
         duration: 60,        // per 60 seconds
         blockDuration: 120,  // block for 2 minutes if exceeded
     },
@@ -46,7 +46,7 @@ const RATE_LIMIT_CONFIGS = {
     },
     // General API - default
     default: {
-        points: 100,
+        points: 1000,
         duration: 60,
         blockDuration: 60,
     },

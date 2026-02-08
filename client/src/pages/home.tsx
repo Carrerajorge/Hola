@@ -16,7 +16,7 @@ import { useLocation, useSearch } from "wouter";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { useChats, Message, generateRequestId } from "@/hooks/use-chats";
+import { useChats, Message, generateRequestId, resolveRealChatId } from "@/hooks/use-chats";
 import { useChatFolders } from "@/hooks/use-chat-folders";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import { toast } from "sonner";
@@ -56,7 +56,7 @@ const PromptTemplatesDialogLazy = lazy(() =>
 
 export default function Home() {
   const isMobile = useIsMobile();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { isAuthenticated, isLoading, isReady } = useAuth();
 
 
@@ -69,6 +69,20 @@ export default function Home() {
   useEffect(() => {
     useMediaLibrary.getState().preload();
   }, []);
+
+
+  // Parse chat id from URL: /chat/:id
+
+  const chatIdFromUrl = useMemo(() => {
+
+    const m = location.match(/^\/chat\/([^/?#]+)/);
+
+    return m ? decodeURIComponent(m[1]) : null;
+
+  }, [location]);
+
+
+
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
@@ -196,6 +210,36 @@ export default function Home() {
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
 
+
+  // Sync URL to active chat state (direct navigation to /chat/:id)
+
+  useEffect(() => {
+
+    if (!chatIdFromUrl) return;
+
+    if (activeChat?.id === chatIdFromUrl) return;
+
+
+
+    // Exit new chat mode and clear project selection
+
+    setIsNewChatMode(false);
+
+    setNewChatStableKey(null);
+
+    pendingChatIdRef.current = null;
+
+    setSelectedProjectId(null);
+
+
+
+    setActiveChatId(chatIdFromUrl);
+
+  }, [chatIdFromUrl, activeChat?.id, setActiveChatId]);
+
+
+
+
   const handleClearPendingCount = useCallback((chatId: string) => {
     clearBadge(chatId);
   }, [clearBadge]);
@@ -214,6 +258,7 @@ export default function Home() {
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
+    setLocation(`/chat/${id}`);
     setSelectedProjectId(null); // Clear project selection when selecting a chat
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
@@ -233,6 +278,7 @@ export default function Home() {
           setNewChatStableKey(null);
         }
         setActiveChatId(chatId);
+        setLocation(`/chat/${chatId}`, { replace: !!preserveKey });
         setAiProcessSteps([]);
       }
     };
@@ -285,6 +331,7 @@ export default function Home() {
 
     // Close any open dialogs
     setIsAppsDialogOpen(false);
+    setLocation("/");
   };
 
   const handleSelectProject = useCallback((projectId: string) => {
@@ -310,8 +357,13 @@ export default function Home() {
     // component remount when newChatStableKey is cleared during navigation.
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
-    return await addMessage(pendingId, message);
-  }, [createChat, addMessage]);
+    const result = await addMessage(pendingId, message);
+    const realId = resolveRealChatId(pendingId);
+    if (realId && !realId.startsWith("pending-")) {
+      setLocation(`/chat/${realId}`, { replace: true });
+    }
+    return result;
+  }, [createChat, addMessage, setLocation]);
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {

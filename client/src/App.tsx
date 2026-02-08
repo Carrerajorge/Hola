@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
@@ -16,6 +16,7 @@ import { BackgroundNotificationContainer } from "@/components/background-notific
 import { CommandPalette } from "@/components/command-palette";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
+import { trackWorkspaceEvent } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
 const Home = lazy(() => import("@/pages/home"));
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
@@ -28,6 +29,25 @@ const PageLoader = () => (
     <Loader2 className="h-8 w-8 animate-spin text-primary" />
   </div>
 );
+
+function WorkspaceAnalyticsTracker() {
+  const [location] = useLocation();
+  const { user, isReady } = useAuth();
+  const lastLocationRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isReady || !user) return;
+    if (lastLocationRef.current === location) return;
+    lastLocationRef.current = location;
+    void trackWorkspaceEvent({
+      eventType: "page_view",
+      page: location,
+      metadata: { path: location },
+    });
+  }, [location, user, isReady]);
+
+  return null;
+}
 
 function ChatPageRedirect() {
   const params = useParams<{ id: string }>();
@@ -79,14 +99,29 @@ function GlobalKeyboardShortcuts() {
   const handleNewChat = useCallback(() => {
     setLocation("/");
     window.dispatchEvent(new CustomEvent("new-chat-requested"));
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "new_chat_requested",
+      metadata: { source: "shortcut" },
+    });
   }, [setLocation]);
 
   const handleOpenSearch = useCallback(() => {
     setCommandPaletteOpen(true); // Now opens Command Palette instead
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "command_palette_opened",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleOpenToolCatalog = useCallback(() => {
     setToolCatalogOpen(true);
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "tool_catalog_opened",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleCloseDialogs = useCallback(() => {
@@ -94,10 +129,20 @@ function GlobalKeyboardShortcuts() {
     setToolCatalogOpen(false);
     setCommandPaletteOpen(false);
     window.dispatchEvent(new CustomEvent("close-all-dialogs"));
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "dialogs_closed",
+      metadata: { source: "shortcut" },
+    });
   }, []);
 
   const handleOpenSettings = useCallback(() => {
     setLocation("/settings");
+    void trackWorkspaceEvent({
+      eventType: "action",
+      action: "settings_opened",
+      metadata: { source: "shortcut" },
+    });
   }, [setLocation]);
 
   const handleSelectChat = useCallback((chatId: string) => {
@@ -146,13 +191,13 @@ function GlobalKeyboardShortcuts() {
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 
 function Router() {
+  const HOME_ROUTE_REGEX = /^\/(?:chat(?:\/[^/]+)?)?\/?$/;
   return (
     <GlobalErrorBoundary>
       <Suspense fallback={<PageLoader />}>
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
-            <Route path="/" component={Home} />
-            <Route path="/chat/:id" component={ChatPageRedirect} />
+            <Route path={HOME_ROUTE_REGEX} component={Home} />
             <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
             <Route path="/signup" component={SignupPage} />
@@ -206,6 +251,7 @@ function AppContent() {
       <OfflineIndicator />
       {/* AuthCallbackHandler removed, moved to AuthProvider */}
       <GlobalKeyboardShortcuts />
+      <WorkspaceAnalyticsTracker />
       <Toaster />
       <SonnerToaster
         position="bottom-right"
