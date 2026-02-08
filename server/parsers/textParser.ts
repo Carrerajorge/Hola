@@ -6,7 +6,6 @@ export class TextParser implements FileParser {
     "text/plain",
     "text/markdown",
     "text/md",
-    "text/csv",
     "text/html",
     "application/json",
   ];
