@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL, DEFAULT_REASONING_MODEL } from "./modelRegistry";
 
 export const openai = new OpenAI({
   baseURL: "https://api.x.ai/v1",
@@ -6,9 +7,9 @@ export const openai = new OpenAI({
 });
 
 export const MODELS = {
-  TEXT: "grok-3-mini",
-  VISION: "grok-2-vision-1212",
-  GROK_REASONING: "grok-4-1-fast-reasoning"
+  TEXT: DEFAULT_TEXT_MODEL,
+  VISION: DEFAULT_VISION_MODEL,
+  GROK_REASONING: DEFAULT_REASONING_MODEL,
 } as const;
 
 export type ModelType = typeof MODELS[keyof typeof MODELS];

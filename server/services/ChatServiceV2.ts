@@ -3,6 +3,10 @@ import { openai, MODELS } from "../lib/openai";
 import { llmGateway } from "../lib/llmGateway";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
 import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
+import {
+  DEFAULT_TEXT_MODEL as REGISTRY_DEFAULT_MODEL,
+  DEFAULT_PROVIDER as REGISTRY_DEFAULT_PROVIDER,
+} from "../lib/modelRegistry";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
@@ -41,8 +45,8 @@ export const AVAILABLE_MODELS = {
     }
 } as const;
 
-export const DEFAULT_PROVIDER = "xai";
-export const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
+export const DEFAULT_PROVIDER = REGISTRY_DEFAULT_PROVIDER;
+export const DEFAULT_MODEL = REGISTRY_DEFAULT_MODEL;
 
 // Interfaces
 export interface ChatMessage {
