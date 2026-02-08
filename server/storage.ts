@@ -715,8 +715,6 @@ export class MemStorage implements IStorage {
       return await query;
     });
   }
-  async searchMessages(userId: string, query: string): Promise<ChatMessage[]> {
-    // Sanitize query to avoid syntax errors in websearch_to_tsquery
     const sanitizedQuery = query.replace(/[^\w\sñáéíóúü]/gi, ' ').trim();
     if (!sanitizedQuery) return [];
 
