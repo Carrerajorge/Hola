@@ -310,12 +310,31 @@ export function useStreamChat(deps: StreamChatDeps) {
                 // Server is doing heavy I/O (search, context load) — keep thinking state
                 setAiState("thinking");
                 onAiStateChange?.("thinking");
+
+                // Surface thinking step details (e.g. "Buscando fuentes…") so the
+                // UI can show progress instead of a generic spinner.
+                if (data.step && data.message) {
+                  setAiProcessSteps?.((prev: any[]) => {
+                    const existing = prev.find((s: any) => s.id === data.step);
+                    if (existing) return prev;
+                    return [...prev, {
+                      id: data.step,
+                      step: data.step,
+                      title: data.message,
+                      status: "pending",
+                    }];
+                  });
+                }
               }
 
               if (!isStale && currentEventType === "context") {
-                // Enriched metadata arrived — switch to responding
+                // Enriched metadata arrived — switch to responding.
+                // Mark any pending thinking steps as done.
                 setAiState("responding");
                 onAiStateChange?.("responding");
+                setAiProcessSteps?.((prev: any[]) =>
+                  prev.map((s: any) => ({ ...s, status: "done" }))
+                );
               }
 
               if (!isStale && currentEventType === "production_start") {

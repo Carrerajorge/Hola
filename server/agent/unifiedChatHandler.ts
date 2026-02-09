@@ -454,6 +454,12 @@ export async function executeUnifiedChat(
     });
   }
 
+  // Helper: true when the response socket is no longer usable
+  const isResponseDead = () => {
+    const r = res as any;
+    return !!(r.writableEnded || r.destroyed);
+  };
+
   writeSse(res, 'start', {
     runId,
     intent: requestSpec.intent,
@@ -463,7 +469,7 @@ export async function executeUnifiedChat(
     timestamp: Date.now()
   });
 
-  if (isAgenticMode) {
+  if (isAgenticMode && !isResponseDead()) {
     // Emit thinking event immediately so TTFT is low even for heavy pipelines
     writeSse(res, 'thinking', {
       step: 'planning',
@@ -502,6 +508,8 @@ export async function executeUnifiedChat(
 
     let fullResponse = '';
     let chunkCount = 0;
+    // Hoisted so the catch block can destroy it on error
+    let activeWriter: SseBufferedWriter | null = null;
 
     if (isAgenticMode) {
       await executeAgentLoop(formattedMessages, res, {
@@ -530,6 +538,7 @@ export async function executeUnifiedChat(
     } else {
       // Use buffered writer to batch small deltas (~30ms intervals)
       const writer = new SseBufferedWriter(res, runId);
+      activeWriter = writer;
 
       const streamGenerator = llmGateway.streamChat(formattedMessages, {
         userId: request.userId,
@@ -605,6 +614,9 @@ export async function executeUnifiedChat(
     }).catch(() => { });
 
   } catch (error: any) {
+    // Destroy any active buffered writer to cancel pending timers
+    activeWriter?.destroy();
+
     console.error(`[UnifiedChat] Execution error:`, error);
 
     await emitTraceEvent(runId, 'error', {

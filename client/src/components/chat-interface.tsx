@@ -3236,7 +3236,8 @@ export function ChatInterface({
               provider: selectedProvider,
               model: selectedModel,
               lastImageBase64,
-              lastImageId
+              lastImageId,
+              latencyMode,
             }),
             signal: abortControllerRef.current.signal
           });
@@ -4495,7 +4496,8 @@ IMPORTANTE:
                 chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null
+                docTool: selectedDocTool || null,
+                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
             });

@@ -1173,8 +1173,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       heartbeatInterval = setInterval(() => {
-        if (!isConnectionClosed) {
-          res.write(`:heartbeat\n\n`);
+        const r = res as any;
+        if (!isConnectionClosed && !r.writableEnded && !r.destroyed) {
+          try {
+            res.write(`:heartbeat\n\n`);
+          } catch {
+            // Connection gone — stop heartbeat
+            isConnectionClosed = true;
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+          }
         }
       }, 15000);
 
@@ -1610,23 +1617,27 @@ ${attachmentContext}`;
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
 
-      // Enriched context event (the lightweight 'start' was already sent early for low TTFT)
-      writeSse(res, 'context', {
-        requestId,
-        runId: effectiveRunId,
-        assistantMessageId,
-        latencyMode,
-        latencyLane: unifiedContext?.resolvedLane || 'fast',
-        intent: unifiedContext?.requestSpec.intent,
-        intentConfidence: unifiedContext?.requestSpec.intentConfidence,
-        deliverableType: unifiedContext?.requestSpec.deliverableType,
-        primaryAgent: unifiedContext?.requestSpec.primaryAgent,
-        targetAgents: unifiedContext?.requestSpec.targetAgents,
-        isAgenticMode: unifiedContext?.isAgenticMode,
-        webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
-        timestamp: Date.now(),
-        ...sessionMetadata
-      });
+      // Enriched context event — only emit when connection is alive.
+      // Use nullish fallbacks so the frontend receives valid metadata even
+      // if unifiedContext creation failed.
+      if (!isConnectionClosed) {
+        writeSse(res, 'context', {
+          requestId,
+          runId: effectiveRunId,
+          assistantMessageId,
+          latencyMode,
+          latencyLane: unifiedContext?.resolvedLane || 'fast',
+          intent: unifiedContext?.requestSpec?.intent ?? 'chat',
+          intentConfidence: unifiedContext?.requestSpec?.intentConfidence ?? 0,
+          deliverableType: unifiedContext?.requestSpec?.deliverableType ?? null,
+          primaryAgent: unifiedContext?.requestSpec?.primaryAgent ?? null,
+          targetAgents: unifiedContext?.requestSpec?.targetAgents ?? [],
+          isAgenticMode: unifiedContext?.isAgenticMode ?? false,
+          webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          timestamp: Date.now(),
+          ...sessionMetadata
+        });
+      }
 
       emitTraceEvent(effectiveRunId, 'task_start', {
         metadata: {
