@@ -1064,6 +1064,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           messages: messages as Array<{ role: string; content: string }>,
           chatId: effectiveChatId,
           userId: userId || 'anonymous',
+          model: effectiveModel,
           runId: runId,
           messageId: `msg_${Date.now()}`,
           attachments: attachmentSpecs,
@@ -1927,7 +1928,9 @@ ${attachmentContext}`;
       }
 
     } catch (error: any) {
-      console.error(`[SSE] Stream error ${requestId}:`, error);
+      const categorized = categorizeError(error, requestId);
+      const streamWasActive = typeof lastAckSequence !== 'undefined' && lastAckSequence >= 0;
+      console.error(`[SSE] Stream error ${requestId} (category=${categorized.category}, midStream=${streamWasActive}):`, error?.message || error);
 
       // Mark run as failed if we claimed one
       if (claimedRun) {
@@ -1940,15 +1943,26 @@ ${attachmentContext}`;
 
       const errorRunId = claimedRun?.id || requestId;
       if (!isConnectionClosed) {
-        writeSse(res, 'error', {
-          error: error.message,
-          requestId,
-          runId: errorRunId,
-          timestamp: Date.now()
-        });
+        try {
+          writeSse(res, 'error', {
+            type: streamWasActive ? 'stream_interrupted' : 'stream_failed',
+            category: categorized.category,
+            error: categorized.userMessage,
+            technicalDetails: categorized.technicalDetails,
+            retryable: categorized.retryable,
+            lastSequenceId: streamWasActive ? lastAckSequence : undefined,
+            requestId,
+            runId: errorRunId,
+            model: typeof effectiveModel !== 'undefined' ? effectiveModel : undefined,
+            timestamp: Date.now()
+          });
+        } catch (writeError) {
+          // Connection may have died between the check and the write
+          console.warn(`[SSE] Failed to write error event: ${(writeError as any)?.message}`);
+        }
 
         emitTraceEvent(errorRunId, 'error', {
-          error: { message: error.message, code: error.code || 'UNKNOWN' }
+          error: { message: error.message, code: categorized.category }
         }).catch(() => { });
       }
     } finally {
@@ -1956,7 +1970,7 @@ ${attachmentContext}`;
         clearInterval(heartbeatInterval);
       }
       if (!isConnectionClosed) {
-        res.end();
+        try { res.end(); } catch { /* already closed */ }
       }
     }
   });

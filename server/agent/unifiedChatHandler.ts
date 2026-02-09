@@ -25,6 +25,7 @@ export interface UnifiedChatRequest {
   messages: Array<{ role: string; content: string }>;
   chatId: string;
   userId: string;
+  model?: string;
   runId?: string;
   messageId?: string;
   attachments?: AttachmentSpec[];
@@ -543,6 +544,7 @@ export async function executeUnifiedChat(
       const streamGenerator = llmGateway.streamChat(formattedMessages, {
         userId: request.userId,
         requestId: runId,
+        model: request.model,
         disableImageGeneration: options.disableImageGeneration,
         ...(fastLaneMaxTokens ? { maxTokens: fastLaneMaxTokens } : {}),
       });
