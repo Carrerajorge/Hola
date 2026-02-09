@@ -658,6 +658,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
   router.post("/chat/stream", async (req, res) => {
     const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const t0 = Date.now(); // Latency instrumentation: request arrival
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let isConnectionClosed = false;
     let claimedRun: any = null;
@@ -1115,7 +1116,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Model", effectiveModel);
         res.setHeader("X-Latency-Mode", latencyMode);
+        if (claimedRun) {
+          res.setHeader("X-Run-Id", claimedRun.id);
+        }
         res.flushHeaders();
       }
 
@@ -1733,6 +1738,9 @@ ${attachmentContext}`;
         });
       }
 
+      const t1 = Date.now(); // Latency instrumentation: just before gateway call
+      console.log(`[Stream][Latency] ${requestId} pre-LLM: ${t1 - t0}ms (routing/search/context)`);
+
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
@@ -1746,6 +1754,7 @@ ${attachmentContext}`;
 
       let fullContent = "";
       let lastAckSequence = -1;
+      let t2Logged = false;
 
       // ── BUFFERED WRITER ────────────────────────────────────────
       // Batch small deltas into ~30ms flushes to reduce res.write()
@@ -1760,6 +1769,12 @@ ${attachmentContext}`;
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
 
+        if (!t2Logged) {
+          const t2 = Date.now();
+          console.log(`[Stream][Latency] ${requestId} first-chunk: ${t2 - t1}ms (provider/${effectiveModel}), total-TTFB: ${t2 - t0}ms`);
+          t2Logged = true;
+        }
+
         fullContent += chunk.content;
         lastAckSequence = chunk.sequenceId;
 
@@ -1772,6 +1787,8 @@ ${attachmentContext}`;
           // Flush remaining buffered content before done event
           writer.finalize();
 
+          const totalMs = Date.now() - t0;
+          console.log(`[Stream][Latency] ${requestId} total: ${totalMs}ms`);
           console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
@@ -1780,6 +1797,9 @@ ${attachmentContext}`;
             intent: unifiedContext?.requestSpec.intent,
             latencyLane: resolvedLane,
             webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            model: effectiveModel,
+            provider: chunk.provider,
+            latencyMs: totalMs,
             timestamp: Date.now(),
             ...sessionMetadata
           });
@@ -1985,7 +2005,8 @@ ${attachmentContext}`;
       });
 
       try {
-        const { messages, attachments, conversationId } = req.body;
+        const { messages, attachments, conversationId, model } = req.body;
+        const analyzeModel = model || DEFAULT_MODEL;
 
         // GUARD: attachments are REQUIRED for /analyze endpoint
         if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
@@ -2540,6 +2561,7 @@ ${documentText}`;
         const streamGenerator = llmGateway.streamChat(llmMessages, {
           userId: userId || conversationId || "anonymous",
           requestId,
+          model: analyzeModel,
           disableImageGeneration: true,  // HARD BLOCK
         });
 

@@ -997,11 +997,20 @@ export async function registerRoutes(
   });
 
   // ===== Model Warmup Endpoint =====
+  const warmupRateLimit = new Map<string, number>(); // model -> last warmup timestamp
+  const WARMUP_COOLDOWN_MS = 30_000; // 30s per model
+
   app.post("/api/models/warmup", async (req: Request, res: Response) => {
     try {
       const { model } = req.body;
       if (!model || typeof model !== "string") {
         return res.status(400).json({ error: "model is required" });
+      }
+
+      // Rate limit: one warmup per model per 30s
+      const lastWarmup = warmupRateLimit.get(model) || 0;
+      if (Date.now() - lastWarmup < WARMUP_COOLDOWN_MS) {
+        return res.json({ status: "already_warm", model });
       }
 
       // Validate the model is actually available before warming up
@@ -1010,6 +1019,8 @@ export async function registerRoutes(
       if (!isValid) {
         return res.status(400).json({ error: "Model not available" });
       }
+
+      warmupRateLimit.set(model, Date.now());
 
       const { modelWarmupManager } = await import("./lib/modelWarmup");
       // Fire and forget - don't block the response on LLM roundtrip

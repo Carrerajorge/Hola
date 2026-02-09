@@ -120,6 +120,7 @@ import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
+import { useModelWarmup } from "@/hooks/use-model-warmup";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 import {
   dataImageUrlToFile,
@@ -842,6 +843,12 @@ export function ChatInterface({
 
   const selectedProvider = selectedModelData?.provider || "gemini";
   const selectedModel = selectedModelData?.modelId || "gemini-3-flash-preview";
+
+  // Pre-warm the selected model's provider when the user starts typing
+  const { onTypingWarmup } = useModelWarmup(selectedModel);
+  useEffect(() => {
+    onTypingWarmup(input.length);
+  }, [input, onTypingWarmup]);
 
   const modelsByProvider = useMemo(() => {
     const grouped: Record<string, AvailableModel[]> = {};
@@ -3945,7 +3952,8 @@ export function ChatInterface({
           body: JSON.stringify({
             messages: finalChatHistoryPrecheck,
             attachments: cleanedAttachments,
-            conversationId: effectiveConversationId
+            conversationId: effectiveConversationId,
+            model: selectedModel,
           }),
           signal: analysisAbortControllerRef.current.signal
         });
@@ -4448,7 +4456,8 @@ IMPORTANTE:
                 body: JSON.stringify({
                   messages: finalChatHistory,
                   attachments: streamAttachments,
-                  conversationId: chatId
+                  conversationId: chatId,
+                  model: selectedModel,
                 }),
                 signal: abortControllerRef.current?.signal
               });
