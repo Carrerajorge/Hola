@@ -1,4 +1,6 @@
 import { chromium, Browser, BrowserContext } from "playwright";
+import createDOMPurify from "dompurify";
+import { JSDOM } from "jsdom";
 import { pdfConcurrencyLimiter, validatePdfBuffer, logDocumentEvent } from "./documentSecurity";
 
 export interface PdfMargin {
@@ -43,6 +45,11 @@ const PAGE_LOAD_TIMEOUT = 30_000;
 const PDF_GENERATION_TIMEOUT = 60_000;
 
 let browserInstance: Browser | null = null;
+
+// Server-side HTML sanitizer for PDF rendering. Regex-based HTML filtering
+// is easy to get wrong and can trigger CodeQL alerts.
+const dompurifyWindow = new JSDOM("").window;
+const DOMPurify = createDOMPurify(dompurifyWindow as any);
 
 // Maximum number of pages to avoid resource exhaustion during rendering
 const MAX_PDF_PAGES = 500;
@@ -101,6 +108,8 @@ function wrapHtmlWithStyles(html: string): string {
   const hasHeadTag = /<head[\s>]/i.test(html);
 
   const printStyles = `
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
       @media print {
         * {
@@ -164,8 +173,6 @@ function wrapHtmlWithStyles(html: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   ${printStyles}
 </head>
 <body>
@@ -188,34 +195,6 @@ function validateHtml(html: string): void {
   if (html.length > maxSize) {
     throw new Error(`HTML content exceeds maximum size of ${maxSize / 1024 / 1024}MB`);
   }
-
-  // Block dangerous HTML patterns
-  const dangerousPatterns = [
-    /<script\b[^>]*>[\s\S]*?<\/script>/gi,   // Script tags
-    /javascript\s*:/gi,                        // JavaScript URLs
-    /on\w+\s*=/gi,                             // Event handlers (onclick, onerror, etc.)
-    /data\s*:\s*text\/html/gi,                 // Data URLs with HTML
-    /vbscript\s*:/gi,                          // VBScript URLs
-    /<iframe\b[^>]*>/gi,                       // iframe tags
-    /<object\b[^>]*>/gi,                       // object tags
-    /<embed\b[^>]*>/gi,                        // embed tags
-    /<applet\b[^>]*>/gi,                       // applet tags (legacy)
-    /<meta\b[^>]*http-equiv\s*=\s*["']?refresh/gi,  // meta refresh redirect
-    /<link\b[^>]*rel\s*=\s*["']?import/gi,    // HTML imports
-    /<base\b[^>]*>/gi,                         // base tag (URL hijacking)
-  ];
-
-  for (const pattern of dangerousPatterns) {
-    if (pattern.test(html)) {
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "security_violation",
-        docType: "pdf",
-        details: { reason: "dangerous_html_pattern", pattern: pattern.source },
-      });
-      throw new Error("HTML content contains potentially dangerous elements");
-    }
-  }
 }
 
 /**
@@ -224,36 +203,81 @@ function validateHtml(html: string): void {
  * and styling needed for PDF output.
  */
 function sanitizeHtmlForPdf(html: string): string {
-  return html
-    // Remove script tags and content
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    // Remove noscript tags
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "")
-    // Remove iframe/object/embed/applet tags
-    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, "")
-    .replace(/<embed\b[^>]*\/?>/gi, "")
-    .replace(/<applet\b[^>]*>[\s\S]*?<\/applet>/gi, "")
-    // Remove base tags (prevent URL hijacking)
-    .replace(/<base\b[^>]*\/?>/gi, "")
-    // Remove meta refresh
-    .replace(/<meta\b[^>]*http-equiv\s*=\s*["']?refresh[^>]*\/?>/gi, "")
-    // Remove link imports
-    .replace(/<link\b[^>]*rel\s*=\s*["']?import[^>]*\/?>/gi, "")
-    // Remove event handler attributes
-    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    // Remove javascript: URLs in any attribute
-    .replace(/javascript\s*:/gi, "blocked:")
-    // Remove vbscript: URLs
-    .replace(/vbscript\s*:/gi, "blocked:")
-    // Remove data:text/html URLs (prevent nested HTML injection)
-    .replace(/data\s*:\s*text\/html/gi, "data:blocked")
-    // Remove expression() in CSS (IE CSS expression attacks)
-    .replace(/expression\s*\(/gi, "blocked(")
-    // Remove -moz-binding (Firefox XBL binding attacks)
-    .replace(/-moz-binding\s*:/gi, "blocked:")
-    // Remove behavior: CSS property (IE HTC)
-    .replace(/behavior\s*:\s*url/gi, "blocked:url");
+  return DOMPurify.sanitize(html, {
+    // Keep a conservative HTML subset for PDF rendering.
+    // Block tags that can execute code, rewrite URLs, or embed active content.
+    ALLOWED_TAGS: [
+      "html",
+      "head",
+      "body",
+      "title",
+      "style",
+      "div",
+      "span",
+      "p",
+      "br",
+      "hr",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "ul",
+      "ol",
+      "li",
+      "blockquote",
+      "pre",
+      "code",
+      "strong",
+      "em",
+      "b",
+      "i",
+      "u",
+      "s",
+      "del",
+      "mark",
+      "table",
+      "thead",
+      "tbody",
+      "tr",
+      "th",
+      "td",
+      "a",
+      "img",
+    ],
+    ALLOWED_ATTR: [
+      "href",
+      "src",
+      "alt",
+      "title",
+      "class",
+      "id",
+      "style",
+      "width",
+      "height",
+      "colspan",
+      "rowspan",
+      "align",
+      "target",
+      "rel",
+    ],
+    FORBID_TAGS: [
+      "script",
+      "noscript",
+      "iframe",
+      "object",
+      "embed",
+      "applet",
+      "base",
+      "meta",
+      "link",
+      "form",
+      "input",
+      "button",
+    ],
+    ALLOW_DATA_ATTR: false,
+  }) as string;
 }
 
 export async function generatePdfFromHtml(
