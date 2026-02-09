@@ -200,6 +200,9 @@ export class UniversalBrowserController extends EventEmitter {
   private llmClient: OpenAI;
   private baseWorkDir: string;
 
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private maxSessionAge = 30 * 60 * 1000; // 30 minutes
+
   constructor(options?: {
     workDir?: string;
     apiKey?: string;
@@ -208,12 +211,24 @@ export class UniversalBrowserController extends EventEmitter {
     super();
     this.baseWorkDir = options?.workDir || "/tmp/browser-controller";
     this.llmClient = new OpenAI({
-      baseURL: options?.baseURL || process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1",
+      baseURL: options?.baseURL || (process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1"),
       apiKey: options?.apiKey || process.env.XAI_API_KEY || process.env.OPENAI_API_KEY || "missing",
     });
 
     // Register default profiles
     this.registerDefaultProfiles();
+
+    // Periodically clean up stale sessions
+    this.cleanupInterval = setInterval(() => this.cleanupStaleSessions(), 5 * 60 * 1000);
+  }
+
+  private async cleanupStaleSessions(): Promise<void> {
+    const now = Date.now();
+    for (const [id, session] of this.sessions) {
+      if (now - session.lastActivity > this.maxSessionAge) {
+        await this.closeSession(id).catch(() => {});
+      }
+    }
   }
 
   private registerDefaultProfiles(): void {
@@ -518,6 +533,7 @@ export class UniversalBrowserController extends EventEmitter {
     force?: boolean;
   }): Promise<{ success: boolean; error?: string }> {
     const page = this.getActivePage(sessionId);
+    const session = this.sessions.get(sessionId);
 
     try {
       await page.click(selector, {
@@ -526,6 +542,7 @@ export class UniversalBrowserController extends EventEmitter {
         timeout: options?.timeout || 5000,
         force: options?.force || false,
       });
+      if (session) session.lastActivity = Date.now();
       return { success: true };
     } catch (error: any) {
       // Try alternative selectors
@@ -533,6 +550,7 @@ export class UniversalBrowserController extends EventEmitter {
       for (const alt of alternatives) {
         try {
           await page.click(alt, { timeout: 3000 });
+          if (session) session.lastActivity = Date.now();
           return { success: true };
         } catch {
           continue;
@@ -548,6 +566,7 @@ export class UniversalBrowserController extends EventEmitter {
     pressEnter?: boolean;
   }): Promise<{ success: boolean; error?: string }> {
     const page = this.getActivePage(sessionId);
+    const session = this.sessions.get(sessionId);
 
     try {
       if (options?.clear) {
@@ -558,6 +577,7 @@ export class UniversalBrowserController extends EventEmitter {
       if (options?.pressEnter) {
         await page.press(selector, "Enter");
       }
+      if (session) session.lastActivity = Date.now();
       return { success: true };
     } catch (error: any) {
       // Fallback: click + keyboard.type
@@ -571,6 +591,7 @@ export class UniversalBrowserController extends EventEmitter {
         if (options?.pressEnter) {
           await page.keyboard.press("Enter");
         }
+        if (session) session.lastActivity = Date.now();
         return { success: true };
       } catch (fallbackErr: any) {
         return { success: false, error: fallbackErr.message };
@@ -580,13 +601,17 @@ export class UniversalBrowserController extends EventEmitter {
 
   async select(sessionId: string, selector: string, values: string | string[]): Promise<{ success: boolean; selected: string[] }> {
     const page = this.getActivePage(sessionId);
+    const session = this.sessions.get(sessionId);
     const selected = await page.selectOption(selector, values);
+    if (session) session.lastActivity = Date.now();
     return { success: true, selected };
   }
 
   async hover(sessionId: string, selector: string): Promise<void> {
     const page = this.getActivePage(sessionId);
+    const session = this.sessions.get(sessionId);
     await page.hover(selector);
+    if (session) session.lastActivity = Date.now();
   }
 
   async scroll(sessionId: string, options: {
@@ -731,7 +756,12 @@ export class UniversalBrowserController extends EventEmitter {
 
     const text = response.choices[0]?.message?.content || "{}";
     const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-    return jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    if (!jsonMatch) return {};
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      return {};
+    }
   }
 
   // ============================================
@@ -1130,7 +1160,13 @@ If the goal is accomplished, use action "done" with extractedData containing res
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) continue;
 
-      const planned = JSON.parse(jsonMatch[0]);
+      let planned: any;
+      try {
+        planned = JSON.parse(jsonMatch[0]);
+      } catch {
+        steps.push("Error: Failed to parse LLM response as JSON");
+        continue;
+      }
       steps.push(`${planned.action}: ${planned.reasoning}`);
 
       if (planned.action === "done") {
@@ -1238,6 +1274,10 @@ If the goal is accomplished, use action "done" with extractedData containing res
   }
 
   async cleanup(): Promise<void> {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
     for (const [id] of this.sessions) {
       await this.closeSession(id);
     }

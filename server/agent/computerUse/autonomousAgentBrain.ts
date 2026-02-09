@@ -460,7 +460,10 @@ Respond in JSON:
 
     const text = response.choices[0]?.message?.content || "{}";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+    let parsed: any = {};
+    if (jsonMatch) {
+      try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+    }
 
     const thought: ThoughtProcess = {
       id: randomUUID(),
@@ -538,7 +541,10 @@ Respond in JSON:
 
     const text = response.choices[0]?.message?.content || "{}";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { steps: [] };
+    let parsed: any = { steps: [] };
+    if (jsonMatch) {
+      try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+    }
 
     const plan: ActionPlan = {
       id: randomUUID(),
@@ -671,7 +677,10 @@ Assess progress and decide next steps. Respond in JSON:
 
       const text = response.choices[0]?.message?.content || "{}";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      let parsed: any = {};
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+      }
 
       const reflection: ReflectionResult = {
         assessment: parsed.assessment || "on_track",
@@ -732,7 +741,10 @@ Create a revised plan from this point forward. Same JSON format as before.`;
 
       const text = response.choices[0]?.message?.content || "{}";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { steps: [] };
+      let parsed: any = { steps: [] };
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+      }
 
       return {
         id: randomUUID(),
@@ -911,7 +923,10 @@ Suggest 1-3 proactive tasks that would be helpful. Respond in JSON:
 
       const text = response.choices[0]?.message?.content || "{}";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { tasks: [] };
+      let parsed: any = { tasks: [] };
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+      }
 
       return (parsed.tasks || [])
         .filter((t: any) => t.confidence >= this.config.confidenceThreshold)
@@ -975,7 +990,10 @@ Respond in JSON:
 
       const text = response.choices[0]?.message?.content || "{}";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { subGoals: [] };
+      let parsed: any = { subGoals: [] };
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+      }
 
       return (parsed.subGoals || []).map((sg: any) => ({
         id: randomUUID(),

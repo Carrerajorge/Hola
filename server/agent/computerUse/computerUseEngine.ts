@@ -138,6 +138,7 @@ export class ComputerUseEngine extends EventEmitter {
   private visionModel: string;
   private workspaceDir: string;
   private maxSessionAge = 30 * 60 * 1000; // 30 minutes
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(options?: {
     apiKey?: string;
@@ -147,11 +148,23 @@ export class ComputerUseEngine extends EventEmitter {
   }) {
     super();
     this.llmClient = new OpenAI({
-      baseURL: options?.baseURL || process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1",
+      baseURL: options?.baseURL || (process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1"),
       apiKey: options?.apiKey || process.env.XAI_API_KEY || process.env.OPENAI_API_KEY || "missing",
     });
     this.visionModel = options?.visionModel || "grok-2-vision-1212";
     this.workspaceDir = options?.workspaceDir || "/tmp/computer-use-workspace";
+
+    // Periodically clean up stale sessions
+    this.cleanupInterval = setInterval(() => this.cleanupStaleSessions(), 5 * 60 * 1000);
+  }
+
+  private async cleanupStaleSessions(): Promise<void> {
+    const now = Date.now();
+    for (const [id, session] of this.sessions) {
+      if (now - session.lastActivity > this.maxSessionAge) {
+        await this.closeSession(id).catch(() => {});
+      }
+    }
   }
 
   // ============================================
@@ -347,7 +360,10 @@ RESPOND IN VALID JSON ONLY with this structure:
 
       const text = response.choices[0]?.message?.content || "{}";
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      let parsed: any = {};
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch { /* use empty default */ }
+      }
 
       const elements: DetectedElement[] = (parsed.elements || []).map((el: any, i: number) => ({
         id: `elem-${i}`,
@@ -761,7 +777,12 @@ Respond in JSON:
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return null;
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        return null;
+      }
 
       const action: ComputerAction = {
         id: randomUUID(),
@@ -844,8 +865,12 @@ Respond in JSON:
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return false;
 
-      const parsed = JSON.parse(jsonMatch[0]);
-      return parsed.completed === true;
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return parsed.completed === true;
+      } catch {
+        return false;
+      }
     } catch {
       return false;
     }
@@ -890,6 +915,10 @@ Respond in JSON:
   }
 
   async cleanup(): Promise<void> {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
     for (const [id] of this.sessions) {
       await this.closeSession(id);
     }
