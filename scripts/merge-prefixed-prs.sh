@@ -16,7 +16,12 @@ PREFIX_REGEX="${PREFIX_REGEX:-^(claude/|work/|fix/|chore/|dependabot/)}"
 
 echo "▸ Finding open PRs matching: ${PREFIX_REGEX}"
 
-mapfile -t PRS < <(
+PRS=()
+# macOS ships bash 3.2 which doesn't support `mapfile`, so use a read loop.
+while IFS= read -r n; do
+  [ -n "$n" ] || continue
+  PRS+=("$n")
+done < <(
   gh pr list --state open --limit 200 \
     --json number,headRefName,isDraft,mergeable \
     --jq ".[] | select(.isDraft==false) | select(.headRefName|test(\"${PREFIX_REGEX}\")) | select(.mergeable==\"MERGEABLE\") | .number" \
@@ -40,4 +45,3 @@ echo "▸ Remaining prefixed PRs still open (likely conflicts):"
 gh pr list --state open --limit 200 \
   --json number,headRefName,title,mergeable,mergeStateStatus,isDraft \
   --jq ".[] | select(.headRefName|test(\"${PREFIX_REGEX}\")) | {number, headRefName, title, isDraft, mergeable, mergeStateStatus}"
-
