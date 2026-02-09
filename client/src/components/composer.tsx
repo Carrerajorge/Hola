@@ -667,7 +667,7 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => { setShowKnowledgeBase(true); onCloseSidebar?.(); }}
+                onClick={() => { try { setShowKnowledgeBase(true); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error opening knowledge base:", err); } }}
                 data-testid="button-knowledge-base"
               >
                 <Users className="h-4 w-4" />
@@ -678,9 +678,13 @@ export function Composer({
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
                 disabled={!webSearchEnabled}
                 onClick={() => {
-                  if (!webSearchEnabled) return;
-                  setSelectedTool("web");
-                  onCloseSidebar?.();
+                  try {
+                    if (!webSearchEnabled) return;
+                    setSelectedTool("web");
+                    onCloseSidebar?.();
+                  } catch (err) {
+                    console.error("[Composer] Error selecting web tool:", err);
+                  }
                 }}
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-cyan-100 dark:bg-cyan-900/30">
@@ -691,7 +695,7 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-3 text-sm h-10 glass-menu-item"
-                onClick={() => { setSelectedTool("image"); onCloseSidebar?.(); }}
+                onClick={() => { try { setSelectedTool("image"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting image tool:", err); } }}
               >
                 <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-pink-100 dark:bg-pink-900/30">
                   <Image className="h-4 w-4 text-pink-600 dark:text-pink-400" />
@@ -714,7 +718,7 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => openBlankDocEditor("word")}
+                        onClick={() => { try { openBlankDocEditor("word"); } catch (err) { console.error("[Composer] Error opening Word editor:", err); } }}
                         data-testid="button-create-word"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
@@ -725,7 +729,7 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => openBlankDocEditor("excel")}
+                        onClick={() => { try { openBlankDocEditor("excel"); } catch (err) { console.error("[Composer] Error opening Excel editor:", err); } }}
                         data-testid="button-create-excel"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
@@ -736,7 +740,7 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => openBlankDocEditor("ppt")}
+                        onClick={() => { try { openBlankDocEditor("ppt"); } catch (err) { console.error("[Composer] Error opening PPT editor:", err); } }}
                         data-testid="button-create-ppt"
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
@@ -747,7 +751,7 @@ export function Composer({
                       <Button
                         variant="ghost"
                         className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                        onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
+                        onClick={() => { try { setSelectedDocTool("figma"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting Figma tool:", err); } }}
                       >
                         <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
                           <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
@@ -776,7 +780,7 @@ export function Composer({
               <Button
                 variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => { setSelectedTool("agent"); onCloseSidebar?.(); }}
+                onClick={() => { try { setSelectedTool("agent"); onCloseSidebar?.(); } catch (err) { console.error("[Composer] Error selecting agent tool:", err); } }}
               >
                 <Bot className="h-4 w-4" />
                 Agente

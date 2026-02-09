@@ -39,7 +39,7 @@ export function WelcomeExplosion({ onComplete }: { onComplete?: () => void }) {
   const [showContent, setShowContent] = useState(false);
   const fireworksRef = useRef<Firework[]>([]);
   const confettiRef = useRef<Particle[]>([]);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
   const startTimeRef = useRef(Date.now());
 
   useEffect(() => {
