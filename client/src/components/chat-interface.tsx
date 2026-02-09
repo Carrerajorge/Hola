@@ -301,7 +301,7 @@ interface UploadedFile {
 
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split('.').pop();
-  return ['xlsx', 'xls', 'csv', 'pdf', 'docx'].includes(ext || '');
+  return ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx'].includes(ext || '');
 }
 
 async function triggerDocumentAnalysis(
@@ -2240,6 +2240,7 @@ export function ChatInterface({
     "text/html",
     "application/json",
     "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",

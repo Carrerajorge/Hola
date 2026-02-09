@@ -46,11 +46,23 @@ export const UserMessage = memo(function UserMessage({
 
     if (variant === "compact") {
         return (
-            <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
-                <span className="text-muted-foreground mr-1 font-medium">
-                    Instrucción:
-                </span>
-                <span className="text-foreground">{message.content}</span>
+            <div className="flex flex-col items-end gap-1 max-w-full">
+                {message.attachments && message.attachments.length > 0 && (
+                    <AttachmentList
+                        attachments={message.attachments}
+                        variant={variant}
+                        onOpenPreview={onOpenPreview}
+                        onReopenDocument={onReopenDocument}
+                    />
+                )}
+                {message.content && (
+                    <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
+                        <span className="text-muted-foreground mr-1 font-medium">
+                            Instrucción:
+                        </span>
+                        <span className="text-foreground">{message.content}</span>
+                    </div>
+                )}
             </div>
         );
     }

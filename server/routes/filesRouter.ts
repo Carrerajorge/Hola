@@ -157,6 +157,7 @@ function inferMimeTypeFromFileName(fileName: string): string | null {
   const map: Record<string, string> = {
     // documents
     pdf: "application/pdf",
+    doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     xls: "application/vnd.ms-excel",
