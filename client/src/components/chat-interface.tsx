@@ -484,6 +484,7 @@ export function ChatInterface({
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
+  const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">("auto");
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
   // DOCX Generation State - for blank page with progress overlay
@@ -1897,6 +1898,7 @@ export function ChatInterface({
         conversationId: chatId,
         provider: selectedProvider,
         model: selectedModel,
+        latencyMode,
       },
       onEvent: (eventType, data) => {
         if (eventType === "production_start") {
@@ -2766,6 +2768,7 @@ export function ChatInterface({
           chatId: effectiveChatIdForStream,
           conversationId: effectiveChatIdForStream,
           model: selectedModel || "grok-3",
+          latencyMode,
         },
         buildFinalMessage: (content, _lastEvent, messageId) => ({
           id: messageId || `emergency-${Date.now()}`,
@@ -2876,6 +2879,7 @@ export function ChatInterface({
           model: selectedModel || "grok-3",
           forceWebSearch: isWebSearch,
           webSearchAuto: isWebSearch,
+          latencyMode,
         },
         buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
           id: messageId || `assistant-${Date.now()}`,
@@ -3232,7 +3236,8 @@ export function ChatInterface({
               provider: selectedProvider,
               model: selectedModel,
               lastImageBase64,
-              lastImageId
+              lastImageId,
+              latencyMode,
             }),
             signal: abortControllerRef.current.signal
           });
@@ -4491,7 +4496,8 @@ IMPORTANTE:
                 chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null
+                docTool: selectedDocTool || null,
+                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -5407,6 +5413,8 @@ IMPORTANTE:
                 handleDocTextDeselect={handleDocTextDeselect}
                 onTextareaFocus={handleCloseModelSelector}
                 isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                latencyMode={latencyMode}
+                setLatencyMode={setLatencyMode}
               />
             </div>
           </Panel>
@@ -5828,6 +5836,8 @@ IMPORTANTE:
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
             isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+            latencyMode={latencyMode}
+            setLatencyMode={setLatencyMode}
           />
         </div>
       )}

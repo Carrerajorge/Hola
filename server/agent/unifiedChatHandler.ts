@@ -16,6 +16,11 @@ import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
 import { agentManager } from "./agentOrchestrator";
 
+// ============================================================================
+// Latency Mode types
+// ============================================================================
+export type LatencyMode = 'fast' | 'deep' | 'auto';
+
 export interface UnifiedChatRequest {
   messages: Array<{ role: string; content: string }>;
   chatId: string;
@@ -24,6 +29,7 @@ export interface UnifiedChatRequest {
   messageId?: string;
   attachments?: AttachmentSpec[];
   sessionState?: SessionState;
+  latencyMode?: LatencyMode;
 }
 
 export interface UnifiedChatContext {
@@ -31,14 +37,128 @@ export interface UnifiedChatContext {
   runId: string;
   startTime: number;
   isAgenticMode: boolean;
+  latencyMode: LatencyMode;
+  resolvedLane: 'fast' | 'deep';
+}
+
+// ============================================================================
+// SSE Buffered Writer — batches small deltas into ~30ms flushes
+// ============================================================================
+export class SseBufferedWriter {
+  private buffer = '';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private seq = 0;
+  private closed = false;
+
+  constructor(
+    private res: Response,
+    private runId: string,
+    private flushIntervalMs = 30,
+    private maxBufferBytes = 512,
+  ) {}
+
+  /** True when the underlying response can no longer accept writes. */
+  private get isWritable(): boolean {
+    if (this.closed) return false;
+    // Express/Node responses expose `writableEnded` or `destroyed`
+    const r = this.res as any;
+    if (r.writableEnded || r.destroyed || r.closed) return false;
+    return true;
+  }
+
+  /** Write a chunk delta. Batched and flushed on interval or size threshold. */
+  pushDelta(content: string): void {
+    if (!this.isWritable) return;
+    this.buffer += content;
+
+    // Approximate byte length (UTF-8: most chars are 1 byte, some up to 4)
+    if (this.buffer.length >= this.maxBufferBytes) {
+      this.flush();
+      return;
+    }
+
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.flush();
+      }, this.flushIntervalMs);
+    }
+  }
+
+  /** Force-flush any buffered content immediately. */
+  flush(): void {
+    this.clearTimer();
+    if (this.buffer.length === 0 || !this.isWritable) return;
+
+    this.seq++;
+    writeSse(this.res, 'chunk', {
+      content: this.buffer,
+      sequence: this.seq,
+      runId: this.runId,
+      timestamp: Date.now(),
+    });
+    this.buffer = '';
+  }
+
+  /** Flush remaining buffer and return total chunks written. */
+  finalize(): number {
+    this.flush();
+    this.closed = true;
+    this.clearTimer(); // safety: ensure no dangling timer
+    return this.seq;
+  }
+
+  /** Cancel any pending flush timer (idempotent). */
+  destroy(): void {
+    this.closed = true;
+    this.clearTimer();
+    this.buffer = '';
+  }
+
+  private clearTimer(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  get sequenceCount(): number {
+    return this.seq;
+  }
+}
+
+// ============================================================================
+// Resolve which lane (fast/deep) a request should use
+// ============================================================================
+export function resolveLatencyLane(
+  latencyMode: LatencyMode,
+  requestSpec: RequestSpec,
+  hasAttachments: boolean,
+): 'fast' | 'deep' {
+  if (latencyMode === 'fast') return 'fast';
+  if (latencyMode === 'deep') return 'deep';
+
+  // auto: decide based on intent & complexity signals
+  const heavyIntents = ['research', 'document_generation', 'data_analysis', 'code_generation',
+    'presentation_creation', 'spreadsheet_creation', 'multi_step_task', 'web_automation'];
+
+  if (heavyIntents.includes(requestSpec.intent)) return 'deep';
+  if (hasAttachments) return 'deep';
+  if (requestSpec.intentConfidence > 0.7 && requestSpec.intent !== 'chat') return 'deep';
+
+  return 'fast';
 }
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
+    // Guard: don't write to a destroyed or finished response
+    const r = res as any;
+    if (r.writableEnded || r.destroyed) return false;
+
     const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     res.write(chunk);
-    if (typeof (res as any).flush === 'function') {
-      (res as any).flush();
+    if (typeof (r).flush === 'function') {
+      (r).flush();
     }
     return true;
   } catch (err) {
@@ -202,10 +322,21 @@ export async function createUnifiedRun(
 
   const runId = request.runId || randomUUID();
 
-  const isAgenticMode =
-    requestSpec.intent !== 'chat' ||
-    requestSpec.intentConfidence > 0.7 ||
-    (request.attachments && request.attachments.length > 0);
+  const latencyMode: LatencyMode = request.latencyMode || 'auto';
+
+  const hasAttachments = !!(request.attachments && request.attachments.length > 0);
+  const isAgenticMode: boolean =
+    latencyMode !== 'fast' && (
+      requestSpec.intent !== 'chat' ||
+      requestSpec.intentConfidence > 0.7 ||
+      hasAttachments
+    );
+
+  const resolvedLane = resolveLatencyLane(
+    latencyMode,
+    requestSpec,
+    hasAttachments,
+  );
 
   try {
     // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
@@ -229,13 +360,15 @@ export async function createUnifiedRun(
     console.error('[UnifiedChat] Failed to persist run:', error);
   }
 
-  console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}`);
+  console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}, lane: ${resolvedLane}`);
 
   return {
     requestSpec,
     runId,
     startTime,
-    isAgenticMode
+    isAgenticMode,
+    latencyMode,
+    resolvedLane,
   };
 }
 
@@ -261,17 +394,22 @@ export async function executeUnifiedChat(
     systemPrompt?: string;
   } = {}
 ): Promise<void> {
-  const { requestSpec, runId, isAgenticMode } = context;
+  const { requestSpec, runId, isAgenticMode, resolvedLane } = context;
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.setHeader("X-Run-Id", runId);
-  res.setHeader("X-Intent", requestSpec.intent);
-  res.setHeader("X-Agentic-Mode", String(isAgenticMode));
-  res.flushHeaders();
+  // Guard: chatAiRouter already opens SSE early for low-TTFT.
+  // Only set headers if they haven't been sent yet.
+  if (!res.headersSent) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("X-Run-Id", runId);
+    res.setHeader("X-Intent", requestSpec.intent);
+    res.setHeader("X-Agentic-Mode", String(isAgenticMode));
+    res.setHeader("X-Latency-Lane", resolvedLane);
+    res.flushHeaders();
+  }
 
   // Handle WhatsApp-style confirmations: user replies with CONFIRM or CANCEL
   const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
@@ -316,15 +454,30 @@ export async function executeUnifiedChat(
     });
   }
 
+  // Helper: true when the response socket is no longer usable
+  const isResponseDead = () => {
+    const r = res as any;
+    return !!(r.writableEnded || r.destroyed);
+  };
+
   writeSse(res, 'start', {
     runId,
     intent: requestSpec.intent,
     deliverableType: requestSpec.deliverableType,
     isAgenticMode,
+    latencyLane: resolvedLane,
     timestamp: Date.now()
   });
 
-  if (isAgenticMode) {
+  if (isAgenticMode && !isResponseDead()) {
+    // Emit thinking event immediately so TTFT is low even for heavy pipelines
+    writeSse(res, 'thinking', {
+      step: 'planning',
+      message: 'Analizando solicitud...',
+      runId,
+      timestamp: Date.now(),
+    });
+
     await emitTraceEvent(runId, 'thinking', {
       content: `Analyzing request: ${requestSpec.intent}`,
       phase: 'planning'
@@ -342,6 +495,9 @@ export async function executeUnifiedChat(
   try {
     const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
 
+    // In fast lane, cap maxTokens for quick responses
+    const fastLaneMaxTokens = resolvedLane === 'fast' ? 400 : undefined;
+
     const formattedMessages = [
       { role: "system" as const, content: systemContent },
       ...request.messages.map(m => ({
@@ -352,6 +508,8 @@ export async function executeUnifiedChat(
 
     let fullResponse = '';
     let chunkCount = 0;
+    // Hoisted so the catch block can destroy it on error
+    let activeWriter: SseBufferedWriter | null = null;
 
     if (isAgenticMode) {
       await executeAgentLoop(formattedMessages, res, {
@@ -374,13 +532,19 @@ export async function executeUnifiedChat(
         durationMs: Date.now() - context.startTime,
         intent: requestSpec.intent,
         isAgenticMode: true,
+        latencyLane: resolvedLane,
         timestamp: Date.now()
       });
     } else {
+      // Use buffered writer to batch small deltas (~30ms intervals)
+      const writer = new SseBufferedWriter(res, runId);
+      activeWriter = writer;
+
       const streamGenerator = llmGateway.streamChat(formattedMessages, {
         userId: request.userId,
         requestId: runId,
         disableImageGeneration: options.disableImageGeneration,
+        ...(fastLaneMaxTokens ? { maxTokens: fastLaneMaxTokens } : {}),
       });
 
       for await (const chunk of streamGenerator) {
@@ -388,11 +552,7 @@ export async function executeUnifiedChat(
           fullResponse += chunk.content;
           chunkCount++;
 
-          writeSse(res, 'chunk', {
-            content: chunk.content,
-            sequence: chunkCount,
-            runId
-          });
+          writer.pushDelta(chunk.content);
 
           if (options.onChunk) {
             options.onChunk(chunk.content);
@@ -414,6 +574,9 @@ export async function executeUnifiedChat(
         }
       }
 
+      // Flush any remaining buffered content
+      writer.finalize();
+
       await emitTraceEvent(runId, 'done', {
         summary: fullResponse.slice(0, 200),
         durationMs: Date.now() - context.startTime,
@@ -422,9 +585,10 @@ export async function executeUnifiedChat(
 
       writeSse(res, 'done', {
         runId,
-        totalChunks: chunkCount,
+        totalChunks: writer.sequenceCount,
         durationMs: Date.now() - context.startTime,
         intent: requestSpec.intent,
+        latencyLane: resolvedLane,
         timestamp: Date.now()
       });
     }
@@ -450,6 +614,9 @@ export async function executeUnifiedChat(
     }).catch(() => { });
 
   } catch (error: any) {
+    // Destroy any active buffered writer to cancel pending timers
+    activeWriter?.destroy();
+
     console.error(`[UnifiedChat] Execution error:`, error);
 
     await emitTraceEvent(runId, 'error', {
@@ -477,7 +644,10 @@ export async function executeUnifiedChat(
     ]).catch(() => { });
   }
 
-  res.end();
+  // Guard: don't call end() if the response is already finished
+  if (!(res as any).writableEnded) {
+    res.end();
+  }
 }
 
 function buildSystemPrompt(requestSpec: RequestSpec): string {

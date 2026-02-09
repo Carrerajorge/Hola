@@ -329,7 +329,10 @@ export async function searchOpenAlex(
 ): Promise<AcademicCandidate[]> {
   const { yearStart = 2020, yearEnd = 2025, maxResults = 100, countryCodes } = options;
 
-  const searchTerms = query.split(/\s+AND\s+|\s+/).filter(t => t.length > 2);
+  // Avoid ambiguous alternation that can cause excessive backtracking on crafted input.
+  // Treat AND as just another separator and then split on whitespace.
+  const normalized = query.replace(/\s+AND\s+/gi, " ").trim();
+  const searchTerms = normalized.split(/\s+/).filter(t => t.length > 2);
   const searchQuery = searchTerms.join(" ");
 
   try {

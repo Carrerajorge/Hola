@@ -339,7 +339,11 @@ export class DocumentBatchProcessor {
         console.log(`[DocumentBatchProcessor] Processed ${attachment.name}: ${chunks.length} chunks, ${tokensExtracted} tokens`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`[DocumentBatchProcessor] Failed to process ${attachment.name}:`, errorMessage);
+        // Avoid externally-controlled format string via console formatting.
+        console.error("[DocumentBatchProcessor] Failed to process attachment", {
+          filename: attachment.name,
+          error: errorMessage,
+        });
 
         result.failedFiles.push({
           filename: attachment.name,

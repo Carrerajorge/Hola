@@ -762,7 +762,8 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   }
 
   const titlePatterns = [
-    /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt|عنوان|शीर्षक|タイトル|제목|标题|заголовок|başlık|judul)\s*[:\s]+["']?([^"'\n]{3,80})["']?/i
+    /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt|عنوان|शीर्षक|タイトル|제목|标题|заголовок|başlık|judul)\s*:\s*["']?([^"'\n]{3,80})["']?/i,
+    /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt|عنوان|शीर्षक|タイトル|제목|标题|заголовок|başlık|judul)\s+["']?([^"'\n]{3,80})["']?/i
   ];
 
   for (const pattern of titlePatterns) {
@@ -852,7 +853,8 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   // AGENTIC IMPROVEMENT #24 & #31: File Entity Extraction and Feasibility Validation
   // ===================================================================================
 
-  const filePattern = /[a-zA-Z0-9_\-\./\\]+\.(ts|js|jsx|tsx|py|html|css|json|md|txt|csv|xlsx|docx|pdf|ppt|pptx|java|c|cpp|h|go|rb|php|sql|xml|yaml|yml)\b/gi;
+  // Bound match length to reduce worst-case backtracking on pathological input.
+  const filePattern = /[a-zA-Z0-9_\-./\\]{1,260}\.(ts|js|jsx|tsx|py|html|css|json|md|txt|csv|xlsx|docx|pdf|ppt|pptx|java|c|cpp|h|go|rb|php|sql|xml|yaml|yml)\b/gi;
   const projectRoot = process.cwd();
 
   const foundFiles: string[] = [];

@@ -171,9 +171,7 @@ function extractYearRange(prompt: string): { yearFrom?: number; yearTo?: number 
 
 function extractTopicQuery(prompt: string): string {
   // Try to capture: "... sobre <TOPIC> del 2021 al 2025 ..." or before export instructions.
-  const m = prompt.match(
-    /(?:\bsobre\b|\bacerca\s+de\b|\brelacionad[ao]\s+con\b)\s+(.+?)(?=\s+(?:del?|entre)?\s*(?:19\d{2}|20\d{2})\s*(?:al|-|hasta|to)\s*(?:19\d{2}|20\d{2})\b|\s+y\s+(?:coloca|colocalo|luego)\b|\s+en\s+un\s+excel\b|\s+en\s+excel\b|\s+en\s+un\s+word\b|\s+en\s+word\b|$)/i
-  );
+  const m = prompt.match(/(?:\bsobre\b|\bacerca\s+de\b|\brelacionad[ao]\s+con\b)\s+([^.\n]{3,240})/i);
   if (m?.[1]?.trim()) return m[1].trim();
 
   // Fallback: strip common "find me N papers" prefix and trailing export instructions

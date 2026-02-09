@@ -23,7 +23,9 @@ import {
   Wand2,
   Sparkles,
   Presentation,
-  Clock
+  Clock,
+  Zap,
+  Brain,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -135,6 +137,8 @@ export interface ComposerProps {
   setIsGoogleFormsActive?: (value: boolean) => void;
   onTextareaFocus?: () => void;
   isFilesLoading?: boolean;
+  latencyMode?: "fast" | "deep" | "auto";
+  setLatencyMode?: (mode: "fast" | "deep" | "auto") => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -202,6 +206,8 @@ export function Composer({
   setIsGoogleFormsActive,
   onTextareaFocus,
   isFilesLoading = false,
+  latencyMode = "auto",
+  setLatencyMode,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -1208,6 +1214,89 @@ export function Composer({
             </div>
 
             <div className="flex items-center gap-1.5">
+              {/* Latency mode toggle */}
+              {setLatencyMode && (
+                <div
+                  className="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden h-7"
+                  role="radiogroup"
+                  aria-label="Modo de latencia"
+                  data-testid="latency-mode-toggle"
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={latencyMode === "fast"}
+                        aria-label="Modo rápido"
+                        disabled={aiState !== "idle"}
+                        onClick={() => setLatencyMode("fast")}
+                        className={cn(
+                          "flex items-center gap-1 px-2 h-full text-[11px] font-medium transition-colors",
+                          "disabled:opacity-50 disabled:cursor-not-allowed",
+                          latencyMode === "fast"
+                            ? "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                            : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        )}
+                        data-testid="latency-fast"
+                      >
+                        <Zap className="h-3 w-3" />
+                        <span className="hidden sm:inline">Fast</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">Respuesta rápida (sin búsqueda, tokens limitados)</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={latencyMode === "auto"}
+                        aria-label="Modo automático"
+                        disabled={aiState !== "idle"}
+                        onClick={() => setLatencyMode("auto")}
+                        className={cn(
+                          "flex items-center gap-1 px-2 h-full text-[11px] font-medium transition-colors border-x border-zinc-200 dark:border-zinc-700",
+                          "disabled:opacity-50 disabled:cursor-not-allowed",
+                          latencyMode === "auto"
+                            ? "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+                            : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        )}
+                        data-testid="latency-auto"
+                      >
+                        <span className="hidden sm:inline">Auto</span>
+                        <span className="sm:hidden">A</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">Automático (decide según complejidad)</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={latencyMode === "deep"}
+                        aria-label="Modo detallado"
+                        disabled={aiState !== "idle"}
+                        onClick={() => setLatencyMode("deep")}
+                        className={cn(
+                          "flex items-center gap-1 px-2 h-full text-[11px] font-medium transition-colors",
+                          "disabled:opacity-50 disabled:cursor-not-allowed",
+                          latencyMode === "deep"
+                            ? "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300"
+                            : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        )}
+                        data-testid="latency-deep"
+                      >
+                        <Brain className="h-3 w-3" />
+                        <span className="hidden sm:inline">Deep</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">Respuesta detallada (búsqueda, agente, más tokens)</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+
               {/* Character counter */}
               {input.length > 0 && (
                 <span className="text-[11px] text-muted-foreground tabular-nums" data-testid="char-counter">
