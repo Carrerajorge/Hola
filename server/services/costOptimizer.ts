@@ -73,11 +73,24 @@ export interface BudgetAlert {
 // ============== Model Pricing ==============
 
 const MODEL_PRICING: ModelPricing[] = [
-    // Grok
+    // Grok 4.1 Series
+    { modelId: "grok-4-1-fast-non-reasoning", provider: "xai", inputPer1k: 0.0005, outputPer1k: 0.002, contextWindow: 2000000 },
+    { modelId: "grok-4-1-fast-reasoning", provider: "xai", inputPer1k: 0.001, outputPer1k: 0.004, contextWindow: 2000000 },
+
+    // Grok 4 Series
+    { modelId: "grok-4-fast-non-reasoning", provider: "xai", inputPer1k: 0.0005, outputPer1k: 0.002, contextWindow: 2000000 },
+    { modelId: "grok-4-fast-reasoning", provider: "xai", inputPer1k: 0.001, outputPer1k: 0.004, contextWindow: 2000000 },
+    { modelId: "grok-4-0709", provider: "xai", inputPer1k: 0.003, outputPer1k: 0.015, contextWindow: 256000 },
+    { modelId: "grok-code-fast-1", provider: "xai", inputPer1k: 0.0005, outputPer1k: 0.002, contextWindow: 256000 },
+
+    // Grok 3 Series
     { modelId: "grok-3", provider: "xai", inputPer1k: 0.003, outputPer1k: 0.015, contextWindow: 131072 },
-    { modelId: "grok-3-fast", provider: "xai", inputPer1k: 0.0015, outputPer1k: 0.0075, contextWindow: 131072 },
-    { modelId: "grok-3-mini", provider: "xai", inputPer1k: 0.0005, outputPer1k: 0.0025, contextWindow: 131072 },
-    { modelId: "grok-2-vision", provider: "xai", inputPer1k: 0.002, outputPer1k: 0.01, contextWindow: 32768 },
+    { modelId: "grok-3-fast", provider: "xai", inputPer1k: 0.005, outputPer1k: 0.025, contextWindow: 131072 },
+    { modelId: "grok-3-mini", provider: "xai", inputPer1k: 0.0003, outputPer1k: 0.0005, contextWindow: 131072 },
+    { modelId: "grok-3-mini-fast", provider: "xai", inputPer1k: 0.0006, outputPer1k: 0.004, contextWindow: 131072 },
+
+    // Grok 2 (Legacy)
+    { modelId: "grok-2-vision-1212", provider: "xai", inputPer1k: 0.002, outputPer1k: 0.01, contextWindow: 32768 },
 
     // Gemini
     { modelId: "gemini-2.5-pro", provider: "google", inputPer1k: 0.00125, outputPer1k: 0.005, contextWindow: 2000000 },

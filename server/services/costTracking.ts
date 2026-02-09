@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { MODEL_PRICING_REGISTRY } from '../lib/modelRegistry';
 
 // ============================================
 // TYPES
@@ -38,20 +39,17 @@ interface UsageSummary {
 }
 
 // ============================================
-// PRICING
+// PRICING - built from the central model registry + additional providers
 // ============================================
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
-    // Grok
-    'grok-3': { inputPerMillion: 3.00, outputPerMillion: 15.00, currency: 'USD' },
-    'grok-3-fast': { inputPerMillion: 5.00, outputPerMillion: 25.00, currency: 'USD' },
-    'grok-3-mini': { inputPerMillion: 0.30, outputPerMillion: 0.50, currency: 'USD' },
-    'grok-3-mini-fast': { inputPerMillion: 0.60, outputPerMillion: 4.00, currency: 'USD' },
-
-    // Google
-    'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 5.00, currency: 'USD' },
-    'gemini-2.5-flash': { inputPerMillion: 0.075, outputPerMillion: 0.30, currency: 'USD' },
-    'gemini-2.0-flash': { inputPerMillion: 0.10, outputPerMillion: 0.40, currency: 'USD' },
+    // Import all xAI / Gemini pricing from the central registry
+    ...Object.fromEntries(
+        Object.entries(MODEL_PRICING_REGISTRY).map(([id, p]) => [
+            id,
+            { inputPerMillion: p.inputPerMillion, outputPerMillion: p.outputPerMillion, currency: 'USD' },
+        ]),
+    ),
 
     // Anthropic
     'claude-3.5-sonnet': { inputPerMillion: 3.00, outputPerMillion: 15.00, currency: 'USD' },

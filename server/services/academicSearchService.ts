@@ -45,10 +45,14 @@ export class AcademicSearchService {
 
         console.log(`[AcademicSearch] Executing search ALL sources with query: "${searchQuery}"`);
 
+        // Map region to affiliation country filters
+        const affilCountries = regionToAffilCountries(queryParams.region);
+
         const searchResult = await unifiedArticleSearch.searchAllSources(searchQuery, {
             maxResults: queryParams.count || 50,
             startYear: queryParams.yearStart,
             endYear: queryParams.yearEnd,
+            affilCountries,
         });
 
         // 3. Generate Output Files
@@ -150,13 +154,32 @@ export class AcademicSearchService {
             return JSON.parse(text);
 
         } catch (error) {
-            console.error("[AcademicSearch] LLM Optimization failed, using fallback", error);
-            return {
-                englishKeywords: [userQuery],
-                spanishKeywords: [userQuery],
-                count: 50,
-                outputFormats: ["word"]
-            };
+            console.error("[AcademicSearch] LLM Optimization failed, using keyword extraction fallback", error);
+
+            // Use the scopus keyword extractor as a more intelligent fallback
+            try {
+                const { extractSearchKeywords } = await import("../agent/superAgent/scopusClient");
+                const extracted = extractSearchKeywords(userQuery);
+                const englishKeywords = extracted.allKeywords.length > 0
+                    ? extracted.allKeywords.slice(0, 5)
+                    : [userQuery];
+
+                return {
+                    englishKeywords,
+                    spanishKeywords: [userQuery],
+                    yearStart: extracted.yearRange?.start,
+                    yearEnd: extracted.yearRange?.end,
+                    count: 50,
+                    outputFormats: ["word"],
+                };
+            } catch {
+                return {
+                    englishKeywords: [userQuery],
+                    spanishKeywords: [userQuery],
+                    count: 50,
+                    outputFormats: ["word"]
+                };
+            }
         }
     }
 
@@ -177,6 +200,42 @@ export class AcademicSearchService {
 **Archivos Generados:**
 ${fileLinks}`;
     }
+}
+
+/**
+ * Convert a region string from the LLM optimizer to a list of affiliation country names
+ * that Scopus and OpenAlex can filter on.
+ */
+function regionToAffilCountries(region: string | undefined): string[] | undefined {
+    if (!region) return undefined;
+    const r = region.toLowerCase().trim();
+
+    const LATAM_COUNTRIES = [
+        "Argentina", "Bolivia", "Brazil", "Chile", "Colombia", "Costa Rica",
+        "Cuba", "Dominican Republic", "Ecuador", "El Salvador", "Guatemala",
+        "Honduras", "Mexico", "Nicaragua", "Panama", "Paraguay", "Peru",
+        "Puerto Rico", "Uruguay", "Venezuela",
+    ];
+
+    if (r === "latam" || r === "latinoamerica" || r === "latin america" || r === "latinoamérica") {
+        return LATAM_COUNTRIES;
+    }
+    if (r === "spain" || r === "españa" || r === "espana") {
+        return ["Spain"];
+    }
+    if (r === "latam+spain" || r === "iberoamerica" || r === "iberoamérica") {
+        return [...LATAM_COUNTRIES, "Spain", "Portugal"];
+    }
+    if (r === "world" || r === "global" || r === "mundial") {
+        return undefined; // No filter
+    }
+
+    // If it looks like a single country name, pass it through
+    if (r.length > 2 && r.length < 40) {
+        return [region];
+    }
+
+    return undefined;
 }
 
 export const academicSearchService = new AcademicSearchService();

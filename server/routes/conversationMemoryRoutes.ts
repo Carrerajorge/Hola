@@ -351,7 +351,7 @@ router.put("/chats/:chatId/summary", async (req: Request, res: Response, next: N
   }
 });
 
-router.get("/memory/stats", async (_req: Request, res: Response) => {
+router.get("/cache-stats", async (_req: Request, res: Response) => {
   const stats = conversationStateService.getCacheStats();
   res.json(stats);
 });

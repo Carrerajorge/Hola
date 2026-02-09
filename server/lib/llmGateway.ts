@@ -3,6 +3,12 @@ import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/res
 import Anthropic from "@anthropic-ai/sdk";
 import { MODELS } from "./openai";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
+import {
+  KNOWN_XAI_MODEL_IDS,
+  KNOWN_GEMINI_MODEL_IDS,
+  DEFAULT_TEXT_MODEL,
+  XAI_MODELS,
+} from "./modelRegistry";
 import crypto from "crypto";
 import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
 import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
@@ -125,26 +131,10 @@ const PROVIDER_MODELS = {
   },
 };
 
-const KNOWN_GEMINI_MODELS = new Set([
-  GEMINI_MODELS.FLASH_PREVIEW.toLowerCase(),
-  GEMINI_MODELS.FLASH.toLowerCase(),
-  GEMINI_MODELS.PRO.toLowerCase(),
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
-  "gemini-2.0-pro",
-]);
+// Model sets sourced from the central model registry
+const KNOWN_GEMINI_MODELS = KNOWN_GEMINI_MODEL_IDS;
 
-const KNOWN_XAI_MODELS = new Set([
-  MODELS.TEXT.toLowerCase(),
-  MODELS.VISION.toLowerCase(),
-  "grok-4-1-fast-non-reasoning",
-  "grok-4-fast-reasoning",
-  "grok-4-fast-non-reasoning",
-  "grok-4-0709",
-  "grok-3-fast",
-  "grok-4-1-fast-reasoning"
-]);
+const KNOWN_XAI_MODELS = KNOWN_XAI_MODEL_IDS;
 
 const KNOWN_DEEPSEEK_MODELS = new Set([
   "deepseek-chat",
@@ -1577,7 +1567,7 @@ class LLMGateway {
           timeout: 5000,
         });
         await client.chat.completions.create({
-          model: "grok-3-mini-fast",
+          model: XAI_MODELS.GROK_3_MINI_FAST,
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 5,
         });

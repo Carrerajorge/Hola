@@ -1,7 +1,7 @@
 # Sandbox Runner Dockerfile
 # Runs a small HTTP service that executes docker-run jobs with hardening.
 
-FROM node:20-alpine
+FROM node:25-alpine
 
 WORKDIR /app
 

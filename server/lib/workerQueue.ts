@@ -400,9 +400,9 @@ class PriorityJobQueue<T, R> extends EventEmitter {
         this.backpressure = new BackpressureController({ maxQueueSize: options.maxQueueSize });
         this.deadLetterQueue = new DeadLetterQueue();
         this.retryConfig = {
-            maxAttempts: options.retryConfig?.maxAttempts ?? 3,
-            baseDelayMs: options.retryConfig?.baseDelayMs ?? 1000,
-            maxDelayMs: options.retryConfig?.maxDelayMs ?? 30000,
+            maxAttempts: options.retryConfig?.maxAttempts ?? 2,
+            baseDelayMs: options.retryConfig?.baseDelayMs ?? 300,
+            maxDelayMs: options.retryConfig?.maxDelayMs ?? 5000,
             jitterFactor: options.retryConfig?.jitterFactor ?? 0.1,
         };
     }

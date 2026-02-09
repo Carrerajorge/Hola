@@ -9,6 +9,7 @@ import { browserAgent, BrowserAgent } from "./BrowserAgent";
 import { documentAgent, DocumentAgent } from "./DocumentAgent";
 import { qaAgent, QAAgent } from "./QAAgent";
 import { securityAgent, SecurityAgent } from "./SecurityAgent";
+import { computerUseAgent, ComputerUseAgent } from "./ComputerUseAgent";
 
 export {
   registerAgent,
@@ -38,6 +39,8 @@ export {
   qaAgent,
   SecurityAgent,
   securityAgent,
+  ComputerUseAgent,
+  computerUseAgent,
 };
 
 export function initializeAgents(): void {
@@ -51,6 +54,7 @@ export function initializeAgents(): void {
   registerAgent(documentAgent);
   registerAgent(qaAgent);
   registerAgent(securityAgent);
+  registerAgent(computerUseAgent);
 
   console.log(`[AgentRegistry] Initialized ${AGENT_REGISTRY.size} specialized agents`);
 }
@@ -138,6 +142,12 @@ export const SPECIALIZED_AGENTS = [
     description: "Security analysis, vulnerability assessment, compliance",
     capabilities: ["vulnerability_scan", "security_audit", "compliance_check"],
     tools: ["encrypt_data", "decrypt_data", "hash_data", "validate_input", "audit_log", "secrets_manage"],
+  },
+  {
+    name: "ComputerUseAgent",
+    description: "Full computer control: agentic browser automation (Chromium/Firefox/WebKit), autonomous screen interaction, terminal control, and professional document generation (PPT/DOCX/XLSX)",
+    capabilities: ["agentic_browser_control", "screen_interaction", "terminal_control", "document_generation", "vision_analysis"],
+    tools: ["computer_use_session", "computer_use_navigate", "computer_use_interact", "computer_use_screenshot", "computer_use_extract", "computer_use_agentic", "generate_perfect_ppt", "generate_perfect_doc", "generate_perfect_excel", "terminal_execute", "terminal_system_info", "terminal_file_op", "vision_analyze"],
   },
 ];
 

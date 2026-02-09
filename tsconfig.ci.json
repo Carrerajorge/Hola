@@ -4,6 +4,7 @@
     "shared/**/*"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "**/*.bak.ts"
   ]
 }

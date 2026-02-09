@@ -56,13 +56,20 @@ export class GlobalErrorBoundary extends Component<Props, State> {
                             <p className="text-muted-foreground text-sm">
                                 Hemos encontrado un error inesperado. Por favor, intenta recargar la sección.
                             </p>
-                            {process.env.NODE_ENV !== "production" && this.state.error && (
-                                <div className="bg-muted p-3 rounded-md text-left overflow-auto max-h-40 text-xs font-mono">
-                                    <p className="font-bold text-red-500 mb-1">{this.state.error.toString()}</p>
-                                    <pre className="text-muted-foreground whitespace-pre-wrap">
-                                        {this.state.errorInfo?.componentStack}
-                                    </pre>
-                                </div>
+                            {this.state.error && (
+                                <details className="text-left">
+                                    <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                                        Detalles del error
+                                    </summary>
+                                    <div className="bg-muted p-3 rounded-md text-left overflow-auto max-h-40 text-xs font-mono mt-2">
+                                        <p className="font-bold text-red-500 mb-1">{this.state.error.toString()}</p>
+                                        {this.state.errorInfo?.componentStack && (
+                                            <pre className="text-muted-foreground whitespace-pre-wrap">
+                                                {this.state.errorInfo.componentStack}
+                                            </pre>
+                                        )}
+                                    </div>
+                                </details>
                             )}
                         </CardContent>
                         <CardFooter className="flex justify-center">

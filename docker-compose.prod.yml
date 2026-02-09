@@ -71,7 +71,7 @@ services:
   sandbox-runner:
     build:
       context: .
-      dockerfile: Dockerfile.sandbox-runner
+      target: sandbox-runner
     restart: always
     environment:
       - NODE_ENV=production

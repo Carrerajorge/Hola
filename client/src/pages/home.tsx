@@ -2,6 +2,7 @@ import { Sidebar } from "@/components/sidebar";
 import { SkeletonPage } from "@/components/skeletons";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
+import { ChatErrorBoundary } from "@/components/error-boundaries";
 import type { Gpt } from "@/components/gpt-explorer";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
@@ -671,7 +672,7 @@ export default function Home() {
             />
           </Suspense>
         ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId) && (
-          
+          <ChatErrorBoundary>
             <ChatInterface
               key={chatInterfaceKey}
               messages={currentMessages}
@@ -716,7 +717,7 @@ export default function Home() {
             setActiveRunId={setActiveRunId}
             selectedProjectId={selectedProjectId}
           />
-          
+          </ChatErrorBoundary>
         )}
       </main>
 

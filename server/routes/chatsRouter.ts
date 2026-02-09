@@ -4,6 +4,7 @@ import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { sanitizeMessageContent } from "../lib/markdownSanitizer";
+import { isTitlePlaceholder } from "../lib/chatTitleGenerator";
 
 // Higher body limit middleware for message creation endpoints.
 // The global limit is 1MB, but messages with attachment metadata can be larger.
@@ -548,11 +549,11 @@ export function createChatsRouter() {
         );
 
         // Persist conversationDocuments for each attachment so files survive reload.
-        // Best-effort — failures here don't block message creation.
+        // Best-effort & non-blocking — runs in parallel without delaying the response.
         if (sanitizedAttachments && sanitizedAttachments.length > 0) {
-          for (const att of sanitizedAttachments) {
-            try {
-              await storage.createConversationDocument({
+          Promise.allSettled(
+            sanitizedAttachments.map((att: any) =>
+              storage.createConversationDocument({
                 chatId: req.params.id,
                 messageId: message.id,
                 fileName: att.name || 'document',
@@ -561,15 +562,20 @@ export function createChatsRouter() {
                 fileSize: att.size || null,
                 extractedText: null, // Text extraction happens in the streaming endpoint
                 metadata: { fileId: att.fileId || att.id },
-              });
-            } catch (docErr) {
-              console.warn(`[Messages] Failed to persist conversationDocument for ${att.name}:`, docErr);
+              })
+            )
+          ).then(results => {
+            const failures = results.filter(r => r.status === 'rejected');
+            if (failures.length > 0) {
+              console.warn(`[Messages] ${failures.length} conversationDocument(s) failed to persist`);
             }
-          }
+          });
         }
 
-        if (chat.title === "New Chat") {
-          const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
+        // Set a quick placeholder title from the user's message.
+        // The AI-generated title will replace this during streaming via chatTitleGenerator.
+        if (isTitlePlaceholder(chat.title)) {
+          const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
           await storage.updateChat(req.params.id, { title: newTitle });
         }
 
@@ -606,8 +612,10 @@ export function createChatsRouter() {
         } : null
       });
 
-      if (chat.title === "New Chat" && role === "user") {
-        const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
+      // Set a quick placeholder title from the user's message (legacy flow).
+      // The AI-generated title will replace this during streaming via chatTitleGenerator.
+      if (isTitlePlaceholder(chat.title) && role === "user") {
+        const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
         await storage.updateChat(req.params.id, { title: newTitle });
       }
 

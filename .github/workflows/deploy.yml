@@ -1,8 +1,6 @@
 name: Deploy to Production
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       skip_ci:
@@ -19,11 +17,11 @@ permissions:
   contents: read
 
 env:
-  # Defaults: public SSH endpoint (port 2222).
+  # Defaults: public SSH endpoint (port 8022).
   # GitHub runners cannot reach private Tailscale IPs without extra setup.
   VPS_HOST: 69.62.98.126
   VPS_USER: root
-  VPS_PORT: "2222"
+  VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
   COMPOSE_PROJECT: iliagpt
 
@@ -45,7 +43,7 @@ jobs:
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
-      VPS_PORT: ${{ secrets.VPS_PORT || '2222' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
       COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
     environment:
@@ -54,7 +52,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup SSH key
         run: |

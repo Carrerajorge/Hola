@@ -67,7 +67,7 @@ export class EnterpriseToolRunner {
     const rlKey = options.rateLimitKey ?? `tool:${toolName}`;
     if (!this.rateLimiter.allow(rlKey)) {
       ctx.metrics.inc("tool.rate_limited", { tool: toolName });
-      cb.onFailure();
+      // Rate limiting is NOT an infrastructure failure — don't count against circuit breaker
       throw new IliagptError("E_RATE_LIMIT", `Rate limited: ${toolName}`, {
         tool: toolName,
         key: rlKey,
@@ -77,7 +77,7 @@ export class EnterpriseToolRunner {
     const parsed = tool.schema.safeParse(params);
     if (!parsed.success) {
       ctx.metrics.inc("tool.bad_params", { tool: toolName });
-      cb.onFailure();
+      // Validation errors are caller errors — don't count against circuit breaker
       throw new IliagptError(
         "E_BAD_PARAMS",
         `Invalid parameters for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,

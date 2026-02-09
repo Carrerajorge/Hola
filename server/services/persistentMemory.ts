@@ -4,7 +4,7 @@
  */
 
 import { db } from '../db';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
 // Memory types
 export type MemoryCategory = 'preferences' | 'facts' | 'style' | 'context' | 'instructions';
@@ -29,8 +29,35 @@ interface MemoryInput {
     source?: 'extracted' | 'stated' | 'inferred';
 }
 
-// In-memory cache for fast access
+// In-memory cache for fast access (with TTL tracking)
 const memoryCache = new Map<number, Map<string, UserMemory>>();
+const cacheTTL = new Map<number, number>(); // userId -> timestamp of last DB sync
+const CACHE_MAX_AGE_MS = 30_000; // 30 seconds
+
+function isCacheFresh(userId: number): boolean {
+    const lastSync = cacheTTL.get(userId);
+    if (!lastSync) return false;
+    return (Date.now() - lastSync) < CACHE_MAX_AGE_MS;
+}
+
+function invalidateCache(userId: number): void {
+    memoryCache.delete(userId);
+    cacheTTL.delete(userId);
+}
+
+function mapRowToMemory(row: any): UserMemory {
+    return {
+        id: row.id,
+        userId: row.user_id,
+        category: row.category,
+        key: row.key,
+        value: row.value,
+        confidence: parseFloat(row.confidence) || 1.0,
+        source: row.source || 'extracted',
+        lastAccessed: row.last_accessed ? new Date(row.last_accessed) : new Date(),
+        createdAt: row.created_at ? new Date(row.created_at) : new Date(),
+    };
+}
 
 /**
  * Save or update a memory for a user
@@ -43,54 +70,48 @@ export async function saveMemory(
     const memoryKey = `${category}:${key}`;
 
     try {
-        // Check if memory exists
-        const existing = await db.query.userMemories?.findFirst({
-            where: and(
-                eq(sql`user_id`, userId),
-                eq(sql`category`, category),
-                eq(sql`key`, key)
-            )
-        });
+        // Check if memory exists using raw SQL (correct Drizzle pattern)
+        const existing = await db.execute(sql`
+            SELECT * FROM user_memories
+            WHERE user_id = ${userId} AND category = ${category} AND key = ${key}
+            LIMIT 1
+        `);
 
-        if (existing) {
+        if (existing.rows && existing.rows.length > 0) {
+            const existingRow = existing.rows[0] as any;
             // Update existing memory
-            const updated = await db.update(sql`user_memories`)
-                .set({
-                    value,
-                    confidence: Math.max(existing.confidence, confidence),
-                    lastAccessed: new Date(),
-                })
-                .where(eq(sql`id`, existing.id))
-                .returning();
+            const updated = await db.execute(sql`
+                UPDATE user_memories SET
+                    value = ${value},
+                    confidence = GREATEST(confidence, ${confidence}),
+                    last_accessed = NOW()
+                WHERE id = ${existingRow.id}
+                RETURNING *
+            `);
 
-            // Update cache
-            const userCache = memoryCache.get(userId) || new Map();
-            userCache.set(memoryKey, updated[0]);
-            memoryCache.set(userId, userCache);
+            // Invalidate cache so next read picks up fresh data
+            invalidateCache(userId);
 
-            return updated[0];
-        } else {
-            // Insert new memory
-            const inserted = await db.insert(sql`user_memories`)
-                .values({
-                    userId,
-                    category,
-                    key,
-                    value,
-                    confidence,
-                    source,
-                    lastAccessed: new Date(),
-                    createdAt: new Date(),
-                })
-                .returning();
-
-            // Update cache
-            const userCache = memoryCache.get(userId) || new Map();
-            userCache.set(memoryKey, inserted[0]);
-            memoryCache.set(userId, userCache);
-
-            return inserted[0];
+            if (updated.rows && updated.rows.length > 0) {
+                return mapRowToMemory(updated.rows[0]);
+            }
         }
+
+        // Insert new memory
+        const inserted = await db.execute(sql`
+            INSERT INTO user_memories (user_id, category, key, value, confidence, source, last_accessed, created_at)
+            VALUES (${userId}, ${category}, ${key}, ${value}, ${confidence}, ${source}, NOW(), NOW())
+            RETURNING *
+        `);
+
+        // Invalidate cache so next read picks up fresh data
+        invalidateCache(userId);
+
+        if (inserted.rows && inserted.rows.length > 0) {
+            return mapRowToMemory(inserted.rows[0]);
+        }
+
+        throw new Error('Insert returned no rows');
     } catch (error) {
         console.error('Error saving memory:', error);
         // Fallback to in-memory only
@@ -121,9 +142,9 @@ export async function getMemories(
     userId: number,
     category?: MemoryCategory
 ): Promise<UserMemory[]> {
-    // Check cache first
+    // Check cache first (only if fresh)
     const userCache = memoryCache.get(userId);
-    if (userCache && userCache.size > 0) {
+    if (userCache && userCache.size > 0 && isCacheFresh(userId)) {
         const memories = Array.from(userCache.values());
         if (category) {
             return memories.filter(m => m.category === category);
@@ -132,34 +153,45 @@ export async function getMemories(
     }
 
     try {
-        // Fetch from database
-        let query = db.query.userMemories?.findMany({
-            where: eq(sql`user_id`, userId),
-            orderBy: desc(sql`last_accessed`),
-        });
-
-        if (category && query) {
-            query = db.query.userMemories?.findMany({
-                where: and(
-                    eq(sql`user_id`, userId),
-                    eq(sql`category`, category)
-                ),
-                orderBy: desc(sql`last_accessed`),
-            });
+        // Fetch from database using raw SQL (correct Drizzle pattern)
+        let result;
+        if (category) {
+            result = await db.execute(sql`
+                SELECT * FROM user_memories
+                WHERE user_id = ${userId} AND category = ${category}
+                ORDER BY last_accessed DESC
+            `);
+        } else {
+            result = await db.execute(sql`
+                SELECT * FROM user_memories
+                WHERE user_id = ${userId}
+                ORDER BY last_accessed DESC
+            `);
         }
 
-        const memories = await query || [];
+        const memories: UserMemory[] = (result.rows || []).map(mapRowToMemory);
 
-        // Populate cache
-        const newCache = new Map<string, UserMemory>();
-        for (const memory of memories) {
-            newCache.set(`${memory.category}:${memory.key}`, memory);
+        // Populate cache with ALL user memories (not filtered)
+        if (!category) {
+            const newCache = new Map<string, UserMemory>();
+            for (const memory of memories) {
+                newCache.set(`${memory.category}:${memory.key}`, memory);
+            }
+            memoryCache.set(userId, newCache);
+            cacheTTL.set(userId, Date.now());
         }
-        memoryCache.set(userId, newCache);
 
         return memories;
     } catch (error) {
         console.error('Error fetching memories:', error);
+        // Return whatever is in cache as fallback
+        if (userCache && userCache.size > 0) {
+            const memories = Array.from(userCache.values());
+            if (category) {
+                return memories.filter(m => m.category === category);
+            }
+            return memories;
+        }
         return [];
     }
 }
@@ -280,14 +312,12 @@ export async function extractMemoriesFromMessage(
  */
 export async function deleteMemory(userId: number, memoryId: number): Promise<boolean> {
     try {
-        await db.delete(sql`user_memories`)
-            .where(and(
-                eq(sql`id`, memoryId),
-                eq(sql`user_id`, userId)
-            ));
+        await db.execute(sql`
+            DELETE FROM user_memories WHERE id = ${memoryId} AND user_id = ${userId}
+        `);
 
-        // Clear cache for user
-        memoryCache.delete(userId);
+        // Invalidate cache for user
+        invalidateCache(userId);
 
         return true;
     } catch (error) {
@@ -301,10 +331,11 @@ export async function deleteMemory(userId: number, memoryId: number): Promise<bo
  */
 export async function clearMemories(userId: number): Promise<void> {
     try {
-        await db.delete(sql`user_memories`)
-            .where(eq(sql`user_id`, userId));
+        await db.execute(sql`
+            DELETE FROM user_memories WHERE user_id = ${userId}
+        `);
 
-        memoryCache.delete(userId);
+        invalidateCache(userId);
     } catch (error) {
         console.error('Error clearing memories:', error);
     }

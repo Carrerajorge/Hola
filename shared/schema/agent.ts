@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, boolean, real, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { vector } from "./common";
 import { users } from "./auth";
 import { chats, chatMessages } from "./chat";
@@ -438,7 +438,7 @@ export const skillActionSchema = z.object({
     type: skillActionTypeSchema,
     name: z.string(),
     description: z.string().optional(),
-    config: z.record(z.any()),
+    config: z.record(z.string(), z.any()),
     dependsOn: z.array(z.string()).optional(),
     condition: z.string().optional(),
     onSuccess: z.string().optional(),
@@ -530,7 +530,7 @@ export const AgentEventSchema = z.object({
     shouldRetry: z.boolean().optional(),
     shouldReplan: z.boolean().optional(),
     timestamp: z.number(),
-    metadata: z.record(z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
 });
 
 export type AgentEventKind = z.infer<typeof AgentEventKindSchema>;
@@ -604,7 +604,7 @@ export const TraceEventSchema = z.object({
     phase: z.enum(['planning', 'executing', 'verifying', 'completed', 'failed', 'cancelled']).optional(),
     status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'retrying']).optional(),
     tool_name: z.string().optional(),
-    tool_input: z.record(z.any()).optional(),
+    tool_input: z.record(z.string(), z.any()).optional(),
     command: z.string().optional(),
     output_snippet: z.string().optional(),
     chunk_sequence: z.number().optional(),
@@ -659,7 +659,7 @@ export const TraceEventSchema = z.object({
     confidence: z.number().min(0).max(1).optional(),
     durationMs: z.number().optional(),
     timestamp: z.number(),
-    metadata: z.record(z.any()).optional(),
+    metadata: z.record(z.string(), z.any()).optional(),
 });
 
 export type TraceEventType = z.infer<typeof TraceEventTypeSchema>;

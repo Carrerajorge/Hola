@@ -530,7 +530,9 @@ export async function routeIntent(
       if (intent === ruleResult.intent) {
         intentScores[intent] = ruleResult.confidence;
       } else {
-        intentScores[intent] = Math.random() * 0.1;
+        // Use deterministic zero score for non-matching intents instead of random noise
+        // Random values cause non-deterministic calibration and make debugging impossible
+        intentScores[intent] = 0;
       }
     }
     

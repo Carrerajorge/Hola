@@ -827,7 +827,7 @@ export function useChats() {
                   try {
                     // Get first user message for title
                     const firstUserMsg = pendingChat.messages.find((m: Message) => m.role === 'user');
-                    const title = firstUserMsg?.content?.slice(0, 30) + (firstUserMsg?.content && firstUserMsg.content.length > 30 ? '...' : '') || 'Nuevo Chat';
+                    const title = firstUserMsg?.content?.slice(0, 50) + (firstUserMsg?.content && firstUserMsg.content.length > 50 ? '...' : '') || 'Nuevo Chat';
 
                     // Create chat with all messages in a single atomic request
                     const messagesToSync = pendingChat.messages.map((msg: Message) => ({
@@ -978,6 +978,38 @@ export function useChats() {
     return () => window.removeEventListener("refresh-chats", handleRefresh);
   }, [activeChatId, loadChatsFromServer]);
 
+  // Listen for "refresh-chat-title" events dispatched after streaming completes.
+  // The server generates an AI-powered title asynchronously; this fetches it
+  // after a short delay and updates the sidebar without a full chat reload.
+  useEffect(() => {
+    const handleTitleRefresh = (e: Event) => {
+      const { chatId, delay = 2000 } = (e as CustomEvent).detail || {};
+      if (!chatId) return;
+
+      setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/chats/${chatId}`, {
+            headers: { ...getAnonUserIdHeader() },
+            credentials: "include",
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          const serverTitle = data.chat?.title || data.title;
+          if (serverTitle) {
+            setChats(prev => prev.map(c =>
+              c.id === chatId ? { ...c, title: serverTitle } : c
+            ));
+          }
+        } catch (err) {
+          console.warn("[TitleRefresh] Failed to fetch updated title:", err);
+        }
+      }, delay);
+    };
+
+    window.addEventListener("refresh-chat-title", handleTitleRefresh);
+    return () => window.removeEventListener("refresh-chat-title", handleTitleRefresh);
+  }, []);
+
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
       // Use debounced save to prevent excessive writes during streaming
@@ -1121,7 +1153,7 @@ export function useChats() {
     }
 
     const title = message.role === "user" && message.content
-      ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
+      ? message.content.slice(0, 50) + (message.content.length > 50 ? "..." : "")
       : "Nuevo Chat";
 
     // If first message comes in while the chat is still pending, force-create the chat

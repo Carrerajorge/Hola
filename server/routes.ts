@@ -32,6 +32,8 @@ import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
+import calendarOAuthRouter from "./routes/calendarOAuthRouter";
+import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
@@ -65,7 +67,12 @@ import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
+import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
+import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
+import { createSuperIntelligenceRouter } from "./routes/superIntelligenceRouter";
+import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
+import { initializeSuperIntelligence } from "./services/superIntelligence";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
@@ -111,6 +118,7 @@ import { compression } from "./middleware/compression";
 
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
+import computerUseRouter from "./routes/computerUseRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -457,6 +465,8 @@ export async function registerRoutes(
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
+  app.use("/api/oauth/google/calendar", calendarOAuthRouter);
+  app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
 
@@ -580,6 +590,15 @@ export async function registerRoutes(
   app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
+  app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
+
+  // SuperIntelligence System
+  app.use("/api/audit", createAuditDashboardRouter());
+  app.use("/api/super-intelligence", createSuperIntelligenceRouter());
+  app.use(auditMiddleware); // Capture metrics for all requests
+
+  // ===== Computer Use / Agentic Control =====
+  app.use("/api/computer-use", computerUseRouter);
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
@@ -596,6 +615,19 @@ export async function registerRoutes(
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
   }).catch(err => {
     console.error("[AgentSystem] Initialization failed:", err.message);
+  });
+
+  // Initialize SuperIntelligence System (includes all phases)
+  initializeSuperIntelligence().then((status) => {
+    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
+  }).catch(err => {
+    console.error("[SuperIntelligence] System initialization failed:", err.message);
+    // Fall back to just audit system
+    initializeAuditSystem().then(() => {
+      console.log("[SuperIntelligence] Audit System initialized (fallback)");
+    }).catch(e => {
+      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+    });
   });
 
   // ===== Simple Tools & Agents Endpoints =====

@@ -19,22 +19,25 @@ export interface CSVParseResult extends ParsedResult {
  */
 export class CsvParser implements FileParser {
   name = "CsvParser";
+  supportedMimeTypes = [
+    "text/csv",
+    "application/csv",
+    "text/comma-separated-values",
+  ];
 
   supports(fileType: DetectedFileType): boolean {
-    const mimeTypes = [
-      "text/csv",
-      "application/csv",
-      "text/comma-separated-values",
-    ];
     const extensions = ["csv"];
-    
+
     return (
-      mimeTypes.includes(fileType.mimeType.toLowerCase()) ||
+      this.supportedMimeTypes.includes(fileType.mimeType.toLowerCase()) ||
       extensions.includes(fileType.extension?.toLowerCase() || "")
     );
   }
 
-  async parse(buffer: Buffer, filename: string): Promise<CSVParseResult> {
+  async parse(buffer: Buffer, fileTypeOrFilename: DetectedFileType | string): Promise<CSVParseResult> {
+    const filename = typeof fileTypeOrFilename === "string"
+      ? fileTypeOrFilename
+      : (fileTypeOrFilename.extension ? `file.${fileTypeOrFilename.extension}` : "file.csv");
     const content = buffer.toString("utf-8");
     const lines = content.split(/\r?\n/).filter(line => line.trim().length > 0);
     

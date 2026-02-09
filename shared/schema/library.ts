@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { users } from "./auth";
 import { chatMessages } from "./chat";
 
@@ -30,7 +30,7 @@ export type LibraryItem = typeof libraryItems.$inferSelect;
 
 // Enhanced Multimedia Library System
 export const libraryFileMetadataSchema = z.object({
-    exif: z.record(z.any()).optional(),
+    exif: z.record(z.string(), z.any()).optional(),
     colors: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     aiDescription: z.string().optional(),

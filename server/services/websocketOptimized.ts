@@ -79,10 +79,10 @@ export class OptimizedWebSocket {
         this.config = {
             url: config.url,
             reconnectAttempts: config.reconnectAttempts ?? 5,
-            reconnectDelay: config.reconnectDelay ?? 1000,
+            reconnectDelay: config.reconnectDelay ?? 500,
             heartbeatInterval: config.heartbeatInterval ?? 30000,
-            batchInterval: config.batchInterval ?? 50,
-            maxBatchSize: config.maxBatchSize ?? 10,
+            batchInterval: config.batchInterval ?? 10,
+            maxBatchSize: config.maxBatchSize ?? 50,
             compression: config.compression ?? true,
             debug: config.debug ?? false,
         };
@@ -157,14 +157,14 @@ export class OptimizedWebSocket {
             this.messageQueue.push(msg);
             this.pendingAcks.set(msg.id, { resolve, reject });
 
-            // Set timeout for ack
+            // Reduced ack timeout for faster failure detection
             setTimeout(() => {
                 const pending = this.pendingAcks.get(msg.id);
                 if (pending) {
                     this.pendingAcks.delete(msg.id);
                     pending.reject(new Error(`Message ${msg.id} timed out`));
                 }
-            }, 10000);
+            }, 5000);
 
             this.scheduleBatch();
         });

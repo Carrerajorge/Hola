@@ -28,10 +28,10 @@ export interface RetryResult<T> {
 // ============== Default Config ==============
 
 const DEFAULT_CONFIG: Required<Omit<RetryConfig, 'onRetry' | 'fallbackModels'>> = {
-    maxRetries: 3,
-    baseDelayMs: 1000,
-    maxDelayMs: 10000,
-    backoffMultiplier: 2,
+    maxRetries: 2,
+    baseDelayMs: 300,
+    maxDelayMs: 3000,
+    backoffMultiplier: 1.5,
     retryableErrors: [
         "ECONNRESET",
         "ETIMEDOUT",
@@ -67,7 +67,7 @@ function calculateDelay(
     multiplier: number
 ): number {
     const exponentialDelay = baseDelay * Math.pow(multiplier, attempt);
-    const jitter = Math.random() * 0.3 * exponentialDelay; // 0-30% jitter
+    const jitter = Math.random() * 0.15 * exponentialDelay; // 0-15% jitter
     return Math.min(exponentialDelay + jitter, maxDelay);
 }
 

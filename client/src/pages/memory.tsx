@@ -169,7 +169,7 @@ export default function MemoryPage() {
 
     const handleDeleteMemory = async (memoryId: string) => {
         try {
-            await apiRequest("DELETE", `/api/memory/semantic/forget/${memoryId}`);
+            await apiRequest("DELETE", `/api/memory/semantic/${memoryId}`);
             toast({
                 title: "Memoria eliminada",
                 description: "La memoria se ha eliminado correctamente"

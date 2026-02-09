@@ -54,10 +54,10 @@ export function createQueue<T>(name: string): Queue<T> | null {
     const queue = new Queue<T>(name, {
         connection: conn,
         defaultJobOptions: {
-            attempts: 3,
+            attempts: 2,
             backoff: {
                 type: 'exponential',
-                delay: 1000,
+                delay: 300,
             },
             removeOnComplete: {
                 age: 24 * 3600, // Keep for 24 hours
@@ -82,7 +82,7 @@ export function createWorker<T, R>(name: string, processor: (job: any) => Promis
 
     return new Worker<T, R>(name, processor, {
         connection: conn,
-        concurrency: parseInt(process.env.WORKER_CONCURRENCY || '5'),
+        concurrency: parseInt(process.env.WORKER_CONCURRENCY || '10'),
     });
 }
 
