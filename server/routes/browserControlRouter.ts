@@ -25,6 +25,7 @@ import {
   AgenticTask,
   AgenticStep,
 } from "../agent/computerUse/universalBrowserController";
+import { browserEngineExtensions } from "../agent/computerUse/browserEngineExtensions";
 
 const browserController = new UniversalBrowserController();
 
@@ -477,6 +478,209 @@ export function createBrowserControlRouter(): Router {
         goal,
         maxSteps || 20
       );
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // PDF Generation
+  // ============================================
+
+  /** Generate PDF from current page */
+  router.post("/sessions/:sessionId/pdf", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const { format, landscape, printBackground, scale, margin } = req.body;
+      const result = await browserEngineExtensions.generatePdf(page, {
+        format, landscape, printBackground, scale, margin,
+      });
+      res.json({ success: true, filePath: result.path, format: format || "A4" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Accessibility
+  // ============================================
+
+  /** Get accessibility tree */
+  router.get("/sessions/:sessionId/accessibility", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const role = req.query.role as string | undefined;
+      if (role) {
+        const nodes = await browserEngineExtensions.getAccessibilityByRole(page, role);
+        res.json({ nodes });
+      } else {
+        const tree = await browserEngineExtensions.getAccessibilityTree(page);
+        res.json({ tree });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Performance Metrics
+  // ============================================
+
+  /** Get page performance metrics */
+  router.get("/sessions/:sessionId/performance", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const metrics = await browserEngineExtensions.getPerformanceMetrics(page);
+      res.json(metrics);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Element Picker
+  // ============================================
+
+  /** Get element at point (for visual picker) */
+  router.post("/sessions/:sessionId/element-at-point", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const { x, y } = req.body;
+      const element = await browserEngineExtensions.getElementAtPoint(page, x, y);
+      res.json({ element });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Highlight elements and return screenshot */
+  router.post("/sessions/:sessionId/highlight", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const { highlights } = req.body;
+      const screenshot = await browserEngineExtensions.highlightElements(page, highlights || []);
+      res.json({ screenshot: `data:image/png;base64,${screenshot}` });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Console Capture
+  // ============================================
+
+  /** Start capturing console logs */
+  router.post("/sessions/:sessionId/console/start", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      browserEngineExtensions.startConsoleCapture(req.params.sessionId, page);
+      browserEngineExtensions.setupDialogHandler(req.params.sessionId, page, true);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get console entries */
+  router.get("/sessions/:sessionId/console", (req: Request, res: Response) => {
+    try {
+      const type = req.query.type as string | undefined;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const entries = browserEngineExtensions.getConsoleEntries(req.params.sessionId, {
+        type: type as any,
+        limit,
+      });
+      res.json({ entries });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get dialog events */
+  router.get("/sessions/:sessionId/dialogs", (req: Request, res: Response) => {
+    try {
+      const events = browserEngineExtensions.getDialogEvents(req.params.sessionId);
+      res.json({ events });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Session Recording
+  // ============================================
+
+  /** Start recording */
+  router.post("/sessions/:sessionId/recording/start", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const { name } = req.body;
+      const recordingId = browserEngineExtensions.startRecording(
+        req.params.sessionId,
+        name || "Recording",
+        page.url(),
+        "chrome-desktop"
+      );
+      res.json({ recordingId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Stop recording */
+  router.post("/sessions/:sessionId/recording/stop", (req: Request, res: Response) => {
+    try {
+      const recording = browserEngineExtensions.stopRecording(req.params.sessionId);
+      res.json({ recording });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** List recordings */
+  router.get("/recordings", (_req: Request, res: Response) => {
+    try {
+      const recordings = browserEngineExtensions.listRecordings();
+      res.json({ recordings });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get a recording */
+  router.get("/recordings/:recordingId", (req: Request, res: Response) => {
+    try {
+      const recording = browserEngineExtensions.getRecording(req.params.recordingId);
+      if (!recording) return res.status(404).json({ error: "Recording not found" });
+      res.json({ recording });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Scraping Pipeline
+  // ============================================
+
+  /** Execute a scraping pipeline */
+  router.post("/sessions/:sessionId/scrape", async (req: Request, res: Response) => {
+    try {
+      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const { pipeline } = req.body;
+      if (!pipeline || !pipeline.startUrl || !pipeline.steps) {
+        return res.status(400).json({ error: "pipeline with startUrl and steps is required" });
+      }
+      const result = await browserEngineExtensions.executeScraping(page, {
+        id: pipeline.id || "pipeline",
+        name: pipeline.name || "Scraping Pipeline",
+        startUrl: pipeline.startUrl,
+        steps: pipeline.steps,
+        maxPages: pipeline.maxPages || 10,
+        concurrency: 1,
+        delay: pipeline.delay || 500,
+        variables: pipeline.variables || {},
+      });
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

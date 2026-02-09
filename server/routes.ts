@@ -121,6 +121,7 @@ import { errorHandler } from "./middleware/error";
 import computerUseRouter from "./routes/computerUseRouter";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
+import { createWorkflowRouter } from "./routes/workflowRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -605,6 +606,7 @@ export async function registerRoutes(
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
   app.use("/api/terminal", createTerminalControlRouter());
+  app.use("/api/workflows", createWorkflowRouter());
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
