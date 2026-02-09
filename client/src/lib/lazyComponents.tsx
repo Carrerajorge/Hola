@@ -49,27 +49,28 @@ export function withLazyLoading<P extends object>(
   importFn: () => Promise<{ default: ComponentType<P> }>,
   FallbackComponent: ComponentType<any> = LoadingFallback,
   fallbackProps: Record<string, any> = {}
-): React.LazyExoticComponent<ComponentType<P>> & { Wrapper: React.FC<P> } {
+): React.FC<P> {
   const LazyComponent = React.lazy(importFn);
 
   const Wrapper: React.FC<P> = (props) => (
-    <Suspense fallback={<FallbackComponent {...fallbackProps} />}>
-      <LazyComponent {...props} />
-    </Suspense>
+    <LazyLoadErrorBoundary>
+      <Suspense fallback={<FallbackComponent {...fallbackProps} />}>
+        <LazyComponent {...props} />
+      </Suspense>
+    </LazyLoadErrorBoundary>
   );
 
-  return Object.assign(LazyComponent, { Wrapper });
+  return Wrapper;
 }
 
 export const LazyPPTEditorShell = React.lazy(() => import('@/components/ppt/PPTEditorShell'));
 
 export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean; initialContent?: string }) {
   return (
-    <LazyLoadErrorBoundary
-    // componentName removed
-    // loadingComponent removed
-    >
-      <LazyPPTEditorShell {...props} />
+    <LazyLoadErrorBoundary>
+      <Suspense fallback={<EditorLoadingFallback />}>
+        <LazyPPTEditorShell {...props} />
+      </Suspense>
     </LazyLoadErrorBoundary>
   );
 }

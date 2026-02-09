@@ -146,6 +146,7 @@ import { SyncStatusIndicator } from "./sync-status-indicator";
 import { ProductionProgress } from "@/components/production-progress";
 import { AiProcessStep } from "./chat-interface/types";
 import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
+import { EditorErrorBoundary } from "@/components/error-boundaries";
 import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
 import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
 import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
@@ -2018,6 +2019,37 @@ export function ChatInterface({
       window.removeEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
     };
   }, [chatId, agentStore, startAgentRun, toast]);
+
+  // Handle tool-selected events from the ToolCatalog dialog
+  useEffect(() => {
+    const handleToolSelected = (e: Event) => {
+      try {
+        const { tool } = (e as CustomEvent).detail || {};
+        if (!tool?.name) return;
+
+        const name = tool.name.toLowerCase();
+
+        // Map catalog tool names to Composer tool types
+        if (name.includes("web") || name.includes("browse") || name.includes("search")) {
+          setSelectedTool("web");
+        } else if (name.includes("image") || name.includes("vision")) {
+          setSelectedTool("image");
+        } else if (name.includes("agent") || name.includes("orchestrat") || name.includes("workflow")) {
+          setSelectedTool("agent");
+        } else {
+          // For other tools, set input with a hint about the tool
+          setInput((prev: string) => prev ? prev : `Usa la herramienta "${tool.name}": `);
+        }
+      } catch (err) {
+        console.error("[tool-selected] Error handling tool selection:", err);
+      }
+    };
+
+    window.addEventListener("tool-selected", handleToolSelected);
+    return () => {
+      window.removeEventListener("tool-selected", handleToolSelected);
+    };
+  }, [setInput]);
 
   const handleStartEdit = useCallback((msg: Message) => {
     setEditingMessageId(msg.id);
@@ -5418,6 +5450,7 @@ IMPORTANTE:
 
           {/* Right: Document Editor Panel */}
           <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
+            <EditorErrorBoundary>
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "ppt") ? (
                 <PPTEditorShellLazy
@@ -5580,6 +5613,7 @@ IMPORTANTE:
                 </div>
               )}
             </div>
+            </EditorErrorBoundary>
           </Panel>
         </PanelGroup>
       ) : (
