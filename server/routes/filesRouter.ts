@@ -996,10 +996,44 @@ export function createFilesRouter() {
 
   router.post("/api/files/quick", async (req, res) => {
     try {
-      const { name, type, size, storagePath } = req.body;
+      // Legacy endpoint (images only). Keep for backwards-compat, but validate strictly.
+      const rawName = req.body?.name;
+      const rawType = req.body?.type;
+      const rawSize = req.body?.size;
+      const rawStoragePath = req.body?.storagePath;
 
-      if (!name || !type || !size || !storagePath) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (typeof rawName !== "string" || rawName.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: name" });
+      }
+      if (typeof rawType !== "string" || rawType.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: type" });
+      }
+      if (rawSize === undefined || rawSize === null) {
+        return res.status(400).json({ error: "Missing required field: size" });
+      }
+      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: storagePath" });
+      }
+
+      const name = sanitizeFilename(rawName.trim());
+      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
+      const storagePath = rawStoragePath.trim();
+
+      if (!name) return res.status(400).json({ error: "Invalid file name" });
+      if (!type) return res.status(400).json({ error: "Invalid file type" });
+      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
+      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
+
+      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
+        return res.status(400).json({ error: "Invalid storagePath" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
+        return res.status(400).json({ error: `Unsupported file type: ${type}` });
+      }
+      if (!type.startsWith("image/")) {
+        return res.status(400).json({ error: "Quick upload only supports images" });
       }
 
       const file = await storage.createFile({
@@ -1020,13 +1054,38 @@ export function createFilesRouter() {
 
   router.post("/api/files", async (req, res) => {
     try {
-      const { name, type, size, storagePath } = req.body;
+      const rawName = req.body?.name;
+      const rawType = req.body?.type;
+      const rawSize = req.body?.size;
+      const rawStoragePath = req.body?.storagePath;
 
-      if (!name || !type || !size || !storagePath) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (typeof rawName !== "string" || rawName.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: name" });
+      }
+      if (typeof rawType !== "string" || rawType.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: type" });
+      }
+      if (rawSize === undefined || rawSize === null) {
+        return res.status(400).json({ error: "Missing required field: size" });
+      }
+      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: storagePath" });
       }
 
-      if (!ALLOWED_MIME_TYPES.includes(type)) {
+      const name = sanitizeFilename(rawName.trim());
+      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
+      const storagePath = rawStoragePath.trim();
+
+      if (!name) return res.status(400).json({ error: "Invalid file name" });
+      if (!type) return res.status(400).json({ error: "Invalid file type" });
+      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
+      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
+      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
+        return res.status(400).json({ error: "Invalid storagePath" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });
       }
 
