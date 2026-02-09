@@ -1063,8 +1063,8 @@ export function generateAPACitation(paper: AcademicPaper): string {
   const volume = paper.volume ? `, *${paper.volume}*` : "";
   const issue = paper.issue ? `(${paper.issue})` : "";
   const pages = paper.pages ? `, ${paper.pages}` : "";
-  const doi = paper.doi ? ` https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 https://doi.org/${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors} ${year}. ${title}. ${journal}${volume}${issue}${pages}.${doi}`.replace(/\s+/g, " ").trim();
 }
 
@@ -1103,8 +1103,8 @@ export function generateMLACitation(paper: AcademicPaper): string {
   const issue = paper.issue ? ` no. ${paper.issue},` : "";
   const year = paper.year ? ` ${paper.year},` : "";
   const pages = paper.pages ? ` pp. ${paper.pages}.` : ".";
-  const doi = paper.doi ? ` https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 https://doi.org/${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors} ${title} ${journal}${volume}${issue}${year}${pages}${doi}`.replace(/\s+/g, " ").trim();
 }
 
@@ -1123,8 +1123,8 @@ export function generateChicagoCitation(paper: AcademicPaper): string {
   const volume = paper.volume ? ` ${paper.volume}` : "";
   const issue = paper.issue ? `, no. ${paper.issue}` : "";
   const pages = paper.pages ? `: ${paper.pages}` : "";
-  const doi = paper.doi ? ` https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 https://doi.org/${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors} ${year}. ${title} ${journal}${volume}${issue}${pages}.${doi}`.replace(/\s+/g, " ").trim();
 }
 
@@ -1143,8 +1143,8 @@ export function generateHarvardCitation(paper: AcademicPaper): string {
   const volume = paper.volume || "";
   const issue = paper.issue ? `(${paper.issue})` : "";
   const pages = paper.pages ? `, pp. ${paper.pages}` : "";
-  const doi = paper.doi ? `. Available at: https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? `. Available at: 🔗 https://doi.org/${paper.doi}` : (paper.url ? `. 🔗 ${paper.url}` : "");
+
   return `${authors} ${year} ${title}, ${journal}, ${volume}${issue}${pages}${doi}.`.replace(/\s+/g, " ").trim();
 }
 
@@ -1171,8 +1171,8 @@ export function generateIEEECitation(paper: AcademicPaper): string {
   const issue = paper.issue ? ` no. ${paper.issue},` : "";
   const pages = paper.pages ? ` pp. ${paper.pages},` : "";
   const year = paper.year ? ` ${paper.year}.` : ".";
-  const doi = paper.doi ? ` doi: ${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 doi: ${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors} ${title} ${journal}${volume}${issue}${pages}${year}${doi}`.replace(/\s+/g, " ").trim();
 }
 
@@ -1200,8 +1200,8 @@ export function generateVancouverCitation(paper: AcademicPaper): string {
   const volume = paper.volume ? `;${paper.volume}` : "";
   const issue = paper.issue ? `(${paper.issue})` : "";
   const pages = paper.pages ? `:${paper.pages}` : "";
-  const doi = paper.doi ? ` doi: ${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 doi: ${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors} ${title} ${journal}${year}${volume}${issue}${pages}.${doi}`.replace(/\s+/g, " ").trim();
 }
 
@@ -1234,8 +1234,8 @@ export function generateASACitation(paper: AcademicPaper): string {
   const journal = paper.journal ? `*${paper.journal}*` : "";
   const volume = paper.volume || "";
   const pages = paper.pages ? `:${paper.pages}` : "";
-  const doi = paper.doi ? ` doi:${paper.doi}` : "";
-  
+  const doi = paper.doi ? ` 🔗 doi:${paper.doi}` : (paper.url ? ` 🔗 ${paper.url}` : "");
+
   return `${authors}. ${year}. ${title} ${journal} ${volume}${pages}.${doi}`.replace(/\s+/g, " ").trim();
 }
 

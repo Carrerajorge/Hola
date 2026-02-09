@@ -23,6 +23,25 @@ export class AcademicSearchService {
     /**
    * Process a natural language research request
    */
+    /**
+     * Sanitize user query to prevent injection and ensure robust results
+     */
+    private sanitizeQuery(raw: string): string {
+        if (!raw || typeof raw !== "string") return "";
+        let q = raw;
+        // Strip HTML/script tags
+        q = q.replace(/<[^>]*>/g, "");
+        // Remove null bytes and control characters
+        q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+        // Normalize unicode
+        q = q.normalize("NFC");
+        // Collapse whitespace
+        q = q.replace(/\s+/g, " ").trim();
+        // Limit length
+        if (q.length > 500) q = q.substring(0, 500).trim();
+        return q;
+    }
+
     async processResearchRequest(
         userQuery: string,
         options: { userId?: string; format?: "apa7" | "bibtex" } = {}
@@ -33,10 +52,21 @@ export class AcademicSearchService {
         articleCount: number;
         sources: string[];
     }> {
-        console.log(`[AcademicSearch] Processing request: "${userQuery}"`);
+        // Harden input query
+        const sanitizedQuery = this.sanitizeQuery(userQuery);
+        if (!sanitizedQuery) {
+            return {
+                summary: "## ⚠️ Búsqueda Académica\n\nLa consulta proporcionada no es válida. Por favor, ingrese un tema de búsqueda.",
+                files: [],
+                articleCount: 0,
+                sources: [],
+            };
+        }
+        const userQueryClean = sanitizedQuery;
+        console.log(`[AcademicSearch] Processing request: "${userQueryClean}"`);
 
         // 1. Analyze and Optimize Query using LLM
-        const queryParams = await this.optimizeQuery(userQuery);
+        const queryParams = await this.optimizeQuery(userQueryClean);
         console.log(`[AcademicSearch] Optimized params:`, queryParams);
 
         // 2. Execute Search
@@ -185,10 +215,24 @@ export class AcademicSearchService {
 
     private generateSummary(result: UnifiedSearchResult, files: { name: string; path: string }[], params: any): string {
         const total = result.articles.length;
+
+        const SOURCE_URLS: Record<string, string> = {
+            scopus: "https://www.scopus.com",
+            wos: "https://www.webofscience.com",
+            openalex: "https://openalex.org",
+            duckduckgo: "https://duckduckgo.com",
+            pubmed: "https://pubmed.ncbi.nlm.nih.gov",
+            scielo: "https://scielo.org",
+            redalyc: "https://www.redalyc.org",
+        };
+
         const sources = Object.entries(result.totalBySource)
             .filter(([_, count]) => count > 0)
-            .map(([source, count]) => `${source} (${count})`)
-            .join(", ");
+            .map(([source, count]) => {
+                const url = SOURCE_URLS[source] || "";
+                return `${source} (${count}) 🔗 ${url}`;
+            })
+            .join("\n  - ");
 
         const fileLinks = files.map(f => `[Descargar ${f.name}](${f.path})`).join("\n");
 
@@ -196,7 +240,8 @@ export class AcademicSearchService {
 
 **Tema:** ${params.englishKeywords[0]}
 **Resultados:** ${total} artículos encontrados.
-**Fuentes:** ${sources || "Ninguna"}
+**Fuentes consultadas:**
+  - ${sources || "Ninguna"}
 **Archivos Generados:**
 ${fileLinks}`;
     }

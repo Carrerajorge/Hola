@@ -452,32 +452,35 @@ export function formatCitation(result: AcademicResult, style: CitationStyle = "a
   const authorsFormatted = formatAuthorsAPA(authors);
   const doiUrl = doi ? `https://doi.org/${doi}` : url;
   
+  const linkUrl = doi ? `https://doi.org/${doi}` : (url || "");
+  const linkEmoji = linkUrl ? ` 🔗 ${linkUrl}` : "";
+
   switch (style) {
     case "apa": // 76
-      return `${authorsFormatted} (${year || "n.d."}). ${title}. ${journal || ""}.${doi ? ` https://doi.org/${doi}` : ""}`;
-    
+      return `${authorsFormatted} (${year || "n.d."}). ${title}. ${journal || ""}.${linkEmoji}`;
+
     case "mla": // 77
-      return `${authors}. "${title}." ${journal || ""}, ${year || "n.d."}.${doi ? ` doi:${doi}` : ""}`;
-    
+      return `${authors}. "${title}." ${journal || ""}, ${year || "n.d."}.${linkEmoji}`;
+
     case "chicago": // 78
-      return `${authors}. "${title}." ${journal || ""} (${year || "n.d."}).${doi ? ` https://doi.org/${doi}` : ""}`;
-    
+      return `${authors}. "${title}." ${journal || ""} (${year || "n.d."}).${linkEmoji}`;
+
     case "ieee": // 79
-      return `${authorsFormatted}, "${title}," ${journal || ""}, ${year || "n.d."}.${doi ? ` doi: ${doi}` : ""}`;
-    
+      return `${authorsFormatted}, "${title}," ${journal || ""}, ${year || "n.d."}.${linkEmoji}`;
+
     case "vancouver": // 80
-      return `${authorsFormatted}. ${title}. ${journal || ""}. ${year || ""}.${doi ? ` doi:${doi}` : ""}`;
-    
+      return `${authorsFormatted}. ${title}. ${journal || ""}. ${year || ""}.${linkEmoji}`;
+
     case "harvard": // 81
-      return `${authorsFormatted} (${year || "n.d."}) '${title}', ${journal || ""}.${doi ? ` doi:${doi}` : ""}`;
-    
+      return `${authorsFormatted} (${year || "n.d."}) '${title}', ${journal || ""}.${linkEmoji}`;
+
     case "bibtex": // 82
       const key = `${(authors.split(/[,\s]/)[0] || "unknown").toLowerCase()}${year || "nd"}`;
       return `@article{${key},\n  title={${title}},\n  author={${authors}},\n  journal={${journal || ""}},\n  year={${year || ""}},\n  doi={${doi || ""}}\n}`;
-    
+
     case "ris": // 83
       return `TY  - JOUR\nTI  - ${title}\nAU  - ${authors}\nPY  - ${year || ""}\nJO  - ${journal || ""}\nDO  - ${doi || ""}\nER  - `;
-    
+
     default:
       return formatCitation(result, "apa");
   }
@@ -888,6 +891,25 @@ export interface UnifiedSearchOptions extends SearchOptions {
   sources?: Array<"scopus" | "scielo" | "pubmed" | "scholar" | "duckduckgo" | "semantic" | "crossref">;
 }
 
+/**
+ * Sanitize and harden raw search query input
+ */
+function hardenQuery(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let q = raw;
+  // Strip HTML/script tags
+  q = q.replace(/<[^>]*>/g, "");
+  // Remove null bytes and control chars
+  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Normalize unicode
+  q = q.normalize("NFC");
+  // Collapse whitespace
+  q = q.replace(/\s+/g, " ").trim();
+  // Limit length
+  if (q.length > 500) q = q.substring(0, 500).trim();
+  return q;
+}
+
 export async function searchAllSources(query: string, options: UnifiedSearchOptions = {}): Promise<{
   query: string;
   originalQuery: string;
@@ -899,15 +921,30 @@ export async function searchAllSources(query: string, options: UnifiedSearchOpti
   metrics: SearchMetrics;
 }> {
   const startTime = Date.now();
-  const { 
-    maxResults = 15, 
+  const {
+    maxResults = 15,
     sources = ["scopus", "pubmed", "scholar", "scielo", "semantic", "crossref"],
     timeout = 10000,
     sortBy = "relevance"
   } = options;
-  
+
+  // Harden query input before processing
+  const hardenedQuery = hardenQuery(query);
+  if (!hardenedQuery) {
+    return {
+      query: "",
+      originalQuery: query,
+      expandedQueries: [],
+      totalResults: 0,
+      sources: {},
+      results: [],
+      timing: 0,
+      metrics: { query: "", totalTime: 0, cacheHit: false, sourceTimes: {}, resultCount: 0, deduplicatedCount: 0 },
+    };
+  }
+
   // Query processing
-  const normalizedQuery = normalizeQuery(query);
+  const normalizedQuery = normalizeQuery(hardenedQuery);
   const expandedQueries = expandQuery(normalizedQuery);
   const perSource = Math.ceil(maxResults / sources.length) + 3;
   

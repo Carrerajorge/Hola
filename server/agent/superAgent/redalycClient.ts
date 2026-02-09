@@ -482,9 +482,9 @@ export function generateRedalycAPA7Citation(article: RedalycArticle): string {
 
     let urlPart = "";
     if (article.doi) {
-        urlPart = ` https://doi.org/${article.doi}`;
+        urlPart = ` 🔗 https://doi.org/${article.doi}`;
     } else if (article.url) {
-        urlPart = ` ${article.url}`;
+        urlPart = ` 🔗 ${article.url}`;
     }
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${urlPart}`.trim();

@@ -326,6 +326,85 @@ function convertCrossRefMetadataToUnified(meta: CrossRefMetadata, source: Unifie
 }
 
 // =============================================================================
+// Search Query Hardening
+// =============================================================================
+
+/**
+ * Sanitize and harden a search query to prevent injection attacks
+ * and ensure robust results across all academic sources.
+ * - Removes dangerous characters that could break API queries
+ * - Trims excessive whitespace
+ * - Limits query length to prevent abuse
+ * - Strips potential script/HTML injection
+ * - Normalizes unicode for consistent cross-source results
+ */
+function hardenSearchQuery(rawQuery: string): string {
+    if (!rawQuery || typeof rawQuery !== "string") return "";
+
+    let query = rawQuery;
+
+    // 1. Strip HTML/script tags to prevent XSS in downstream rendering
+    query = query.replace(/<[^>]*>/g, "");
+
+    // 2. Remove null bytes and control characters (except newlines/tabs)
+    query = query.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+    // 3. Normalize unicode (NFC form for consistent matching across DBs)
+    query = query.normalize("NFC");
+
+    // 4. Remove excessive special characters that break API queries
+    //    Keep: alphanumeric, spaces, hyphens, periods, commas, parentheses, quotes, colons, accented chars
+    query = query.replace(/[^\w\s\-.,()'"":;áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
+
+    // 5. Collapse multiple spaces into one
+    query = query.replace(/\s+/g, " ").trim();
+
+    // 6. Limit query length (most APIs have limits around 500-2000 chars)
+    const MAX_QUERY_LENGTH = 500;
+    if (query.length > MAX_QUERY_LENGTH) {
+        query = query.substring(0, MAX_QUERY_LENGTH).trim();
+    }
+
+    // 7. Minimum query validation
+    if (query.length < 2) {
+        console.warn("[SearchHardening] Query too short after sanitization:", rawQuery);
+        return "";
+    }
+
+    return query;
+}
+
+/**
+ * Validate and clamp numeric search options
+ */
+function hardenSearchOptions(options: SearchOptions): SearchOptions {
+    const currentYear = new Date().getFullYear();
+    const hardened = { ...options };
+
+    // Clamp maxResults
+    if (hardened.maxResults !== undefined) {
+        hardened.maxResults = Math.max(1, Math.min(500, hardened.maxResults));
+    }
+    if (hardened.maxPerSource !== undefined) {
+        hardened.maxPerSource = Math.max(1, Math.min(100, hardened.maxPerSource));
+    }
+
+    // Validate year range
+    if (hardened.startYear !== undefined) {
+        hardened.startYear = Math.max(1900, Math.min(currentYear + 1, hardened.startYear));
+    }
+    if (hardened.endYear !== undefined) {
+        hardened.endYear = Math.max(1900, Math.min(currentYear + 1, hardened.endYear));
+    }
+    if (hardened.startYear && hardened.endYear && hardened.startYear > hardened.endYear) {
+        // Swap if inverted
+        [hardened.startYear, hardened.endYear] = [hardened.endYear, hardened.startYear];
+    }
+
+    return hardened;
+}
+
+// =============================================================================
 // Main Search Function
 // =============================================================================
 
@@ -336,6 +415,21 @@ export async function searchAllSources(
     query: string,
     options: SearchOptions = {}
 ): Promise<UnifiedSearchResult> {
+    // Harden inputs
+    const sanitizedQuery = hardenSearchQuery(query);
+    const sanitizedOptions = hardenSearchOptions(options);
+
+    if (!sanitizedQuery) {
+        console.error("[UnifiedSearch] Empty query after sanitization, aborting search");
+        return {
+            articles: [],
+            totalBySource: { scopus: 0, wos: 0, openalex: 0, duckduckgo: 0, pubmed: 0, scielo: 0, redalyc: 0 },
+            query: query,
+            searchTime: 0,
+            errors: ["Query was empty or invalid after sanitization"],
+        };
+    }
+
     const {
         maxResults = 100,
         maxPerSource = 30,
@@ -344,17 +438,16 @@ export async function searchAllSources(
         sources = ["scopus", "openalex", "pubmed", "scielo", "redalyc"],
         language,
         affilCountries
-    } = options;
+    } = sanitizedOptions;
 
     const startTime = Date.now();
     const errors: string[] = [];
 
-    // Use the query as provided (the caller should handle translation if needed)
-    // For Scopus/PubMed we prefer English, for SciELO/Redalyc we prefer Spanish/Portuguese
-    const englishQuery = query; // Assuming caller passed English or mixed
-    const spanishQuery = query; // Assuming caller passed Spanish or mixed
+    // Use sanitized query for all sources
+    const englishQuery = sanitizedQuery;
+    const spanishQuery = sanitizedQuery;
 
-    console.log(`[UnifiedSearch] Starting search for: "${query}"`);
+    console.log(`[UnifiedSearch] Starting search for: "${sanitizedQuery}"`);
 
     const results: {
         scopus: UnifiedArticle[];
@@ -798,7 +891,7 @@ function generateGenericAPA7Citation(article: UnifiedArticle): string {
     const linkUrl = doiUrl || ((rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) ? rawUrl : "");
 
     const journalSegment = journalPart ? ` ${journalPart}.` : "";
-    const linkSegment = linkUrl ? ` ${linkUrl}` : "";
+    const linkSegment = linkUrl ? ` 🔗 ${linkUrl}` : "";
 
     return `${authorsStr} ${year}. ${title}${journalSegment}${linkSegment}`.trim();
 }
@@ -826,7 +919,7 @@ function generateScopusAPA7Citation(article: ScopusArticle): string {
 
     let doiPart = "";
     if (article.doi) {
-        doiPart = ` https://doi.org/${article.doi}`;
+        doiPart = ` 🔗 https://doi.org/${article.doi}`;
     }
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
@@ -855,7 +948,7 @@ function generateOpenAlexAPA7Citation(candidate: AcademicCandidate): string {
     const journalPart = candidate.journal ? `*${candidate.journal}*` : "";
 
     const doi = (candidate.doi || "").trim();
-    const doiPart = doi ? ` https://doi.org/${doi}` : "";
+    const doiPart = doi ? ` 🔗 https://doi.org/${doi}` : "";
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
 }
@@ -1119,21 +1212,29 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
 
     for (let i = 0; i < sortedArticles.length; i++) {
         const article = sortedArticles[i];
+        const sourceUrl = article.doi ? `https://doi.org/${article.doi}` : article.url || "";
+        const linkEmoji = sourceUrl ? ` 🔗 ${sourceUrl}` : "";
         lines.push(`${i + 1}. [${article.source.toUpperCase()}]`);
-        lines.push(article.apaCitation || generateGenericAPA7Citation(article));
+        const citation = article.apaCitation || generateGenericAPA7Citation(article);
+        // Ensure every citation ends with the 🔗 link emoji if not already present
+        if (citation.includes("🔗")) {
+            lines.push(citation);
+        } else {
+            lines.push(`${citation}${linkEmoji}`);
+        }
         lines.push("");
     }
 
     lines.push("================================================================================");
     lines.push("");
     lines.push("Distribución por fuente:");
-    lines.push(`  - Scopus: ${bySource.scopus.length} artículos`);
-    lines.push(`  - WoS: ${bySource.wos.length} artículos`);
-    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos`);
-    lines.push(`  - DuckDuckGo: ${bySource.duckduckgo.length} artículos`);
-    lines.push(`  - PubMed: ${bySource.pubmed.length} artículos`);
-    lines.push(`  - SciELO: ${bySource.scielo.length} artículos`);
-    lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos`);
+    lines.push(`  - Scopus: ${bySource.scopus.length} artículos 🔗 https://www.scopus.com`);
+    lines.push(`  - WoS: ${bySource.wos.length} artículos 🔗 https://www.webofscience.com`);
+    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos 🔗 https://openalex.org`);
+    lines.push(`  - DuckDuckGo: ${bySource.duckduckgo.length} artículos 🔗 https://duckduckgo.com`);
+    lines.push(`  - PubMed: ${bySource.pubmed.length} artículos 🔗 https://pubmed.ncbi.nlm.nih.gov`);
+    lines.push(`  - SciELO: ${bySource.scielo.length} artículos 🔗 https://scielo.org`);
+    lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos 🔗 https://www.redalyc.org`);
 
     return lines.join("\n");
 }

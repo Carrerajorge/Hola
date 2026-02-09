@@ -559,9 +559,9 @@ export function generateSciELOAPA7Citation(article: SciELOArticle): string {
 
     let doiPart = "";
     if (article.doi) {
-        doiPart = ` https://doi.org/${article.doi}`;
+        doiPart = ` 🔗 https://doi.org/${article.doi}`;
     } else if (article.url) {
-        doiPart = ` ${article.url}`;
+        doiPart = ` 🔗 ${article.url}`;
     }
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
