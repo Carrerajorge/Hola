@@ -109,8 +109,8 @@ export function createGraphForRun(
           reason: event.reason,
         },
       });
-    } catch {
-      // Non-critical — don't break execution
+    } catch (err) {
+      console.warn(`[orchestratorBridge] state_change emission failed for run ${runId}:`, err);
     }
   });
 
@@ -130,8 +130,8 @@ export function createGraphForRun(
           },
         });
       }
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.warn(`[orchestratorBridge] plan_created emission failed for run ${runId}:`, err);
     }
   });
 
@@ -148,8 +148,8 @@ export function createGraphForRun(
           status: result.success ? "completed" : "failed",
         });
       }
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.warn(`[orchestratorBridge] step_end emission failed for run ${runId}:`, err);
     }
   });
 
@@ -159,8 +159,8 @@ export function createGraphForRun(
         summary: event.data?.summary || "Task completed",
         metadata: graph.toJSON(),
       });
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.warn(`[orchestratorBridge] done emission failed for run ${runId}:`, err);
     }
   });
 
@@ -172,8 +172,8 @@ export function createGraphForRun(
           code: event.data?.code || "GRAPH_ERROR",
         },
       });
-    } catch {
-      // Non-critical
+    } catch (err) {
+      console.warn(`[orchestratorBridge] error emission failed for run ${runId}:`, err);
     }
   });
 
@@ -376,9 +376,19 @@ export function getGraphStatus(runId: string): {
   if (!graph) return null;
 
   const ctx = graph.getContext();
+  const m = ctx.task.metrics;
   return {
     state: graph.getState(),
-    metrics: { ...ctx.task.metrics } as any,
+    metrics: {
+      stepsExecuted: m.stepsExecuted,
+      stepsSucceeded: m.stepsSucceeded,
+      stepsFailed: m.stepsFailed,
+      retries: m.retries,
+      replans: m.replans,
+      tokensUsed: m.tokensUsed,
+      wallClockMs: m.wallClockMs,
+      artifactsProduced: m.artifactsProduced,
+    },
     retriesRemaining: ctx.retriesRemaining,
     replansRemaining: ctx.replansRemaining,
     strategyMode: ctx.strategyMode,
