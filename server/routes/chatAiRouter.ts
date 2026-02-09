@@ -321,6 +321,11 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
             extractedContents.push({ extracted, attachment });
           }
 
+          const failedExtractions = extractedContents.filter(e => e.extracted === null);
+          if (failedExtractions.length > 0) {
+            console.warn(`[Chat API] Failed to extract content from ${failedExtractions.length} attachment(s):`,
+              failedExtractions.map(e => e.attachment.name).join(', '));
+          }
           const successfulExtractions = extractedContents.filter(e => e.extracted !== null).map(e => e.extracted!);
           if (successfulExtractions.length > 0) {
             attachmentContext = formatAttachmentsAsContext(successfulExtractions);
@@ -2146,8 +2151,14 @@ ${attachmentContext}`;
               throw new Error('No storagePath or content provided for attachment');
             }
 
-            // Call normalizeDocument to extract structured data
-            const docModel = await normalizeDocument(buffer, filename, att.storagePath);
+            // Call normalizeDocument with a 30s timeout to prevent hanging on malformed documents
+            const PARSE_TIMEOUT_MS = 30_000;
+            const docModel = await Promise.race([
+              normalizeDocument(buffer, filename, att.storagePath),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Document parsing timed out after ${PARSE_TIMEOUT_MS / 1000}s for ${filename}`)), PARSE_TIMEOUT_MS)
+              ),
+            ]);
             documentModels.push(docModel);
 
             const parseTimeMs = Date.now() - parseStartTime;

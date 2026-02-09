@@ -1108,12 +1108,12 @@ export function Composer({
                 if (showMentionPopover) return;
                 handleHistoryNavigation(e);
                 const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading && hasContent) {
                   e.preventDefault();
                   handleSubmitWithHistory();
                   return;
                 }
-                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
+                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading && hasContent) {
                   e.preventDefault();
                   handleSubmitWithHistory();
                 }
