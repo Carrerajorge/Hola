@@ -4,6 +4,7 @@
  */
 
 import CircuitBreaker from 'opossum';
+import { FALLBACK_CHAINS } from '../lib/modelRegistry';
 
 interface CircuitBreakerOptions {
     timeout?: number;          // Time in ms to wait for action to complete
@@ -31,15 +32,10 @@ const DEFAULT_OPTIONS: CircuitBreakerOptions = {
 // Breaker registry
 const breakers = new Map<string, CircuitBreaker>();
 
-// Fallback models by provider
-const FALLBACK_CHAIN: Record<string, string[]> = {
-    'grok-3': ['grok-3-fast', 'grok-3-mini-fast'],
-    'grok-3-fast': ['grok-3-mini-fast', 'grok-3'],
-    'grok-3-mini-fast': ['grok-3-fast'],
-    'gemini-2.5-pro': ['gemini-2.0-flash'],
-    'gemini-2.0-flash': ['gemini-2.5-pro'],
-    'claude-3.5-sonnet': ['claude-3-haiku'],
-};
+// Fallback models – sourced from the central model registry
+const FALLBACK_CHAIN: Record<string, string[]> = Object.fromEntries(
+    Object.entries(FALLBACK_CHAINS).map(([k, v]) => [k, [...v]]),
+);
 
 /**
  * Get or create circuit breaker for a model
