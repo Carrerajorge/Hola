@@ -208,6 +208,15 @@ interface ArchivedChat {
   updatedAt: string;
 }
 
+interface DeletedChat {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  archived?: string | null;
+}
+
 interface ConsentLogEntry {
   id: string;
   consentType: string;
@@ -722,12 +731,14 @@ function AppsSection() {
 function DataControlsSection() {
   const { user, logout } = useAuth();
   const userId = user?.id;
+  const isAuthed = !!userId;
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { settings: platformSettings } = usePlatformSettings();
   const platformTimeZone = normalizeTimeZone(platformSettings.timezone_default);
   const platformDateFormat = platformSettings.date_format;
   const [showArchivedDialog, setShowArchivedDialog] = useState(false);
+  const [showDeletedDialog, setShowDeletedDialog] = useState(false);
   const [showSharedLinksDialog, setShowSharedLinksDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
@@ -766,8 +777,19 @@ function DataControlsSection() {
     enabled: !!userId,
   });
 
+  const { data: deletedChats = [], isLoading: isLoadingDeleted } = useQuery<DeletedChat[]>({
+    queryKey: ['/api/users', userId, 'chats', 'deleted'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/chats/deleted`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch deleted chats');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
   const updatePrivacy = useMutation({
     mutationFn: async (data: Partial<PrivacySettings>) => {
+      if (!userId) throw new Error("Unauthorized");
       const res = await fetch(`/api/users/${userId}/privacy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -788,6 +810,7 @@ function DataControlsSection() {
 
   const revokeLink = useMutation({
     mutationFn: async (linkId: string) => {
+      if (!userId) throw new Error("Unauthorized");
       const res = await fetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to revoke');
       return res.json();
@@ -796,10 +819,14 @@ function DataControlsSection() {
       queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'shared-links'] });
       toast({ title: "Enlace revocado", description: "El enlace compartido ha sido revocado." });
     },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo revocar el enlace.", variant: "destructive" });
+    },
   });
 
   const unarchiveChat = useMutation({
     mutationFn: async (chatId: string) => {
+      if (!userId) throw new Error("Unauthorized");
       const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to unarchive');
       return res.json();
@@ -810,10 +837,32 @@ function DataControlsSection() {
       toast({ title: "Chat desarchivado", description: "El chat ha sido devuelto a tu lista." });
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo restaurar el chat.", variant: "destructive" });
+    },
+  });
+
+  const restoreDeletedChat = useMutation({
+    mutationFn: async (chatId: string) => {
+      if (!userId) throw new Error("Unauthorized");
+      const res = await fetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to restore');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'deleted'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      toast({ title: "Chat restaurado", description: "El chat ha sido restaurado." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo restaurar el chat.", variant: "destructive" });
+    },
   });
 
   const archiveAll = useMutation({
     mutationFn: async () => {
+      if (!userId) throw new Error("Unauthorized");
       const res = await fetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to archive all');
       return res.json();
@@ -825,19 +874,29 @@ function DataControlsSection() {
       setShowArchiveConfirm(false);
       window.dispatchEvent(new CustomEvent("refresh-chats"));
     },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudieron archivar los chats.", variant: "destructive" });
+    },
   });
 
   const deleteAll = useMutation({
     mutationFn: async () => {
+      if (!userId) throw new Error("Unauthorized");
       const res = await fetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to delete all');
       return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'deleted'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'shared-links'] });
       toast({ title: "Chats eliminados", description: `Se eliminaron ${data.count} chats.` });
       setShowDeleteConfirm(false);
       window.dispatchEvent(new CustomEvent("refresh-chats"));
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudieron eliminar los chats.", variant: "destructive" });
     },
   });
 
@@ -918,7 +977,7 @@ function DataControlsSection() {
             <Switch
               checked={privacySettings.trainingOptIn}
               onCheckedChange={(checked) => updatePrivacy.mutate({ trainingOptIn: checked })}
-              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!isAuthed || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-training-opt-in"
             />
           </div>
@@ -946,7 +1005,7 @@ function DataControlsSection() {
             <Switch
               checked={privacySettings.remoteBrowserDataAccess}
               onCheckedChange={(checked) => updatePrivacy.mutate({ remoteBrowserDataAccess: checked })}
-              disabled={!userId || updatePrivacy.isPending || isLoadingPrivacy}
+              disabled={!isAuthed || updatePrivacy.isPending || isLoadingPrivacy}
               data-testid="switch-remote-browser"
             />
           </div>
@@ -961,13 +1020,14 @@ function DataControlsSection() {
           <div>
             <span className="text-sm block">Administrar enlaces</span>
             <span className="text-xs text-muted-foreground">
-              {sharedLinks.filter(l => l.isRevoked === 'false').length} enlaces activos
+              {sharedLinks.filter(l => l.isRevoked !== 'true').length} enlaces activos
             </span>
           </div>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setShowSharedLinksDialog(true)}
+            disabled={!isAuthed}
             data-testid="button-manage-links"
           >
             Administrar
@@ -1004,7 +1064,26 @@ function DataControlsSection() {
               variant="outline"
               size="sm"
               onClick={() => setShowArchivedDialog(true)}
+              disabled={!isAuthed}
               data-testid="button-manage-archived"
+            >
+              Administrar
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2">
+            <div>
+              <span className="text-sm block">Chats eliminados</span>
+              <span className="text-xs text-muted-foreground">
+                {deletedChats.length} chats en la papelera
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDeletedDialog(true)}
+              disabled={!isAuthed}
+              data-testid="button-manage-deleted"
             >
               Administrar
             </Button>
@@ -1016,7 +1095,7 @@ function DataControlsSection() {
               variant="outline"
               size="sm"
               onClick={() => setShowArchiveConfirm(true)}
-              disabled={archiveAll.isPending}
+              disabled={!isAuthed || archiveAll.isPending}
               data-testid="button-archive-all"
             >
               {archiveAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Archivar todo"}
@@ -1030,7 +1109,7 @@ function DataControlsSection() {
               size="sm"
               className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
               onClick={() => setShowDeleteConfirm(true)}
-              disabled={deleteAll.isPending}
+              disabled={!isAuthed || deleteAll.isPending}
               data-testid="button-delete-all"
             >
               {deleteAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Borrar todo"}
@@ -1135,6 +1214,51 @@ function DataControlsSection() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showDeletedDialog} onOpenChange={setShowDeletedDialog}>
+        <DialogContent className="max-w-md max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Chats eliminados</DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Lista de chats eliminados</DialogDescription>
+            </VisuallyHidden>
+          </DialogHeader>
+          <ScrollArea className="h-[400px] pr-4">
+            {isLoadingDeleted ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : deletedChats.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No tienes chats eliminados.</p>
+            ) : (
+              <div className="space-y-2">
+                {deletedChats.map((chat) => {
+                  const restoring = restoreDeletedChat.isPending && restoreDeletedChat.variables === chat.id;
+                  return (
+                    <div key={chat.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`deleted-chat-${chat.id}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{chat.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Eliminado: {chat.deletedAt ? new Date(chat.deletedAt).toLocaleDateString() : new Date(chat.updatedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => restoreDeletedChat.mutate(chat.id)}
+                        disabled={restoring}
+                        data-testid={`button-restore-deleted-${chat.id}`}
+                      >
+                        {restoring ? <Loader2 className="h-4 w-4 animate-spin" /> : "Restaurar"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showSharedLinksDialog} onOpenChange={setShowSharedLinksDialog}>
         <DialogContent className="max-w-lg max-h-[80vh]">
           <DialogHeader>
@@ -1151,31 +1275,31 @@ function DataControlsSection() {
             ) : sharedLinks.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No tienes enlaces compartidos.</p>
             ) : (
-              <div className="space-y-2">
-                {sharedLinks.map((link) => (
-                  <div key={link.id} className={cn("p-3 border rounded-lg", link.isRevoked === 'true' && "opacity-50")} data-testid={`shared-link-${link.id}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Share2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm font-medium capitalize">{link.resourceType}</span>
-                          <span className={cn(
-                            "text-xs px-2 py-0.5 rounded-full",
-                            link.scope === 'public' ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
-                              link.scope === 'organization' ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
-                                "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                          )}>
-                            {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
-                          </span>
+	              <div className="space-y-2">
+	                {sharedLinks.map((link) => (
+	                  <div key={link.id} className={cn("p-3 border rounded-lg", link.isRevoked === 'true' && "opacity-50")} data-testid={`shared-link-${link.id}`}>
+	                    <div className="flex items-center justify-between">
+	                      <div className="flex-1 min-w-0">
+	                        <div className="flex items-center gap-2">
+	                          <Share2 className="h-4 w-4 text-muted-foreground" />
+	                          <span className="text-sm font-medium capitalize">{link.resourceType}</span>
+	                          <span className={cn(
+	                            "text-xs px-2 py-0.5 rounded-full",
+	                            link.scope === 'public' ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
+	                              link.scope === 'organization' ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
+	                                "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+	                          )}>
+	                            {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
+	                          </span>
 	                        </div>
 	                        <p className="text-xs text-muted-foreground mt-1">
 	                          Creado: {formatZonedDate(link.createdAt, { timeZone: platformTimeZone, dateFormat: platformDateFormat })} · {link.accessCount} accesos
 	                        </p>
 	                      </div>
-                      {link.isRevoked === 'false' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
+	                      {link.isRevoked !== 'true' && (
+	                        <Button
+	                          variant="ghost"
+	                          size="sm"
                           className="text-red-500 hover:text-red-600"
                           onClick={() => revokeLink.mutate(link.id)}
                           disabled={revokeLink.isPending}
@@ -1213,10 +1337,10 @@ function DataControlsSection() {
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Borrar historial?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esto eliminará todas tus conversaciones del historial. Tendrás un período de recuperación antes de que se eliminen permanentemente.
-            </AlertDialogDescription>
+            <AlertDialogTitle>¿Eliminar todos los chats?</AlertDialogTitle>
+          <AlertDialogDescription>
+              Esta acción enviará todos tus chats a la papelera. Podrás restaurarlos desde "Chats eliminados".
+          </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
@@ -1254,357 +1378,693 @@ function DataControlsSection() {
   );
 }
 
-function normalizeTwoFactorCode(value: string): string {
-  return String(value || "").replace(/\s+/g, "").trim().toUpperCase();
+type TrustedDevice = {
+  sid: string;
+  isCurrent: boolean;
+  createdAt: number | null;
+  lastSeenAt: number | null;
+  ip: string | null;
+  userAgent: string | null;
+  expiresAt: string | null;
+  pushApprovalsEnabled: boolean;
+  hasPushSubscription: boolean;
+};
+
+type TrustedDevicesResponse = {
+  currentSid: string | null;
+  devices: TrustedDevice[];
+};
+
+type TwoFaStatusResponse = { enabled: boolean };
+
+type TwoFaSetupResponse = {
+  secret: string;
+  qrCodeUrl: string;
+  qrCodeImage: string;
+  backupCodes: string[];
+  message?: string;
+};
+
+function formatDeviceLabel(userAgent: string | null): string {
+  if (!userAgent) return "Dispositivo";
+  const ua = userAgent;
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua);
+  const os =
+    /Windows NT/i.test(ua) ? "Windows" :
+    /Mac OS X/i.test(ua) ? "macOS" :
+    /Android/i.test(ua) ? "Android" :
+    /iPhone|iPad/i.test(ua) ? "iOS" :
+    "Sistema";
+
+  const browser =
+    /Edg\//i.test(ua) ? "Edge" :
+    /Chrome\//i.test(ua) ? "Chrome" :
+    /Safari\//i.test(ua) && !/Chrome\//i.test(ua) ? "Safari" :
+    /Firefox\//i.test(ua) ? "Firefox" :
+    "Navegador";
+
+  return `${isMobile ? "Móvil" : "Desktop"} · ${os} · ${browser}`;
 }
 
-function TwoFactorSection() {
-  const { isAuthenticated } = useAuth();
-  const { toast } = useToast();
-  const [status, setStatus] = useState<TwoFactorStatus | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
-  const [code, setCode] = useState("");
-  const [backupCopied, setBackupCopied] = useState(false);
-  const [newBackupCodes, setNewBackupCodes] = useState<string[] | null>(null);
+function formatLastSeen(ms: number | null): string | null {
+  if (!ms) return null;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString();
+}
 
-  const loadStatus = async () => {
-    if (!isAuthenticated) return;
-    setLoading(true);
-    try {
+function TrustedDevicesDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  data?: TrustedDevicesResponse;
+  isLoading: boolean;
+  onRevoke: (sid: string) => void;
+  isRevoking?: boolean;
+  revokingSid?: string | null;
+}) {
+  const devices = props.data?.devices || [];
+  const currentSid = props.data?.currentSid || null;
+
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Dispositivos de confianza</DialogTitle>
+          <DialogDescription>
+            Administra tus sesiones activas. Si cierras una sesión, ese dispositivo perderá acceso.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          {props.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : devices.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No hay dispositivos registrados.
+            </p>
+          ) : (
+            devices.map((d) => {
+              const lastSeen = formatLastSeen(d.lastSeenAt);
+              const isCurrent = d.sid === currentSid || d.isCurrent;
+              return (
+                <div
+                  key={d.sid}
+                  className="flex items-center justify-between gap-3 border rounded-lg p-3"
+                  data-testid={`trusted-device-${d.sid}`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">
+                        {formatDeviceLabel(d.userAgent)}
+                      </span>
+                      {isCurrent && (
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          (Este dispositivo)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {d.ip ? <span>{d.ip}</span> : null}
+                      {d.ip && lastSeen ? <span> · </span> : null}
+                      {lastSeen ? <span>Última actividad: {lastSeen}</span> : <span>Última actividad: —</span>}
+                    </div>
+	                    <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+	                      <span className={cn(
+	                        "inline-flex items-center gap-1",
+	                        d.pushApprovalsEnabled ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+	                      )}>
+	                        {d.pushApprovalsEnabled ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+	                        {d.pushApprovalsEnabled ? "Aprobaciones push: activas" : "Aprobaciones push: inactivas"}
+	                      </span>
+	                      <span className={cn(
+	                        "inline-flex items-center gap-1",
+	                        d.hasPushSubscription ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+	                      )}>
+	                        {d.hasPushSubscription ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+	                        {d.hasPushSubscription ? "Push: registrado" : "Push: sin registrar"}
+	                      </span>
+	                    </div>
+	                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(!isCurrent && "text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950")}
+                    onClick={() => props.onRevoke(d.sid)}
+                    disabled={!!props.isRevoking && props.revokingSid === d.sid}
+                    data-testid={`button-revoke-device-${d.sid}`}
+                  >
+                    {!!props.isRevoking && props.revokingSid === d.sid ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Cerrar sesión"
+                    )}
+                  </Button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SecuritySection(props: {
+  settings: any;
+  updateSetting: (key: any, value: any) => void;
+  onLogout: () => void;
+  onRequestLogoutAll: () => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuth();
+
+  const [showTrustedDevices, setShowTrustedDevices] = useState(false);
+
+  const { data: devicesData, isLoading: isLoadingDevices } = useQuery<TrustedDevicesResponse>({
+    queryKey: ["/api/security/trusted-devices"],
+    queryFn: async () => {
+      const res = await apiFetch("/api/security/trusted-devices");
+      if (!res.ok) throw new Error("Failed to fetch trusted devices");
+      return res.json();
+    },
+    enabled: isAuthenticated,
+  });
+
+  const { data: twoFaStatus } = useQuery<TwoFaStatusResponse>({
+    queryKey: ["/api/2fa/status"],
+    queryFn: async () => {
       const res = await apiFetch("/api/2fa/status");
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "No se pudo cargar el estado de 2FA.");
-      }
-      setStatus({ enabled: Boolean(payload?.enabled), verified: Boolean(payload?.verified) });
-    } catch {
-      setStatus(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (!res.ok) throw new Error("Failed to fetch 2FA status");
+      return res.json();
+    },
+    enabled: isAuthenticated,
+  });
+
+  const authAppEnabled = twoFaStatus?.enabled ?? !!props.settings.authApp;
+  const currentDevice = devicesData?.devices?.find((d) => d.isCurrent) || null;
+  const pushEnabled = currentDevice?.pushApprovalsEnabled ?? !!props.settings.pushNotifications;
+  const trustedDevicesCount = devicesData?.devices?.length ?? 0;
 
   useEffect(() => {
-    void loadStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
-
-  const copyBackupCodes = async (codes: string[]) => {
-    if (!codes?.length) return;
-    try {
-      await navigator.clipboard.writeText(codes.join("\n"));
-      setBackupCopied(true);
-      setTimeout(() => setBackupCopied(false), 1500);
-      toast({ title: "Códigos copiados", description: "Guárdalos en un lugar seguro." });
-    } catch {
-      toast({ title: "Error", description: "No se pudieron copiar los códigos.", variant: "destructive" });
+    if (typeof twoFaStatus?.enabled === "boolean" && props.settings.authApp !== twoFaStatus.enabled) {
+      props.updateSetting("authApp", twoFaStatus.enabled);
     }
-  };
+  }, [twoFaStatus?.enabled, props.settings.authApp, props.updateSetting]);
 
-  const startSetup = async () => {
-    setBusy(true);
-    setNewBackupCodes(null);
-    try {
-      const res = await apiFetch("/api/2fa/setup", {
+  useEffect(() => {
+    if (currentDevice && props.settings.pushNotifications !== currentDevice.pushApprovalsEnabled) {
+      props.updateSetting("pushNotifications", currentDevice.pushApprovalsEnabled);
+    }
+  }, [currentDevice, props.settings.pushNotifications, props.updateSetting]);
+
+  const pushApprovalsMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await apiFetch("/api/security/push-approvals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
       });
-      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "No se pudo iniciar la configuración de 2FA.");
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to update push approvals");
       }
-      setSetup(payload as TwoFactorSetup);
-      toast({ title: "2FA listo para configurar", description: "Escanea el QR y verifica el código." });
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "No se pudo iniciar 2FA.", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  };
+      return res.json() as Promise<{ success: boolean; enabled: boolean }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/security/trusted-devices"] });
+    },
+  });
 
-  const verifySetup = async () => {
-    const normalized = normalizeTwoFactorCode(code);
-    if (normalized.length < 6) {
-      toast({ title: "Código inválido", description: "Ingresa un código válido.", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
+  const revokeSessionMutation = useMutation({
+    mutationFn: async (sid: string) => {
+      const res = await apiFetch("/api/security/sessions/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sid }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to revoke session");
+      }
+      return res.json() as Promise<{ success: boolean; current?: boolean }>;
+    },
+    onSuccess: (_data, sid) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/security/trusted-devices"] });
+      if (devicesData?.currentSid && sid === devicesData.currentSid) {
+        props.onLogout();
+      }
+    },
+  });
+
+  // --- 2FA setup flow ---
+  const [show2faSetup, setShow2faSetup] = useState(false);
+  const [show2faDisable, setShow2faDisable] = useState(false);
+  const [setupPayload, setSetupPayload] = useState<TwoFaSetupResponse | null>(null);
+  const [verifyCode, setVerifyCode] = useState("");
+  const [disableCode, setDisableCode] = useState("");
+
+  const setup2faMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/2fa/setup", { method: "POST" });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to start 2FA setup");
+      }
+      return res.json() as Promise<TwoFaSetupResponse>;
+    },
+    onSuccess: (payload) => {
+      setSetupPayload(payload);
+      setVerifyCode("");
+      setShow2faSetup(true);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "No se pudo iniciar 2FA",
+        description: err?.message || "Error inesperado",
+        variant: "destructive" as any,
+      });
+    },
+  });
+
+  const verify2faSetupMutation = useMutation({
+    mutationFn: async (code: string) => {
       const res = await apiFetch("/api/2fa/verify-setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: normalized }),
+        body: JSON.stringify({ code }),
       });
-      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "No se pudo verificar el código.");
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to verify 2FA setup");
       }
-      setSetup(null);
-      setCode("");
-      setStatus({ enabled: true, verified: true });
-      toast({ title: "2FA activado", description: "Tu cuenta ahora está protegida." });
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "No se pudo verificar el código.", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verifySession = async () => {
-    const normalized = normalizeTwoFactorCode(code);
-    if (normalized.length < 6) {
-      toast({ title: "Código inválido", description: "Ingresa un código válido.", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await apiFetch("/api/2fa/verify-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: normalized }),
+      return res.json() as Promise<{ success: boolean }>;
+    },
+    onSuccess: () => {
+      toast({ title: "2FA activado", description: "Tu aplicación de autenticación ya está configurada." });
+      setShow2faSetup(false);
+      setSetupPayload(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/2fa/status"] });
+      props.updateSetting("authApp", true);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Código inválido",
+        description: err?.message || "No se pudo verificar el código",
+        variant: "destructive" as any,
       });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "Código inválido.");
-      }
-      setCode("");
-      setStatus((prev) => (prev ? { ...prev, verified: true } : { enabled: true, verified: true }));
-      toast({ title: "Sesión verificada", description: "Esta sesión ya está verificada." });
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "No se pudo verificar.", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  };
+    },
+  });
 
-  const disableTwoFactor = async () => {
-    const normalized = normalizeTwoFactorCode(code);
-    if (normalized.length < 6) {
-      toast({ title: "Código requerido", description: "Ingresa tu código 2FA para desactivar.", variant: "destructive" });
-      return;
-    }
-    setBusy(true);
-    try {
+  const disable2faMutation = useMutation({
+    mutationFn: async (code: string) => {
       const res = await apiFetch("/api/2fa/disable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: normalized }),
+        body: JSON.stringify({ code }),
       });
-      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "No se pudo desactivar 2FA.");
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to disable 2FA");
       }
-      setSetup(null);
-      setCode("");
-      setNewBackupCodes(null);
-      setStatus({ enabled: false, verified: false });
+      return res.json() as Promise<{ success: boolean }>;
+    },
+    onSuccess: () => {
       toast({ title: "2FA desactivado", description: "Se desactivó la autenticación multifactor." });
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "No se pudo desactivar 2FA.", variant: "destructive" });
-    } finally {
-      setBusy(false);
-    }
-  };
+      setShow2faDisable(false);
+      setDisableCode("");
+      queryClient.invalidateQueries({ queryKey: ["/api/2fa/status"] });
+      props.updateSetting("authApp", false);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "No se pudo desactivar",
+        description: err?.message || "Revisa el código e inténtalo de nuevo",
+        variant: "destructive" as any,
+      });
+    },
+  });
 
-  const regenerateBackupCodes = async () => {
-    const normalized = normalizeTwoFactorCode(code);
-    if (normalized.length < 6) {
-      toast({ title: "Código requerido", description: "Ingresa tu código 2FA para regenerar.", variant: "destructive" });
+  const onToggleAuthApp = (next: boolean) => {
+    if (!isAuthenticated) {
+      toast({ title: "Inicia sesión", description: "Necesitas una cuenta para activar 2FA.", variant: "destructive" as any });
       return;
     }
-    setBusy(true);
-    try {
-      const res = await apiFetch("/api/2fa/regenerate-backup", {
+
+    if (next) {
+      setup2faMutation.mutate();
+      return;
+    }
+
+    setDisableCode("");
+    setShow2faDisable(true);
+  };
+
+  const onTogglePushApprovals = async (next: boolean) => {
+    if (!isAuthenticated) {
+      toast({ title: "Inicia sesión", description: "Necesitas una cuenta para usar aprobaciones push.", variant: "destructive" as any });
+      return;
+    }
+
+    const urlBase64ToUint8Array = (base64String: string) => {
+      const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; i++) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    };
+
+    const ensureServiceWorker = async (): Promise<ServiceWorkerRegistration> => {
+      if (!("serviceWorker" in navigator)) {
+        throw new Error("SERVICE_WORKER_NOT_SUPPORTED");
+      }
+      const existing = await navigator.serviceWorker.getRegistration();
+      if (existing) return existing;
+      return navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    };
+
+    const subscribeWebPush = async (): Promise<void> => {
+      const keyRes = await apiFetch("/api/security/push/vapid-public-key");
+      if (!keyRes.ok) throw new Error("Failed to get VAPID key");
+      const keyData = await keyRes.json() as { configured: boolean; publicKey: string; isEphemeral?: boolean };
+      if (!keyData.configured || !keyData.publicKey) {
+        throw new Error("WEB_PUSH_NOT_CONFIGURED");
+      }
+
+      const reg = await ensureServiceWorker();
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(keyData.publicKey),
+        });
+      }
+
+      const payload = { subscription: sub.toJSON() };
+      const res = await apiFetch("/api/security/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: normalized }),
+        body: JSON.stringify(payload),
       });
-      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(payload?.error || payload?.message || "No se pudieron regenerar los códigos.");
+        const msg = await res.text().catch(() => "");
+        throw new Error(msg || "Failed to save subscription");
       }
-      const codes = (payload?.backupCodes || []) as string[];
-      setNewBackupCodes(codes);
-      toast({ title: "Códigos regenerados", description: "Guárdalos en un lugar seguro." });
-    } catch (e: any) {
-      toast({ title: "Error", description: e?.message || "No se pudieron regenerar.", variant: "destructive" });
-    } finally {
-      setBusy(false);
+    };
+
+    const unsubscribeWebPush = async (): Promise<void> => {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          const sub = await reg.pushManager.getSubscription();
+          if (sub) {
+            await sub.unsubscribe();
+          }
+        }
+      } finally {
+        await apiFetch("/api/security/push/unsubscribe", { method: "POST" });
+      }
+    };
+
+    if (next) {
+      if (!("Notification" in window)) {
+        toast({ title: "No compatible", description: "Tu navegador no soporta notificaciones.", variant: "destructive" as any });
+        return;
+      }
+
+      if (Notification.permission !== "granted") {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          toast({
+            title: "Permiso denegado",
+            description: "Activa las notificaciones en tu navegador para usar aprobaciones push.",
+            variant: "destructive" as any,
+          });
+          return;
+        }
+      }
+
+      try {
+        await subscribeWebPush();
+      } catch (err: any) {
+        const msg = err?.message === "WEB_PUSH_NOT_CONFIGURED"
+          ? "Configura VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY en el servidor para habilitar push."
+          : (err?.message || "No se pudo activar web push");
+        toast({ title: "Push no disponible", description: msg, variant: "destructive" as any });
+        return;
+      }
+    }
+
+    try {
+      await pushApprovalsMutation.mutateAsync(next);
+
+      if (!next) {
+        // Best-effort cleanup: stop receiving push on this device.
+        try {
+          await unsubscribeWebPush();
+        } catch {
+          // Ignore.
+        }
+      }
+
+      props.updateSetting("pushNotifications", next);
+      toast({
+        title: next ? "Aprobaciones push activadas" : "Aprobaciones push desactivadas",
+        description: next
+          ? "Este dispositivo puede aprobar inicios de sesión."
+          : "Este dispositivo ya no recibirá solicitudes de aprobación.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "No se pudo actualizar",
+        description: err?.message || "Error inesperado",
+        variant: "destructive" as any,
+      });
     }
   };
 
-  if (!isAuthenticated) {
-    return <div className="text-sm text-muted-foreground">Inicia sesión para usar 2FA.</div>;
-  }
-
-  const enabled = Boolean(status?.enabled);
-  const verified = Boolean(status?.verified);
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex-1 pr-4">
-          <span className="text-sm block">Aplicación de autenticación (TOTP)</span>
-          <span className="text-xs text-muted-foreground">
-            Protege tu cuenta con un código de 6 dígitos desde Google Authenticator, Authy u otra app.
-          </span>
-        </div>
-        <span
-          className={cn(
-            "text-xs px-2 py-1 rounded-full border",
-            enabled ? "bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-900/50" : "bg-muted text-muted-foreground",
-          )}
-          data-testid="badge-2fa-status"
-        >
-          {loading ? "Cargando..." : enabled ? "Activado" : "Desactivado"}
-        </span>
-      </div>
+    <div className="space-y-6">
+      <h2 className="text-xl font-semibold">Seguridad</h2>
 
-      {!enabled && !setup && (
-        <div className="flex items-center justify-end">
-          <Button variant="outline" onClick={() => void startSetup()} disabled={busy} data-testid="button-2fa-start">
-            Activar 2FA
+      <div className="space-y-4">
+        <h3 className="text-base font-medium">Autenticación multifactor (MFA)</h3>
+
+        <div className="flex items-center justify-between py-2">
+          <div className="flex-1 pr-4">
+            <span className="text-sm block">Aplicación de autenticación</span>
+            <span className="text-xs text-muted-foreground">
+              Usa códigos únicos desde una aplicación de autenticación.
+            </span>
+          </div>
+          <Switch
+            checked={authAppEnabled}
+            onCheckedChange={(checked) => onToggleAuthApp(checked)}
+            data-testid="switch-auth-app"
+            disabled={setup2faMutation.isPending || verify2faSetupMutation.isPending || disable2faMutation.isPending}
+          />
+        </div>
+
+        <div className="flex items-center justify-between py-2">
+          <div className="flex-1 pr-4">
+            <span className="text-sm block">Notificaciones push</span>
+            <span className="text-xs text-muted-foreground">
+              Aprueba los inicios de sesión con una notificación push enviada a tu dispositivo de confianza
+            </span>
+          </div>
+          <Switch
+            checked={pushEnabled}
+            onCheckedChange={(checked) => onTogglePushApprovals(checked)}
+            data-testid="switch-push-notif"
+            disabled={pushApprovalsMutation.isPending}
+          />
+        </div>
+
+        <button
+          className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+          data-testid="security-trusted-devices"
+          onClick={() => setShowTrustedDevices(true)}
+        >
+          <span className="text-sm">Dispositivos de confianza</span>
+          <span className="text-sm text-muted-foreground flex items-center gap-1">
+            {isLoadingDevices ? "..." : trustedDevicesCount} <ChevronRight className="h-4 w-4" />
+          </span>
+        </button>
+
+        <Separator />
+
+        <div className="flex items-center justify-between py-2">
+          <span className="text-sm">Cerrar la sesión en este dispositivo</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={props.onLogout}
+            data-testid="button-logout"
+          >
+            Cerrar sesión
           </Button>
         </div>
-      )}
 
-      {setup && (
-        <div className="space-y-4 rounded-lg border p-4">
-          <div className="text-sm font-medium">Escanea el QR</div>
-          <div className="text-xs text-muted-foreground">
-            Luego ingresa tu código de 6 dígitos para activar.
+        <div className="flex items-start justify-between py-2">
+          <div className="flex-1 pr-4">
+            <span className="text-sm block">Cerrar sesión en todos los dispositivos</span>
+            <span className="text-xs text-muted-foreground">
+              Cierra todas las sesiones activas en todos los dispositivos.
+            </span>
           </div>
-          <div className="flex justify-center py-2">
-            <img src={setup.qrCodeImage} alt="QR 2FA" className="h-44 w-44 rounded bg-white p-2" />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-medium">Códigos de respaldo</div>
-                <div className="text-xs text-muted-foreground">Guárdalos en un lugar seguro.</div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void copyBackupCodes(setup.backupCodes || [])}
-                disabled={busy}
-                data-testid="button-2fa-copy-backup"
-              >
-                {backupCopied ? "Copiado" : "Copiar"}
-              </Button>
-            </div>
-            <pre className="text-xs bg-muted/40 rounded p-2 overflow-auto max-h-40" data-testid="pre-2fa-backup">
-              {(setup.backupCodes || []).join("\n")}
-            </pre>
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Código</div>
-            <Input
-              inputMode="numeric"
-              placeholder="123456"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\s+/g, ""))}
-              maxLength={10}
-              disabled={busy}
-              data-testid="input-2fa-code"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <Button variant="ghost" onClick={() => setSetup(null)} disabled={busy}>
-                Cancelar
-              </Button>
-              <Button onClick={() => void verifySetup()} disabled={busy} data-testid="button-2fa-verify-setup">
-                Verificar y activar
-              </Button>
-            </div>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 whitespace-nowrap"
+            onClick={props.onRequestLogoutAll}
+            data-testid="button-logout-all"
+          >
+            Cerrar todas las sesiones
+          </Button>
         </div>
-      )}
 
-      {enabled && !setup && (
-        <div className="space-y-3 rounded-lg border p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm">
-              {verified ? (
-                <span className="inline-flex items-center gap-2 text-green-700 dark:text-green-300">
-                  <CheckCircle2 className="h-4 w-4" /> Sesión verificada
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2 text-amber-700 dark:text-amber-300">
-                  <AlertCircle className="h-4 w-4" /> Sesión no verificada
-                </span>
-              )}
+        <Separator />
+
+        <div className="pt-2">
+          <h3 className="text-base font-medium">Inicio de sesión seguro con ILIAGPT</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de ILIAGPT.
+          </p>
+        </div>
+      </div>
+
+      <TrustedDevicesDialog
+        open={showTrustedDevices}
+        onOpenChange={setShowTrustedDevices}
+        data={devicesData}
+        isLoading={isLoadingDevices}
+        isRevoking={revokeSessionMutation.isPending}
+        onRevoke={(sid) => revokeSessionMutation.mutate(sid, {
+          onError: (err: any) => {
+            toast({ title: "No se pudo cerrar la sesión", description: err?.message || "Error inesperado", variant: "destructive" as any });
+          },
+          onSuccess: () => {
+            toast({ title: "Sesión cerrada", description: "El dispositivo ya no tiene acceso." });
+          }
+        })}
+        revokingSid={(revokeSessionMutation.variables as any) || null}
+      />
+
+      {/* 2FA Setup Dialog */}
+      <Dialog open={show2faSetup} onOpenChange={setShow2faSetup}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Configurar 2FA</DialogTitle>
+            <DialogDescription>
+              Escanea el código QR con tu app (Google Authenticator, Authy, etc.) y luego ingresa el código de 6 dígitos.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!setupPayload ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-            <Button variant="outline" size="sm" onClick={() => void loadStatus()} disabled={loading || busy}>
-              Actualizar
-            </Button>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Código 2FA</div>
-              <Input
-                inputMode="numeric"
-                placeholder="123456"
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\s+/g, ""))}
-                maxLength={10}
-                disabled={busy}
-                data-testid="input-2fa-code-existing"
-              />
-              <div className="text-xs text-muted-foreground">
-                Necesario para verificar esta sesión, desactivar 2FA o regenerar códigos.
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center">
+                <img
+                  src={setupPayload.qrCodeImage}
+                  alt="QR 2FA"
+                  className="h-44 w-44 rounded-md border bg-white p-2"
+                />
               </div>
-            </div>
 
-            <div className="flex flex-col gap-2 justify-end">
-              {!verified && (
-                <Button variant="outline" onClick={() => void verifySession()} disabled={busy} data-testid="button-2fa-verify-session">
-                  Verificar esta sesión
-                </Button>
-              )}
-              <Button variant="outline" onClick={() => void regenerateBackupCodes()} disabled={busy} data-testid="button-2fa-regenerate">
-                Regenerar códigos
-              </Button>
-              <Button
-                variant="outline"
-                className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                onClick={() => void disableTwoFactor()}
-                disabled={busy}
-                data-testid="button-2fa-disable"
-              >
-                Desactivar 2FA
-              </Button>
-            </div>
-          </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Código de verificación</label>
+                <Input
+                  value={verifyCode}
+                  onChange={(e) => setVerifyCode(e.target.value)}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  maxLength={6}
+                  data-testid="input-2fa-verify-code"
+                />
+              </div>
 
-          {newBackupCodes?.length ? (
-            <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-medium">Nuevos códigos de respaldo</div>
-                  <div className="text-xs text-muted-foreground">Copialos y guárdalos.</div>
-                </div>
+              <div className="flex items-center justify-end gap-2">
                 <Button
                   variant="outline"
-                  size="sm"
-                  onClick={() => void copyBackupCodes(newBackupCodes)}
-                  disabled={busy}
-                  data-testid="button-2fa-copy-new-backup"
+                  onClick={() => {
+                    setShow2faSetup(false);
+                    setSetupPayload(null);
+                    setVerifyCode("");
+                  }}
                 >
-                  {backupCopied ? "Copiado" : "Copiar"}
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => verify2faSetupMutation.mutate(verifyCode)}
+                  disabled={verify2faSetupMutation.isPending || verifyCode.trim().length !== 6}
+                  data-testid="button-2fa-verify"
+                >
+                  {verify2faSetupMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Activar"}
                 </Button>
               </div>
-              <pre className="text-xs bg-muted/40 rounded p-2 overflow-auto max-h-40" data-testid="pre-2fa-new-backup">
-                {newBackupCodes.join("\n")}
-              </pre>
+
+              {setupPayload.backupCodes?.length ? (
+                <div className="pt-2">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                    <span>Guarda tus códigos de respaldo en un lugar seguro.</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {setupPayload.backupCodes.slice(0, 6).map((code) => (
+                      <div key={code} className="text-xs font-mono border rounded-md px-2 py-1">
+                        {code}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 2FA Disable Dialog */}
+      <AlertDialog open={show2faDisable} onOpenChange={setShow2faDisable}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desactivar 2FA</AlertDialogTitle>
+            <AlertDialogDescription>
+              Para desactivar 2FA, confirma con un código actual de tu aplicación de autenticación.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="py-2">
+            <Input
+              value={disableCode}
+              onChange={(e) => setDisableCode(e.target.value)}
+              placeholder="123456 o XXXX-XXXX"
+              maxLength={12}
+              data-testid="input-2fa-disable-code"
+            />
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => disable2faMutation.mutate(disableCode)}
+              className="bg-red-500 hover:bg-red-600"
+              disabled={disable2faMutation.isPending || disableCode.trim().length < 6}
+              data-testid="button-2fa-disable"
+            >
+              {disable2faMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Desactivar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1656,37 +2116,21 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     toast({ title: "Sesión cerrada", description: "Has cerrado sesión correctamente." });
   };
 
-  const handleLogoutAll = () => {
-    (async () => {
-      if (!user?.id) {
-        handleLogout();
-        return;
-      }
+  const handleLogoutAll = async () => {
+    try {
+      // Revoke all sessions server-side (other devices), then log out locally.
+      setIsLoggingOutAll(true);
+      await apiFetch("/api/security/sessions/revoke-all", { method: "POST" });
+    } catch {
+      // Best-effort: still log out locally.
+    } finally {
+      setIsLoggingOutAll(false);
+      setShowLogoutAllConfirm(false);
+    }
 
-      try {
-        setIsLoggingOutAll(true);
-        const res = await fetch(`/api/users/${user.id}/sessions/logout-all`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          throw new Error((await res.text()) || res.statusText);
-        }
-      } catch (err: any) {
-        toast({
-          title: "Error",
-          description: err?.message || "No se pudieron cerrar todas las sesiones.",
-          variant: "destructive",
-        });
-        return;
-      } finally {
-        setIsLoggingOutAll(false);
-        setShowLogoutAllConfirm(false);
-      }
-
-      onOpenChange(false);
-      logout();
-    })();
+    logout();
+    onOpenChange(false);
+    toast({ title: "Todas las sesiones cerradas", description: "Se han cerrado todas las sesiones activas." });
   };
 
   const renderSectionContent = () => {
@@ -2343,66 +2787,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
       case "security":
         return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Seguridad</h2>
-
-            <div className="space-y-4">
-              <h3 className="text-base font-medium">Autenticación multifactor (2FA)</h3>
-              <TwoFactorSection />
-
-              <Separator />
-
-              <button
-                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
-                onClick={() => setSessionsManagerOpen(true)}
-                data-testid="security-trusted-devices"
-              >
-                <span className="text-sm">Sesiones y dispositivos</span>
-                <span className="text-sm text-muted-foreground flex items-center gap-1">
-                  Administrar <ChevronRight className="h-4 w-4" />
-                </span>
-              </button>
-
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Cerrar la sesión en este dispositivo</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleLogout}
-                  data-testid="button-logout"
-                >
-                  Cerrar sesión
-                </Button>
-              </div>
-
-              <div className="flex items-start justify-between py-2">
-                <div className="flex-1 pr-4">
-                  <span className="text-sm block">Cerrar sesión en todos los dispositivos</span>
-                  <span className="text-xs text-muted-foreground">
-                    Cierra todas las sesiones activas en todos los dispositivos.
-                  </span>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 whitespace-nowrap"
-                  onClick={() => setShowLogoutAllConfirm(true)}
-                  data-testid="button-logout-all"
-                >
-                  Cerrar todas las sesiones
-                </Button>
-              </div>
-
-              <Separator />
-
-              <div className="pt-2">
-                <h3 className="text-base font-medium">Inicio de sesión seguro con ILIAGPT</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de ILIAGPT.
-                </p>
-              </div>
-            </div>
-          </div>
+          <SecuritySection
+            settings={settings}
+            updateSetting={updateSetting}
+            onLogout={handleLogout}
+            onRequestLogoutAll={() => setShowLogoutAllConfirm(true)}
+          />
         );
 
       case "account": {

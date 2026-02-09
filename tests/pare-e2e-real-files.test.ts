@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import express, { Express, Request, Response, NextFunction } from "express";
-import request from "supertest";
+import { describe, it, expect, beforeAll } from "vitest";
 import ExcelJS from "exceljs";
 import { 
   pareRequestContract, 
   pareRateLimiter, 
   pareQuotaGuard, 
   requirePareContext,
-  pareAnalyzeSchemaValidator 
+  pareAnalyzeSchemaValidator,
+  clearPareRateLimitStores,
 } from "../server/middleware";
+import { createMockReq, createMockRes, runMiddlewares } from "./helpers/mockExpress";
 import { PdfParser } from "../server/parsers/pdfParser";
 import { XlsxParser } from "../server/parsers/xlsxParser";
 
@@ -252,102 +252,106 @@ async function processAttachment(att: any): Promise<ProcessedFile> {
   }
 }
 
-function createTestApp(): Express {
-  const app = express();
-  app.use(express.json({ limit: "200mb" }));
-  
-  app.post("/api/analyze", 
+async function handleAnalyze(req: any, res: any) {
+  const pareContext = requirePareContext(req);
+  const { requestId, isDataMode } = pareContext;
+
+  const { attachments } = req.body;
+
+  if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+    return res.status(400).json({
+      error: "ATTACHMENTS_REQUIRED",
+      message: "El endpoint /analyze requiere al menos un documento adjunto.",
+      requestId,
+    });
+  }
+
+  const processedFiles: ProcessedFile[] = [];
+
+  for (const att of attachments) {
+    if (att.content) {
+      const result = await processAttachment(att);
+      processedFiles.push(result);
+    }
+  }
+
+  const successfulFiles = processedFiles.filter((f) => f.status === "success");
+  const failedFiles = processedFiles.filter((f) => f.status === "failed");
+  const totalTokens = processedFiles.reduce((sum, f) => sum + f.tokensExtracted, 0);
+
+  const progressReport = {
+    requestId,
+    isDocumentMode: isDataMode,
+    attachments_count: attachments.length,
+    processedFiles: successfulFiles.length,
+    failedFiles: failedFiles.length,
+    tokens_extracted_total: totalTokens,
+    totalChunks: successfulFiles.length,
+    perFileStats: processedFiles.map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      bytesRead: f.bytesRead,
+      pagesProcessed: f.pagesProcessed,
+      tokensExtracted: f.tokensExtracted,
+      parseTimeMs: f.parseTimeMs,
+      chunkCount: f.chunkCount,
+      mime_detect: f.mime_detect,
+      parser_used: f.parser_used,
+      error: f.error,
+    })),
+  };
+
+  const citations = successfulFiles.map((f, idx) => ({
+    docId: `doc-${idx}`,
+    filename: f.filename,
+    location: f.metadata?.pages ? `Page 1-${f.metadata.pages}` : "Document",
+    excerpt: f.content.substring(0, 100) + (f.content.length > 100 ? "..." : ""),
+  }));
+
+  const answer_text =
+    successfulFiles.length > 0
+      ? `Analyzed ${successfulFiles.length} document(s). Extracted ${totalTokens} tokens.`
+      : "No content could be extracted from the provided documents.";
+
+  return res.json({
+    success: true,
+    requestId,
+    answer_text,
+    citations,
+    progressReport,
+    isDocumentMode: isDataMode,
+  });
+}
+
+async function postAnalyze(body: any, headers?: Record<string, string>) {
+  const req = createMockReq({
+    method: "POST",
+    path: "/api/analyze",
+    headers,
+    body,
+  });
+  const res = createMockRes();
+
+  await runMiddlewares(req, res, [
     pareRequestContract,
     pareAnalyzeSchemaValidator,
     pareRateLimiter({ ipMaxRequests: 100, ipWindowMs: 60000 }),
     pareQuotaGuard({ maxFilesPerRequest: 20, maxFileSizeBytes: 100 * 1024 * 1024 }),
-    async (req: Request, res: Response) => {
-      const pareContext = requirePareContext(req);
-      const { requestId, isDataMode } = pareContext;
-      
-      const { attachments } = req.body;
-      
-      if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
-        return res.status(400).json({
-          error: "ATTACHMENTS_REQUIRED",
-          message: "El endpoint /analyze requiere al menos un documento adjunto.",
-          requestId,
-        });
-      }
-      
-      const processedFiles: ProcessedFile[] = [];
-      
-      for (const att of attachments) {
-        if (att.content) {
-          const result = await processAttachment(att);
-          processedFiles.push(result);
-        }
-      }
-      
-      const successfulFiles = processedFiles.filter(f => f.status === "success");
-      const failedFiles = processedFiles.filter(f => f.status === "failed");
-      const totalTokens = processedFiles.reduce((sum, f) => sum + f.tokensExtracted, 0);
-      
-      const progressReport = {
-        requestId,
-        isDocumentMode: isDataMode,
-        attachments_count: attachments.length,
-        processedFiles: successfulFiles.length,
-        failedFiles: failedFiles.length,
-        tokens_extracted_total: totalTokens,
-        totalChunks: successfulFiles.length,
-        perFileStats: processedFiles.map(f => ({
-          filename: f.filename,
-          status: f.status,
-          bytesRead: f.bytesRead,
-          pagesProcessed: f.pagesProcessed,
-          tokensExtracted: f.tokensExtracted,
-          parseTimeMs: f.parseTimeMs,
-          chunkCount: f.chunkCount,
-          mime_detect: f.mime_detect,
-          parser_used: f.parser_used,
-          error: f.error,
-        })),
-      };
-      
-      const citations = successfulFiles.map((f, idx) => ({
-        docId: `doc-${idx}`,
-        filename: f.filename,
-        location: f.metadata?.pages ? `Page 1-${f.metadata.pages}` : "Document",
-        excerpt: f.content.substring(0, 100) + (f.content.length > 100 ? "..." : ""),
-      }));
-      
-      const answer_text = successfulFiles.length > 0
-        ? `Analyzed ${successfulFiles.length} document(s). Extracted ${totalTokens} tokens.`
-        : "No content could be extracted from the provided documents.";
-      
-      return res.json({
-        success: true,
-        requestId,
-        answer_text,
-        citations,
-        progressReport,
-        isDocumentMode: isDataMode,
-      });
-    }
-  );
-  
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    console.error("Test app error:", err);
-    res.status(500).json({ error: err.message });
-  });
-  
-  return app;
+    async (req: any, res: any) => {
+      await handleAnalyze(req, res);
+    },
+  ]);
+
+  return { status: res.statusCode, body: res.body, headers: res.headers };
 }
 
 describe("PARE E2E Real Files Tests", () => {
-  let app: Express;
   let pdfBuffer: Buffer;
   let xlsxBuffer: Buffer;
   let multiSheetXlsxBuffer: Buffer;
   
   beforeAll(async () => {
-    app = createTestApp();
+    clearPareRateLimitStores();
     pdfBuffer = generateSimplePdf();
     xlsxBuffer = await generateSalesXlsx();
     multiSheetXlsxBuffer = await generateMultiSheetXlsx();
@@ -355,17 +359,15 @@ describe("PARE E2E Real Files Tests", () => {
   
   describe("PDF Analysis", () => {
     it("should analyze PDF and return progressReport with PdfParser", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze this document" }],
-          attachments: [{
-            name: "sample-report.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: pdfBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze this document" }],
+        attachments: [{
+          name: "sample-report.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: pdfBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -381,17 +383,15 @@ describe("PARE E2E Real Files Tests", () => {
     });
     
     it("should include citations with document references", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "What is the revenue?" }],
-          attachments: [{
-            name: "q4-report.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: pdfBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "What is the revenue?" }],
+        attachments: [{
+          name: "q4-report.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: pdfBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.citations).toBeDefined();
@@ -401,17 +401,15 @@ describe("PARE E2E Real Files Tests", () => {
     it("should handle corrupted PDF gracefully", async () => {
       const corruptedPdf = Buffer.from("NOT_A_VALID_PDF_RANDOM_BYTES", "utf-8");
       
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [{
-            name: "corrupted.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: corruptedPdf.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [{
+          name: "corrupted.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: corruptedPdf.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.progressReport).toBeDefined();
@@ -424,17 +422,15 @@ describe("PARE E2E Real Files Tests", () => {
   
   describe("XLSX Analysis", () => {
     it("should analyze XLSX and return progressReport with XlsxParser", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Summarize this spreadsheet" }],
-          attachments: [{
-            name: "sales-data.xlsx",
-            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type: "document",
-            content: xlsxBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Summarize this spreadsheet" }],
+        attachments: [{
+          name: "sales-data.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          type: "document",
+          content: xlsxBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -448,17 +444,15 @@ describe("PARE E2E Real Files Tests", () => {
     });
     
     it("should process multi-sheet XLSX and report all sheets", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze all sheets" }],
-          attachments: [{
-            name: "multi-sheet.xlsx",
-            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type: "document",
-            content: multiSheetXlsxBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze all sheets" }],
+        attachments: [{
+          name: "multi-sheet.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          type: "document",
+          content: multiSheetXlsxBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -469,17 +463,15 @@ describe("PARE E2E Real Files Tests", () => {
     });
     
     it("should include citations with sheet/location references for XLSX", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "What are the sales figures?" }],
-          attachments: [{
-            name: "sales-data.xlsx",
-            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type: "document",
-            content: xlsxBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "What are the sales figures?" }],
+        attachments: [{
+          name: "sales-data.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          type: "document",
+          content: xlsxBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.citations).toBeDefined();
@@ -494,25 +486,23 @@ describe("PARE E2E Real Files Tests", () => {
   
   describe("Multi-file Batch Processing", () => {
     it("should process PDF + XLSX together", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Compare these documents" }],
-          attachments: [
-            {
-              name: "report.pdf",
-              mimeType: "application/pdf",
-              type: "document",
-              content: pdfBuffer.toString("base64"),
-            },
-            {
-              name: "data.xlsx",
-              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              type: "document",
-              content: xlsxBuffer.toString("base64"),
-            },
-          ],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Compare these documents" }],
+        attachments: [
+          {
+            name: "report.pdf",
+            mimeType: "application/pdf",
+            type: "document",
+            content: pdfBuffer.toString("base64"),
+          },
+          {
+            name: "data.xlsx",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type: "document",
+            content: xlsxBuffer.toString("base64"),
+          },
+        ],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -530,25 +520,23 @@ describe("PARE E2E Real Files Tests", () => {
     });
     
     it("should include citations from each document in batch", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Summarize all" }],
-          attachments: [
-            {
-              name: "doc1.pdf",
-              mimeType: "application/pdf",
-              type: "document",
-              content: pdfBuffer.toString("base64"),
-            },
-            {
-              name: "doc2.xlsx",
-              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              type: "document",
-              content: xlsxBuffer.toString("base64"),
-            },
-          ],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Summarize all" }],
+        attachments: [
+          {
+            name: "doc1.pdf",
+            mimeType: "application/pdf",
+            type: "document",
+            content: pdfBuffer.toString("base64"),
+          },
+          {
+            name: "doc2.xlsx",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type: "document",
+            content: xlsxBuffer.toString("base64"),
+          },
+        ],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.citations).toBeDefined();
@@ -562,34 +550,28 @@ describe("PARE E2E Real Files Tests", () => {
   
   describe("Error Cases", () => {
     it("should return 400 when no attachments provided", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [],
+      });
       
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe("VALIDATION_ERROR");
     });
     
     it("should return 400 when attachments field is missing", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+      });
       
       expect(response.status).toBe(400);
     });
     
     it("should include requestId in error responses", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [],
+      });
       
       expect(response.body.error.requestId).toBeDefined();
       expect(response.headers["x-request-id"]).toBeDefined();
@@ -598,17 +580,15 @@ describe("PARE E2E Real Files Tests", () => {
   
   describe("Request Metadata", () => {
     it("should return X-Request-Id header", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [{
-            name: "test.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: pdfBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [{
+          name: "test.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: pdfBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.headers["x-request-id"]).toBeDefined();
       expect(response.body.requestId).toBe(response.headers["x-request-id"]);
@@ -617,35 +597,30 @@ describe("PARE E2E Real Files Tests", () => {
     it("should preserve provided X-Request-Id", async () => {
       const customRequestId = "550e8400-e29b-41d4-a716-446655440000";
       
-      const response = await request(app)
-        .post("/api/analyze")
-        .set("X-Request-Id", customRequestId)
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [{
-            name: "test.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: pdfBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [{
+          name: "test.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: pdfBuffer.toString("base64"),
+        }],
+      }, { "x-request-id": customRequestId });
       
       expect(response.headers["x-request-id"]).toBe(customRequestId);
       expect(response.body.requestId).toBe(customRequestId);
     });
     
     it("should set isDocumentMode to true when attachments present", async () => {
-      const response = await request(app)
-        .post("/api/analyze")
-        .send({
-          messages: [{ role: "user", content: "Analyze" }],
-          attachments: [{
-            name: "test.pdf",
-            mimeType: "application/pdf",
-            type: "document",
-            content: pdfBuffer.toString("base64"),
-          }],
-        });
+      const response = await postAnalyze({
+        messages: [{ role: "user", content: "Analyze" }],
+        attachments: [{
+          name: "test.pdf",
+          mimeType: "application/pdf",
+          type: "document",
+          content: pdfBuffer.toString("base64"),
+        }],
+      });
       
       expect(response.status).toBe(200);
       expect(response.body.isDocumentMode).toBe(true);

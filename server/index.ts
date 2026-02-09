@@ -17,6 +17,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { requestTracerMiddleware } from "./lib/requestTracer";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
+import { updateContext } from "./middleware/correlationContext";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
@@ -37,6 +38,7 @@ import { runCleanup } from "./lib/cleanup";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { startChatScheduleRunner } from "./services/chatScheduleRunner";
 import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
+import { getUserId } from "./types/express";
 
 initTracing();
 
@@ -150,6 +152,21 @@ export function log(message: string, source = "express") {
 
   // Session + Passport (must be before csrfProtection/rateLimiter/idempotency)
   await setupAuth(app);
+  // Ensure CorrelationContext has the authenticated userId (req.user can be populated by Passport/session).
+  // Also bind the session to the authenticated userId for simpler secure queries later.
+  app.use((req, _res, next) => {
+    const userId = getUserId(req);
+    if (userId && !userId.startsWith("anon_")) {
+      updateContext({ userId });
+
+      const session = (req as any).session as any | undefined;
+      if (session && !session.authUserId) {
+        session.authUserId = userId;
+      }
+    }
+    next();
+  });
+
   registerAuthRoutes(app);
 
   // Capture best-effort device metadata for session management UI.
@@ -232,6 +249,14 @@ export function log(message: string, source = "express") {
         pythonServiceManager.stop();
       });
     }
+
+    // Register WhatsApp Web cleanup
+    registerCleanup(async () => {
+      log("Shutting down WhatsApp Web sessions...");
+      const { whatsappWebManager } = await import('./integrations/whatsappWeb');
+      await whatsappWebManager.shutdownAll();
+      log("WhatsApp Web cleanup complete");
+    });
 
     // Register OpenTelemetry tracing cleanup
     registerCleanup(async () => {

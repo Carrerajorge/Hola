@@ -10,6 +10,31 @@ interface MathNode {
   value: string;
 }
 
+// ============================================
+// SECURITY LIMITS
+// ============================================
+
+/** Maximum number of AST nodes to process (prevents DoS from deeply nested markdown) */
+const MAX_AST_NODES = 50_000;
+
+/** Maximum list nesting depth */
+const MAX_LIST_DEPTH = 10;
+
+/** Maximum code block line count */
+const MAX_CODE_BLOCK_LINES = 10_000;
+
+/** Maximum table rows per table */
+const MAX_TABLE_ROWS = 1_000;
+
+/** Maximum table columns per table */
+const MAX_TABLE_COLS = 100;
+
+/** Maximum generated DOCX elements */
+const MAX_DOCX_ELEMENTS = 100_000;
+
+/** Track processing metrics for safety */
+let _nodeCount = 0;
+
 function convertLatexToMath(latex: string): DocxMath {
   return new DocxMath({
     children: [new MathRun(latex)]
@@ -142,8 +167,19 @@ async function processTableNode(tableNode: MdTable): Promise<Table> {
   const rows: TableRow[] = [];
   let maxCols = 0;
 
-  for (const row of tableNode.children as MdTableRow[]) {
+  // Security: limit table dimensions to prevent resource exhaustion
+  const tableRows = tableNode.children as MdTableRow[];
+  if (tableRows.length > MAX_TABLE_ROWS) {
+    console.warn(`[markdownToDocx] Table has ${tableRows.length} rows, truncating to ${MAX_TABLE_ROWS}`);
+    tableRows.length = MAX_TABLE_ROWS;
+  }
+
+  for (const row of tableRows) {
     maxCols = Math.max(maxCols, row.children.length);
+  }
+  if (maxCols > MAX_TABLE_COLS) {
+    console.warn(`[markdownToDocx] Table has ${maxCols} columns, truncating to ${MAX_TABLE_COLS}`);
+    maxCols = MAX_TABLE_COLS;
   }
 
   for (let rowIndex = 0; rowIndex < tableNode.children.length; rowIndex++) {
@@ -185,6 +221,12 @@ async function processTableNode(tableNode: MdTable): Promise<Table> {
 }
 
 async function processListNode(listNode: List, level: number = 0): Promise<Paragraph[]> {
+  // Security: prevent excessive nesting depth (DoS via deeply nested lists)
+  if (level > MAX_LIST_DEPTH) {
+    console.warn(`[markdownToDocx] List nesting depth ${level} exceeds max ${MAX_LIST_DEPTH}, skipping`);
+    return [];
+  }
+
   const paragraphs: Paragraph[] = [];
   const isOrdered = listNode.ordered;
 
@@ -241,7 +283,18 @@ async function processBlockquote(node: Blockquote): Promise<Paragraph[]> {
 async function astToDocxElements(ast: Root): Promise<(Paragraph | Table)[]> {
   const elements: (Paragraph | Table)[] = [];
 
+  // Security: limit total AST nodes to prevent DoS
+  if (ast.children.length > MAX_AST_NODES) {
+    console.warn(`[markdownToDocx] AST has ${ast.children.length} nodes, truncating to ${MAX_AST_NODES}`);
+    ast.children.length = MAX_AST_NODES;
+  }
+
   for (const node of ast.children) {
+    // Security: limit total generated elements
+    if (elements.length >= MAX_DOCX_ELEMENTS) {
+      console.warn(`[markdownToDocx] Element limit reached (${MAX_DOCX_ELEMENTS}), stopping`);
+      break;
+    }
     switch (node.type) {
       case "heading": {
         const headingNode = node as Heading;
@@ -321,7 +374,14 @@ async function astToDocxElements(ast: Root): Promise<(Paragraph | Table)[]> {
 
       case "code": {
         const codeNode = node as Code;
-        const codeLines = codeNode.value.split("\n");
+        let codeLines = codeNode.value.split("\n");
+
+        // Security: limit code block lines to prevent memory exhaustion
+        if (codeLines.length > MAX_CODE_BLOCK_LINES) {
+          console.warn(`[markdownToDocx] Code block has ${codeLines.length} lines, truncating to ${MAX_CODE_BLOCK_LINES}`);
+          codeLines = codeLines.slice(0, MAX_CODE_BLOCK_LINES);
+          codeLines.push(`... (truncated, ${codeNode.value.split("\n").length - MAX_CODE_BLOCK_LINES} more lines)`);
+        }
 
         for (const line of codeLines) {
           elements.push(new Paragraph({
@@ -355,8 +415,14 @@ async function astToDocxElements(ast: Root): Promise<(Paragraph | Table)[]> {
   return elements;
 }
 
+/** Maximum markdown content size for Word generation (5MB) */
+const MAX_MARKDOWN_CONTENT_SIZE = 5 * 1024 * 1024;
+
 export async function generateWordFromMarkdown(title: string, content: string): Promise<Buffer> {
-  // await ensureMathJaxReady(); // Not needed for native docx math
+  // Security: enforce content size limit
+  if (content.length > MAX_MARKDOWN_CONTENT_SIZE) {
+    throw new Error(`Markdown content exceeds maximum size of ${MAX_MARKDOWN_CONTENT_SIZE / (1024 * 1024)}MB`);
+  }
 
   const ast = parseMarkdownToAst(content);
   console.log('[markdownToDocx] parsed AST options:', ast.children.length, 'nodes');

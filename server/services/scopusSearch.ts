@@ -71,12 +71,16 @@ export async function searchScopus(
       field: "dc:title,dc:creator,prism:publicationName,prism:coverDate,prism:doi,citedby-count,dc:description,prism:url,dc:identifier"
     });
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
     const response = await fetch(`${SCOPUS_BASE_URL}?${params}`, {
       headers: {
         "X-ELS-APIKey": SCOPUS_API_KEY,
         "Accept": "application/json"
-      }
+      },
+      signal: controller.signal,
     });
+    clearTimeout(timer);
 
     if (!response.ok) {
       const error = await response.text();
@@ -122,7 +126,7 @@ export function scopusToSearchResults(articles: ScopusArticle[]): SearchResult[]
   return articles.map(article => ({
     title: article.title,
     url: article.doi ? `https://doi.org/${article.doi}` : article.url,
-    snippet: article.abstract || `${article.publicationName}. Cited by ${article.citedByCount}`,
+    snippet: article.abstract || `${article.publicationName}. Cited by ${article.citedByCount} 🔗`,
     authors: article.authors,
     year: article.year,
     citation: formatApaCitation(article)
@@ -144,8 +148,8 @@ export function formatApaCitation(article: ScopusArticle): string {
     authorStr = `${authorList[0]} et al.`;
   }
   
-  const doi = article.doi ? ` https://doi.org/${article.doi}` : "";
-  
+  const doi = article.doi ? ` 🔗 https://doi.org/${article.doi}` : "";
+
   return `${authorStr} (${article.year}). ${article.title}. ${article.publicationName}.${doi}`;
 }
 
@@ -207,15 +211,19 @@ export async function getScopusArticleByDoi(doi: string): Promise<ScopusArticle 
   if (!SCOPUS_API_KEY) return null;
 
   try {
+    const doiController = new AbortController();
+    const doiTimer = setTimeout(() => doiController.abort(), 15000);
     const response = await fetch(
       `https://api.elsevier.com/content/abstract/doi/${encodeURIComponent(doi)}`,
       {
         headers: {
           "X-ELS-APIKey": SCOPUS_API_KEY,
           "Accept": "application/json"
-        }
+        },
+        signal: doiController.signal,
       }
     );
+    clearTimeout(doiTimer);
 
     if (!response.ok) return null;
 

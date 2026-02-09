@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import express from "express";
 import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
-const ENV_KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "ILIAGPT_API_KEY"] as const;
+const ENV_KEYS = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "XAI_API_KEY",
+  "GROK_API_KEY",
+  "ILIAGPT_API_KEY",
+  "OPENAI_API_KEY",
+] as const;
 
 const storageMock = {
   getAiModelById: vi.fn(),
@@ -195,7 +202,7 @@ describe("admin models router", () => {
       expect(res.status).toBe(200);
 
       const calledProviders = syncModelsForProviderMock.mock.calls.map((c) => c[0]);
-      expect(calledProviders.sort()).toEqual(["google", "xai"]);
+      expect(calledProviders.sort()).toEqual(["google", "openai", "xai"]);
     } finally {
       await close();
     }

@@ -18,6 +18,7 @@ export function uniq<T>(items: T[]): T[] {
 const FILELIKE_EXTENSIONS = new Set([
   // documents
   "pdf",
+  "doc",
   "docx",
   "xlsx",
   "xls",
@@ -162,6 +163,7 @@ export function inferMimeTypeFromFilename(filename: string): string | null {
 
   const map: Record<string, string> = {
     pdf: "application/pdf",
+    doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     xls: "application/vnd.ms-excel",
@@ -189,7 +191,23 @@ export function inferMimeTypeFromFilename(filename: string): string | null {
 
 export function normalizeFileForUpload(file: File): File {
   if (!file) return file;
-  if (file.type) return file;
+  const declaredType = (file.type || "").trim().toLowerCase();
+  // Some browsers/flows mark known files as application/octet-stream. Treat that as "unknown"
+  // and infer the real MIME type from the filename when possible.
+  //
+  // We also normalize a few common legacy/alias MIME types that would otherwise be rejected
+  // by the server's allowlist (which expects standard MIME types).
+  const NORMALIZE_MIME_ALIASES = new Set([
+    "application/octet-stream",
+    "application/x-pdf",
+    "application/acrobat",
+    "application/vnd.pdf",
+    "application/zip",
+    "application/x-zip-compressed",
+    "image/pjpeg",
+    "image/x-png",
+  ]);
+  if (declaredType && !NORMALIZE_MIME_ALIASES.has(declaredType)) return file;
 
   const inferred = inferMimeTypeFromFilename(file.name);
   if (!inferred) return file;

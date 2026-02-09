@@ -275,7 +275,20 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
   }
 }
 
+function sanitizeWebQuery(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let q = raw;
+  q = q.replace(/<[^>]*>/g, "");
+  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  q = q.normalize("NFC");
+  q = q.replace(/\s+/g, " ").trim();
+  if (q.length > 500) q = q.substring(0, 500).trim();
+  return q;
+}
+
 export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_SEARCH_RESULTS): Promise<WebSearchResponse> {
+  const sanitized = sanitizeWebQuery(query);
+  if (!sanitized) return { query, results: [], contents: [] };
   const results: SearchResult[] = [];
   const seenDomains = new Set<string>();
 
@@ -291,7 +304,7 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
   try {
     // Request more results than needed to ensure diversity after deduplication
     const requestCount = Math.min(maxResults * 2, 30);
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(sanitized)}`;
 
     // IMPORTANT: Protect the initial search request with a hard timeout.
     // If this hangs, /api/chat/stream never flushes headers and the UI stays stuck on "Buscando".
@@ -405,10 +418,12 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
 }
 
 export async function searchScholar(query: string, maxResults: number = LIMITS.MAX_SEARCH_RESULTS): Promise<SearchResult[]> {
+  const sanitized = sanitizeWebQuery(query);
+  if (!sanitized) return [];
   const results: SearchResult[] = [];
 
   try {
-    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es`;
+    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(sanitized)}&hl=es`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);

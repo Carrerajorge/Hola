@@ -1,3 +1,5 @@
+import { normalizeFileForUpload } from "@/lib/attachmentIngest";
+
 export interface ValidationResult {
   type: 'validation_result';
   valid: boolean;
@@ -31,6 +33,45 @@ interface MultipartSession {
   storagePath: string;
 }
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1000;
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = MAX_RETRIES,
+  baseDelay: number = RETRY_BASE_DELAY_MS,
+  signal?: AbortSignal,
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (signal?.aborted) {
+      throw new Error('Upload cancelled');
+    }
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      // Don't retry on validation or client errors (4xx)
+      const msg = (error?.message || '').toLowerCase();
+      if (
+        msg.includes('cancelled') ||
+        msg.includes('abort') ||
+        msg.includes('not permitted') ||
+        msg.includes('not allowed') ||
+        msg.includes('too large') ||
+        msg.includes('empty')
+      ) {
+        throw error;
+      }
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError || new Error('Upload failed after retries');
+}
+
 export class ChunkedFileUploader {
   private worker: Worker | null = null;
   private ws: WebSocket | null = null;
@@ -57,12 +98,12 @@ export class ChunkedFileUploader {
 
   private async fetchConfig(): Promise<FileConfig> {
     if (this.config) return this.config;
-    
+
     const response = await fetch('/api/files/config');
     if (!response.ok) {
       throw new Error('Failed to fetch file upload configuration');
     }
-    
+
     this.config = await response.json();
     return this.config!;
   }
@@ -81,13 +122,13 @@ export class ChunkedFileUploader {
   async validateFile(file: File): Promise<ValidationResult> {
     const config = await this.fetchConfig();
     const headerBytes = await this.readFileHeaderBytes(file);
-    
+
     if (!this.worker) {
       const errors: string[] = [];
       const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-      
+
       const detectedMimeType = this.detectMimeTypeFromBytes(headerBytes, file.type, extension);
-      
+
       if (!this.isValidMimeType(detectedMimeType, file.type, config.allowedMimeTypes)) {
         errors.push('Tipo de archivo no permitido');
       }
@@ -97,7 +138,7 @@ export class ChunkedFileUploader {
       if (file.size === 0) {
         errors.push('El archivo está vacío');
       }
-      
+
       return {
         type: 'validation_result',
         valid: errors.length === 0,
@@ -111,7 +152,7 @@ export class ChunkedFileUploader {
         this.worker?.removeEventListener('message', handleMessage);
         resolve(e.data);
       };
-      
+
       this.worker!.addEventListener('message', handleMessage);
       this.worker!.postMessage({
         type: 'validate',
@@ -155,17 +196,17 @@ export class ChunkedFileUploader {
       return allowedTypes.includes(declaredType);
     }
     if (allowedTypes.includes(detectedType)) return true;
-    
+
     const zipBasedTypes = [
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     ];
-    
+
     if (detectedType === 'application/zip' && zipBasedTypes.includes(declaredType)) {
       return allowedTypes.some(t => zipBasedTypes.includes(t) || t === declaredType);
     }
-    
+
     return false;
   }
 
@@ -174,8 +215,9 @@ export class ChunkedFileUploader {
     onProgress: (progress: UploadProgress) => void
   ): Promise<{ fileId: string; storagePath: string }> {
     this.abortController = new AbortController();
+    const normalizedFile = normalizeFileForUpload(file);
     const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-    
+
     try {
       onProgress({
         fileId,
@@ -184,7 +226,7 @@ export class ChunkedFileUploader {
         processingProgress: 0,
       });
 
-      const validation = await this.validateFile(file);
+      const validation = await this.validateFile(normalizedFile);
       if (!validation.valid) {
         throw new Error(validation.errors.join('. '));
       }
@@ -197,15 +239,15 @@ export class ChunkedFileUploader {
       });
 
       const config = await this.fetchConfig();
-      const useChunked = file.size > config.chunkSize;
+      const useChunked = normalizedFile.size > config.chunkSize;
 
       let storagePath: string;
-      let actualFileId = fileId;
+      let registeredFileId: string | undefined;
 
       if (useChunked) {
-        const result = await this.uploadChunked(file, config, (percent) => {
+        const result = await this.uploadChunked(normalizedFile, config, (percent) => {
           onProgress({
-            fileId: actualFileId,
+            fileId: registeredFileId || fileId,
             phase: 'uploading',
             uploadProgress: percent,
             processingProgress: 0,
@@ -213,18 +255,46 @@ export class ChunkedFileUploader {
         });
         storagePath = result.storagePath;
         if (result.fileId) {
-          actualFileId = result.fileId;
+          registeredFileId = result.fileId;
         }
       } else {
-        storagePath = await this.uploadSingle(file, (percent) => {
+        const result = await this.uploadSingle(normalizedFile, (percent) => {
           onProgress({
-            fileId: actualFileId,
+            fileId: registeredFileId || fileId,
             phase: 'uploading',
             uploadProgress: percent,
             processingProgress: 0,
           });
         });
+        storagePath = result.storagePath;
       }
+
+      // Register the file in the database if not already done (chunked upload does it via /complete)
+      if (!registeredFileId) {
+        const endpoint = '/api/files';
+
+        const registerRes = await retryWithBackoff(async () => {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: normalizedFile.name,
+              type: normalizedFile.type,
+              size: normalizedFile.size,
+              storagePath,
+            }),
+          });
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ error: 'Registration failed' }));
+            throw new Error(errorData.error || `File registration failed with status ${res.status}`);
+          }
+          return res.json();
+        }, 2, RETRY_BASE_DELAY_MS, this.abortController.signal);
+
+        registeredFileId = registerRes.id;
+      }
+
+      const actualFileId = registeredFileId || fileId;
 
       onProgress({
         fileId: actualFileId,
@@ -249,17 +319,29 @@ export class ChunkedFileUploader {
   private async uploadSingle(
     file: File,
     onProgress: (percent: number) => void
-  ): Promise<string> {
-    const response = await fetch('/api/objects/upload', { method: 'POST' });
-    if (!response.ok) {
-      throw new Error('Failed to get upload URL');
-    }
-    
-    const { uploadURL, storagePath } = await response.json();
+  ): Promise<{ storagePath: string }> {
+    // Get upload URL with retry
+    const { uploadURL, storagePath } = await retryWithBackoff(async () => {
+      const response = await fetch('/api/objects/upload', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(`Failed to get upload URL (status ${response.status})`);
+      }
+      const data = await response.json();
+      if (!data.uploadURL || !data.storagePath) {
+        throw new Error('Server returned invalid upload configuration');
+      }
+      return data;
+    }, 2, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
-    await this.uploadWithProgress(uploadURL, file, onProgress);
-    
-    return storagePath;
+    // Upload file with retry
+    await retryWithBackoff(
+      () => this.uploadWithProgress(uploadURL, file, file.type, onProgress),
+      MAX_RETRIES,
+      RETRY_BASE_DELAY_MS,
+      this.abortController?.signal,
+    );
+
+    return { storagePath };
   }
 
   private async uploadChunked(
@@ -269,23 +351,25 @@ export class ChunkedFileUploader {
   ): Promise<{ storagePath: string; fileId?: string }> {
     const totalChunks = Math.ceil(file.size / config.chunkSize);
 
-    const createResponse = await fetch('/api/objects/multipart/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: file.name,
-        mimeType: file.type,
-        fileSize: file.size,
-        totalChunks,
-      }),
-    });
+    const createResponse = await retryWithBackoff(async () => {
+      const res = await fetch('/api/objects/multipart/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          totalChunks,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({ error: 'Failed to create multipart upload' }));
+        throw new Error(error.error || 'Failed to create multipart upload');
+      }
+      return res.json();
+    }, 2, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
-    if (!createResponse.ok) {
-      const error = await createResponse.json();
-      throw new Error(error.error || 'Failed to create multipart upload');
-    }
-
-    const session: MultipartSession = await createResponse.json();
+    const session: MultipartSession = createResponse;
     const uploadedParts: { partNumber: number; etag?: string }[] = [];
     let completedChunks = 0;
 
@@ -294,22 +378,24 @@ export class ChunkedFileUploader {
       const end = Math.min(start + config.chunkSize, file.size);
       const chunk = file.slice(start, end);
 
-      const signResponse = await fetch('/api/objects/multipart/sign-part', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uploadId: session.uploadId,
-          partNumber,
-        }),
-      });
+      await retryWithBackoff(async () => {
+        const signResponse = await fetch('/api/objects/multipart/sign-part', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uploadId: session.uploadId,
+            partNumber,
+          }),
+        });
 
-      if (!signResponse.ok) {
-        throw new Error(`Failed to sign part ${partNumber}`);
-      }
+        if (!signResponse.ok) {
+          throw new Error(`Failed to sign part ${partNumber}`);
+        }
 
-      const { signedUrl } = await signResponse.json();
+        const { signedUrl } = await signResponse.json();
 
-      await this.uploadWithProgress(signedUrl, chunk, () => {});
+        await this.uploadWithProgress(signedUrl, chunk, file.type, () => {});
+      }, MAX_RETRIES, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
       uploadedParts.push({ partNumber });
       completedChunks++;
@@ -323,31 +409,33 @@ export class ChunkedFileUploader {
       await Promise.all(batch.map(uploadChunk));
     }
 
-    const completeResponse = await fetch('/api/objects/multipart/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uploadId: session.uploadId,
-        parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
-      }),
-    });
+    const result = await retryWithBackoff(async () => {
+      const completeResponse = await fetch('/api/objects/multipart/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadId: session.uploadId,
+          parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
+        }),
+      });
+      if (!completeResponse.ok) {
+        throw new Error('Failed to complete multipart upload');
+      }
+      return completeResponse.json();
+    }, 2, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
-    if (!completeResponse.ok) {
-      throw new Error('Failed to complete multipart upload');
-    }
-
-    const result = await completeResponse.json();
     return { storagePath: result.storagePath, fileId: result.fileId };
   }
 
   private uploadWithProgress(
     url: string,
     data: Blob,
+    contentType: string,
     onProgress: (percent: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      
+
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
           const percent = Math.round((e.loaded / e.total) * 100);
@@ -372,6 +460,10 @@ export class ChunkedFileUploader {
       });
 
       xhr.open('PUT', url);
+      // Set Content-Type header so storage receives the correct MIME type
+      if (contentType) {
+        xhr.setRequestHeader('Content-Type', contentType);
+      }
       xhr.send(data);
 
       if (this.abortController) {
@@ -403,10 +495,10 @@ export class ChunkedFileUploader {
 
   private ensureWebSocketConnection(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
-    
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/file-status`;
-    
+
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {

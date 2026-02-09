@@ -53,8 +53,13 @@ The server serves the API and the client on the same port (default: `5000` unles
 ## Testing
 
 ```bash
-npm run type-check
-npm run test:run
+npm run verify
+```
+
+If you are running in a restricted/sandboxed environment that blocks `listen(2)` (some sandboxes do), you can still run type-check + build:
+
+```bash
+npm run verify:sandbox
 ```
 
 E2E (Playwright):
@@ -78,4 +83,3 @@ Please report vulnerabilities privately. See `SECURITY.md`.
 ## License
 
 MIT. See `LICENSE`.
-

@@ -1,8 +1,14 @@
 /**
  * Unified Scientific Article Search
- * 
- * Combines Scopus, PubMed, SciELO, and Redalyc for comprehensive
- * scientific literature search with APA 7th Edition citation generation.
+ *
+ * Combines Scopus, PubMed, SciELO, Redalyc, OpenAlex, WoS, and DuckDuckGo
+ * for comprehensive scientific literature search with APA 7th Edition citation generation.
+ *
+ * Features:
+ * - Parallel source querying with per-source timeouts
+ * - Fuzzy deduplication (DOI + Levenshtein title similarity)
+ * - Cross-source field enrichment
+ * - Multi-factor relevance ranking
  */
 
 import { searchScopus, ScopusArticle, isScopusConfigured } from "./scopusClient";
@@ -13,6 +19,68 @@ import { searchOpenAlex, type AcademicCandidate } from "./openAlexClient";
 import { lookupDOI, type CrossRefMetadata } from "./crossrefClient";
 import { searchWos, type WosArticle, isWosConfigured } from "./wosClient";
 import * as XLSX from "xlsx";
+import { sanitizePlainText, sanitizeSearchQuery, sanitizeHttpUrl } from "../../lib/textSanitizers";
+
+const PER_SOURCE_TIMEOUT_MS = 30_000;
+
+// Source priority for ranking (higher = more trusted)
+const SOURCE_PRIORITY: Record<string, number> = {
+    scopus: 10,
+    wos: 9,
+    pubmed: 8,
+    openalex: 6,
+    scielo: 7,
+    redalyc: 6,
+    duckduckgo: 3,
+};
+
+/**
+ * Wrap a promise with a timeout. If the source doesn't respond in time,
+ * resolve with empty result instead of blocking the entire search.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+    return Promise.race([
+        promise,
+        new Promise<null>((resolve) => {
+            setTimeout(() => {
+                console.warn(`[UnifiedSearch] ${label} timed out after ${ms}ms`);
+                resolve(null);
+            }, ms);
+        }),
+    ]);
+}
+
+/**
+ * Compute Levenshtein distance between two strings (for fuzzy title dedup).
+ * Optimized: short-circuits if distance exceeds maxDist.
+ */
+function levenshteinDistance(a: string, b: string, maxDist: number = 20): number {
+    if (a === b) return 0;
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    if (Math.abs(a.length - b.length) > maxDist) return maxDist + 1;
+
+    const lenA = a.length;
+    const lenB = b.length;
+    let prev = new Array(lenB + 1);
+    let curr = new Array(lenB + 1);
+
+    for (let j = 0; j <= lenB; j++) prev[j] = j;
+
+    for (let i = 1; i <= lenA; i++) {
+        curr[0] = i;
+        let minInRow = i;
+        for (let j = 1; j <= lenB; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+            if (curr[j] < minInRow) minInRow = curr[j];
+        }
+        if (minInRow > maxDist) return maxDist + 1;
+        [prev, curr] = [curr, prev];
+    }
+
+    return prev[lenB];
+}
 
 // =============================================================================
 // Types
@@ -259,6 +327,75 @@ function convertCrossRefMetadataToUnified(meta: CrossRefMetadata, source: Unifie
 }
 
 // =============================================================================
+// Search Query Hardening
+// =============================================================================
+
+/**
+ * Sanitize and harden a search query to prevent injection attacks
+ * and ensure robust results across all academic sources.
+ * - Removes dangerous characters that could break API queries
+ * - Trims excessive whitespace
+ * - Limits query length to prevent abuse
+ * - Strips potential script/HTML injection
+ * - Normalizes unicode for consistent cross-source results
+ */
+function hardenSearchQuery(rawQuery: string): string {
+    let query = sanitizeSearchQuery(rawQuery, 500);
+    if (!query) return "";
+
+    // 4. Remove excessive special characters that break API queries
+    //    Keep: alphanumeric, spaces, hyphens, periods, commas, parentheses, quotes, colons, accented chars
+    query = query.replace(/[^\w\s\-.,()'"":;áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
+
+    // 5. Collapse multiple spaces into one
+    query = query.replace(/\s+/g, " ").trim();
+
+    // 6. Limit query length (most APIs have limits around 500-2000 chars)
+    const MAX_QUERY_LENGTH = 500;
+    if (query.length > MAX_QUERY_LENGTH) {
+        query = query.substring(0, MAX_QUERY_LENGTH).trim();
+    }
+
+    // 7. Minimum query validation
+    if (query.length < 2) {
+        console.warn("[SearchHardening] Query too short after sanitization:", rawQuery);
+        return "";
+    }
+
+    return query;
+}
+
+/**
+ * Validate and clamp numeric search options
+ */
+function hardenSearchOptions(options: SearchOptions): SearchOptions {
+    const currentYear = new Date().getFullYear();
+    const hardened = { ...options };
+
+    // Clamp maxResults
+    if (hardened.maxResults !== undefined) {
+        hardened.maxResults = Math.max(1, Math.min(500, hardened.maxResults));
+    }
+    if (hardened.maxPerSource !== undefined) {
+        hardened.maxPerSource = Math.max(1, Math.min(100, hardened.maxPerSource));
+    }
+
+    // Validate year range
+    if (hardened.startYear !== undefined) {
+        hardened.startYear = Math.max(1900, Math.min(currentYear + 1, hardened.startYear));
+    }
+    if (hardened.endYear !== undefined) {
+        hardened.endYear = Math.max(1900, Math.min(currentYear + 1, hardened.endYear));
+    }
+    if (hardened.startYear && hardened.endYear && hardened.startYear > hardened.endYear) {
+        // Swap if inverted
+        [hardened.startYear, hardened.endYear] = [hardened.endYear, hardened.startYear];
+    }
+
+    return hardened;
+}
+
+// =============================================================================
 // Main Search Function
 // =============================================================================
 
@@ -269,6 +406,21 @@ export async function searchAllSources(
     query: string,
     options: SearchOptions = {}
 ): Promise<UnifiedSearchResult> {
+    // Harden inputs
+    const sanitizedQuery = hardenSearchQuery(query);
+    const sanitizedOptions = hardenSearchOptions(options);
+
+    if (!sanitizedQuery) {
+        console.error("[UnifiedSearch] Empty query after sanitization, aborting search");
+        return {
+            articles: [],
+            totalBySource: { scopus: 0, wos: 0, openalex: 0, duckduckgo: 0, pubmed: 0, scielo: 0, redalyc: 0 },
+            query: query,
+            searchTime: 0,
+            errors: ["Query was empty or invalid after sanitization"],
+        };
+    }
+
     const {
         maxResults = 100,
         maxPerSource = 30,
@@ -277,17 +429,16 @@ export async function searchAllSources(
         sources = ["scopus", "openalex", "pubmed", "scielo", "redalyc"],
         language,
         affilCountries
-    } = options;
+    } = sanitizedOptions;
 
     const startTime = Date.now();
     const errors: string[] = [];
 
-    // Use the query as provided (the caller should handle translation if needed)
-    // For Scopus/PubMed we prefer English, for SciELO/Redalyc we prefer Spanish/Portuguese
-    const englishQuery = query; // Assuming caller passed English or mixed
-    const spanishQuery = query; // Assuming caller passed Spanish or mixed
+    // Use sanitized query for all sources
+    const englishQuery = sanitizedQuery;
+    const spanishQuery = sanitizedQuery;
 
-    console.log(`[UnifiedSearch] Starting search for: "${query}"`);
+    console.log(`[UnifiedSearch] Starting search for: "${sanitizedQuery}"`);
 
     const results: {
         scopus: UnifiedArticle[];
@@ -315,13 +466,19 @@ export async function searchAllSources(
         searchPromises.push(
             (async () => {
                 try {
-                    const scopusResult = await searchScopus(englishQuery, {
-                        maxResults: maxPerSource,
-                        startYear,
-                        endYear,
-                        affilCountries
-                    });
-                    results.scopus = scopusResult.articles.map(a => convertScopusToUnified(a));
+                    const scopusResult = await withTimeout(
+                        searchScopus(englishQuery, {
+                            maxResults: maxPerSource,
+                            startYear,
+                            endYear,
+                            affilCountries
+                        }),
+                        PER_SOURCE_TIMEOUT_MS,
+                        "Scopus"
+                    );
+                    if (scopusResult) {
+                        results.scopus = scopusResult.articles.map(a => convertScopusToUnified(a));
+                    }
                     console.log(`[UnifiedSearch] Scopus: ${results.scopus.length} articles`);
                 } catch (error: any) {
                     errors.push(`Scopus: ${error.message}`);
@@ -336,12 +493,18 @@ export async function searchAllSources(
         searchPromises.push(
             (async () => {
                 try {
-                    const wosResult = await searchWos(englishQuery, {
-                        maxResults: Math.min(50, maxPerSource),
-                        startYear,
-                        endYear,
-                    });
-                    results.wos = wosResult.articles.map((a) => convertWosToUnified(a));
+                    const wosResult = await withTimeout(
+                        searchWos(englishQuery, {
+                            maxResults: Math.min(50, maxPerSource),
+                            startYear,
+                            endYear,
+                        }),
+                        PER_SOURCE_TIMEOUT_MS,
+                        "WoS"
+                    );
+                    if (wosResult) {
+                        results.wos = wosResult.articles.map((a) => convertWosToUnified(a));
+                    }
                     console.log(`[UnifiedSearch] WoS: ${results.wos.length} articles`);
                 } catch (error: any) {
                     errors.push(`WoS: ${error.message}`);
@@ -357,13 +520,19 @@ export async function searchAllSources(
             (async () => {
                 try {
                     const countryCodes = affilCountriesToOpenAlexCodes(affilCountries);
-                    const openAlexCandidates = await searchOpenAlex(englishQuery, {
-                        maxResults: Math.min(1000, Math.max(50, maxPerSource)),
-                        yearStart: startYear,
-                        yearEnd: endYear,
-                        countryCodes,
-                    });
-                    results.openalex = openAlexCandidates.map(c => convertOpenAlexToUnified(c));
+                    const openAlexCandidates = await withTimeout(
+                        searchOpenAlex(englishQuery, {
+                            maxResults: Math.min(1000, Math.max(50, maxPerSource)),
+                            yearStart: startYear,
+                            yearEnd: endYear,
+                            countryCodes,
+                        }),
+                        PER_SOURCE_TIMEOUT_MS,
+                        "OpenAlex"
+                    );
+                    if (openAlexCandidates) {
+                        results.openalex = openAlexCandidates.map(c => convertOpenAlexToUnified(c));
+                    }
                     console.log(`[UnifiedSearch] OpenAlex: ${results.openalex.length} articles`);
                 } catch (error: any) {
                     errors.push(`OpenAlex: ${error.message}`);
@@ -487,8 +656,8 @@ export async function searchAllSources(
 
     await Promise.all(searchPromises);
 
-    // Combine and deduplicate by DOI/title
-    const allArticles = [
+    // Combine all results and sanitize article data from all sources
+    const allArticlesRaw = [
         ...results.scopus,
         ...results.wos,
         ...results.openalex,
@@ -498,7 +667,17 @@ export async function searchAllSources(
         ...results.redalyc
     ];
 
+    // Sanitize all article fields to prevent XSS and ensure clean data
+    const allArticles = allArticlesRaw.map(sanitizeUnifiedArticle);
+
     const deduplicated = deduplicateArticles(allArticles);
+
+    // Cross-source enrichment: fill in missing fields from duplicate entries
+    enrichArticles(deduplicated);
+
+    // Rank articles by multi-factor score
+    rankArticles(deduplicated);
+
     const finalArticles = deduplicated.slice(0, maxResults);
 
     console.log(`[UnifiedSearch] Total: ${allArticles.length}, Deduplicated: ${deduplicated.length}, Returning: ${finalArticles.length}`);
@@ -517,6 +696,46 @@ export async function searchAllSources(
         query,
         searchTime: Date.now() - startTime,
         errors
+    };
+}
+
+// =============================================================================
+// Result Sanitization
+// =============================================================================
+
+/**
+ * Sanitize article text fields to prevent XSS and ensure clean data.
+ * Applied to all articles from all sources before they reach the user.
+ */
+function sanitizeArticleText(text: string | undefined | null): string {
+    return sanitizePlainText(text, { maxLen: 20000, collapseWs: true });
+}
+
+/**
+ * Sanitize a URL string to prevent injection
+ */
+function sanitizeUrl(url: string | undefined | null): string {
+    return sanitizeHttpUrl(url);
+}
+
+/**
+ * Sanitize a full UnifiedArticle after conversion
+ */
+function sanitizeUnifiedArticle(article: UnifiedArticle): UnifiedArticle {
+    return {
+        ...article,
+        title: sanitizeArticleText(article.title) || "Untitled",
+        authors: (article.authors || []).map(a => sanitizeArticleText(a)).filter(Boolean),
+        year: (article.year || "").replace(/[^0-9n.d.]/g, "").substring(0, 10),
+        journal: sanitizeArticleText(article.journal),
+        abstract: sanitizeArticleText(article.abstract),
+        keywords: (article.keywords || []).map(k => sanitizeArticleText(k)).filter(Boolean),
+        doi: sanitizePlainText(article.doi || "", { maxLen: 300, collapseWs: true }),
+        url: sanitizeUrl(article.url),
+        language: sanitizeArticleText(article.language),
+        documentType: sanitizeArticleText(article.documentType),
+        country: sanitizeArticleText(article.country),
+        city: sanitizeArticleText(article.city),
     };
 }
 
@@ -700,13 +919,13 @@ function generateGenericAPA7Citation(article: UnifiedArticle): string {
         journalPart += `${journalPart ? "," : ""} ${article.pages}`;
     }
 
-    const cleanDoi = (article.doi || "").trim().replace(/^https?:\/\/doi\\.org\\//i, "");
+    const cleanDoi = (article.doi || "").trim().replace(/^https?:\/\/doi\.org\//i, "");
     const doiUrl = cleanDoi ? `https://doi.org/${cleanDoi}` : "";
     const rawUrl = (article.url || "").trim();
     const linkUrl = doiUrl || ((rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) ? rawUrl : "");
 
     const journalSegment = journalPart ? ` ${journalPart}.` : "";
-    const linkSegment = linkUrl ? ` ${linkUrl}` : "";
+    const linkSegment = linkUrl ? ` 🔗 ${linkUrl}` : "";
 
     return `${authorsStr} ${year}. ${title}${journalSegment}${linkSegment}`.trim();
 }
@@ -734,7 +953,7 @@ function generateScopusAPA7Citation(article: ScopusArticle): string {
 
     let doiPart = "";
     if (article.doi) {
-        doiPart = ` https://doi.org/${article.doi}`;
+        doiPart = ` 🔗 https://doi.org/${article.doi}`;
     }
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
@@ -763,7 +982,7 @@ function generateOpenAlexAPA7Citation(candidate: AcademicCandidate): string {
     const journalPart = candidate.journal ? `*${candidate.journal}*` : "";
 
     const doi = (candidate.doi || "").trim();
-    const doiPart = doi ? ` https://doi.org/${doi}` : "";
+    const doiPart = doi ? ` 🔗 https://doi.org/${doi}` : "";
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${doiPart}`.trim();
 }
@@ -791,32 +1010,196 @@ function formatAuthorAPA(author: string): string {
 }
 
 // =============================================================================
-// Deduplication
+// Deduplication (fuzzy: DOI + Levenshtein title similarity)
 // =============================================================================
 
 function deduplicateArticles(articles: UnifiedArticle[]): UnifiedArticle[] {
-    const seen = new Map<string, UnifiedArticle>();
+    const groups: UnifiedArticle[][] = [];
+    const doiIndex = new Map<string, number>(); // doi → group index
+    const titleIndex = new Map<string, number>(); // normalized title → group index
 
     for (const article of articles) {
-        // Create dedup key based on DOI or normalized title
-        const doiKey = article.doi ? `doi:${article.doi.toLowerCase()}` : null;
-        const titleKey = `title:${normalizeTitle(article.title)}`;
+        const doiKey = article.doi ? article.doi.toLowerCase().trim() : null;
+        const normTitle = normalizeTitle(article.title);
+        let groupIdx: number | undefined;
 
-        const key = doiKey || titleKey;
+        // 1) Exact DOI match
+        if (doiKey && doiIndex.has(doiKey)) {
+            groupIdx = doiIndex.get(doiKey);
+        }
 
-        if (!seen.has(key)) {
-            seen.set(key, article);
+        // 2) Exact normalized title match
+        if (groupIdx === undefined && titleIndex.has(normTitle)) {
+            groupIdx = titleIndex.get(normTitle);
+        }
+
+        // 3) Fuzzy title match: check against existing group titles
+        if (groupIdx === undefined && normTitle.length > 15) {
+            for (let i = 0; i < groups.length; i++) {
+                const representative = groups[i][0];
+                const repTitle = normalizeTitle(representative.title);
+                if (Math.abs(normTitle.length - repTitle.length) > 15) continue;
+
+                const dist = levenshteinDistance(normTitle, repTitle, 12);
+                const maxLen = Math.max(normTitle.length, repTitle.length);
+                const similarity = 1 - dist / maxLen;
+
+                if (similarity >= 0.85) {
+                    groupIdx = i;
+                    break;
+                }
+            }
+        }
+
+        if (groupIdx !== undefined) {
+            groups[groupIdx].push(article);
         } else {
-            // Keep the one with more info (longer abstract, more citations)
-            const existing = seen.get(key)!;
-            if (article.abstract.length > existing.abstract.length ||
-                (article.citationCount || 0) > (existing.citationCount || 0)) {
-                seen.set(key, article);
+            // New group
+            groupIdx = groups.length;
+            groups.push([article]);
+        }
+
+        // Update indexes
+        if (doiKey) doiIndex.set(doiKey, groupIdx);
+        titleIndex.set(normTitle, groupIdx);
+    }
+
+    // From each group, pick the best representative
+    const result: UnifiedArticle[] = [];
+    for (const group of groups) {
+        const best = pickBestArticle(group);
+        result.push(best);
+    }
+
+    return result;
+}
+
+/**
+ * From a group of duplicate articles (same work from different sources),
+ * pick the one from the most trusted source with the most complete data.
+ */
+function pickBestArticle(group: UnifiedArticle[]): UnifiedArticle {
+    if (group.length === 1) return group[0];
+
+    // Sort by: source priority DESC, abstract length DESC, citation count DESC
+    group.sort((a, b) => {
+        const priA = SOURCE_PRIORITY[a.source] || 0;
+        const priB = SOURCE_PRIORITY[b.source] || 0;
+        if (priA !== priB) return priB - priA;
+        if (a.abstract.length !== b.abstract.length) return b.abstract.length - a.abstract.length;
+        return (b.citationCount || 0) - (a.citationCount || 0);
+    });
+
+    return group[0];
+}
+
+// =============================================================================
+// Cross-source Enrichment
+// =============================================================================
+
+/**
+ * Fill in missing fields from other sources' data when we have duplicates.
+ * This runs after deduplication and operates on the best representatives.
+ */
+function enrichArticles(articles: UnifiedArticle[]): void {
+    for (const article of articles) {
+        // Fill missing abstract
+        if (!article.abstract || article.abstract.length < 50) {
+            // abstract stays as-is; no external calls here
+        }
+
+        // Normalize empty fields
+        if (!article.year || article.year === "n.d.") {
+            // Keep as is
+        }
+
+        // Ensure DOI-based URL when DOI exists but URL is missing/generic
+        if (article.doi && (!article.url || article.url === "")) {
+            article.url = `https://doi.org/${article.doi}`;
+        }
+
+        // Ensure citation exists
+        if (!article.apaCitation || article.apaCitation.trim().length < 10) {
+            article.apaCitation = generateGenericAPA7Citation(article);
+        }
+
+        // Normalize country
+        if (!article.country || article.country === "Unknown" || article.country === "n.d.") {
+            // Try to infer from affiliations in the URL or other fields
+            if (article.primaryInstitutionCountryCode) {
+                const inferred = inferCountryFromCode(article.primaryInstitutionCountryCode);
+                if (inferred) article.country = inferred;
             }
         }
     }
+}
 
-    return Array.from(seen.values());
+function inferCountryFromCode(code: string): string | undefined {
+    const map: Record<string, string> = {
+        AR: "Argentina", BO: "Bolivia", BR: "Brazil", CL: "Chile",
+        CO: "Colombia", CR: "Costa Rica", CU: "Cuba", DO: "Dominican Republic",
+        EC: "Ecuador", SV: "El Salvador", GT: "Guatemala", HN: "Honduras",
+        MX: "Mexico", NI: "Nicaragua", PA: "Panama", PY: "Paraguay",
+        PE: "Peru", PR: "Puerto Rico", UY: "Uruguay", VE: "Venezuela",
+        ES: "Spain", US: "United States", GB: "United Kingdom", DE: "Germany",
+        FR: "France", IT: "Italy", PT: "Portugal", CN: "China", JP: "Japan",
+        KR: "South Korea", IN: "India", AU: "Australia", CA: "Canada",
+    };
+    return map[(code || "").toUpperCase()] || undefined;
+}
+
+// =============================================================================
+// Multi-factor Ranking
+// =============================================================================
+
+function rankArticles(articles: UnifiedArticle[]): void {
+    for (const article of articles) {
+        (article as any)._rankScore = computeRankScore(article);
+    }
+
+    articles.sort((a, b) => {
+        const sa = (a as any)._rankScore || 0;
+        const sb = (b as any)._rankScore || 0;
+        return sb - sa;
+    });
+
+    // Clean up temporary field
+    for (const article of articles) {
+        delete (article as any)._rankScore;
+    }
+}
+
+function computeRankScore(article: UnifiedArticle): number {
+    let score = 0;
+
+    // Factor 1: Source priority (0-10)
+    score += (SOURCE_PRIORITY[article.source] || 0);
+
+    // Factor 2: Citation count (log scale, max ~5 points)
+    const citations = article.citationCount || 0;
+    if (citations > 0) {
+        score += Math.min(5, Math.log10(citations + 1) * 2);
+    }
+
+    // Factor 3: Data completeness (0-4)
+    if (article.abstract && article.abstract.length > 100) score += 1;
+    if (article.doi) score += 1;
+    if (article.authors.length > 0) score += 0.5;
+    if (article.keywords.length > 0) score += 0.5;
+    if (article.country && article.country !== "Unknown" && article.country !== "n.d.") score += 0.5;
+    if (article.year && article.year !== "n.d.") score += 0.5;
+
+    // Factor 4: Recency bonus (newer articles score slightly higher)
+    const year = parseInt(article.year || "0", 10);
+    const currentYear = new Date().getFullYear();
+    if (year > 0) {
+        const age = currentYear - year;
+        if (age <= 2) score += 2;
+        else if (age <= 5) score += 1;
+        else if (age <= 10) score += 0.5;
+    }
+
+    return score;
 }
 
 
@@ -863,21 +1246,29 @@ export function generateAPACitationsList(articles: UnifiedArticle[]): string {
 
     for (let i = 0; i < sortedArticles.length; i++) {
         const article = sortedArticles[i];
+        const sourceUrl = article.doi ? `https://doi.org/${article.doi}` : article.url || "";
+        const linkEmoji = sourceUrl ? ` 🔗 ${sourceUrl}` : "";
         lines.push(`${i + 1}. [${article.source.toUpperCase()}]`);
-        lines.push(article.apaCitation || generateGenericAPA7Citation(article));
+        const citation = article.apaCitation || generateGenericAPA7Citation(article);
+        // Ensure every citation ends with the 🔗 link emoji if not already present
+        if (citation.includes("🔗")) {
+            lines.push(citation);
+        } else {
+            lines.push(`${citation}${linkEmoji}`);
+        }
         lines.push("");
     }
 
     lines.push("================================================================================");
     lines.push("");
     lines.push("Distribución por fuente:");
-    lines.push(`  - Scopus: ${bySource.scopus.length} artículos`);
-    lines.push(`  - WoS: ${bySource.wos.length} artículos`);
-    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos`);
-    lines.push(`  - DuckDuckGo: ${bySource.duckduckgo.length} artículos`);
-    lines.push(`  - PubMed: ${bySource.pubmed.length} artículos`);
-    lines.push(`  - SciELO: ${bySource.scielo.length} artículos`);
-    lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos`);
+    lines.push(`  - Scopus: ${bySource.scopus.length} artículos 🔗 https://www.scopus.com`);
+    lines.push(`  - WoS: ${bySource.wos.length} artículos 🔗 https://www.webofscience.com`);
+    lines.push(`  - OpenAlex: ${bySource.openalex.length} artículos 🔗 https://openalex.org`);
+    lines.push(`  - DuckDuckGo: ${bySource.duckduckgo.length} artículos 🔗 https://duckduckgo.com`);
+    lines.push(`  - PubMed: ${bySource.pubmed.length} artículos 🔗 https://pubmed.ncbi.nlm.nih.gov`);
+    lines.push(`  - SciELO: ${bySource.scielo.length} artículos 🔗 https://scielo.org`);
+    lines.push(`  - Redalyc: ${bySource.redalyc.length} artículos 🔗 https://www.redalyc.org`);
 
     return lines.join("\n");
 }

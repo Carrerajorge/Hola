@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import express, { Express, Request, Response } from 'express';
-import request from 'supertest';
+import { createMockReq, createMockRes } from '../../tests/helpers/mockExpress';
 
 vi.mock('../storage', () => ({
   storage: {
@@ -22,10 +21,18 @@ vi.mock('../services/analysisOrchestrator', () => ({
   getAnalysisResults: vi.fn(),
 }));
 
+vi.mock('../services/analysisService', () => ({
+  analysisService: {
+    startUploadAnalysis: vi.fn(),
+    getAnalysisStatus: vi.fn(),
+  },
+}));
+
 import { createChatRoutes } from '../routes/chatRoutes';
 import { storage } from '../storage';
 import { getUpload, getSheets } from '../services/spreadsheetAnalyzer';
 import { startAnalysis, getAnalysisProgress, getAnalysisResults } from '../services/analysisOrchestrator';
+import { analysisService } from '../services/analysisService';
 
 function getFileExtension(filename: string): string {
   return (filename.split('.').pop() || '').toLowerCase();
@@ -37,17 +44,8 @@ function isSpreadsheetFile(filename: string): boolean {
 }
 
 describe('Document Analysis Feature', () => {
-  let app: Express;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    app = express();
-    app.use(express.json());
-    app.use((req: Request, _res: Response, next) => {
-      (req as any).user = { id: 'test-user-id' };
-      next();
-    });
-    app.use('/api/chat', createChatRoutes());
   });
 
   afterEach(() => {
@@ -101,14 +99,26 @@ describe('Document Analysis Feature', () => {
 
   describe('Chat Routes - POST /uploads/:uploadId/analyze', () => {
     it('should return 404 for non-existent upload', async () => {
-      vi.mocked(getUpload).mockResolvedValue(undefined);
-      // AnalysisService checks storage.getFile first
-      vi.mocked(storage.getFile as any).mockResolvedValue(undefined);
+      vi.mocked(analysisService.startUploadAnalysis).mockRejectedValue(new Error('Upload not found'));
 
-      await request(app)
-        .post('/api/chat/uploads/non-existent-id/analyze')
-        .send({ scope: 'all' })
-        .expect(404);
+      const router = createChatRoutes();
+      const layer = (router as any).stack.find((l: any) => l.route?.path === '/uploads/:uploadId/analyze');
+      expect(layer).toBeDefined();
+      const handler = layer.route.stack[0].handle as any;
+
+      const req = createMockReq({
+        method: 'POST',
+        path: '/api/chat/uploads/non-existent-id/analyze',
+        params: { uploadId: 'non-existent-id' },
+        body: { scope: 'all' },
+        user: { id: 'test-user-id' },
+      });
+      const res = createMockRes();
+
+      await handler(req, res, () => {});
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body?.error).toBe('Upload not found');
     });
 
     it('should handle spreadsheet files correctly with scope=all', async () => {

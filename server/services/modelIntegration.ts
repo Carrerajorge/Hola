@@ -1,4 +1,4 @@
-export type ChatRuntimeProvider = "xai" | "gemini";
+export type ChatRuntimeProvider = "xai" | "gemini" | "openai";
 
 export function normalizeModelProviderToRuntime(provider: string): ChatRuntimeProvider | null {
   const normalized = String(provider || "").toLowerCase().trim();
@@ -9,6 +9,9 @@ export function normalizeModelProviderToRuntime(provider: string): ChatRuntimePr
 
   // Storage uses "xai" for Grok. Some code uses "grok".
   if (normalized === "xai" || normalized === "grok") return "xai";
+
+  // OpenAI models
+  if (normalized === "openai") return "openai";
 
   return null;
 }
@@ -27,6 +30,9 @@ export function hasApiKeyForRuntimeProvider(runtime: ChatRuntimeProvider): boole
     // Legacy/alternate: GOOGLE_API_KEY.
     return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
   }
+  if (runtime === "openai") {
+    return !!process.env.OPENAI_API_KEY;
+  }
   return false;
 }
 
@@ -41,6 +47,10 @@ export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId?: 
   if (!id) return false;
   if (runtime === "gemini") return id.includes("gemini");
   if (runtime === "xai") return id.includes("grok");
+  if (runtime === "openai") {
+    // All OpenAI chat models: GPT, O-series, ChatGPT, Codex (text)
+    return /^(gpt|o\d|chatgpt|codex-mini|computer-use)/.test(id);
+  }
   return false;
 }
 
@@ -60,8 +70,7 @@ export function isModelProviderIntegrated(provider: string): boolean {
 // Provider ids as stored in ai_models.provider (plus known aliases).
 export function getSupportedModelProviderIds(): string[] {
   // Provider ids as stored in `ai_models.provider` plus known legacy aliases.
-  // NOTE: the runtime supports only xAI + Gemini today.
-  return ["xai", "google", "grok", "gemini"];
+  return ["xai", "google", "openai", "grok", "gemini"];
 }
 
 export function getIntegratedModelProviderIds(): string[] {

@@ -14,9 +14,11 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Menu, FileText, X, GripVertical } from "lucide-react";
+import { Menu, FileText, X, GripVertical, Monitor } from "lucide-react";
 import { toast } from "sonner";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
+import { lazy, Suspense } from "react";
+const ComputerUsePanel = lazy(() => import("@/components/computer-use/ComputerUsePanel"));
 
 const PANEL_SIZES_KEY = "workspace-panel-sizes";
 
@@ -66,6 +68,7 @@ function WorkspaceContent() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isAiRailCollapsed, setIsAiRailCollapsed] = useState(false);
+  const [isComputerUseOpen, setIsComputerUseOpen] = useState(false);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
 
@@ -365,6 +368,17 @@ function WorkspaceContent() {
                 id="chat-panel"
                 data-testid="panel-chat"
               >
+                <div className="relative h-full">
+                  {/* Computer Use toggle */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-2 right-2 z-10 h-8 w-8 opacity-60 hover:opacity-100"
+                    onClick={() => setIsComputerUseOpen((prev) => !prev)}
+                    title="Toggle Computer Use Panel"
+                  >
+                    <Monitor className={cn("h-4 w-4", isComputerUseOpen && "text-blue-400")} />
+                  </Button>
                 <ChatInterface
                   key={chatInterfaceKey}
                   messages={displayMessages}
@@ -376,6 +390,7 @@ function WorkspaceContent() {
                   aiProcessSteps={aiProcessSteps}
                   setAiProcessSteps={setAiProcessSteps}
                 />
+                </div>
               </Panel>
 
               {activeDocumentId && (
@@ -414,6 +429,41 @@ function WorkspaceContent() {
               )}
             </PanelGroup>
           </Panel>
+
+          {/* Computer Use Panel (slide-out) */}
+          {isComputerUseOpen && (
+            <>
+              <ResizeHandle id="computer-use-resize" />
+              <Panel
+                defaultSize={40}
+                minSize={25}
+                maxSize={60}
+                id="computer-use-panel"
+              >
+                <div className="h-full flex flex-col bg-background border-l">
+                  <div className="flex items-center justify-between px-4 py-2 border-b">
+                    <div className="flex items-center gap-2">
+                      <Monitor className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">Computer Use</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setIsComputerUseOpen(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground text-sm">Loading...</div>}>
+                      <ComputerUsePanel />
+                    </Suspense>
+                  </div>
+                </div>
+              </Panel>
+            </>
+          )}
 
           <ResizeHandle id="ai-rail-resize" />
 

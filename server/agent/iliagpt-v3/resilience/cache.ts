@@ -79,13 +79,30 @@ export class TTLCache implements Cache {
     return value;
   }
 
+  private inflightRequests = new Map<string, Promise<unknown>>();
+
   async getOrSetAsync<T>(key: string, factory: () => Promise<T>, ttlMs?: number): Promise<T> {
     const existing = this.get<T>(key);
     if (existing !== undefined) return existing;
-    
-    const value = await factory();
-    this.set(key, value, ttlMs);
-    return value;
+
+    // Prevent thundering herd: if a factory is already in-flight for this key,
+    // wait for it instead of launching a duplicate request
+    const inflight = this.inflightRequests.get(key);
+    if (inflight) {
+      return inflight as Promise<T>;
+    }
+
+    const promise = factory().then((value) => {
+      this.set(key, value, ttlMs);
+      this.inflightRequests.delete(key);
+      return value;
+    }).catch((err) => {
+      this.inflightRequests.delete(key);
+      throw err;
+    });
+
+    this.inflightRequests.set(key, promise);
+    return promise;
   }
 
   private evictOldest(): void {

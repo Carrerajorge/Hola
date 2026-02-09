@@ -21,8 +21,8 @@ export interface StreamConfig {
 
 const DEFAULT_CONFIG: StreamConfig = {
     heartbeatInterval: 15000,   // 15 seconds
-    maxChunkSize: 100,          // 100 chars per chunk
-    flushThreshold: 10,         // Flush every 10 chars
+    maxChunkSize: 500,          // 500 chars per chunk (increased for throughput)
+    flushThreshold: 1,          // Flush immediately for minimal latency
     connectionTimeout: 300000,  // 5 minutes
 };
 
@@ -145,7 +145,7 @@ export function initSSEStream(
     return controller;
 }
 
-// Stream tokens one by one with delay
+// Stream tokens immediately without artificial delay
 export async function streamTokens(
     controller: StreamController,
     tokens: string[],
@@ -154,7 +154,7 @@ export async function streamTokens(
         onToken?: (token: string, index: number) => void;
     } = {}
 ): Promise<{ completed: boolean; tokensSent: number }> {
-    const { delayMs = 20, onToken } = options;
+    const { delayMs = 0, onToken } = options;
     let tokensSent = 0;
 
     for (let i = 0; i < tokens.length; i++) {
@@ -175,6 +175,7 @@ export async function streamTokens(
         tokensSent++;
         onToken?.(tokens[i], i);
 
+        // Only apply delay if explicitly requested (default: no delay)
         if (delayMs > 0) {
             await sleep(delayMs);
         }
@@ -183,7 +184,7 @@ export async function streamTokens(
     return { completed: true, tokensSent };
 }
 
-// Stream text character by character
+// Stream text in chunks without artificial delay
 export async function streamText(
     controller: StreamController,
     text: string,
@@ -193,7 +194,7 @@ export async function streamText(
         onChunk?: (chunk: string, index: number) => void;
     } = {}
 ): Promise<{ completed: boolean; bytesSent: number }> {
-    const { chunkSize = 5, delayMs = 10, onChunk } = options;
+    const { chunkSize = 50, delayMs = 0, onChunk } = options;
     let bytesSent = 0;
     let chunkIndex = 0;
 
@@ -216,6 +217,7 @@ export async function streamText(
         bytesSent += chunk.length;
         onChunk?.(chunk, chunkIndex++);
 
+        // Only apply delay if explicitly requested (default: no delay)
         if (delayMs > 0) {
             await sleep(delayMs);
         }

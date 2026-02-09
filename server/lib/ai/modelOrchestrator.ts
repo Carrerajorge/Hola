@@ -6,12 +6,13 @@
 import { EventEmitter } from 'events';
 import { Logger } from '../logger';
 import { serviceRegistry } from '../serviceMesh';
+import { XAI_MODELS, DEFAULT_TEXT_MODEL } from '../modelRegistry';
 
 // ============================================================================
 // Types & Interfaces
 // ============================================================================
 
-export type ModelProvider = 'openai' | 'anthropic' | 'google' | 'mistral' | 'local';
+export type ModelProvider = 'openai' | 'anthropic' | 'google' | 'mistral' | 'local' | 'xai';
 export type ModelTier = 'ultra' | 'pro' | 'flash' | 'instant';
 
 export interface ModelConfig {
@@ -31,6 +32,8 @@ export interface ModelConfig {
     reliabilityScore: number; // 0-1
 }
 
+export type LatencyLane = 'fast' | 'deep';
+
 export interface PromptRequest {
     taskId: string;
     messages: any[];
@@ -41,6 +44,7 @@ export interface PromptRequest {
         features?: ('vision' | 'functionCalling' | 'jsonMode')[];
         tier?: ModelTier;
         jsonMode?: boolean;
+        latencyLane?: LatencyLane;
     };
     metadata?: Record<string, any>;
 }
@@ -71,7 +75,56 @@ class ModelRouter extends EventEmitter {
     }
 
     private initializeModels() {
-        // Current Generation SOTA
+        // xAI Grok Models (primary provider)
+        this.registerModel({
+            id: XAI_MODELS.GROK_4_1_FAST,
+            provider: 'xai',
+            tier: 'pro',
+            contextWindow: 2000000,
+            costPerInputToken: 0.50 / 1000000,
+            costPerOutputToken: 2.00 / 1000000,
+            capabilities: { vision: false, functionCalling: true, jsonMode: true, streaming: true },
+            latencyScore: 15,
+            reliabilityScore: 0.99,
+        });
+
+        this.registerModel({
+            id: XAI_MODELS.GROK_4_1_FAST_REASONING,
+            provider: 'xai',
+            tier: 'ultra',
+            contextWindow: 2000000,
+            costPerInputToken: 1.00 / 1000000,
+            costPerOutputToken: 4.00 / 1000000,
+            capabilities: { vision: false, functionCalling: true, jsonMode: true, streaming: true },
+            latencyScore: 20,
+            reliabilityScore: 0.99,
+        });
+
+        this.registerModel({
+            id: XAI_MODELS.GROK_3_FAST,
+            provider: 'xai',
+            tier: 'flash',
+            contextWindow: 131072,
+            costPerInputToken: 5.00 / 1000000,
+            costPerOutputToken: 25.00 / 1000000,
+            capabilities: { vision: false, functionCalling: true, jsonMode: true, streaming: true },
+            latencyScore: 12,
+            reliabilityScore: 0.98,
+        });
+
+        this.registerModel({
+            id: XAI_MODELS.GROK_2_VISION,
+            provider: 'xai',
+            tier: 'pro',
+            contextWindow: 32768,
+            costPerInputToken: 2.00 / 1000000,
+            costPerOutputToken: 10.00 / 1000000,
+            capabilities: { vision: true, functionCalling: false, jsonMode: false, streaming: true },
+            latencyScore: 25,
+            reliabilityScore: 0.97,
+        });
+
+        // OpenAI
         this.registerModel({
             id: 'gpt-4o',
             provider: 'openai',
@@ -84,8 +137,9 @@ class ModelRouter extends EventEmitter {
             reliabilityScore: 0.99
         });
 
+        // Anthropic
         this.registerModel({
-            id: 'claude-3-5-sonnet-20240620',
+            id: 'claude-3-5-sonnet-20241022',
             provider: 'anthropic',
             tier: 'pro',
             contextWindow: 200000,
@@ -96,13 +150,14 @@ class ModelRouter extends EventEmitter {
             reliabilityScore: 0.99
         });
 
+        // Google Gemini
         this.registerModel({
-            id: 'gemini-1.5-flash',
+            id: 'gemini-2.5-flash',
             provider: 'google',
             tier: 'flash',
             contextWindow: 1000000,
-            costPerInputToken: 0.35 / 1000000,
-            costPerOutputToken: 0.7 / 1000000,
+            costPerInputToken: 0.075 / 1000000,
+            costPerOutputToken: 0.30 / 1000000,
             capabilities: { vision: true, functionCalling: true, jsonMode: true, streaming: true },
             latencyScore: 15,
             reliabilityScore: 0.98
@@ -114,7 +169,10 @@ class ModelRouter extends EventEmitter {
     }
 
     /**
-     * Route a request to the best fitting model
+     * Route a request to the best fitting model.
+     * When latencyLane is set, it biases selection:
+     *   fast → prefer flash/instant tiers (lowest latencyScore)
+     *   deep → allow ultra/pro tiers (highest quality)
      */
     selectModel(request: PromptRequest): ModelConfig {
         const candidates = Array.from(this.models.values())
@@ -122,6 +180,26 @@ class ModelRouter extends EventEmitter {
 
         if (candidates.length === 0) {
             throw new Error('No models available meeting requirements');
+        }
+
+        const lane = request.requirements.latencyLane;
+
+        // Fast lane: always prefer lowest-latency model regardless of complexity
+        if (lane === 'fast') {
+            const flashModels = candidates
+                .filter(m => m.tier === 'flash' || m.tier === 'instant')
+                .sort((a, b) => a.latencyScore - b.latencyScore);
+            if (flashModels.length > 0) return flashModels[0];
+            // Fallback: just pick lowest latency among all candidates
+            return candidates.sort((a, b) => a.latencyScore - b.latencyScore)[0];
+        }
+
+        // Deep lane: prefer higher-quality tiers
+        if (lane === 'deep') {
+            const proOrUltra = candidates
+                .filter(m => m.tier === 'ultra' || m.tier === 'pro')
+                .sort((a, b) => (b.reliabilityScore ?? 0) - (a.reliabilityScore ?? 0));
+            if (proOrUltra.length > 0) return proOrUltra[0];
         }
 
         // Task Complexity Analysis (Task 63)
@@ -148,23 +226,26 @@ class ModelRouter extends EventEmitter {
     }
 
     private meetsRequirements(model: ModelConfig, requirements: PromptRequest['requirements']): boolean {
-        if (requirements.minContext && model.contextWindow < requirements.minContext) return false;
+        if (!model || !requirements) return false;
+        if (requirements.minContext && (model.contextWindow ?? 0) < requirements.minContext) return false;
+        if (requirements.maxLatency && (model.latencyScore ?? Infinity) > requirements.maxLatency) return false;
         if (requirements.features) {
             for (const feature of requirements.features) {
-                if (!model.capabilities[feature]) return false;
+                if (!model.capabilities?.[feature]) return false;
             }
         }
         return true;
     }
 
     private analyzeComplexity(messages: any[]): 'low' | 'medium' | 'high' {
+        if (!messages || messages.length === 0) return 'low';
         const totalLength = JSON.stringify(messages).length;
 
         // Heuristic 1: Length
         if (totalLength > 10000) return 'high';
 
         // Heuristic 2: Keywords
-        const text = messages.map(m => m.content).join(' ').toLowerCase();
+        const text = messages.map(m => m.content || '').join(' ').toLowerCase();
         const complexKeywords = ['analyze', 'synthesize', 'compare', 'code', 'refactor', 'architect'];
         const hits = complexKeywords.filter(k => text.includes(k)).length;
 
@@ -256,42 +337,48 @@ export class AIModelService {
         Logger.info(`[AI] Calling ${model.provider}:${model.id} for task ${request.taskId}`);
 
         try {
-            // Import dynamically to avoid circular deps
-            const { openai } = await import('../openai');
+            // Use the LLM Gateway for proper multi-provider routing instead
+            // of always going through the xAI-configured OpenAI client.
+            const { llmGateway } = await import('../llmGateway');
 
-            // Map request messages to OpenAI format
+            // Map request messages to OpenAI format (the gateway handles
+            // converting to provider-specific formats internally).
             const messages = request.messages.map(m => ({
                 role: m.role as 'system' | 'user' | 'assistant',
-                content: m.content
+                content: m.content,
             }));
 
-            // Force JSON mode if requested
-            const response_format = request.requirements.jsonMode ? { type: "json_object" } : undefined;
+            const providerMap: Record<string, string> = {
+                xai: 'xai',
+                openai: 'openai',
+                anthropic: 'anthropic',
+                google: 'gemini',
+                mistral: 'openai', // OpenAI-compatible
+                local: 'xai',
+            };
 
-            const completion = await openai.chat.completions.create({
-                model: model.id, // e.g., 'gpt-4o' or 'grok-3-fast'
-                messages,
-                response_format: response_format as any,
-                // stream: request.requirements.streaming // Handle streaming later
+            const result = await llmGateway.chat(messages, {
+                model: model.id,
+                provider: (providerMap[model.provider] || 'auto') as any,
+                temperature: undefined, // use gateway defaults
+                maxTokens: undefined,
             });
 
-            const choice = completion.choices[0];
-            const content = choice.message.content || '';
-            const usage = completion.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-
-            Logger.info(`[AI] Success: ${usage.total_tokens} tokens used`);
+            Logger.info(`[AI] Success: ${result.usage?.totalTokens || 0} tokens used`);
 
             return {
-                content,
-                modelUsed: completion.model,
+                content: result.content,
+                modelUsed: result.model,
                 tokenUsage: {
-                    prompt: usage.prompt_tokens,
-                    completion: usage.completion_tokens,
-                    total: usage.total_tokens
+                    prompt: result.usage?.promptTokens || 0,
+                    completion: result.usage?.completionTokens || 0,
+                    total: result.usage?.totalTokens || 0,
                 },
-                cost: (usage.prompt_tokens * model.costPerInputToken) + (usage.completion_tokens * model.costPerOutputToken),
+                cost:
+                    ((result.usage?.promptTokens || 0) * model.costPerInputToken) +
+                    ((result.usage?.completionTokens || 0) * model.costPerOutputToken),
                 durationMs: Date.now() - startTime,
-                cached: false
+                cached: result.cached || false,
             };
 
         } catch (error: any) {

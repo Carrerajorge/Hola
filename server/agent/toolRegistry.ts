@@ -22,6 +22,7 @@ import { validateOrThrow } from "./validation";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 import { getIntegrationPolicyCached } from "../services/integrationPolicyCache";
 import { getUserSettingsCached } from "../services/userSettingsCache";
+import { getUserPrivacySettings } from "../services/privacyService";
 
 const AGENT_WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || "/tmp/agent-workspace";
 const getRunWorkspaceDir = (runId: string) => path.resolve(AGENT_WORKSPACE_ROOT, runId);
@@ -1314,6 +1315,78 @@ const browseUrlTool: ToolDefinition = {
         };
       }
 
+      const privacy = await getUserPrivacySettings(context.userId);
+      if (!privacy.remoteBrowserDataAccess) {
+        // Privacy-preserving fallback: do a stateless HTTP fetch without cookies/session,
+        // and never capture screenshots.
+        const fetchStart = Date.now();
+
+        const extractTitle = (html: string): string => {
+          const match = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+          return (match?.[1] || "").replace(/\s+/g, " ").trim().slice(0, 200);
+        };
+
+        const response = await fetch(input.url, {
+          signal: context.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          },
+        });
+
+        if (!response.ok) {
+          return {
+            success: false,
+            output: null,
+            error: createError(
+              "BROWSE_ERROR",
+              `Remote browser data access is disabled. HTTP fetch failed: ${response.status} ${response.statusText}`,
+              response.status >= 500
+            ),
+            artifacts: [],
+            previews: [],
+            logs: [
+              {
+                level: "warn",
+                message: "Remote browser disabled by privacy settings; browse_url used HTTP fetch fallback.",
+                timestamp: new Date(),
+                data: { url: input.url, status: response.status },
+              },
+            ],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+
+        const htmlText = await response.text();
+        const html = htmlText.slice(0, 50000);
+
+        return {
+          success: true,
+          output: {
+            url: response.url || input.url,
+            title: extractTitle(html),
+            html,
+            timing: {
+              navigationMs: Date.now() - fetchStart,
+              renderMs: 0,
+            },
+            sessionId: undefined,
+            privacyFallback: true,
+          },
+          artifacts: [],
+          previews: [],
+          logs: [
+            {
+              level: "info",
+              message: "Remote browser disabled by privacy settings; browse_url used HTTP fetch fallback (no cookies/session, no screenshots).",
+              timestamp: new Date(),
+              data: { url: input.url },
+            },
+          ],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
       if (!sessionId) {
         sessionId = await browserWorker.createSession();
         createdSession = true;
@@ -2182,6 +2255,272 @@ import { extendedTools } from "./extendedTools";
 for (const tool of extendedTools) {
   toolRegistry.register(tool);
 }
+
+// Register computer use tools
+import { computerUseEngine } from "./computerUse/computerUseEngine";
+import { universalBrowserController } from "./computerUse/universalBrowserController";
+import { perfectPptGenerator } from "./computerUse/perfectPptGenerator";
+import { perfectDocumentGenerator } from "./computerUse/perfectDocumentGenerator";
+import { perfectExcelGenerator } from "./computerUse/perfectExcelGenerator";
+import { terminalController } from "./computerUse/terminalController";
+import { visionPipeline } from "./computerUse/visionPipeline";
+
+const computerUseCreateSessionSchema = z.object({
+  profileId: z.string().default("chrome-desktop").describe("Browser profile"),
+  url: z.string().optional().describe("Initial URL"),
+});
+
+const computerUseCreateSessionTool: ToolDefinition = {
+  name: "computer_use_create_session",
+  description: "Create a browser session for computer use (Chromium, Firefox, WebKit)",
+  inputSchema: computerUseCreateSessionSchema,
+  capabilities: ["long_running"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const sessionId = await universalBrowserController.createSession(input.profileId);
+      if (input.url) {
+        await universalBrowserController.navigate(sessionId, input.url);
+      }
+      return {
+        success: true,
+        output: { sessionId, profileId: input.profileId },
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("SESSION_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const computerUseAgenticSchema = z.object({
+  sessionId: z.string().describe("Browser session ID"),
+  goal: z.string().describe("Goal to accomplish autonomously"),
+  maxSteps: z.number().default(15).describe("Maximum autonomous steps"),
+});
+
+const computerUseAgenticTool: ToolDefinition = {
+  name: "computer_use_agentic_browse",
+  description: "Autonomous browser agent that accomplishes goals by navigating, clicking, typing, and extracting data automatically.",
+  inputSchema: computerUseAgenticSchema,
+  capabilities: ["long_running", "requires_network"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const result = await universalBrowserController.agenticNavigate(input.sessionId, input.goal, input.maxSteps);
+      return {
+        success: result.success,
+        output: { steps: result.steps, data: result.data, screenshotsCount: result.screenshots.length },
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("AGENTIC_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const generatePerfectPptSchema = z.object({
+  topic: z.string().describe("Presentation topic"),
+  slideCount: z.number().default(10).describe("Number of slides"),
+  template: z.string().default("corporate").describe("Template name"),
+  language: z.string().default("en").describe("Language code"),
+});
+
+const generatePerfectPptTool: ToolDefinition = {
+  name: "generate_perfect_ppt",
+  description: "Generate a professional PowerPoint with AI content, charts, speaker notes. 15 templates available.",
+  inputSchema: generatePerfectPptSchema,
+  capabilities: ["produces_artifacts", "writes_files"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const result = await perfectPptGenerator.generate({
+        topic: input.topic,
+        slideCount: input.slideCount,
+        template: input.template,
+        language: input.language,
+        includeSpeakerNotes: true,
+        includeCharts: true,
+      });
+      return {
+        success: true,
+        output: { fileName: result.fileName, filePath: result.filePath, slideCount: result.slideCount },
+        artifacts: [createArtifact("document", result.fileName, { path: result.filePath }, "application/vnd.openxmlformats-officedocument.presentationml.presentation")],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("PPT_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const generatePerfectDocSchema = z.object({
+  topic: z.string().describe("Document topic"),
+  type: z.string().default("report").describe("Document type: report, essay, proposal, etc."),
+  wordCount: z.number().default(2000).describe("Target word count"),
+  language: z.string().default("en").describe("Language code"),
+});
+
+const generatePerfectDocTool: ToolDefinition = {
+  name: "generate_perfect_doc",
+  description: "Generate a professional Word document with AI content, cover page, TOC, references.",
+  inputSchema: generatePerfectDocSchema,
+  capabilities: ["produces_artifacts", "writes_files"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const result = await perfectDocumentGenerator.generate({
+        topic: input.topic,
+        type: input.type as any,
+        wordCount: input.wordCount,
+        language: input.language,
+        includeTableOfContents: true,
+        includeCoverPage: true,
+      });
+      return {
+        success: true,
+        output: { fileName: result.fileName, filePath: result.filePath, wordCount: result.wordCount },
+        artifacts: [createArtifact("document", result.fileName, { path: result.filePath }, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("DOC_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const generatePerfectExcelSchema = z.object({
+  topic: z.string().describe("Spreadsheet topic"),
+  type: z.string().default("spreadsheet").describe("Type: spreadsheet, dashboard, budget, etc."),
+  rowCount: z.number().default(20).describe("Number of data rows"),
+  language: z.string().default("en").describe("Language code"),
+});
+
+const generatePerfectExcelTool: ToolDefinition = {
+  name: "generate_perfect_excel",
+  description: "Generate a professional Excel spreadsheet with AI data, formulas, conditional formatting, charts.",
+  inputSchema: generatePerfectExcelSchema,
+  capabilities: ["produces_artifacts", "writes_files"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const result = await perfectExcelGenerator.generate({
+        topic: input.topic,
+        type: input.type as any,
+        rowCount: input.rowCount,
+        language: input.language,
+        includeFormulas: true,
+        includeConditionalFormatting: true,
+        includePivotSummary: true,
+      });
+      return {
+        success: true,
+        output: { fileName: result.fileName, filePath: result.filePath, sheetCount: result.sheetCount, totalRows: result.totalRows },
+        artifacts: [createArtifact("document", result.fileName, { path: result.filePath }, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("EXCEL_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const terminalExecuteSchema = z.object({
+  command: z.string().describe("Shell command to execute"),
+  cwd: z.string().optional().describe("Working directory"),
+  timeout: z.number().default(30000).describe("Timeout in ms"),
+});
+
+const terminalExecuteRegistryTool: ToolDefinition = {
+  name: "terminal_execute",
+  description: "Execute a shell command via computer use terminal controller with safety guards.",
+  inputSchema: terminalExecuteSchema,
+  capabilities: ["executes_code", "long_running"],
+  execute: async (input): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const sid = terminalController.createSession(input.cwd);
+      const result = await terminalController.executeCommand(sid, { command: input.command, timeout: input.timeout });
+      return {
+        success: result.success,
+        output: { stdout: result.stdout.slice(0, 5000), stderr: result.stderr.slice(0, 2000), exitCode: result.exitCode, duration: result.duration },
+        artifacts: [],
+        previews: [{ type: "text" as const, content: (result.stdout || result.stderr).slice(0, 5000), title: "Terminal Output" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("TERMINAL_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+toolRegistry.register(computerUseCreateSessionTool);
+toolRegistry.register(computerUseAgenticTool);
+toolRegistry.register(generatePerfectPptTool);
+toolRegistry.register(generatePerfectDocTool);
+toolRegistry.register(generatePerfectExcelTool);
+toolRegistry.register(terminalExecuteRegistryTool);
 
 export {
   analyzeSpreadsheetSchema,

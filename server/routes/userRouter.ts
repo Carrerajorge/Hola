@@ -8,6 +8,7 @@ import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, users, chatSchedules, chats, sessions } from "@shared/schema";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { usageQuotaService } from "../services/usageQuotaService";
+import { invalidateUserPrivacySettingsCache } from "../services/privacyService";
 import { AuthenticatedRequest, getUserId } from "../types/express";
 import { validateBody } from "../middleware/validateRequest";
 import { z } from "zod";
@@ -1218,13 +1219,30 @@ export function createUserRouter() {
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const { trainingOptIn, remoteBrowserDataAccess, analyticsTracking, chatHistoryEnabled } = req.body;
+      if (
+        trainingOptIn === undefined &&
+        remoteBrowserDataAccess === undefined &&
+        analyticsTracking === undefined &&
+        chatHistoryEnabled === undefined
+      ) {
+        return res.status(400).json({ error: "No valid privacy fields provided" });
+      }
+
+      const existing = await storage.getUserSettings(id);
+      const currentPrivacy = {
+        trainingOptIn: false,
+        remoteBrowserDataAccess: false,
+        analyticsTracking: true,
+        chatHistoryEnabled: true,
+        ...(existing?.privacySettings || {}),
+      };
       const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
       const userAgent = req.headers['user-agent'] || undefined;
 
-      if (trainingOptIn !== undefined) {
+      if (trainingOptIn !== undefined && trainingOptIn !== currentPrivacy.trainingOptIn) {
         await storage.logConsent(id, 'training_opt_in', String(trainingOptIn), ipAddress, userAgent);
       }
-      if (remoteBrowserDataAccess !== undefined) {
+      if (remoteBrowserDataAccess !== undefined && remoteBrowserDataAccess !== currentPrivacy.remoteBrowserDataAccess) {
         await storage.logConsent(id, 'remote_browser_access', String(remoteBrowserDataAccess), ipAddress, userAgent);
       }
       if (analyticsTracking !== undefined) {
@@ -1244,6 +1262,7 @@ export function createUserRouter() {
         privacySettings: privacySettingsUpdates
       });
 
+      invalidateUserPrivacySettingsCache(id);
       res.json(settings);
     } catch (error: any) {
       console.error("Error updating privacy settings:", error);
@@ -1309,6 +1328,10 @@ export function createUserRouter() {
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
+      const links = await storage.getSharedLinks(id);
+      const link = links.find(l => l.id === linkId);
+      if (!link) return res.status(404).json({ error: "Shared link not found" });
+
       await storage.revokeSharedLink(linkId);
       res.json({ success: true });
     } catch (error: any) {
@@ -1324,6 +1347,10 @@ export function createUserRouter() {
 
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const links = await storage.getSharedLinks(id);
+      const existing = links.find(l => l.id === linkId);
+      if (!existing) return res.status(404).json({ error: "Shared link not found" });
 
       const link = await storage.rotateSharedLinkToken(linkId);
       res.json(link);
@@ -1342,6 +1369,10 @@ export function createUserRouter() {
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
 
       const { scope, permissions } = req.body;
+
+      const links = await storage.getSharedLinks(id);
+      const existing = links.find(l => l.id === linkId);
+      if (!existing) return res.status(404).json({ error: "Shared link not found" });
 
       const link = await storage.updateSharedLink(linkId, { scope, permissions });
       res.json(link);
@@ -1407,6 +1438,9 @@ export function createUserRouter() {
 
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const chat = await storage.getChat(chatId);
+      if (!chat || chat.userId !== id) return res.status(404).json({ error: "Chat not found" });
 
       await storage.unarchiveChat(chatId);
       res.json({ success: true });
@@ -1479,6 +1513,9 @@ export function createUserRouter() {
 
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+
+      const chat = await storage.getChat(chatId);
+      if (!chat || chat.userId !== id) return res.status(404).json({ error: "Chat not found" });
 
       await storage.restoreDeletedChat(chatId);
       res.json({ success: true });

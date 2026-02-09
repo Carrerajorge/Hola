@@ -12,21 +12,24 @@ interface Particle {
   life: number;
 }
 
-const COLORS = [
-  '#8B5CF6', // Purple
-  '#06B6D4', // Cyan
-  '#EC4899', // Pink
-  '#10B981', // Emerald
-  '#F59E0B', // Amber
-  '#3B82F6', // Blue
-  '#EF4444', // Red
-  '#6366F1', // Indigo
+const LIGHT_COLORS = [
+  "#0A0A0A",
+  "#18181B",
+  "#27272A",
+  "#3F3F46",
+];
+
+const DARK_COLORS = [
+  "#FAFAFA",
+  "#E4E4E7",
+  "#A1A1AA",
+  "#71717A",
 ];
 
 export function WelcomeAnimation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,6 +37,8 @@ export function WelcomeAnimation() {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    const palette = document.documentElement.classList.contains("dark") ? DARK_COLORS : LIGHT_COLORS;
 
     const resizeCanvas = () => {
       canvas.width = canvas.offsetWidth * window.devicePixelRatio;
@@ -52,7 +57,7 @@ export function WelcomeAnimation() {
         vx: (Math.random() - 0.5) * 2,
         vy: Math.random() * 3 + 1,
         size: Math.random() * 4 + 2,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        color: palette[Math.floor(Math.random() * palette.length)],
         alpha: Math.random() * 0.6 + 0.4,
         life: 1,
       };
@@ -135,20 +140,21 @@ export function WelcomeAnimation() {
       <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-6 px-4">
         {/* Animated Logo/Icon */}
         <div className="relative">
-          <div className="absolute inset-0 animate-ping opacity-20">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500" />
-          </div>
-          <div className="relative w-24 h-24 rounded-full bg-gradient-to-r from-purple-600 via-pink-500 to-cyan-400 flex items-center justify-center shadow-2xl shadow-purple-500/30 animate-pulse">
-            <Sparkles className="w-12 h-12 text-white" />
+          <div className="relative w-24 h-24 rounded-2xl border border-border bg-card flex items-center justify-center shadow-sm">
+            <div className="w-14 h-14 rounded-xl bg-foreground text-background flex items-center justify-center">
+              <Sparkles className="w-7 h-7" />
+            </div>
           </div>
         </div>
 
         {/* Welcome Text */}
         <div className="space-y-3">
-          <h1 className="text-3xl md:text-4xl font-bold">
-            <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent animate-gradient">
-              ¡Bienvenido a ILIAGPT!
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground">
+            ¡Bienvenido a{" "}
+            <span className="inline-flex items-baseline rounded-lg bg-muted px-2 py-0.5 font-bold">
+              ILIAGPT
             </span>
+            !
           </h1>
           <p className="text-muted-foreground text-lg max-w-md mx-auto">
             Tu asistente de IA más inteligente está listo para ayudarte
@@ -160,7 +166,7 @@ export function WelcomeAnimation() {
           {['Crear imágenes', 'Investigar', 'Programar', 'Analizar datos', 'Escribir documentos'].map((feature, idx) => (
             <span
               key={feature}
-              className="px-4 py-2 rounded-full text-sm font-medium bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 text-purple-300 hover:border-purple-500/40 transition-all duration-300"
+              className="px-4 py-2 rounded-full text-sm font-medium bg-muted/30 border border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors duration-200"
               style={{ animationDelay: `${idx * 100}ms` }}
             >
               {feature}
@@ -169,22 +175,8 @@ export function WelcomeAnimation() {
         </div>
 
         {/* Call to Action */}
-        <p className="text-muted-foreground/80 text-sm mt-4">
-          Escribe tu primera pregunta para comenzar ✨
-        </p>
+        <p className="text-muted-foreground/80 text-sm mt-4">Escribe tu primera pregunta para comenzar.</p>
       </div>
-
-      {/* CSS for gradient animation */}
-      <style>{`
-        @keyframes gradient {
-          0%, 100% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-        }
-        .animate-gradient {
-          background-size: 200% 200%;
-          animation: gradient 3s ease infinite;
-        }
-      `}</style>
     </div>
   );
 }

@@ -63,6 +63,7 @@ function ChatPageRedirect() {
   return <Home />;
 }
 const LoginPage = lazy(() => import("@/pages/login"));
+const LoginApprovePage = lazy(() => import("@/pages/login-approve"));
 const SignupPage = lazy(() => import("@/pages/signup"));
 const LandingPage = lazy(() => import("@/pages/landing"));
 const NotFound = lazy(() => import("@/pages/not-found"));
@@ -87,6 +88,7 @@ const BusinessPage = lazy(() => import("@/pages/business"));
 const DownloadPage = lazy(() => import("@/pages/download"));
 const PowerPage = lazy(() => import("@/pages/power"));
 const MemoryPage = lazy(() => import("@/pages/memory"));
+const ComputerUsePage = lazy(() => import("@/pages/computer-use"));
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -200,6 +202,7 @@ function Router() {
             <Route path="/chat/:id" component={ChatPageRedirect} />
             <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
+            <Route path="/login/approve" component={LoginApprovePage} />
             <Route path="/signup" component={SignupPage} />
             <Route path="/profile" component={ProfilePage} />
             <Route path="/billing" component={BillingPage} />
@@ -221,6 +224,7 @@ function Router() {
             <Route path="/business" component={BusinessPage} />
             <Route path="/download" component={DownloadPage} />
             <Route path="/power" component={PowerPage} />
+            <Route path="/computer-use" component={ComputerUsePage} />
             <Route component={NotFound} />
           </Switch>
         </main>

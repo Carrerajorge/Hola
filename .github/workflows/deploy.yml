@@ -1,0 +1,162 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_ci:
+        description: 'Skip CI checks and deploy directly'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Defaults: public SSH endpoint (port 8022).
+  # GitHub runners cannot reach private Tailscale IPs without extra setup.
+  VPS_HOST: 69.62.98.126
+  VPS_USER: root
+  VPS_PORT: "8022"
+  DEPLOY_PATH: /opt/hola
+  COMPOSE_PROJECT: iliagpt
+
+jobs:
+  # ── CI Gate ─────────────────────────────────────────────
+  ci:
+    name: CI Checks
+    if: ${{ github.event.inputs.skip_ci != 'true' }}
+    uses: ./.github/workflows/ci.yml
+
+  # ── Deploy ──────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: [ci]
+    if: always() && (needs.ci.result == 'success' || github.event.inputs.skip_ci == 'true')
+    timeout-minutes: 15
+    # Resolve secrets at the job level (workflow-level `env` + reusable workflows can be finicky).
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+    environment:
+      name: production
+      url: https://iliagpt.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Best-effort: StrictHostKeyChecking=no is used below, so failure to keyscan
+          # should not hard-fail the workflow.
+          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy to VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+            set -euo pipefail
+
+            echo "═══════════════════════════════════════════"
+            echo "  ILIAGPT Production Deploy"
+            echo "  $(date '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "═══════════════════════════════════════════"
+
+            DEPLOY_PATH="/opt/hola"
+            COMPOSE_FILE="docker-compose.prod.yml"
+            PROJECT="iliagpt"
+
+            cd "$DEPLOY_PATH"
+
+            # ── Load SANDBOX_RUNNER_TOKEN for compose variable expansion ──
+            # docker compose only expands ${VARS} from the process environment (and .env),
+            # not from `env_file:`. Without this, runner auth tokens end up empty.
+            if [ -f .env.production ]; then
+              export SANDBOX_RUNNER_TOKEN="$(grep '^SANDBOX_RUNNER_TOKEN=' .env.production | head -n1 | cut -d= -f2- || true)"
+              if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
+                export SANDBOX_RUNNER_TOKEN="$(openssl rand -hex 32)"
+                if grep -q '^SANDBOX_RUNNER_TOKEN=' .env.production; then
+                  sed -i "s/^SANDBOX_RUNNER_TOKEN=.*/SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}/" .env.production
+                else
+                  echo "SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}" >> .env.production
+                fi
+              fi
+            fi
+
+            # ── Pull latest code ──
+            echo "▸ Pulling latest code..."
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            # ── Build new images ──
+            echo "▸ Building Docker images..."
+            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" build --no-cache app worker sandbox-runner
+
+            # ── Stop old containers (keep DB + Redis running) ──
+            echo "▸ Rolling update: stopping app containers..."
+            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
+            sleep 5
+
+            # ── Start updated containers ──
+            echo "▸ Starting updated containers..."
+            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d
+
+            # ── Wait for health check ──
+            echo "▸ Waiting for health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://127.0.0.1:5000/health > /dev/null 2>&1; then
+                echo "✓ App is healthy!"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "✗ Health check failed after 30 attempts"
+                docker compose -p "$PROJECT" -f "$COMPOSE_FILE" logs --tail=50 app
+                exit 1
+              fi
+              echo "  Attempt $i/30 - waiting..."
+              sleep 5
+            done
+
+            # ── Cleanup old images ──
+            echo "▸ Cleaning up old images..."
+            docker image prune -f
+
+            # ── Status report ──
+            echo ""
+            echo "═══════════════════════════════════════════"
+            echo "  ✓ Deploy complete!"
+            echo "═══════════════════════════════════════════"
+            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" ps
+            echo ""
+            curl -s http://127.0.0.1:5000/health || true
+          DEPLOY_SCRIPT
+
+      - name: Verify production
+        run: |
+          echo "▸ Verifying https://iliagpt.com..."
+          sleep 10
+          STATUS=$(curl -sI --max-time 15 https://iliagpt.com | head -1 || echo "UNREACHABLE")
+          echo "Response: $STATUS"
+          if echo "$STATUS" | grep -qE "200|301|302"; then
+            echo "✓ Production site is live!"
+          else
+            echo "⚠ Warning: Site may not be responding correctly"
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment to production FAILED. Check the logs above."
+          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p iliagpt -f docker-compose.prod.yml up -d --build'"

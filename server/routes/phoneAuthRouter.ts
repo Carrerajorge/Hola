@@ -4,6 +4,8 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import { buildSessionUserFromDbUser } from "../lib/sessionUser";
+import { computeMfaForUser, startMfaLoginChallenge } from "../services/mfaLogin";
 
 export const phoneAuthRouter = Router();
 
@@ -205,12 +207,59 @@ phoneAuthRouter.post("/verify", async (req, res) => {
         .set({ phoneVerified: "true", lastLoginAt: new Date() })
         .where(eq(users.id, user.id));
     }
-    
+
+    // MFA gate: require TOTP and/or push approval if enabled.
+    const mfa = await computeMfaForUser({ userId: user.id, excludeSid: req.sessionID || null });
+    if (mfa.requiresMfa) {
+      try {
+        const challenge = await startMfaLoginChallenge({
+          req,
+          userId: user.id,
+          email: user.email,
+          totpEnabled: mfa.totpEnabled,
+          pushTargets: mfa.pushTargets,
+          ttlMs: 5 * 60 * 1000,
+        });
+
+        const message = challenge.methods.push && challenge.methods.totp
+          ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+          : challenge.methods.push
+            ? "Aprueba el inicio de sesión en tu dispositivo de confianza."
+            : "Ingresa tu código 2FA.";
+
+        return res.json({
+          success: false,
+          mfaRequired: true,
+          methods: challenge.methods,
+          approvalId: challenge.approvalId,
+          message,
+        });
+      } catch (e: any) {
+        if (e?.code === "PUSH_DELIVERY_FAILED") {
+          return res.status(503).json({
+            success: false,
+            message: "No se pudo enviar la notificación push. Intenta de nuevo.",
+            code: "PUSH_DELIVERY_FAILED",
+          });
+        }
+        console.error("[PhoneAuth] Failed to start MFA challenge:", e?.message || e);
+        return res.status(500).json({ success: false, message: "No se pudo iniciar el flujo MFA." });
+      }
+    }
+
     // Create session
-    (req as any).login(user, (err: any) => {
+    const sessionUser = buildSessionUserFromDbUser(user);
+    (req as any).login(sessionUser, (err: any) => {
       if (err) {
         console.error("[PhoneAuth] Login error:", err);
         return res.status(500).json({ success: false, message: "Error al iniciar sesión" });
+      }
+
+      // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+      if ((req as any).session) {
+        (req as any).session.authUserId = user.id;
+        (req as any).session.passport = (req as any).session.passport || {};
+        (req as any).session.passport.user = sessionUser;
       }
       
       storage.createAuditLog({
@@ -219,9 +268,30 @@ phoneAuthRouter.post("/verify", async (req, res) => {
         userId: user.id,
         details: { phone: normalizedPhone.slice(-4) }
       });
-      
-      res.json({ 
-        success: true, 
+
+      const sess = (req as any).session;
+      if (sess?.save) {
+        sess.save((saveErr: any) => {
+          if (saveErr) {
+            console.error("[PhoneAuth] Session save error:", saveErr);
+            return res.status(500).json({ success: false, message: "Error al guardar sesión" });
+          }
+          res.json({
+            success: true,
+            message: "Inicio de sesión exitoso",
+            user: {
+              id: user.id,
+              username: user.username,
+              phone: user.phone,
+              plan: user.plan
+            }
+          });
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
         message: "Inicio de sesión exitoso",
         user: {
           id: user.id,

@@ -300,8 +300,44 @@ export function useStreamChat(deps: StreamChatDeps) {
                 }
               }
 
-              // Handle AI state changes from events
-              if (currentEventType === "production_start") {
+              // Handle AI state changes from events.
+              // Guard: skip state updates if the stream was aborted or chat switched
+              // to avoid setting stale states on a dead stream.
+              const isStale = combinedSignal.aborted ||
+                (chatId && activeChatIdRef.current !== chatId);
+
+              if (!isStale && currentEventType === "thinking") {
+                // Server is doing heavy I/O (search, context load) — keep thinking state
+                setAiState("thinking");
+                onAiStateChange?.("thinking");
+
+                // Surface thinking step details (e.g. "Buscando fuentes…") so the
+                // UI can show progress instead of a generic spinner.
+                if (data.step && data.message) {
+                  setAiProcessSteps?.((prev: any[]) => {
+                    const existing = prev.find((s: any) => s.id === data.step);
+                    if (existing) return prev;
+                    return [...prev, {
+                      id: data.step,
+                      step: data.step,
+                      title: data.message,
+                      status: "pending",
+                    }];
+                  });
+                }
+              }
+
+              if (!isStale && currentEventType === "context") {
+                // Enriched metadata arrived — switch to responding.
+                // Mark any pending thinking steps as done.
+                setAiState("responding");
+                onAiStateChange?.("responding");
+                setAiProcessSteps?.((prev: any[]) =>
+                  prev.map((s: any) => ({ ...s, status: "done" }))
+                );
+              }
+
+              if (!isStale && currentEventType === "production_start") {
                 setAiState("agent_working");
                 onAiStateChange?.("agent_working");
               }

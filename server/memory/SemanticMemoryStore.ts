@@ -189,7 +189,9 @@ class EmbeddingProvider {
 export class SemanticMemoryStore {
     private embeddingProvider = new EmbeddingProvider();
     private memoryCache = new Map<string, MemoryChunk[]>(); // In-memory cache for performance
+    private memoryCacheTTL = new Map<string, number>(); // userId -> timestamp of last DB sync
     private initialized = false;
+    private static CACHE_MAX_AGE_MS = 30_000; // 30 seconds
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
@@ -198,10 +200,20 @@ export class SemanticMemoryStore {
     }
 
     /**
+     * Check if user cache is still fresh
+     */
+    private isCacheFresh(userId: string): boolean {
+        const lastSync = this.memoryCacheTTL.get(userId);
+        if (!lastSync) return false;
+        return (Date.now() - lastSync) < SemanticMemoryStore.CACHE_MAX_AGE_MS;
+    }
+
+    /**
      * Load user memories from database into cache
      */
     private async loadUserMemories(userId: string): Promise<MemoryChunk[]> {
-        if (this.memoryCache.has(userId)) {
+        // Only use cache if it's fresh (not stale)
+        if (this.memoryCache.has(userId) && this.isCacheFresh(userId)) {
             return this.memoryCache.get(userId)!;
         }
 
@@ -228,6 +240,7 @@ export class SemanticMemoryStore {
             }));
 
             this.memoryCache.set(userId, chunks);
+            this.memoryCacheTTL.set(userId, Date.now());
             return chunks;
         } catch (error) {
             console.error("[SemanticMemoryStore] Error loading from DB:", error);
@@ -317,9 +330,8 @@ export class SemanticMemoryStore {
             console.error("[SemanticMemoryStore] Error inserting into DB:", error);
         }
 
-        // Add to cache
-        userChunks.push(chunk);
-        this.memoryCache.set(userId, userChunks);
+        // Invalidate cache to force reload from DB on next access
+        this.clearCache(userId);
 
         console.log(`[SemanticMemoryStore] Stored memory: ${chunk.id} (${type})`);
         return chunk;
@@ -392,7 +404,24 @@ export class SemanticMemoryStore {
 
         // Sort by score descending and limit
         results.sort((a, b) => b.score - a.score);
-        return results.slice(0, limit);
+        const topResults = results.slice(0, limit);
+
+        // Persist access count updates to DB for matched memories
+        const matchedIds = topResults.map(r => r.chunk.id);
+        if (matchedIds.length > 0) {
+            try {
+                await db.update(semanticMemoryChunks)
+                    .set({
+                        lastAccessedAt: new Date(),
+                        accessCount: sql`${semanticMemoryChunks.accessCount} + 1`,
+                    })
+                    .where(inArray(semanticMemoryChunks.id, matchedIds));
+            } catch (error) {
+                console.warn("[SemanticMemoryStore] Error persisting access counts:", error);
+            }
+        }
+
+        return topResults;
     }
 
     /**
@@ -457,7 +486,7 @@ export class SemanticMemoryStore {
     async forget(userId: string, memoryId: string): Promise<boolean> {
         const chunks = await this.loadUserMemories(userId);
         const index = chunks.findIndex(c => c.id === memoryId);
-        
+
         if (index >= 0) {
             // Remove from database
             try {
@@ -466,11 +495,10 @@ export class SemanticMemoryStore {
             } catch (error) {
                 console.error("[SemanticMemoryStore] Error deleting from DB:", error);
             }
-            
-            // Remove from cache
-            chunks.splice(index, 1);
-            this.memoryCache.set(userId, chunks);
-            
+
+            // Invalidate cache to force reload from DB
+            this.clearCache(userId);
+
             console.log(`[SemanticMemoryStore] Deleted memory: ${memoryId}`);
             return true;
         }
@@ -522,10 +550,10 @@ export class SemanticMemoryStore {
 
             // Extract explicit facts
             const factPatterns = [
-                /(?:me llamo|my name is|soy)\s+(\w+)/i,
-                /(?:trabajo en|i work at)\s+(.+?)(?:\.|,|$)/i,
-                /(?:vivo en|i live in)\s+(.+?)(?:\.|,|$)/i,
-                /(?:mi email es|my email is)\s+([\w@.]+)/i
+                /(?:me llamo|my name is|soy)\s+([^\n\r\t.,]{1,40})/i,
+                /(?:trabajo en|i work at)\s+([^\n\r\t.,]{1,120})/i,
+                /(?:vivo en|i live in)\s+([^\n\r\t.,]{1,120})/i,
+                /(?:mi email es|my email is)\s+([\w@.]{3,200})/i
             ];
 
             for (const pattern of factPatterns) {
@@ -541,9 +569,9 @@ export class SemanticMemoryStore {
 
             // Extract preferences
             const prefPatterns = [
-                /(?:prefiero|i prefer|me gusta)\s+(.+?)(?:\.|,|$)/i,
-                /(?:siempre quiero|always want)\s+(.+?)(?:\.|,|$)/i,
-                /(?:no me gusta|i don't like)\s+(.+?)(?:\.|,|$)/i
+                /(?:prefiero|i prefer|me gusta)\s+([^\n\r\t.,]{1,160})/i,
+                /(?:siempre quiero|always want)\s+([^\n\r\t.,]{1,160})/i,
+                /(?:no me gusta|i don't like)\s+([^\n\r\t.,]{1,160})/i
             ];
 
             for (const pattern of prefPatterns) {
@@ -559,9 +587,9 @@ export class SemanticMemoryStore {
 
             // Extract instructions
             const instrPatterns = [
-                /(?:recuerda que|remember that)\s+(.+?)(?:\.|$)/i,
-                /(?:siempre|always)\s+(.+?)(?:\.|$)/i,
-                /(?:nunca|never)\s+(.+?)(?:\.|$)/i
+                /(?:recuerda que|remember that)\s+([^\n\r\t.]{1,240})/i,
+                /(?:siempre|always)\s+([^\n\r\t.]{1,240})/i,
+                /(?:nunca|never)\s+([^\n\r\t.]{1,240})/i
             ];
 
             for (const pattern of instrPatterns) {
@@ -604,11 +632,11 @@ export class SemanticMemoryStore {
         return {
             totalMemories: chunks.length,
             byType,
-            avgConfidence: chunks.length > 0 ? totalConfidence / chunks.length : 0,
-            embeddingProvider: process.env.GEMINI_API_KEY 
-                ? "gemini" 
-                : process.env.OPENAI_API_KEY 
-                    ? "openai" 
+            avgConfidence: chunks.length > 0 ? Math.round((totalConfidence / chunks.length) * 100) : 0,
+            embeddingProvider: process.env.GEMINI_API_KEY
+                ? "gemini"
+                : process.env.OPENAI_API_KEY
+                    ? "openai"
                     : "simple"
         };
     }
@@ -618,6 +646,7 @@ export class SemanticMemoryStore {
      */
     clearCache(userId: string): void {
         this.memoryCache.delete(userId);
+        this.memoryCacheTTL.delete(userId);
     }
 
     // ============================================================================

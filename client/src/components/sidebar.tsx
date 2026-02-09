@@ -36,7 +36,8 @@ import {
   Pin,
   Download,
   MoveRight,
-  Brain
+  Brain,
+  Terminal
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -658,7 +659,7 @@ export function Sidebar({
             className={cn(
               "h-2.5 w-2.5 rounded-full",
               waStatus.state === 'connected' && 'bg-green-500',
-              (waStatus.state === 'connecting' || waStatus.state === 'qr') && 'bg-amber-500',
+              (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500',
               waStatus.state === 'disconnected' && 'bg-red-500'
             )}
             title={`WhatsApp: ${waStatus.state}`}
@@ -673,6 +674,15 @@ export function Sidebar({
         >
           <Code className="h-4 w-4" />
           Codex
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50/50"
+          onClick={() => setLocation("/computer-use")}
+          data-testid="button-computer-use"
+        >
+          <Terminal className="h-4 w-4" />
+          Computer Use
         </Button>
       </div>
 

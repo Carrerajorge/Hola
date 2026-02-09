@@ -32,6 +32,8 @@ import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
+import calendarOAuthRouter from "./routes/calendarOAuthRouter";
+import outlookOAuthRouter from "./routes/outlookOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
@@ -44,6 +46,8 @@ import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
 import { createAgentModeRouter } from "./routes/agentRoutes";
+import { createOrchestratorRouter } from "./routes/orchestratorRoutes";
+import { registerAgenticTools } from "./agent/orchestrator/agenticToolRegistrations";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
@@ -64,7 +68,12 @@ import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
+import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
+import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
+import { createSuperIntelligenceRouter } from "./routes/superIntelligenceRouter";
+import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
+import { initializeSuperIntelligence } from "./services/superIntelligence";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
@@ -92,6 +101,9 @@ import { memoryRouter } from "./routes/memoryRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
+import { createSecurityRouter } from "./routes/securityRouter";
+import { createMfaRouter } from "./routes/mfaRouter";
+import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
@@ -107,6 +119,10 @@ import { compression } from "./middleware/compression";
 
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
+import computerUseRouter from "./routes/computerUseRouter";
+import { createBrowserControlRouter } from "./routes/browserControlRouter";
+import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
+import { createWorkflowRouter } from "./routes/workflowRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -129,18 +145,64 @@ export async function registerRoutes(
       prompt: "consent select_account",
     }));
     app.get("/api/auth/google/callback",
-      passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=google_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Google callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Google login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -154,18 +216,64 @@ export async function registerRoutes(
   if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
     app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
     app.get("/api/auth/microsoft/callback",
-      passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=microsoft_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Microsoft callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Microsoft login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -178,18 +286,64 @@ export async function registerRoutes(
   if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
     app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
     app.get("/api/auth/auth0/callback",
-      passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
       (req, res, next) => {
-        if (req.session) {
-          req.session.save((err) => {
-            if (err) {
-              return next(err);
+        passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }, (err: any, user: any) => {
+          (async () => {
+            if (err || !user) {
+              return res.redirect("/login?error=auth0_failed");
             }
-            res.redirect("/?auth=success");
-          });
-          return;
-        }
-        res.redirect("/?auth=success");
+
+            const userId = user?.claims?.sub || user?.id;
+            const email = user?.claims?.email || user?.email || null;
+            if (!userId) {
+              return res.redirect("/login?error=login_failed");
+            }
+
+            const mfa = await computeMfaForUser({ userId, excludeSid: req.sessionID || null });
+            if (mfa.requiresMfa) {
+              try {
+                await startMfaLoginChallenge({
+                  req,
+                  userId,
+                  email,
+                  totpEnabled: mfa.totpEnabled,
+                  pushTargets: mfa.pushTargets,
+                  ttlMs: 5 * 60 * 1000,
+                  sessionUser: user,
+                });
+                return res.redirect("/login?mfa=1");
+              } catch (e: any) {
+                console.warn("[Auth] Auth0 callback MFA failed:", e?.message || e);
+                return res.redirect("/login?error=login_failed");
+              }
+            }
+
+            return (req as any).logIn(user, (loginErr: any) => {
+              if (loginErr) {
+                console.error("[Auth] Auth0 login error:", loginErr);
+                return res.redirect("/login?error=login_failed");
+              }
+
+              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+              if ((req as any).session) {
+                (req as any).session.authUserId = userId;
+                (req as any).session.passport = (req as any).session.passport || {};
+                (req as any).session.passport.user = user;
+              }
+
+              const sess = (req as any).session;
+              if (sess?.save) {
+                sess.save((saveErr: any) => {
+                  if (saveErr) return next(saveErr);
+                  res.redirect("/?auth=success");
+                });
+                return;
+              }
+
+              res.redirect("/?auth=success");
+            });
+          })().catch(next);
+        })(req, res, next);
       }
     );
   } else {
@@ -315,6 +469,8 @@ export async function registerRoutes(
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
+  app.use("/api/oauth/google/calendar", calendarOAuthRouter);
+  app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
 
@@ -401,13 +557,19 @@ export async function registerRoutes(
   app.use("/api/spreadsheet", createSpreadsheetRouter());
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
+  app.use("/api/orchestrator", createOrchestratorRouter());
+
+  // Register agentic tools (browser, research, documents, terminal)
+  registerAgenticTools();
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
   
   // New routes from 8H plan
   app.use("/api/templates", templatesRouter);
   app.use("/api/webhooks", webhooksRouter);
+  app.use("/api/auth/mfa", createMfaRouter());
   app.use("/api/2fa", twoFactorRouter);
+  app.use("/api/security", createSecurityRouter());
   app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/memory", memoryRouter);
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
@@ -433,6 +595,20 @@ export async function registerRoutes(
   app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
+  app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
+
+  // SuperIntelligence System
+  app.use("/api/audit", createAuditDashboardRouter());
+  app.use("/api/super-intelligence", createSuperIntelligenceRouter());
+  app.use(auditMiddleware); // Capture metrics for all requests
+
+  // ===== Computer Use / Agentic Control =====
+  app.use("/api/computer-use", computerUseRouter);
+
+  // ===== Browser & Terminal Control =====
+  app.use("/api/browser-control", createBrowserControlRouter());
+  app.use("/api/terminal", createTerminalControlRouter());
+  app.use("/api/workflows", createWorkflowRouter());
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
@@ -449,6 +625,19 @@ export async function registerRoutes(
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
   }).catch(err => {
     console.error("[AgentSystem] Initialization failed:", err.message);
+  });
+
+  // Initialize SuperIntelligence System (includes all phases)
+  initializeSuperIntelligence().then((status) => {
+    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
+  }).catch(err => {
+    console.error("[SuperIntelligence] System initialization failed:", err.message);
+    // Fall back to just audit system
+    initializeAuditSystem().then(() => {
+      console.log("[SuperIntelligence] Audit System initialized (fallback)");
+    }).catch(e => {
+      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+    });
   });
 
   // ===== Simple Tools & Agents Endpoints =====
@@ -1393,6 +1582,49 @@ export async function registerRoutes(
           clients.delete(ws);
           if (clients.size === 0) {
             browserClients.delete(subscribedSessionId);
+          }
+        }
+      }
+    });
+  });
+
+  // ===== Terminal WebSocket =====
+  const terminalWss = new WebSocketServer({ server: httpServer, path: "/ws/terminal" });
+
+  createAuthenticatedWebSocketHandler(terminalWss, true, (ws: AuthenticatedWebSocket) => {
+    let subscribedSessionId: string | null = null;
+
+    ws.on("message", (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+
+        if (data.type === "subscribe" && data.sessionId) {
+          subscribedSessionId = data.sessionId;
+          if (!terminalClients.has(data.sessionId)) {
+            terminalClients.set(data.sessionId, new Set());
+          }
+          terminalClients.get(data.sessionId)!.add(ws);
+          ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
+        } else if (data.type === "input" && subscribedSessionId) {
+          // Forward input to terminal session (for interactive commands)
+          ws.send(JSON.stringify({
+            type: "ack",
+            sessionId: subscribedSessionId,
+            timestamp: Date.now(),
+          }));
+        }
+      } catch (e) {
+        console.error("Terminal WS message parse error:", e);
+      }
+    });
+
+    ws.on("close", () => {
+      if (subscribedSessionId) {
+        const clients = terminalClients.get(subscribedSessionId);
+        if (clients) {
+          clients.delete(ws);
+          if (clients.size === 0) {
+            terminalClients.delete(subscribedSessionId);
           }
         }
       }

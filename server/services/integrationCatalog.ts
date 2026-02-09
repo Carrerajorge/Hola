@@ -104,6 +104,101 @@ export const DEFAULT_INTEGRATION_PROVIDERS: Array<{
     category: "productivity",
     isActive: "true",
   },
+  {
+    id: "gmail",
+    name: "Gmail",
+    description: "Enviar, leer y gestionar correos electrónicos",
+    iconUrl: "https://ssl.gstatic.com/ui/v1/icons/mail/rfr/gmail.ico",
+    authType: "oauth2",
+    authConfig: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.modify",
+      ],
+    },
+    category: "communication",
+    isActive: "true",
+  },
+  {
+    id: "google_calendar",
+    name: "Google Calendar",
+    description: "Sincroniza eventos, crea reuniones y gestiona tu agenda",
+    iconUrl: "https://ssl.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_31_2x.png",
+    authType: "oauth2",
+    authConfig: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+      ],
+    },
+    category: "productivity",
+    isActive: "true",
+  },
+  {
+    id: "outlook",
+    name: "Outlook Mail",
+    description: "Conecta tu correo de Microsoft para leer y enviar emails",
+    iconUrl: "https://res.cdn.office.net/assets/mail/pwa/v1/pngs/outlook_48x48.png",
+    authType: "oauth2",
+    authConfig: {
+      authUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      scopes: [
+        "https://graph.microsoft.com/Mail.Read",
+        "https://graph.microsoft.com/Mail.Send",
+      ],
+    },
+    category: "communication",
+    isActive: "true",
+  },
+  {
+    id: "outlook_calendar",
+    name: "Outlook Calendar",
+    description: "Sincroniza tu calendario de Microsoft y gestiona tus eventos",
+    iconUrl: "https://res.cdn.office.net/assets/mail/pwa/v1/pngs/outlook_48x48.png",
+    authType: "oauth2",
+    authConfig: {
+      authUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      scopes: [
+        "https://graph.microsoft.com/Calendars.ReadWrite",
+        "https://graph.microsoft.com/Calendars.Read",
+      ],
+    },
+    category: "productivity",
+    isActive: "true",
+  },
+  {
+    id: "google_forms",
+    name: "Google Forms",
+    description: "Crea y gestiona formularios, ve respuestas en tiempo real",
+    iconUrl: "https://ssl.gstatic.com/docs/spreadsheets/forms/favicon3.ico",
+    authType: "oauth2",
+    authConfig: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      scopes: ["https://www.googleapis.com/auth/forms.body.readonly"],
+    },
+    category: "productivity",
+    isActive: "true",
+  },
+  {
+    id: "whatsapp",
+    name: "WhatsApp",
+    description: "Envía y recibe mensajes de WhatsApp",
+    iconUrl: "https://static.whatsapp.net/rsrc.php/v3/y7/r/DSxOAUB0raA.png",
+    authType: "custom",
+    authConfig: {
+      connectionType: "qr_code",
+    },
+    category: "communication",
+    isActive: "true",
+  },
 ];
 
 export const DEFAULT_INTEGRATION_TOOLS: Array<{
@@ -246,6 +341,152 @@ export const DEFAULT_INTEGRATION_TOOLS: Array<{
     confirmationRequired: "false",
     isActive: "true",
   },
+  // Gmail tools
+  {
+    id: "gmail:read_emails",
+    providerId: "gmail",
+    name: "Leer correos",
+    description: "Lee los correos electrónicos del usuario",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "gmail:send_email",
+    providerId: "gmail",
+    name: "Enviar correo",
+    description: "Envía un correo electrónico",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.send"],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  {
+    id: "gmail:search_emails",
+    providerId: "gmail",
+    name: "Buscar correos",
+    description: "Busca correos por criterios",
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  // Google Calendar tools
+  {
+    id: "google_calendar:list_events",
+    providerId: "google_calendar",
+    name: "Listar eventos",
+    description: "Lista los eventos del calendario",
+    requiredScopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "google_calendar:create_event",
+    providerId: "google_calendar",
+    name: "Crear evento",
+    description: "Crea un nuevo evento en el calendario",
+    requiredScopes: ["https://www.googleapis.com/auth/calendar.events"],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  {
+    id: "google_calendar:find_free_slots",
+    providerId: "google_calendar",
+    name: "Buscar horarios libres",
+    description: "Encuentra horarios disponibles para reuniones",
+    requiredScopes: ["https://www.googleapis.com/auth/calendar.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  // Outlook Mail tools
+  {
+    id: "outlook:read_emails",
+    providerId: "outlook",
+    name: "Leer correos",
+    description: "Lee los correos de Outlook",
+    requiredScopes: ["https://graph.microsoft.com/Mail.Read"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "outlook:send_email",
+    providerId: "outlook",
+    name: "Enviar correo",
+    description: "Envía un correo desde Outlook",
+    requiredScopes: ["https://graph.microsoft.com/Mail.Send"],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  // Outlook Calendar tools
+  {
+    id: "outlook_calendar:list_events",
+    providerId: "outlook_calendar",
+    name: "Listar eventos",
+    description: "Lista los eventos del calendario de Outlook",
+    requiredScopes: ["https://graph.microsoft.com/Calendars.Read"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "outlook_calendar:create_event",
+    providerId: "outlook_calendar",
+    name: "Crear evento",
+    description: "Crea un nuevo evento en el calendario de Outlook",
+    requiredScopes: ["https://graph.microsoft.com/Calendars.ReadWrite"],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  // Google Forms tools
+  {
+    id: "google_forms:list_forms",
+    providerId: "google_forms",
+    name: "Listar formularios",
+    description: "Lista los formularios del usuario",
+    requiredScopes: ["https://www.googleapis.com/auth/forms.body.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "google_forms:get_responses",
+    providerId: "google_forms",
+    name: "Ver respuestas",
+    description: "Obtiene las respuestas de un formulario",
+    requiredScopes: ["https://www.googleapis.com/auth/forms.body.readonly"],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  // WhatsApp tools
+  {
+    id: "whatsapp:send_message",
+    providerId: "whatsapp",
+    name: "Enviar mensaje",
+    description: "Envía un mensaje de WhatsApp",
+    requiredScopes: [],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  {
+    id: "whatsapp:read_messages",
+    providerId: "whatsapp",
+    name: "Leer mensajes",
+    description: "Lee los mensajes recientes de WhatsApp",
+    requiredScopes: [],
+    dataAccessLevel: "read",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
 ];
 
 export async function seedIntegrationCatalog(): Promise<SeedResult> {
@@ -273,12 +514,7 @@ export async function seedIntegrationCatalog(): Promise<SeedResult> {
 }
 
 export async function ensureIntegrationCatalogSeeded(): Promise<SeedResult> {
-  const anyProvider = await db.select({ id: integrationProviders.id }).from(integrationProviders).limit(1);
-  if (anyProvider.length > 0) {
-    const providersTotal = (await db.select({ id: integrationProviders.id }).from(integrationProviders)).length;
-    const toolsTotal = (await db.select({ id: integrationTools.id }).from(integrationTools)).length;
-    return { insertedProviders: 0, insertedTools: 0, providersTotal, toolsTotal };
-  }
+  // Always upsert to ensure new providers/tools are added when the catalog grows
   return seedIntegrationCatalog();
 }
 

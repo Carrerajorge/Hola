@@ -16,6 +16,9 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000, // Fail fast
   allowExitOnIdle: false,
   application_name: 'iliagpt_server_write', // Tag connections for PG logs
+  // Ensure predictable table resolution for queries/migrations that don't schema-qualify.
+  // Prevents runtime errors like: relation "chat_schedules" does not exist
+  options: '-c search_path=public',
 });
 
 // Read Replica Pool (Optional)
@@ -27,6 +30,7 @@ const poolRead = env.DATABASE_READ_URL ? new Pool({
   connectionTimeoutMillis: 5000,
   allowExitOnIdle: false,
   application_name: 'iliagpt_server_read',
+  options: '-c search_path=public',
 }) : pool; // Fallback to primary pool if no read replica
 
 pool.on('error', (err: any) => {

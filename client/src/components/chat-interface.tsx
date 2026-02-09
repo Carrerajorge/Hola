@@ -146,6 +146,7 @@ import { SyncStatusIndicator } from "./sync-status-indicator";
 import { ProductionProgress } from "@/components/production-progress";
 import { AiProcessStep } from "./chat-interface/types";
 import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
+import { EditorErrorBoundary } from "@/components/error-boundaries";
 import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
 import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
 import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
@@ -300,7 +301,7 @@ interface UploadedFile {
 
 function isAnalyzableFile(filename: string): boolean {
   const ext = filename.toLowerCase().split('.').pop();
-  return ['xlsx', 'xls', 'csv', 'pdf', 'docx'].includes(ext || '');
+  return ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx'].includes(ext || '');
 }
 
 async function triggerDocumentAnalysis(
@@ -484,6 +485,7 @@ export function ChatInterface({
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
+  const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">("auto");
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
   // DOCX Generation State - for blank page with progress overlay
@@ -653,9 +655,13 @@ export function ChatInterface({
     // 2. Not transitioning from null to pending (new chat creation)
     // 3. Not transitioning from pending to confirmed chatId (same chat)
     if (!isInitialRender && !isNewChatCreation && !isSameChatTransition) {
-      // This is a real chat switch - clear optimistic messages
-      chatLogger.debug("Clearing optimistic messages (real chat switch)");
+      // This is a real chat switch - clear optimistic messages and pending uploads
+      chatLogger.debug("Clearing optimistic messages and pending uploads (real chat switch)");
       setOptimisticMessages([]);
+      // Clear uploaded files so they don't bleed into the new chat
+      setUploadedFiles([]);
+      // Discard pending upload tracking (polling will self-terminate via stillTracked check)
+      pendingUploadsRef.current.clear();
     } else {
       chatLogger.debug("Keeping optimistic messages");
     }
@@ -1403,6 +1409,15 @@ export function ChatInterface({
     setAiProcessSteps,
   });
 
+  // Request a refresh of the AI-generated title after streaming completes.
+  // The server generates the title asynchronously, so we delay the fetch.
+  const requestTitleRefresh = useCallback((targetChatId: string | null | undefined) => {
+    if (!targetChatId || targetChatId.startsWith("pending-")) return;
+    window.dispatchEvent(new CustomEvent("refresh-chat-title", {
+      detail: { chatId: targetChatId, delay: 2500 }
+    }));
+  }, []);
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1897,6 +1912,7 @@ export function ChatInterface({
         conversationId: chatId,
         provider: selectedProvider,
         model: selectedModel,
+        latencyMode,
       },
       onEvent: (eventType, data) => {
         if (eventType === "production_start") {
@@ -2019,6 +2035,37 @@ export function ChatInterface({
     };
   }, [chatId, agentStore, startAgentRun, toast]);
 
+  // Handle tool-selected events from the ToolCatalog dialog
+  useEffect(() => {
+    const handleToolSelected = (e: Event) => {
+      try {
+        const { tool } = (e as CustomEvent).detail || {};
+        if (!tool?.name) return;
+
+        const name = tool.name.toLowerCase();
+
+        // Map catalog tool names to Composer tool types
+        if (name.includes("web") || name.includes("browse") || name.includes("search")) {
+          setSelectedTool("web");
+        } else if (name.includes("image") || name.includes("vision")) {
+          setSelectedTool("image");
+        } else if (name.includes("agent") || name.includes("orchestrat") || name.includes("workflow")) {
+          setSelectedTool("agent");
+        } else {
+          // For other tools, set input with a hint about the tool
+          setInput((prev: string) => prev ? prev : `Usa la herramienta "${tool.name}": `);
+        }
+      } catch (err) {
+        console.error("[tool-selected] Error handling tool selection:", err);
+      }
+    };
+
+    window.addEventListener("tool-selected", handleToolSelected);
+    return () => {
+      window.removeEventListener("tool-selected", handleToolSelected);
+    };
+  }, [setInput]);
+
   const handleStartEdit = useCallback((msg: Message) => {
     setEditingMessageId(msg.id);
     setEditContent(msg.content);
@@ -2119,56 +2166,67 @@ export function ChatInterface({
     }
   };
 
-  const pollFileStatus = async (fileId: string, trackingId: string) => {
-    const maxAttempts = 30;
-    let attempts = 0;
+  // Returns a Promise that resolves when polling completes (ready/error/timeout).
+  // This allows callers (and pendingUploadsRef) to properly await the full file lifecycle.
+  const pollFileStatus = (fileId: string, trackingId: string): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const maxAttempts = 30;
+      let attempts = 0;
 
-    const checkStatus = async () => {
-      try {
-        const contentRes = await fetch(`/api/files/${fileId}/content`);
+      const checkStatus = async () => {
+        try {
+          const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+          if (!stillTracked) { resolve(); return; }
 
-        if (!contentRes.ok && contentRes.status !== 202) {
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
-          return;
-        }
+          const contentRes = await fetch(`/api/files/${fileId}/content`);
 
-        const contentData = await contentRes.json();
+          if (!contentRes.ok && contentRes.status !== 202) {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+            );
+            resolve();
+            return;
+          }
 
-        if (contentData.status === "ready") {
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === fileId || f.id === trackingId
-              ? { ...f, id: fileId, status: "ready", content: contentData.content }
-              : f))
-          );
-          return;
-        } else if (contentData.status === "error") {
-          setUploadedFiles((prev: UploadedFile[]) =>
-            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
-          return;
-        }
+          const contentData = await contentRes.json();
 
-        attempts++;
-        if (attempts >= maxAttempts) {
+          if (contentData.status === "ready") {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === fileId || f.id === trackingId
+                ? { ...f, id: fileId, status: "ready", content: contentData.content }
+                : f))
+            );
+            resolve();
+            return;
+          } else if (contentData.status === "error") {
+            setUploadedFiles((prev: UploadedFile[]) =>
+              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+            );
+            resolve();
+            return;
+          }
+
+          attempts++;
+          if (attempts >= maxAttempts) {
+            setUploadedFiles((prev: UploadedFile[]) =>
+              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+            );
+            console.warn(`File ${fileId} processing timed out`);
+            resolve();
+            return;
+          }
+          setTimeout(checkStatus, 2000);
+        } catch (error) {
+          console.error("Error polling file status:", error);
           setUploadedFiles((prev: UploadedFile[]) =>
             prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
           );
-          console.warn(`File ${fileId} processing timed out`);
-          return;
+          resolve();
         }
-        setTimeout(checkStatus, 2000);
-      } catch (error) {
-        console.error("Error polling file status:", error);
-        // Fix: add type to prev
-        setUploadedFiles((prev: UploadedFile[]) =>
-          prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
-        );
-      }
-    };
+      };
 
-    setTimeout(checkStatus, 2000);
+      setTimeout(checkStatus, 2000);
+    });
   };
 
   const removeFile = (index: number) => {
@@ -2182,6 +2240,7 @@ export function ChatInterface({
     "text/html",
     "application/json",
     "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel",
@@ -2277,17 +2336,45 @@ export function ChatInterface({
       setUploadedFiles((prev: any) => [...prev, tempFile]);
 
       const doUpload = async (): Promise<void> => {
+        const retryFetch = async (fn: () => Promise<Response>, maxRetries = 3): Promise<Response> => {
+          let lastError: Error | null = null;
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+              const res = await fn();
+              return res;
+            } catch (err: any) {
+              lastError = err;
+              if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+              }
+            }
+          }
+          throw lastError || new Error("Request failed after retries");
+        };
+
         try {
-          const urlRes = await fetch("/api/objects/upload", { method: "POST" });
-          const { uploadURL, storagePath } = await urlRes.json();
+          const safeJson = async (res: Response): Promise<any> => {
+            try {
+              return await res.json();
+            } catch {
+              return null;
+            }
+          };
+
+          const urlRes = await retryFetch(() => fetch("/api/objects/upload", { method: "POST" }), 2);
+          const urlData = await safeJson(urlRes);
+          if (!urlRes.ok) {
+            throw new Error(urlData?.error || `Failed to get upload URL (status ${urlRes.status})`);
+          }
+          const { uploadURL, storagePath } = urlData || {};
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
-          const uploadRes = await fetch(uploadURL, {
+          const uploadRes = await retryFetch(() => fetch(uploadURL, {
             method: "PUT",
-            headers: { "Content-Type": file.type },
+            headers: { "Content-Type": file.type || "application/octet-stream" },
             body: file,
-          });
-          if (!uploadRes.ok) throw new Error("Upload failed");
+          }));
+          if (!uploadRes.ok) throw new Error(`Upload failed with status ${uploadRes.status}`);
 
           let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
 
@@ -2302,7 +2389,10 @@ export function ChatInterface({
               });
 
               if (spreadsheetRes.ok) {
-                const spreadsheetResult = await spreadsheetRes.json();
+                const spreadsheetResult = await safeJson(spreadsheetRes);
+                if (!spreadsheetResult) {
+                  throw new Error("Invalid spreadsheet response");
+                }
                 const uploadId = spreadsheetResult.id;
                 const sheetDetails = spreadsheetResult.sheetDetails || [];
                 const sheets = sheetDetails.map((s: any) => ({
@@ -2335,13 +2425,18 @@ export function ChatInterface({
           }
 
           if (isImage) {
-            const registerRes = await fetch("/api/files/quick", {
+            const registerRes = await fetch("/api/files", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
             });
-            const registeredFile = await registerRes.json();
-            if (!registerRes.ok) throw new Error(registeredFile.error);
+            const registeredFile = await safeJson(registerRes);
+            if (!registerRes.ok) {
+              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
+            }
+            if (!registeredFile?.id) {
+              throw new Error("Server returned invalid file registration response");
+            }
 
             setUploadedFiles((prev: any[]) =>
               prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
@@ -2356,14 +2451,21 @@ export function ChatInterface({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
             });
-            const registeredFile = await registerRes.json();
-            if (!registerRes.ok) throw new Error(registeredFile.error);
+            const registeredFile = await safeJson(registerRes);
+            if (!registerRes.ok) {
+              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
+            }
+            if (!registeredFile?.id) {
+              throw new Error("Server returned invalid file registration response");
+            }
 
             setUploadedFiles((prev: any[]) =>
               prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
             );
 
-            pollFileStatusFast(registeredFile.id, tempId);
+            // Await polling so pendingUploadsRef tracks the full lifecycle
+            // (upload + processing → ready/error) instead of resolving prematurely.
+            await pollFileStatusFast(registeredFile.id, tempId);
 
             if (isAnalyzableFile(file.name) && !isExcel) {
               triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
@@ -2374,9 +2476,15 @@ export function ChatInterface({
             }
           }
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
           console.error("File upload error:", error);
+          toast({
+            title: "Error al subir archivo",
+            description: `${file.name}: ${message}`,
+            variant: "destructive",
+          });
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error" } : f))
+            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error", error: message } : f))
           );
         }
       };
@@ -2398,57 +2506,63 @@ export function ChatInterface({
     }
   };
 
-  const pollFileStatusFast = async (fileId: string, trackingId: string) => {
-    const maxTime = 5000;
-    const pollInterval = 250;
-    const startTime = Date.now();
+  // Returns a Promise that resolves when the file reaches a terminal state (ready/error).
+  // First polls fast (250ms) for 5s, then falls back to slow polling (2s).
+  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const maxTime = 5000;
+      const pollInterval = 250;
+      const startTime = Date.now();
 
-    const checkStatus = async (): Promise<void> => {
-      const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
-      if (!stillTracked) return;
+      const checkStatus = async (): Promise<void> => {
+        const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+        if (!stillTracked) { resolve(); return; }
 
-      if (Date.now() - startTime > maxTime) {
-        // Fall back to slower polling. Do NOT mark as ready prematurely, as that
-        // causes "attached but empty" docs and broken analysis.
-        pollFileStatus(fileId, trackingId);
-        return;
-      }
-
-      try {
-        const contentRes = await fetch(`/api/files/${fileId}/content`);
-
-        if (!contentRes.ok && contentRes.status !== 202) {
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
+        if (Date.now() - startTime > maxTime) {
+          // Fall back to slower polling. Chain the promise so caller awaits the full lifecycle.
+          pollFileStatus(fileId, trackingId).then(resolve);
           return;
         }
 
-        const contentData = await contentRes.json();
+        try {
+          const contentRes = await fetch(`/api/files/${fileId}/content`);
 
-        if (contentData.status === "ready") {
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === fileId || f.id === trackingId
-              ? { ...f, id: fileId, status: "ready", content: contentData.content }
-              : f))
-          );
-          return;
-        } else if (contentData.status === "error") {
-          setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
-          return;
+          if (!contentRes.ok && contentRes.status !== 202) {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+            );
+            resolve();
+            return;
+          }
+
+          const contentData = await contentRes.json();
+
+          if (contentData.status === "ready") {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === fileId || f.id === trackingId
+                ? { ...f, id: fileId, status: "ready", content: contentData.content }
+                : f))
+            );
+            resolve();
+            return;
+          } else if (contentData.status === "error") {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+            );
+            resolve();
+            return;
+          }
+
+          setTimeout(checkStatus, pollInterval);
+        } catch (error) {
+          console.error("Polling error:", error);
+          // Network hiccup: fall back to slower polling. Chain promise.
+          pollFileStatus(fileId, trackingId).then(resolve);
         }
+      };
 
-        setTimeout(checkStatus, pollInterval);
-      } catch (error) {
-        console.error("Polling error:", error);
-        // Network hiccup: fall back to slower polling instead of lying about readiness.
-        pollFileStatus(fileId, trackingId);
-      }
-    };
-
-    checkStatus();
+      checkStatus();
+    });
   };
 
   const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
@@ -2746,9 +2860,12 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
-    // EMERGENCY DEBUG - REMOVE AFTER FIX
-    console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
-    
+    // Prevent double-submit while a request is already in flight
+    if (aiState !== "idle") {
+      console.log("[handleSubmit] Blocked: aiState is", aiState, "(not idle)");
+      return;
+    }
+
     // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
     if (input.trim().startsWith("!")) {
       const cleanInput = input.trim().substring(1);
@@ -2759,13 +2876,14 @@ export function ChatInterface({
         window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
       }
 
-      await streamChat.stream("/api/chat/stream", {
+      const emergencyResult = await streamChat.stream("/api/chat/stream", {
         chatId: effectiveChatIdForStream,
         body: {
           messages: [{ role: "user", content: cleanInput }],
           chatId: effectiveChatIdForStream,
           conversationId: effectiveChatIdForStream,
           model: selectedModel || "grok-3",
+          latencyMode,
         },
         buildFinalMessage: (content, _lastEvent, messageId) => ({
           id: messageId || `emergency-${Date.now()}`,
@@ -2774,6 +2892,7 @@ export function ChatInterface({
           timestamp: new Date(),
         }),
       });
+      if (emergencyResult.ok) requestTitleRefresh(effectiveChatIdForStream);
       return;
     }
     
@@ -2816,6 +2935,11 @@ export function ChatInterface({
     const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
+      toast({
+        title: "Archivos en proceso",
+        description: "Espera a que los archivos terminen de cargarse antes de enviar.",
+        duration: 3000,
+      });
       return;
     }
 
@@ -2828,6 +2952,22 @@ export function ChatInterface({
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
       console.log("[handleSubmit] no content to submit, returning");
       return;
+    }
+
+    // FIX: Auto-generate a prompt when the user sends ONLY files without text.
+    // The backend rejects empty message content even when attachments are present,
+    // which causes files to "disappear" from the UI (already cleared) with no response.
+    let autoPromptForFiles = "";
+    if (!hasInput && hasFiles) {
+      const filesRef = uploadedFilesRef.current;
+      const hasImage = filesRef.some((f: any) => (f.type || "").startsWith("image/"));
+      const hasDoc = filesRef.some((f: any) => !(f.type || "").startsWith("image/"));
+      autoPromptForFiles = hasImage && !hasDoc
+        ? "Describe la imagen adjunta."
+        : hasDoc && !hasImage
+          ? "Analiza los documentos adjuntos y resume lo importante."
+          : "Analiza los archivos adjuntos y dime lo más importante.";
+      console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
     }
 
     // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
@@ -2855,8 +2995,10 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: `req_${Date.now()}`
       };
+      // Show user message immediately (optimistic update) — BEFORE any async work
+      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
       onSendMessage(userMessage);
-      
+
       // Stream the response using the all-in-one hook
       // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
       const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
@@ -2867,7 +3009,7 @@ export function ChatInterface({
         window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
       }
 
-      await streamChat.stream("/api/chat/stream", {
+      const streamResult = await streamChat.stream("/api/chat/stream", {
         chatId: effectiveChatIdForStream,
         body: {
           messages: [{ role: "user", content: cleanInput }],
@@ -2876,6 +3018,7 @@ export function ChatInterface({
           model: selectedModel || "grok-3",
           forceWebSearch: isWebSearch,
           webSearchAuto: isWebSearch,
+          latencyMode,
         },
         buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
           id: messageId || `assistant-${Date.now()}`,
@@ -2891,13 +3034,16 @@ export function ChatInterface({
           timestamp: new Date(),
         }),
       });
+      if (streamResult.ok) requestTitleRefresh(effectiveChatIdForStream);
       return;
     }
 
     // Handle Agent mode - show in chat, not side panel
     if (selectedTool === "agent") {
+      // Save files before clearing so we can restore on error
+      const savedAgentFiles = [...uploadedFilesRef.current];
       try {
-        const userMessageContent = input;
+        const userMessageContent = input || autoPromptForFiles;
         const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
 
         // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
@@ -2996,7 +3142,11 @@ export function ChatInterface({
         console.error("Failed to start agent run:", error);
         // Remove the optimistic message since the agent failed to start
         setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
-        toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
+        // Restore files so user doesn't lose them
+        if (savedAgentFiles.length > 0) {
+          setUploadedFiles(savedAgentFiles);
+        }
+        toast({ title: "Error", description: "Error al iniciar el agente. Tus archivos fueron restaurados.", variant: "destructive" });
       }
       return;
     }
@@ -3232,7 +3382,8 @@ export function ChatInterface({
               provider: selectedProvider,
               model: selectedModel,
               lastImageBase64,
-              lastImageId
+              lastImageId,
+              latencyMode,
             }),
             signal: abortControllerRef.current.signal
           });
@@ -3337,6 +3488,9 @@ export function ChatInterface({
                       artifact: data.artifact,
                       webSources: data.webSources,
                     });
+
+                    // Request AI-generated title refresh after streaming completes
+                    requestTitleRefresh(chatId);
                   } else if (currentEventType === "error" || currentEventType === "production_error") {
                     throw new Error(data.message || data.error || "Stream error");
                   }
@@ -3367,11 +3521,12 @@ export function ChatInterface({
 
 
     // Check if this is a Super Agent research request with sources
-    const superAgentCheck = shouldUseSuperAgent(input);
+    const effectiveInputForChecks = input || autoPromptForFiles;
+    const superAgentCheck = shouldUseSuperAgent(effectiveInputForChecks);
     if (superAgentCheck.use) {
       console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
 
-      const userInput = input;
+      const userInput = effectiveInputForChecks;
       const superAgentMessageId = `super-agent-${Date.now()}`;
 
       // Clear input immediately
@@ -3680,6 +3835,9 @@ export function ChatInterface({
 
           completeRun(superAgentMessageId, finalResult);
           setActiveRunId(null);
+
+          // Request AI-generated title refresh after Super Agent completes
+          requestTitleRefresh(chatId);
         }
 
       } catch (error) {
@@ -3714,12 +3872,13 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
     // -------------------------------------------------------------------------
-    // Capture state immediately
-    const userInput = input;
+    // Capture state immediately — use auto-generated prompt if user sent only files
+    const userInput = input || autoPromptForFiles;
     const currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = Date.now().toString();
 
-    // Reset UI state immediately
+    // Reset UI state immediately — save files for restoration on error
+    const savedMainFiles = [...uploadedFilesRef.current];
     setInput("");
     if (chatId) clearDraft(chatId);
     setUploadedFiles([]);
@@ -3869,21 +4028,27 @@ export function ChatInterface({
 
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
-    const isDocumentFileLegacyPrecheck = (mimeType: string, fileName: string, type?: string): boolean => {
+    // Unified document detection function used by both pre-check and SSE paths
+    const isDocumentFile = (mimeType: string, fileName: string, type?: string): boolean => {
       const lowerMime = (mimeType || "").toLowerCase();
       const lowerName = (fileName || "").toLowerCase();
       const lowerType = (type || "").toLowerCase();
 
+      // Explicit image type or MIME → NOT a document
       if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
 
+      // Document MIME types
       const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
       if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
 
+      // Document file extensions
       const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
       if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
 
+      // Explicit document-like type
       if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
 
+      // Unknown MIME → check file extension to disambiguate
       if (!lowerMime || lowerMime === "application/octet-stream") {
         const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
         return !hasImageExt;
@@ -3892,7 +4057,7 @@ export function ChatInterface({
       return false;
     };
 
-    const hasDocumentAttachmentsPrecheck = attachments.some((a: any) => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
+    const hasDocumentAttachmentsPrecheck = attachments.some((a: any) => isDocumentFile(a.mimeType || String(a.type), a.name, String(a.type)));
 
     // Store pre-fetched analysis result to use later (prevents race condition)
     let preFetchedAnalysisResult: {
@@ -3953,7 +4118,18 @@ export function ChatInterface({
         } else {
           const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
           console.error("[handleSubmit] Pre-send: Analyze error:", analyzeResponse.status, errorData);
-          // Fall through to normal flow if analysis fails
+
+          // Handle specific error codes
+          if (errorData.code === "USE_ANALYZE_ENDPOINT") {
+            console.warn("[handleSubmit] Pre-send: Backend says USE_ANALYZE_ENDPOINT — will retry in SSE path");
+          } else if (analyzeResponse.status >= 500) {
+            toast({
+              title: "Error del servidor",
+              description: "Error al analizar los documentos. Reintentando...",
+              duration: 3000,
+            });
+          }
+          // Fall through to normal flow — SSE path will retry if preFetchedAnalysisResult is null
         }
       } catch (analyzeError: any) {
         if (analyzeError?.name === "AbortError") {
@@ -4027,6 +4203,7 @@ export function ChatInterface({
             }
           };
 
+          setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
           onSendMessage(formPreviewMsg);
           // Note: markRequestComplete is called inside addMessage after persistence
           setAiState("idle");
@@ -4081,6 +4258,7 @@ export function ChatInterface({
               userMessageId: userMsgId,
               webSources: data.webSources,
             };
+            setOptimisticMessages((prev: Message[]) => [...prev, gmailResponseMsg]);
             onSendMessage(gmailResponseMsg);
           } else {
             const gmailErrorMsg: Message = {
@@ -4091,6 +4269,7 @@ export function ChatInterface({
               requestId: generateRequestId(),
               userMessageId: userMsgId
             };
+            setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
             onSendMessage(gmailErrorMsg);
           }
         } catch (error) {
@@ -4103,6 +4282,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
           onSendMessage(gmailErrorMsg);
         }
 
@@ -4134,6 +4314,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, orchestratorMsg]);
           onSendMessage(orchestratorMsg);
         } catch (err) {
           console.error("[Orchestrator] Error:", err);
@@ -4145,6 +4326,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
           onSendMessage(errorMsg);
         }
 
@@ -4232,6 +4414,7 @@ export function ChatInterface({
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
               };
+              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
               onSendMessage(aiMsg);
 
               setIsGeneratingImage(false);
@@ -4381,47 +4564,12 @@ IMPORTANTE:
             let fullContent = "";
             let sseError: Error | null = null;
 
-            // try {
-            // Helper function to robustly detect if a file is a document (not an image)
-            // Uses mimeType AND file extension for reliable detection
-            const isDocumentFile = (mimeType: string, fileName: string): boolean => {
-              const lowerMime = (mimeType || "").toLowerCase();
-              const lowerName = (fileName || "").toLowerCase();
-
-              // Check for explicit image MIME types first
-              if (lowerMime.startsWith("image/")) return false;
-
-              // Document MIME types
-              const docMimePatterns = [
-                "pdf", "word", "document", "sheet", "excel",
-                "spreadsheet", "presentation", "powerpoint", "csv",
-                "text/plain", "text/csv", "application/json"
-              ];
-              if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
-
-              // Document file extensions
-              const docExtensions = [
-                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-                ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
-              ];
-              if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
-
-              // If mimeType is empty/unknown and has no extension, treat as document (safer)
-              if (!lowerMime || lowerMime === "application/octet-stream") return true;
-
-              return false;
-            };
-
             // Build attachments array for streaming endpoint
+            // FIX: Normalize type to match backend schema: "document" | "image" | "file"
             const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
-                type: f.type.startsWith("image/") ? "image" as const :
-                  f.type.includes("pdf") ? "pdf" as const :
-                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
-                      f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-                        f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                          "document" as const,
+                type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
                 name: f.name,
                 mimeType: f.type,
                 storagePath: f.storagePath,
@@ -4435,25 +4583,33 @@ IMPORTANTE:
               .some(f => isDocumentFile(f.type, f.name));
 
             // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
+            // Reuse pre-fetched result if available (avoid duplicate network call)
             if (hasDocumentAttachments) {
-              console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
-              const analyzeResponse = await fetch("/api/analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  messages: finalChatHistory,
-                  attachments: streamAttachments,
-                  conversationId: chatId
-                }),
-                signal: abortControllerRef.current?.signal
-              });
+              let analyzeResult: any;
 
-              if (!analyzeResponse.ok) {
-                const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
-                throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+              if (preFetchedAnalysisResult) {
+                console.log("[handleSubmit] DATA_MODE: Reusing pre-fetched analysis result (no duplicate call)");
+                analyzeResult = preFetchedAnalysisResult;
+              } else {
+                console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
+                const analyzeResponse = await fetch("/api/analyze", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    messages: finalChatHistory,
+                    attachments: streamAttachments,
+                    conversationId: chatId
+                  }),
+                  signal: abortControllerRef.current?.signal
+                });
+
+                if (!analyzeResponse.ok) {
+                  const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+                  throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+                }
+
+                analyzeResult = await analyzeResponse.json();
               }
-
-              const analyzeResult = await analyzeResponse.json();
 
               // Create assistant message with analysis results
               const analysisMsg: Message = {
@@ -4491,7 +4647,8 @@ IMPORTANTE:
                 chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null
+                docTool: selectedDocTool || null,
+                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -4711,6 +4868,9 @@ IMPORTANTE:
 
             agent.complete();
             abortControllerRef.current = null;
+
+            // Request AI-generated title refresh after streaming completes
+            requestTitleRefresh(effectiveStreamChatId);
 
           } else {
             // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
@@ -5082,12 +5242,34 @@ IMPORTANTE:
         // }
       } catch (error: any) {
         console.error("[handleSubmit] Error:", error);
+        // Restore files on error so user doesn't lose them
+        if (savedMainFiles.length > 0) {
+          setUploadedFiles(savedMainFiles);
+        }
+        if (error?.name !== "AbortError") {
+          toast({
+            title: "Error al procesar",
+            description: "Hubo un error al enviar tu mensaje. Tus archivos fueron restaurados.",
+            variant: "destructive",
+            duration: 5000,
+          });
+        }
         setAiState("idle");
         setAiProcessSteps([]);
         abortControllerRef.current = null;
       }
     } catch (outerError: any) {
       console.error("[handleSubmit] Outer error:", outerError);
+      // Restore files on outer error
+      if (savedMainFiles.length > 0) {
+        setUploadedFiles(savedMainFiles);
+      }
+      toast({
+        title: "Error inesperado",
+        description: "Algo salió mal. Tus archivos fueron restaurados.",
+        variant: "destructive",
+        duration: 5000,
+      });
       setAiState("idle");
       setAiProcessSteps([]);
     }
@@ -5407,6 +5589,8 @@ IMPORTANTE:
                 handleDocTextDeselect={handleDocTextDeselect}
                 onTextareaFocus={handleCloseModelSelector}
                 isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                latencyMode={latencyMode}
+                setLatencyMode={setLatencyMode}
               />
             </div>
           </Panel>
@@ -5418,6 +5602,7 @@ IMPORTANTE:
 
           {/* Right: Document Editor Panel */}
           <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
+            <EditorErrorBoundary>
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "ppt") ? (
                 <PPTEditorShellLazy
@@ -5580,6 +5765,7 @@ IMPORTANTE:
                 </div>
               )}
             </div>
+            </EditorErrorBoundary>
           </Panel>
         </PanelGroup>
       ) : (
@@ -5828,6 +6014,8 @@ IMPORTANTE:
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
             isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+            latencyMode={latencyMode}
+            setLatencyMode={setLatencyMode}
           />
         </div>
       )}

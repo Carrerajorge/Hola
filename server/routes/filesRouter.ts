@@ -24,7 +24,44 @@ interface MultipartUploadSession {
   createdAt: Date;
 }
 
+// ============================================
+// SECURITY: Multipart session limits & cleanup
+// ============================================
+
+/** Maximum concurrent multipart upload sessions */
+const MAX_MULTIPART_SESSIONS = 100;
+
+/** Maximum session age before auto-cleanup (30 minutes) */
+const SESSION_TTL_MS = 30 * 60 * 1000;
+
+/** Cleanup interval (every 5 minutes) */
+const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
 const multipartSessions: Map<string, MultipartUploadSession> = new Map();
+
+// Periodic cleanup of stale multipart sessions to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of multipartSessions) {
+    if (now - session.createdAt.getTime() > SESSION_TTL_MS) {
+      multipartSessions.delete(id);
+      console.log(`[FilesRouter] Expired multipart session: ${id}`);
+    }
+  }
+}, SESSION_CLEANUP_INTERVAL_MS).unref();
+
+/** Security: validate objectId to prevent path traversal */
+function isValidObjectId(objectId: string): boolean {
+  if (!objectId || typeof objectId !== "string") return false;
+  if (objectId.length > 512) return false;
+  // Block path traversal sequences
+  if (objectId.includes("..") || objectId.includes("//")) return false;
+  if (objectId.includes("\0") || objectId.includes("%00")) return false;
+  if (objectId.includes("%2e%2e") || objectId.includes("%2E%2E")) return false;
+  // Only allow safe characters: alphanumeric, dash, underscore, dot, forward slash
+  if (!/^[a-zA-Z0-9._\-\/]+$/.test(objectId)) return false;
+  return true;
+}
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -157,6 +194,7 @@ function inferMimeTypeFromFileName(fileName: string): string | null {
   const map: Record<string, string> = {
     // documents
     pdf: "application/pdf",
+    doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     xls: "application/vnd.ms-excel",
@@ -352,70 +390,86 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
   try {
     let content: Buffer;
     const fs = await import("fs");
-    const path = await import("path");
+    const pathMod = await import("path");
 
     console.log(`[processFileAsync] Starting processing for file ${fileId}, storagePath: ${storagePath}, mimeType: ${mimeType}`);
 
-    // Check if this is a local storage path (from our local fallback)
-    // Local paths start with /objects/uploads/ and the file exists in ./uploads/
-    const isLocalPath = storagePath.startsWith('/objects/uploads/');
+    // Determine all possible local file paths to try
+    const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
 
-    if (isLocalPath) {
-      // Extract the object ID from the path and read from local uploads directory
-      const objectId = storagePath.replace('/objects/uploads/', '');
-      const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
+    const localCandidates: string[] = [];
+    if (storagePath.startsWith('/objects/uploads/')) {
+      localCandidates.push(pathMod.default.join(uploadsDir, storagePath.replace('/objects/uploads/', '')));
+    }
+    if (storagePath.startsWith('/objects/')) {
+      localCandidates.push(pathMod.default.join(uploadsDir, storagePath.replace('/objects/', '')));
+    }
 
-      console.log(`[processFileAsync] Attempting to read local file: ${localFilePath}`);
+    // Try to read the file content from various sources
+    let fileReadSuccess = false;
 
-      // Wait a bit for the file to be fully written (upload might still be in progress)
+    // 1. Try local paths first (with waiting for file to be fully written)
+    for (const localFilePath of localCandidates) {
+      // Ensure path doesn't escape uploads directory
+      const safePrefix = uploadsDir + pathMod.default.sep;
+      if (!localFilePath.startsWith(safePrefix) && localFilePath !== uploadsDir) {
+        continue;
+      }
+
       let attempts = 0;
-      const maxAttempts = 10;
+      const maxAttempts = 20; // Wait up to 10 seconds (20 * 500ms)
       while (!fs.default.existsSync(localFilePath) && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 500));
         attempts++;
-        console.log(`[processFileAsync] Waiting for file... attempt ${attempts}/${maxAttempts}`);
       }
 
-      if (!fs.default.existsSync(localFilePath)) {
-        console.error(`[processFileAsync] Local file not found after ${maxAttempts} attempts: ${localFilePath}`);
-        throw new Error(`Local file not found: ${localFilePath}`);
-      }
+      if (fs.default.existsSync(localFilePath)) {
+        // Wait a bit more to ensure write is complete
+        const stat = await fs.promises.stat(localFilePath);
+        if (stat.size === 0) {
+          // File exists but is empty - wait a bit more
+          let sizeAttempts = 0;
+          while (sizeAttempts < 10) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const reStat = await fs.promises.stat(localFilePath);
+            if (reStat.size > 0) break;
+            sizeAttempts++;
+          }
+        }
 
-      content = await fs.promises.readFile(localFilePath);
-      console.log(`[processFileAsync] Read ${content.length} bytes from local file`);
-    } else {
-      // Use object storage for non-local paths
-      try {
-        const objectStorageService = new ObjectStorageService();
-        const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
-        content = await objectStorageService.getFileContent(objectFile);
-        console.log(`[processFileAsync] Read ${content.length} bytes from object storage`);
-      } catch (storageError: any) {
-        console.error(`[processFileAsync] Object storage error for ${storagePath}:`, storageError.message);
-
-        // Fallback: try to read as local file if object storage fails
-        const objectId = storagePath.replace('/objects/', '');
-        const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
-
-        if (fs.default.existsSync(localFilePath)) {
-          console.log(`[processFileAsync] Fallback to local file: ${localFilePath}`);
-          content = await fs.promises.readFile(localFilePath);
-        } else {
-          throw storageError;
+        content = await fs.promises.readFile(localFilePath);
+        if (content.length > 0) {
+          console.log(`[processFileAsync] Read ${content.length} bytes from local file: ${localFilePath}`);
+          fileReadSuccess = true;
+          break;
         }
       }
     }
 
-    if (!content || content.length === 0) {
-      console.error(`[processFileAsync] Empty content for file ${fileId}`);
-      throw new Error('File content is empty');
+    // 2. Try object storage
+    if (!fileReadSuccess) {
+      try {
+        const svc = new ObjectStorageService();
+        const objectFile = await svc.getObjectEntityFile(storagePath);
+        content = await svc.getFileContent(objectFile);
+        if (content && content.length > 0) {
+          console.log(`[processFileAsync] Read ${content.length} bytes from object storage`);
+          fileReadSuccess = true;
+        }
+      } catch (storageError: any) {
+        console.warn(`[processFileAsync] Object storage read failed for ${storagePath}:`, storageError.message);
+      }
     }
 
-    const result = await processDocument(content, mimeType, filename);
+    if (!fileReadSuccess || !content! || content!.length === 0) {
+      console.error(`[processFileAsync] Could not read file content for ${fileId} from any source`);
+      throw new Error('File content could not be read from any storage source');
+    }
+
+    const result = await processDocument(content!, mimeType, filename);
 
     if (!result.text || result.text.trim().length === 0) {
       console.warn(`[processFileAsync] No text extracted from file ${fileId}, setting as ready with empty content`);
-      // Still mark as ready but with no chunks - allows the file to be used
       await storage.updateFileStatus(fileId, "ready");
       return;
     }
@@ -434,7 +488,7 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     await storage.createFileChunks(chunksWithoutEmbeddings);
     await storage.updateFileStatus(fileId, "ready");
 
-    console.log(`[processFileAsync] File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
+    console.log(`[processFileAsync] File ${fileId} processed: ${chunks.length} chunks created`);
 
     generateEmbeddingsAsync(fileId, chunks);
   } catch (error: any) {
@@ -522,8 +576,24 @@ export function createFilesRouter() {
         return res.status(400).json({ error: `File size exceeds maximum limit of ${LIMITS.MAX_FILE_SIZE_MB}MB` });
       }
 
+      // Security: limit concurrent sessions to prevent memory exhaustion
+      if (multipartSessions.size >= MAX_MULTIPART_SESSIONS) {
+        return res.status(429).json({ error: "Too many concurrent upload sessions. Please try again later." });
+      }
+
       const uploadId = `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-      const privateObjectDir = objectStorageService.getPrivateObjectDir();
+
+      let privateObjectDir: string;
+      let isLocalFallback = false;
+      try {
+        privateObjectDir = objectStorageService.getPrivateObjectDir();
+      } catch {
+        // Local fallback when object storage is unavailable
+        isLocalFallback = true;
+        privateObjectDir = "/local";
+        console.log("[FilesRouter] Multipart: using local fallback for chunked upload");
+      }
+
       const objectId = `uploads/${uploadId}`;
       const storagePath = `/objects/${objectId}`;
 
@@ -534,8 +604,8 @@ export function createFilesRouter() {
         fileSize,
         totalChunks,
         storagePath,
-        basePath: `${privateObjectDir}/${objectId}`,
-        bucketName: privateObjectDir.split('/')[1] || '',
+        basePath: isLocalFallback ? `local/${objectId}` : `${privateObjectDir}/${objectId}`,
+        bucketName: isLocalFallback ? "__local__" : (privateObjectDir.split('/')[1] || ''),
         uploadedParts: new Map(),
         createdAt: new Date(),
       };
@@ -564,6 +634,12 @@ export function createFilesRouter() {
 
       if (partNumber < 1 || partNumber > session.totalChunks) {
         return res.status(400).json({ error: `Invalid part number. Must be between 1 and ${session.totalChunks}` });
+      }
+
+      // Local fallback: return a local upload URL for each part
+      if (session.bucketName === "__local__") {
+        const signedUrl = `/api/local-upload/${uploadId}_part_${partNumber}`;
+        return res.json({ signedUrl });
       }
 
       const partPath = `${session.basePath}_part_${partNumber}`;
@@ -596,6 +672,77 @@ export function createFilesRouter() {
         return res.status(404).json({ error: "Upload session not found" });
       }
 
+      const isLocalFallback = session.bucketName === "__local__";
+
+      if (isLocalFallback) {
+        // Local fallback: concatenate part files into a single file
+        const fs = await import("fs");
+        const pathMod = await import("path");
+        const crypto = await import("crypto");
+
+        const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
+        if (!fs.default.existsSync(UPLOADS_DIR)) {
+          fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+        }
+
+        const finalObjectId = crypto.randomUUID();
+        const finalPath = pathMod.default.join(UPLOADS_DIR, finalObjectId);
+
+        const sortedParts = parts.sort(
+          (a: { partNumber: number }, b: { partNumber: number }) => a.partNumber - b.partNumber
+        );
+
+        // Concatenate all part files into the final file
+        const writeStream = fs.default.createWriteStream(finalPath);
+        for (const part of sortedParts) {
+          const partFileName = `${uploadId}_part_${part.partNumber}`;
+          const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
+
+          if (!fs.default.existsSync(partPath)) {
+            writeStream.destroy();
+            return res.status(500).json({ error: `Missing part file: ${part.partNumber}` });
+          }
+
+          const partContent = await fs.promises.readFile(partPath);
+          writeStream.write(partContent);
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on("finish", resolve);
+          writeStream.on("error", reject);
+          writeStream.end();
+        });
+
+        // Clean up part files
+        for (const part of sortedParts) {
+          const partFileName = `${uploadId}_part_${part.partNumber}`;
+          const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
+          try {
+            await fs.promises.unlink(partPath);
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+
+        const storagePath = `/objects/uploads/${finalObjectId}`;
+
+        multipartSessions.delete(uploadId);
+
+        const file = await storage.createFile({
+          name: session.fileName,
+          type: session.mimeType,
+          size: session.fileSize,
+          storagePath,
+          status: "processing",
+          userId: null,
+        });
+
+        processFileAsync(file.id, storagePath, session.mimeType, session.fileName);
+
+        return res.json({ success: true, storagePath, fileId: file.id });
+      }
+
+      // Object storage path
       const { bucketName } = parseObjectPath(session.basePath);
       const bucket = objectStorageClient.bucket(bucketName);
 
@@ -677,16 +824,35 @@ export function createFilesRouter() {
         return res.status(404).json({ error: "Upload session not found" });
       }
 
-      const { bucketName } = parseObjectPath(session.basePath);
-      const bucket = objectStorageClient.bucket(bucketName);
+      const isLocalFallback = session.bucketName === "__local__";
 
-      for (let i = 1; i <= session.totalChunks; i++) {
-        const chunkPath = session.basePath.concat("_part_", String(i));
-        const { objectName } = parseObjectPath(chunkPath);
-        try {
-          const fileRef = bucket.file(objectName);
-          await fileRef.delete();
-        } catch (cleanupErr) {
+      if (isLocalFallback) {
+        // Clean up local part files
+        const fs = await import("fs");
+        const pathMod = await import("path");
+        const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
+        for (let i = 1; i <= session.totalChunks; i++) {
+          const partPath = pathMod.default.join(UPLOADS_DIR, `${uploadId}_part_${i}`);
+          try {
+            if (fs.default.existsSync(partPath)) {
+              await fs.promises.unlink(partPath);
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      } else {
+        const { bucketName } = parseObjectPath(session.basePath);
+        const bucket = objectStorageClient.bucket(bucketName);
+
+        for (let i = 1; i <= session.totalChunks; i++) {
+          const chunkPath = session.basePath.concat("_part_", String(i));
+          const { objectName } = parseObjectPath(chunkPath);
+          try {
+            const fileRef = bucket.file(objectName);
+            await fileRef.delete();
+          } catch (cleanupErr) {
+          }
         }
       }
 
@@ -872,10 +1038,44 @@ export function createFilesRouter() {
 
   router.post("/api/files/quick", async (req, res) => {
     try {
-      const { name, type, size, storagePath } = req.body;
+      // Legacy endpoint (images only). Keep for backwards-compat, but validate strictly.
+      const rawName = req.body?.name;
+      const rawType = req.body?.type;
+      const rawSize = req.body?.size;
+      const rawStoragePath = req.body?.storagePath;
 
-      if (!name || !type || !size || !storagePath) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (typeof rawName !== "string" || rawName.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: name" });
+      }
+      if (typeof rawType !== "string" || rawType.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: type" });
+      }
+      if (rawSize === undefined || rawSize === null) {
+        return res.status(400).json({ error: "Missing required field: size" });
+      }
+      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: storagePath" });
+      }
+
+      const name = sanitizeFilename(rawName.trim());
+      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
+      const storagePath = rawStoragePath.trim();
+
+      if (!name) return res.status(400).json({ error: "Invalid file name" });
+      if (!type) return res.status(400).json({ error: "Invalid file type" });
+      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
+      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
+
+      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
+        return res.status(400).json({ error: "Invalid storagePath" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
+        return res.status(400).json({ error: `Unsupported file type: ${type}` });
+      }
+      if (!type.startsWith("image/")) {
+        return res.status(400).json({ error: "Quick upload only supports images" });
       }
 
       const file = await storage.createFile({
@@ -896,26 +1096,66 @@ export function createFilesRouter() {
 
   router.post("/api/files", async (req, res) => {
     try {
-      const { name, type, size, storagePath } = req.body;
+      const rawName = req.body?.name;
+      const rawType = req.body?.type;
+      const rawSize = req.body?.size;
+      const rawStoragePath = req.body?.storagePath;
 
-      if (!name || !type || !size || !storagePath) {
-        return res.status(400).json({ error: "Missing required fields" });
+      if (typeof rawName !== "string" || rawName.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: name" });
+      }
+      if (typeof rawType !== "string" || rawType.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: type" });
+      }
+      if (rawSize === undefined || rawSize === null) {
+        return res.status(400).json({ error: "Missing required field: size" });
+      }
+      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
+        return res.status(400).json({ error: "Missing required field: storagePath" });
       }
 
-      if (!ALLOWED_MIME_TYPES.includes(type)) {
+      const name = sanitizeFilename(rawName.trim());
+      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
+      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
+      const storagePath = rawStoragePath.trim();
+
+      if (!name) return res.status(400).json({ error: "Invalid file name" });
+      if (!type) return res.status(400).json({ error: "Invalid file type" });
+      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
+      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
+      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
+        return res.status(400).json({ error: "Invalid storagePath" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });
       }
+
+      const isImage = typeof type === "string" && type.startsWith("image/");
 
       const file = await storage.createFile({
         name,
         type,
         size,
         storagePath,
-        status: "processing",
+        status: isImage ? "ready" : "processing",
         userId: null,
       });
 
-      processFileAsync(file.id, storagePath, type, name);
+      if (!isImage) {
+        // Create a tracking job record and process asynchronously
+        try {
+          await storage.createFileJob({
+            fileId: file.id,
+            status: "pending",
+          });
+        } catch (jobError) {
+          // Non-critical: proceed even if job tracking fails
+          console.warn(`[FilesRouter] Could not create file job for ${file.id}:`, jobError);
+        }
+
+        processFileAsync(file.id, storagePath, type, name);
+      }
 
       res.json(file);
     } catch (error: any) {
@@ -962,11 +1202,17 @@ export function createFilesRouter() {
       // Serve those files directly from disk so the client can preview attachments.
       if (req.path.startsWith("/objects/uploads/")) {
         const fs = await import("fs");
-        const path = await import("path");
+        const pathMod = await import("path");
         const objectId = req.path.replace("/objects/uploads/", "");
-        const uploadsDir = path.default.resolve(process.cwd(), "uploads");
-        const localFilePath = path.default.resolve(uploadsDir, objectId);
-        const safePrefix = uploadsDir + path.default.sep;
+
+        // Security: validate objectId to prevent path traversal
+        if (!isValidObjectId(objectId)) {
+          return res.sendStatus(404);
+        }
+
+        const localUploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
+        const localFilePath = pathMod.default.resolve(localUploadsDir, objectId);
+        const safePrefix = localUploadsDir + pathMod.default.sep;
 
         // Prevent path traversal outside uploads/.
         if (!localFilePath.startsWith(safePrefix)) {
@@ -977,6 +1223,8 @@ export function createFilesRouter() {
           return res.sendStatus(404);
         }
 
+        // Security: set nosniff to prevent MIME confusion attacks
+        res.setHeader("X-Content-Type-Options", "nosniff");
         return res.sendFile(localFilePath);
       }
 
@@ -995,6 +1243,12 @@ export function createFilesRouter() {
   router.put("/api/local-upload/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
+
+      // Security: validate objectId to prevent path traversal
+      if (!isValidObjectId(objectId)) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
+
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
@@ -1003,8 +1257,13 @@ export function createFilesRouter() {
         fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
 
-      const filePath = pathMod.default.join(UPLOADS_DIR, objectId);
+      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
+      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
 
+      // Security: ensure resolved path stays within uploads directory
+      if (!filePath.startsWith(safePrefix) && filePath !== UPLOADS_DIR) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
 
       const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
 
@@ -1022,15 +1281,15 @@ export function createFilesRouter() {
         receivedBytes += chunk.length;
         if (receivedBytes > MAX_SIZE) {
           writeStream.destroy();
-          fsSync.default.unlinkSync(filePath); // Cleanup
-          // We can't easily send a response if we're pipe-ing, but we can try destroying request
+          try { fsSync.default.unlinkSync(filePath); } catch { /* cleanup best-effort */ }
           req.destroy(new Error("File limit exceeded"));
         }
       });
 
       writeStream.on("finish", async () => {
-        console.log(`[LocalStorage] File streamed to disk: ${filePath} (${receivedBytes} bytes)`);
-        res.status(200).json({ success: true, path: filePath, size: receivedBytes });
+        console.log(`[LocalStorage] File uploaded: ${objectId} (${receivedBytes} bytes)`);
+        // Security: don't leak filesystem paths in response
+        res.status(200).json({ success: true, size: receivedBytes });
       });
 
       writeStream.on("error", (error: Error) => {
@@ -1047,10 +1306,23 @@ export function createFilesRouter() {
   router.get("/api/local-files/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
+
+      // Security: validate objectId to prevent path traversal
+      if (!isValidObjectId(objectId)) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
+
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
-      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
+      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
+      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+
+      // Security: ensure resolved path stays within uploads directory
+      if (!filePath.startsWith(safePrefix)) {
+        return res.status(404).json({ error: "File not found" });
+      }
 
       if (!fsSync.default.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found" });
@@ -1061,6 +1333,11 @@ export function createFilesRouter() {
       const contentType = file?.type || "application/octet-stream";
 
       res.setHeader("Content-Type", contentType);
+      // Security: force download for non-image types to prevent XSS via stored files
+      if (!contentType.startsWith("image/")) {
+        res.setHeader("Content-Disposition", "attachment");
+      }
+      res.setHeader("X-Content-Type-Options", "nosniff");
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);
     } catch (error: any) {
@@ -1073,10 +1350,23 @@ export function createFilesRouter() {
   router.get("/objects/uploads/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
+
+      // Security: validate objectId to prevent path traversal
+      if (!isValidObjectId(objectId)) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
+
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
-      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
+      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
+      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+
+      // Security: ensure resolved path stays within uploads directory
+      if (!filePath.startsWith(safePrefix)) {
+        return res.status(404).json({ error: "File not found" });
+      }
 
       if (!fsSync.default.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found" });
@@ -1088,6 +1378,11 @@ export function createFilesRouter() {
 
       res.setHeader("Content-Type", contentType);
       res.setHeader("Cache-Control", "private, max-age=3600");
+      // Security: force download for non-image types to prevent XSS via stored files
+      if (!contentType.startsWith("image/")) {
+        res.setHeader("Content-Disposition", "attachment");
+      }
+      res.setHeader("X-Content-Type-Options", "nosniff");
 
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);

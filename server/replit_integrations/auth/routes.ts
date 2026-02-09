@@ -8,6 +8,8 @@ import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middlew
 import { sendMagicLinkEmail } from "../../services/genericEmailService";
 import { getSecureUserId } from "../../lib/anonUserHelper";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { buildSessionUserFromDbUser } from "../../lib/sessionUser";
+import { computeMfaForUser, startMfaLoginChallenge } from "../../services/mfaLogin";
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -23,6 +25,8 @@ function sanitizeUser(user: any): any {
   const { password, ...safeUser } = user;
   return safeUser;
 }
+
+// MFA + WebPush helpers live in ../../services/mfaLogin
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
@@ -84,6 +88,45 @@ export function registerAuthRoutes(app: Express): void {
           },
           expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
         };
+
+        // MFA gate: require TOTP and/or push approval if enabled (admin too).
+        const mfa = await computeMfaForUser({ userId: adminId, excludeSid: req.sessionID || null });
+        if (mfa.requiresMfa) {
+          try {
+            const challenge = await startMfaLoginChallenge({
+              req,
+              userId: adminId,
+              email: ADMIN_EMAIL,
+              totpEnabled: mfa.totpEnabled,
+              pushTargets: mfa.pushTargets,
+              ttlMs: 5 * 60 * 1000,
+              sessionUser: adminUser,
+            });
+
+            const message = challenge.methods.push && challenge.methods.totp
+              ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+              : challenge.methods.push
+                ? "Aprueba el inicio de sesión en tu dispositivo de confianza."
+                : "Ingresa tu código 2FA.";
+
+            return res.json({
+              success: false,
+              mfaRequired: true,
+              methods: challenge.methods,
+              approvalId: challenge.approvalId,
+              message,
+            });
+          } catch (e: any) {
+            if (e?.code === "PUSH_DELIVERY_FAILED") {
+              return res.status(503).json({
+                message: "No se pudo enviar la notificación push. Intenta de nuevo.",
+                code: "PUSH_DELIVERY_FAILED",
+              });
+            }
+            console.error("[Auth] Failed to start MFA challenge (admin):", e?.message || e);
+            return res.status(500).json({ message: "No se pudo iniciar el flujo MFA." });
+          }
+        }
 
         return req.login(adminUser, async (err: any) => {
           if (err) {
@@ -200,18 +243,46 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Usuario inactivo" });
       }
 
+      // MFA gate: require TOTP and/or push approval if enabled.
+      const mfa = await computeMfaForUser({ userId: dbUser.id, excludeSid: req.sessionID || null });
+      if (mfa.requiresMfa) {
+        try {
+          const challenge = await startMfaLoginChallenge({
+            req,
+            userId: dbUser.id,
+            email: dbUser.email,
+            totpEnabled: mfa.totpEnabled,
+            pushTargets: mfa.pushTargets,
+            ttlMs: 5 * 60 * 1000,
+          });
+
+          const message = challenge.methods.push && challenge.methods.totp
+            ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+            : challenge.methods.push
+              ? "Aprueba el inicio de sesión en tu dispositivo de confianza."
+              : "Ingresa tu código 2FA.";
+
+          return res.json({
+            success: false,
+            mfaRequired: true,
+            methods: challenge.methods,
+            approvalId: challenge.approvalId,
+            message,
+          });
+        } catch (e: any) {
+          if (e?.code === "PUSH_DELIVERY_FAILED") {
+            return res.status(503).json({
+              message: "No se pudo enviar la notificación push. Intenta de nuevo.",
+              code: "PUSH_DELIVERY_FAILED",
+            });
+          }
+          console.error("[Auth] Failed to start MFA challenge:", e?.message || e);
+          return res.status(500).json({ message: "No se pudo iniciar el flujo MFA." });
+        }
+      }
+
       // Set up session
-      const sessionUser = {
-        claims: {
-          sub: dbUser.id,
-          email: dbUser.email,
-          first_name: dbUser.firstName || "",
-          last_name: dbUser.lastName || "",
-          role: dbUser.role || "user",
-        },
-        role: dbUser.role || "user",
-        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
-      };
+      const sessionUser = buildSessionUserFromDbUser(dbUser);
 
       req.login(sessionUser, async (err: any) => {
         if (err) {
@@ -308,6 +379,45 @@ export function registerAuthRoutes(app: Express): void {
         },
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
       };
+
+      // MFA gate: require TOTP and/or push approval if enabled (admin too).
+      const mfa = await computeMfaForUser({ userId: adminId, excludeSid: req.sessionID || null });
+      if (mfa.requiresMfa) {
+        try {
+          const challenge = await startMfaLoginChallenge({
+            req,
+            userId: adminId,
+            email: ADMIN_EMAIL,
+            totpEnabled: mfa.totpEnabled,
+            pushTargets: mfa.pushTargets,
+            ttlMs: 5 * 60 * 1000,
+            sessionUser: adminUser,
+          });
+
+          const message = challenge.methods.push && challenge.methods.totp
+            ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
+            : challenge.methods.push
+              ? "Aprueba el inicio de sesión en tu dispositivo de confianza."
+              : "Ingresa tu código 2FA.";
+
+          return res.json({
+            success: false,
+            mfaRequired: true,
+            methods: challenge.methods,
+            approvalId: challenge.approvalId,
+            message,
+          });
+        } catch (e: any) {
+          if (e?.code === "PUSH_DELIVERY_FAILED") {
+            return res.status(503).json({
+              message: "No se pudo enviar la notificación push. Intenta de nuevo.",
+              code: "PUSH_DELIVERY_FAILED",
+            });
+          }
+          console.error("[Auth] Failed to start MFA challenge (admin-login):", e?.message || e);
+          return res.status(500).json({ message: "No se pudo iniciar el flujo MFA." });
+        }
+      }
 
       req.login(adminUser, async (err: any) => {
         if (err) {
@@ -491,18 +601,29 @@ export function registerAuthRoutes(app: Express): void {
         return res.redirect(`/login?error=magic_link_expired`);
       }
 
-      // Create session for the user
-      const userClaims = {
-        claims: {
-          sub: result.user.id,
-          email: result.user.email,
-          first_name: result.user.firstName,
-          last_name: result.user.lastName,
-        },
-        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
-      };
+      const sessionUser = buildSessionUserFromDbUser(result.user);
 
-      req.login(userClaims, async (err: any) => {
+      // MFA gate (push approval and/or TOTP) before we create an authenticated session.
+      const mfa = await computeMfaForUser({ userId: result.user.id, excludeSid: req.sessionID || null });
+      if (mfa.requiresMfa) {
+        try {
+          await startMfaLoginChallenge({
+            req,
+            userId: result.user.id,
+            email: result.user.email,
+            totpEnabled: mfa.totpEnabled,
+            pushTargets: mfa.pushTargets,
+            ttlMs: 5 * 60 * 1000,
+            sessionUser,
+          });
+          return res.redirect("/login?mfa=1");
+        } catch (e: any) {
+          console.warn("[MagicLink] Failed to start MFA challenge:", e?.message || e);
+          return res.redirect("/login?error=login_failed");
+        }
+      }
+
+      req.login(sessionUser, async (err: any) => {
         if (err) {
           console.error("[MagicLink] Login error:", err);
           return res.redirect("/login?error=login_failed");
@@ -512,7 +633,7 @@ export function registerAuthRoutes(app: Express): void {
         if (req.session) {
           req.session.authUserId = result.user.id;
           req.session.passport = req.session.passport || {};
-          req.session.passport.user = userClaims;
+          req.session.passport.user = sessionUser;
         }
 
 	        try {

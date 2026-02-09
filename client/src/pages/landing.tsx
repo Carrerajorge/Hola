@@ -1,290 +1,382 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle, Sparkles, Zap, Shield, Globe, Menu } from "lucide-react";
+import {
+  Paperclip,
+  Search,
+  BookOpen,
+  Image,
+  Mic,
+  X,
+  Sparkles,
+  Zap,
+  Shield,
+  Menu,
+  ArrowRight,
+  Clock,
+  Lock,
+  Send,
+} from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
+
+/* ─────────────────────────────────────────────
+   Hook: scroll‑triggered reveal via IntersectionObserver
+   ───────────────────────────────────────────── */
+function useReveal(threshold = 0.15) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+      { threshold },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [threshold]);
+  return { ref, visible };
+}
+
+/* ─────────────────────────────────────────────
+   Typing‑text animation for the hero
+   ───────────────────────────────────────────── */
+const heroSuggestions = [
+  "Explicame la teoria de la relatividad...",
+  "Escribe un correo profesional para...",
+  "Crea una imagen de un paisaje futurista...",
+  "Ayudame a estudiar biologia molecular...",
+  "Resume este articulo en 3 puntos clave...",
+  "Genera un plan de negocios para...",
+];
+
+function useTypingPlaceholder() {
+  const [text, setText] = useState("");
+  const idx = useRef(0);
+  const charIdx = useRef(0);
+  const deleting = useRef(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const run = () => {
+      const phrase = heroSuggestions[idx.current];
+      if (!deleting.current) {
+        charIdx.current++;
+        setText(phrase.slice(0, charIdx.current));
+        if (charIdx.current === phrase.length) {
+          deleting.current = true;
+          timer = setTimeout(run, 2200);
+          return;
+        }
+        timer = setTimeout(run, 45 + Math.random() * 40);
+      } else {
+        charIdx.current--;
+        setText(phrase.slice(0, charIdx.current));
+        if (charIdx.current === 0) {
+          deleting.current = false;
+          idx.current = (idx.current + 1) % heroSuggestions.length;
+          timer = setTimeout(run, 400);
+          return;
+        }
+        timer = setTimeout(run, 22);
+      }
+    };
+    timer = setTimeout(run, 800);
+    return () => clearTimeout(timer);
+  }, []);
+  return text;
+}
+
+/* ═══════════════════════════════════════════════
+   COMPONENT
+   ═══════════════════════════════════════════════ */
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
   const [inputValue, setInputValue] = useState("");
   const [showPromo, setShowPromo] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [headerScrolled, setHeaderScrolled] = useState(false);
+  const typingPlaceholder = useTypingPlaceholder();
 
+  // Scroll‑reveal refs
+  const ctaReveal   = useReveal(0.15);
+
+  /* ── Mobile menu body‑lock & close helpers ── */
   useEffect(() => {
-    // Prevent background scroll while the mobile drawer is open.
     if (!mobileMenuOpen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
+    return () => { document.body.style.overflow = prev; };
   }, [mobileMenuOpen]);
 
   useEffect(() => {
-    // Close drawer on Escape (desktop / mobile keyboards)
     if (!mobileMenuOpen) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileMenuOpen(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [mobileMenuOpen]);
 
   useEffect(() => {
-    // Close drawer with browser back (Android back button / history back)
     if (!mobileMenuOpen) return;
-
-    const stateKey = "mobile-menu-open";
-    const currentState = window.history.state;
-
-    // Only push a state if we aren't already in one created for this menu.
-    if (!currentState || currentState[stateKey] !== true) {
-      window.history.pushState({ ...(currentState || {}), [stateKey]: true }, "");
-    }
-
-    const onPopState = () => {
-      setMobileMenuOpen(false);
-    };
-
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    const k = "mobile-menu-open";
+    const s = window.history.state;
+    if (!s || s[k] !== true) window.history.pushState({ ...(s || {}), [k]: true }, "");
+    const pop = () => setMobileMenuOpen(false);
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
   }, [mobileMenuOpen]);
+
+  /* ── Sticky header shadow on scroll ── */
+  useEffect(() => {
+    const fn = () => setHeaderScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", fn, { passive: true });
+    fn();
+    return () => window.removeEventListener("scroll", fn);
+  }, []);
 
   const handleSubmit = () => {
-    if (inputValue.trim()) {
-      setLocation("/login");
-    }
+    if (inputValue.trim()) setLocation("/login");
   };
 
+  /* ══════════ DATA ══════════ */
+
   const features = [
-    { icon: Sparkles, label: "Adjuntar", color: "from-purple-500 to-pink-500" },
-    { icon: Search, label: "Buscar", color: "from-blue-500 to-cyan-500" },
-    { icon: BookOpen, label: "Estudiemos", color: "from-emerald-500 to-teal-500" },
-    { icon: Image, label: "Crear imagen", color: "from-orange-500 to-amber-500" },
-    { icon: Mic, label: "Voz", color: "from-rose-500 to-pink-500" },
+    { icon: Paperclip, label: "Adjuntar" },
+    { icon: Search,    label: "Buscar" },
+    { icon: BookOpen,  label: "Estudiemos" },
+    { icon: Image,     label: "Crear imagen" },
+    { icon: Mic,       label: "Voz" },
   ];
 
+  const marqueeLogos = [
+    "Universidad Nacional", "TechLatam", "MedGroup", "CreativeStudio",
+    "EduPro", "DataSoft", "InnovaLab", "GlobalMedia",
+  ];
+
+  /* ─── reveal helper class ─── */
+  const rv = (visible: boolean, delay = 0) =>
+    `transition-all duration-700 ease-out ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`
+    + (delay ? ` [transition-delay:${delay}ms]` : "");
+
+  /* ═══════════════════════════════════════════════
+     RENDER
+     ═══════════════════════════════════════════════ */
   return (
-    <div className="min-h-screen landing-luxe flex flex-col relative overflow-hidden">
-      {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-4 md:px-8 h-16 border-b border-black/10 bg-white/70 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          {/* Mobile menu trigger moved to the left so it never gets pushed off-screen by CTA buttons */}
+    <div className="min-h-screen bg-white flex flex-col relative overflow-x-hidden">
+
+      {/* ════════════════════ HEADER ════════════════════ */}
+      <header
+        className={
+          "sticky top-0 z-50 flex items-center justify-between px-5 md:px-10 h-16 bg-white/80 backdrop-blur-xl transition-shadow duration-300 " +
+          (headerScrolled ? "shadow-[0_1px_3px_rgba(0,0,0,0.08)]" : "")
+        }
+      >
+        <div className="flex items-center gap-2.5">
           <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5 md:hidden"
+            variant="ghost" size="icon"
+            className="rounded-full text-neutral-700 hover:text-black hover:bg-neutral-100 md:hidden"
             onClick={() => setMobileMenuOpen((v) => !v)}
-            aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú"}
+            aria-label={mobileMenuOpen ? "Cerrar menu" : "Abrir menu"}
             aria-expanded={mobileMenuOpen}
             data-testid="button-mobile-menu-left"
           >
             <Menu className="h-5 w-5" />
           </Button>
-
-
-          <IliaGPTLogo size={32} className="shadow-sm" />
-          <span className="font-semibold tracking-wide text-luxe text-luxe-sm" data-text="ILIAGPT">ILIAGPT</span>
-          <ChevronDown className="h-4 w-4 text-zinc-500" />
+          <IliaGPTLogo size={30} className="shadow-sm" />
+          <span className="font-extrabold tracking-tight text-black text-lg select-none">ILIAGPT</span>
         </div>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm">
-          <span onClick={() => setLocation("/about")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
-          <span onClick={() => setLocation("/learn")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Aprender</span>
-          <span onClick={() => setLocation("/business")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Business</span>
-          <span onClick={() => setLocation("/pricing")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Precios</span>
-          <span onClick={() => setLocation("/login")} className="text-amber-700 hover:text-amber-600 transition-colors duration-200 cursor-pointer">Imágenes</span>
-          <span onClick={() => setLocation("/download")} className="text-zinc-600 hover:text-zinc-900 transition-colors duration-200 cursor-pointer">Descargar</span>
+        <nav className="hidden md:flex items-center gap-7 text-[13px] font-medium tracking-wide uppercase">
+          {[
+            { label: "Sobre nosotros", to: "/about" },
+            { label: "Aprender", to: "/learn" },
+            { label: "Business", to: "/business" },
+            { label: "Precios", to: "/pricing" },
+            { label: "Imagenes", to: "/login" },
+            { label: "Descargar", to: "/download" },
+          ].map((n) => (
+            <span key={n.to} onClick={() => setLocation(n.to)} className="text-neutral-500 hover:text-black transition-colors cursor-pointer">
+              {n.label}
+            </span>
+          ))}
         </nav>
 
-        <div className="flex items-center gap-3">
-          {/* Mobile nav trigger (kept in the top-right corner) */}
+        <div className="flex items-center gap-2.5">
           <Button
-            className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300 h-9 px-4 text-sm sm:h-10 sm:px-5 sm:text-base"
+            className="rounded-full bg-black text-white hover:bg-neutral-800 transition-all h-9 px-5 text-sm font-semibold shadow-sm"
             onClick={() => setLocation("/login")}
             data-testid="button-header-login"
           >
-            Inicia sesión
+            Inicia sesion
           </Button>
           <Button
             variant="outline"
-            className="rounded-full hidden sm:flex border-black/20 text-zinc-900 hover:bg-black/5 hover:border-amber-400/60 transition-all duration-300"
+            className="rounded-full hidden sm:flex border-neutral-300 text-black hover:bg-neutral-50 hover:border-neutral-400 transition-all font-semibold"
             onClick={() => setLocation("/signup")}
             data-testid="button-header-signup"
           >
-            Suscríbete gratis
-          </Button>
-          <Button variant="ghost" size="icon" className="rounded-full hidden sm:inline-flex text-zinc-600 hover:text-zinc-900 hover:bg-black/5">
-            <HelpCircle className="h-5 w-5" />
+            Suscribete gratis
           </Button>
         </div>
       </header>
 
-      {/* Mobile menu: left drawer + scrim (keeps header clickable so user can close via hamburger) */}
-      <div
-        className={
-          "md:hidden" +
-          (mobileMenuOpen ? "" : " pointer-events-none")
-        }
-        aria-hidden={!mobileMenuOpen}
-      >
-        {/* Scrim blocks interactions with the page, but starts below the header so the hamburger stays clickable */}
+      {/* ════════════════════ MOBILE DRAWER ════════════════════ */}
+      <div className={"md:hidden" + (mobileMenuOpen ? "" : " pointer-events-none")} aria-hidden={!mobileMenuOpen}>
         <div
-          className={
-            "fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/50 transition-opacity duration-200 " +
-            (mobileMenuOpen ? "opacity-100" : "opacity-0")
-          }
+          className={"fixed left-0 right-0 top-16 bottom-0 z-40 bg-black/40 transition-opacity duration-200 " + (mobileMenuOpen ? "opacity-100" : "opacity-0")}
+          onClick={() => setMobileMenuOpen(false)}
         />
-
-        {/* Drawer */}
         <div
-          className={
-            "fixed left-0 top-16 bottom-0 z-50 w-[78vw] max-w-[320px] border-r border-black/10 bg-white/90 backdrop-blur-xl shadow-2xl " +
-            "transition-transform duration-200 ease-out " +
-            (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")
-          }
-          role="menu"
-          aria-label="Menú"
-          data-testid="mobile-menu"
+          className={"fixed left-0 top-16 bottom-0 z-50 w-[80vw] max-w-[320px] border-r border-neutral-200 bg-white shadow-2xl transition-transform duration-250 ease-out " + (mobileMenuOpen ? "translate-x-0" : "-translate-x-full")}
+          role="menu" aria-label="Menu" data-testid="mobile-menu"
         >
-          <div className="p-2">
+          <div className="p-3 space-y-0.5">
             {[
               { label: "Sobre nosotros", to: "/about" },
               { label: "Aprender", to: "/learn" },
               { label: "Business", to: "/business" },
               { label: "Precios", to: "/pricing" },
-              { label: "Imágenes", to: "/login" },
+              { label: "Imagenes", to: "/login" },
               { label: "Descargar", to: "/download" },
             ].map((item) => (
-              <button
-                key={item.to}
-                type="button"
-                className={
-                  "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors " +
-                  (item.label === "Imágenes"
-                    ? "text-amber-700 hover:text-amber-600 hover:bg-black/5"
-                    : "text-zinc-800 hover:text-zinc-900 hover:bg-black/5")
-                }
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  setLocation(item.to);
-                }}
-                role="menuitem"
+              <button key={item.to} type="button" role="menuitem"
+                className="w-full text-left px-4 py-3 rounded-xl text-sm font-medium text-neutral-800 hover:text-black hover:bg-neutral-100 transition-colors"
+                onClick={() => { setMobileMenuOpen(false); setLocation(item.to); }}
               >
                 {item.label}
               </button>
             ))}
           </div>
+          <div className="px-3 pt-4 border-t border-neutral-100 mx-3">
+            <Button className="w-full rounded-full bg-black text-white hover:bg-neutral-800 font-semibold"
+              onClick={() => { setMobileMenuOpen(false); setLocation("/signup"); }}>
+              Suscribete gratis
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
-        <div className="w-full max-w-3xl space-y-10">
-          {/* Hero Title */}
+      {/* ════════════════════ HERO ════════════════════ */}
+      <section className="relative flex flex-col items-center px-5 pt-20 pb-24 md:pt-32 md:pb-36 overflow-hidden">
+        {/* Dot grid */}
+        <div className="absolute inset-0 opacity-[0.025]" style={{
+          backgroundImage: "radial-gradient(circle at 1px 1px, black 1px, transparent 0)",
+          backgroundSize: "28px 28px",
+        }} />
+        {/* Gradient blobs */}
+        <div className="absolute -top-40 -left-40 w-[500px] h-[500px] rounded-full bg-neutral-100 blur-[120px] opacity-60" />
+        <div className="absolute -bottom-40 -right-40 w-[400px] h-[400px] rounded-full bg-neutral-200/60 blur-[100px] opacity-40" />
+
+        <div className="relative w-full max-w-3xl space-y-10">
+          {/* Badge */}
+          <div className="flex justify-center fade-in-up">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-neutral-200 bg-white text-xs font-semibold tracking-wide uppercase text-neutral-600 shadow-sm">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-60" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-black" />
+              </span>
+              Mas de 10 millones de consultas resueltas
+            </div>
+          </div>
+
+          {/* Title */}
           <div className="text-center fade-in-up">
-            <h1 className="text-4xl md:text-6xl font-bold mb-4">
-              <span className="text-luxe text-luxe-lg" data-text="¿Con qué puedo ayudarte?">¿Con qué puedo ayudarte?</span>
+            <h1 className="text-5xl sm:text-6xl md:text-8xl font-black tracking-tight text-black leading-[1.05] mb-6">
+              Tu mente,
+              <br />
+              <span className="relative inline-block">
+                amplificada
+                <svg className="absolute -bottom-2 left-0 w-full" viewBox="0 0 300 12" fill="none">
+                  <path d="M2 8 Q75 2 150 6 Q225 10 298 4" stroke="black" strokeWidth="3" strokeLinecap="round" fill="none" opacity="0.15" />
+                </svg>
+              </span>
             </h1>
-            <p className="text-lg text-zinc-600 max-w-xl mx-auto">
-              El asistente de IA más inteligente para crear, investigar y aprender
+            <p className="text-lg md:text-xl text-neutral-500 max-w-2xl mx-auto leading-relaxed font-medium">
+              El asistente de IA mas avanzado en espanol. Crea contenido, genera imagenes,
+              investiga, aprende y automatiza — todo en una sola conversacion.
             </p>
           </div>
 
-          {/* Search Input */}
-          <div className="space-y-6 fade-in-up fade-in-up-delay-1">
-            <div className="relative">
-              <div className="glass-luxe rounded-2xl p-1">
+          {/* Search */}
+          <div className="space-y-5 fade-in-up fade-in-up-delay-1">
+            <div className="relative group">
+              <div className="rounded-2xl border-2 border-neutral-200 bg-white shadow-xl shadow-black/[0.04] transition-all duration-300 group-focus-within:shadow-2xl group-focus-within:shadow-black/[0.08] group-focus-within:border-black/20 flex items-center">
                 <Input
-                  placeholder="Pregunta lo que quieras..."
+                  placeholder={typingPlaceholder}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                  className="h-16 px-6 text-lg bg-transparent border-0 text-zinc-900 placeholder:text-zinc-400 
-                    focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="h-16 md:h-[72px] px-6 text-lg bg-transparent border-0 text-black placeholder:text-neutral-400 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1"
                   data-testid="input-landing-search"
                 />
+                <Button
+                  size="icon"
+                  className="mr-3 h-11 w-11 rounded-xl bg-black text-white hover:bg-neutral-800 transition-all flex-shrink-0"
+                  onClick={handleSubmit}
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
               </div>
-              {/* Subtle glow effect */}
-              <div className="absolute inset-0 -z-10 rounded-2xl bg-gradient-to-r from-amber-200/60 via-yellow-100/50 to-amber-200/60 blur-xl opacity-70" />
             </div>
 
-            {/* Feature Buttons */}
-            <div className="flex items-center justify-center gap-3 flex-wrap">
-              {features.map((feature, index) => (
-                <Button
-                  key={feature.label}
-                  variant="outline"
-                  className={`rounded-full gap-2 text-sm border-black/10 bg-white/70 text-zinc-900
-                    hover:bg-white hover:border-amber-300/60 transition-all duration-300
-                    hover:scale-105 hover:shadow-lg fade-in-up`}
-                  style={{ animationDelay: `${(index + 2) * 100}ms` }}
+            {/* Quick-action pills */}
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {features.map((f, i) => (
+                <Button key={f.label} variant="outline"
+                  className="rounded-full gap-2 text-[13px] border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 hover:text-black hover:border-neutral-300 transition-all duration-200 fade-in-up h-9 px-4"
+                  style={{ animationDelay: `${(i + 2) * 80}ms` }}
                   onClick={() => setLocation("/login")}
-                  data-testid={`button-${feature.label.toLowerCase().replace(' ', '-')}`}
+                  data-testid={`button-${f.label.toLowerCase().replace(" ", "-")}`}
                 >
-                  <feature.icon className="h-4 w-4" />
-                  {feature.label}
+                  <f.icon className="h-3.5 w-3.5" />
+                  {f.label}
                 </Button>
               ))}
             </div>
           </div>
 
-          {/* Promo Card with Premium Design */}
+          {/* Promo Card */}
           {showPromo && (
-            <div className="glass-luxe rounded-3xl p-6 md:p-8 relative overflow-hidden isolate fade-in-up fade-in-up-delay-3 card-lift">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute top-4 right-4 h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-black/5 rounded-full"
-                onClick={() => setShowPromo(false)}
-                data-testid="button-close-promo"
+            <div className="rounded-2xl border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white p-6 md:p-8 relative overflow-hidden fade-in-up fade-in-up-delay-3 group/promo hover:shadow-lg transition-shadow duration-300">
+              <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-bl from-neutral-100 to-transparent rounded-bl-[80px] opacity-60" />
+              <Button variant="ghost" size="icon"
+                className="absolute top-3 right-3 h-8 w-8 text-neutral-400 hover:text-black hover:bg-neutral-200 rounded-full z-10"
+                onClick={() => setShowPromo(false)} data-testid="button-close-promo"
               >
                 <X className="h-4 w-4" />
               </Button>
 
-              <div className="flex flex-col md:flex-row md:items-center gap-6">
+              <div className="relative flex flex-col md:flex-row md:items-center gap-6">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Sparkles className="h-5 w-5 text-amber-400" />
-                    <span className="text-xs font-medium text-amber-400 uppercase tracking-wider">Nuevo</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-zinc-900 mb-2">Crea tu primera imagen</h3>
-                  <p className="text-sm text-zinc-600 mb-5 leading-relaxed">
-                    ¿Tienes una idea? Prueba nuestros estilos y filtros seleccionados o imagina algo desde cero.
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-black uppercase tracking-[0.15em] bg-black/[0.04] px-3 py-1 rounded-full mb-3">
+                    <Sparkles className="h-3 w-3" />
+                    Nuevo
+                  </span>
+                  <h3 className="text-xl font-bold text-black mb-2">Crea tu primera imagen</h3>
+                  <p className="text-sm text-neutral-500 mb-5 leading-relaxed max-w-md">
+                    Transforma cualquier idea en arte visual. Elige entre mas de 20 estilos artisticos o deja volar tu imaginacion desde cero.
                   </p>
-                  <Button
-                    className="btn-luxe rounded-full bg-black text-white border border-amber-300/60 hover:bg-zinc-900 hover:border-amber-300 shadow-[0_0_24px_rgba(216,179,95,0.20)] hover:shadow-[0_0_32px_rgba(216,179,95,0.28)] transition-all duration-300"
-                    onClick={() => setLocation("/login")}
-                    data-testid="button-try-now"
+                  <Button className="rounded-full bg-black text-white hover:bg-neutral-800 transition-all font-semibold shadow-md hover:shadow-lg"
+                    onClick={() => setLocation("/login")} data-testid="button-try-now"
                   >
-                    <Zap className="h-4 w-4 mr-2" />
                     Probar ahora
+                    <ArrowRight className="h-4 w-4 ml-2" />
                   </Button>
                 </div>
-
-                {/* Style Cards */}
-                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:items-center md:gap-4">
+                <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0 md:overflow-visible md:flex-wrap md:justify-center md:gap-3">
                   {[
-                    { emoji: "🎨", label: "Boceto", gradient: "from-amber-500/30 to-orange-500/30" },
-                    { emoji: "🎄", label: "Festivo", gradient: "from-emerald-500/30 to-green-500/30" },
-                    { emoji: "🎭", label: "Dramático", gradient: "from-purple-500/30 to-violet-500/30" },
-                    { emoji: "🧸", label: "Peluche", gradient: "from-pink-500/30 to-rose-500/30" },
-                  ].map((style) => (
-                    <div
-                      key={style.label}
-                      className="flex flex-col items-center gap-2 min-w-[70px] cursor-pointer group"
-                      onClick={() => setLocation("/login")}
-                    >
-                      <div className={`w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br ${style.gradient} 
-                        flex items-center justify-center border border-black/10
-                        transition-all duration-300 group-hover:scale-105 group-hover:border-amber-400/60
-                        group-hover:shadow-lg`}>
-                        <span className="text-2xl">{style.emoji}</span>
+                    { emoji: "🎨", label: "Boceto",    bg: "bg-orange-50 border-orange-200 hover:bg-orange-100" },
+                    { emoji: "🎄", label: "Festivo",   bg: "bg-emerald-50 border-emerald-200 hover:bg-emerald-100" },
+                    { emoji: "🎭", label: "Dramatico", bg: "bg-violet-50 border-violet-200 hover:bg-violet-100" },
+                    { emoji: "🧸", label: "Peluche",   bg: "bg-pink-50 border-pink-200 hover:bg-pink-100" },
+                  ].map((s) => (
+                    <div key={s.label} className="flex flex-col items-center gap-2 min-w-[72px] cursor-pointer group/style" onClick={() => setLocation("/login")}>
+                      <div className={`w-16 h-16 md:w-[76px] md:h-[76px] rounded-2xl ${s.bg} border flex items-center justify-center transition-all duration-200 group-hover/style:scale-110 group-hover/style:shadow-md`}>
+                        <span className="text-2xl">{s.emoji}</span>
                       </div>
-                      <span className="text-xs text-zinc-600 group-hover:text-zinc-900 transition-colors">{style.label}</span>
+                      <span className="text-xs text-neutral-500 group-hover/style:text-black transition-colors font-semibold">{s.label}</span>
                     </div>
                   ))}
                 </div>
@@ -292,31 +384,141 @@ export default function LandingPage() {
             </div>
           )}
 
-          {/* Trust Indicators */}
-          <div className="flex items-center justify-center gap-8 text-zinc-500 text-sm fade-in-up fade-in-up-delay-4">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4" />
-              <span>Seguro y privado</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4" />
-              <span>Disponible 24/7</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4" />
-              <span>Respuestas instantáneas</span>
-            </div>
+          {/* Trust bar */}
+          <div className="flex items-center justify-center gap-6 md:gap-10 text-neutral-400 text-xs font-medium uppercase tracking-wide fade-in-up fade-in-up-delay-4 flex-wrap">
+            {[
+              { icon: Shield, text: "Cifrado E2E" },
+              { icon: Clock, text: "Disponible 24/7" },
+              { icon: Zap, text: "Respuesta < 2s" },
+              { icon: Lock, text: "Privacidad total" },
+            ].map((t) => (
+              <div key={t.text} className="flex items-center gap-1.5">
+                <t.icon className="h-3.5 w-3.5" />
+                <span>{t.text}</span>
+              </div>
+            ))}
           </div>
         </div>
-      </main>
+      </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 py-4 text-center text-sm text-zinc-600 border-t border-black/10 bg-white/70 backdrop-blur-md">
-        Al enviar un mensaje a ILIAGPT, un chatbot de IA, aceptas nuestros{" "}
-        <Link href="/terms" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Términos</Link>
-        {" "}y reconoces que leíste nuestra{" "}
-        <Link href="/privacy-policy" className="text-zinc-700 hover:text-zinc-900 underline transition-colors">Política de privacidad</Link>.
+      {/* ════════════════════ MARQUEE LOGOS ════════════════════ */}
+      <div className="border-y border-neutral-100 bg-neutral-50/50 py-5 overflow-hidden">
+        <div className="flex items-center gap-12 animate-marquee whitespace-nowrap">
+          {[...marqueeLogos, ...marqueeLogos].map((name, i) => (
+            <span key={i} className="text-sm font-semibold text-neutral-300 tracking-wide uppercase select-none flex-shrink-0">
+              {name}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ════════════════════ FINAL CTA ════════════════════ */}
+      <section ref={ctaReveal.ref} className="py-24 md:py-32 px-5 relative overflow-hidden">
+        <div className="absolute inset-0 bg-black" />
+        <div className="absolute inset-0 opacity-10" style={{
+          backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
+          backgroundSize: "24px 24px",
+        }} />
+
+        <div className={`relative max-w-3xl mx-auto text-center ${rv(ctaReveal.visible)}`}>
+          <h2 className="text-3xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-6">
+            El futuro de la productividad<br />empieza aqui
+          </h2>
+          <p className="text-lg text-white/60 mb-10 max-w-xl mx-auto font-medium">
+            Unete a mas de 10 millones de personas que ya amplifican su potencial con ILIAGPT. Gratis, para siempre.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Button className="rounded-full bg-white text-black hover:bg-neutral-100 transition-all h-13 px-8 text-base font-bold shadow-lg"
+              onClick={() => setLocation("/signup")}>
+              Comenzar gratis
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+            <Button variant="outline" className="rounded-full border-white/20 text-white hover:bg-white/10 hover:border-white/30 transition-all h-13 px-8 text-base font-semibold"
+              onClick={() => setLocation("/pricing")}>
+              Ver todos los planes
+            </Button>
+          </div>
+          <p className="text-xs text-white/30 mt-6 font-medium">Sin tarjeta de credito requerida — Configuracion en 30 segundos</p>
+        </div>
+      </section>
+
+      {/* ════════════════════ FOOTER ════════════════════ */}
+      <footer className="border-t border-neutral-200 bg-white">
+        <div className="max-w-6xl mx-auto px-5 py-14 md:py-20">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-14">
+            <div className="col-span-2 md:col-span-1">
+              <div className="flex items-center gap-2 mb-4">
+                <IliaGPTLogo size={24} />
+                <span className="font-black text-black">ILIAGPT</span>
+              </div>
+              <p className="text-sm text-neutral-500 leading-relaxed max-w-[240px]">
+                La plataforma de inteligencia artificial mas avanzada del mundo hispanohablante.
+              </p>
+            </div>
+            {[
+              { title: "Producto", links: [
+                { label: "Precios", to: "/pricing" },
+                { label: "Descargar", to: "/download" },
+                { label: "Business", to: "/business" },
+                { label: "Imagenes", to: "/login" },
+              ]},
+              { title: "Recursos", links: [
+                { label: "Aprender", to: "/learn" },
+                { label: "Sobre nosotros", to: "/about" },
+                { label: "Blog", to: "/learn" },
+              ]},
+              { title: "Soporte", links: [
+                { label: "Centro de ayuda", to: "/about" },
+                { label: "Contacto", to: "/about" },
+                { label: "Status", to: "/about" },
+              ]},
+              { title: "Legal", links: [
+                { label: "Terminos de uso", to: "/terms", isLink: true },
+                { label: "Privacidad", to: "/privacy-policy", isLink: true },
+                { label: "Cookies", to: "/privacy-policy", isLink: true },
+              ]},
+            ].map((col) => (
+              <div key={col.title}>
+                <h4 className="font-bold text-black text-xs uppercase tracking-wider mb-4">{col.title}</h4>
+                <ul className="space-y-2.5 text-sm">
+                  {col.links.map((l) => (
+                    <li key={l.label}>
+                      {"isLink" in l && l.isLink ? (
+                        <Link href={l.to} className="text-neutral-500 hover:text-black transition-colors">{l.label}</Link>
+                      ) : (
+                        <span onClick={() => setLocation(l.to)} className="text-neutral-500 hover:text-black transition-colors cursor-pointer">{l.label}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-8 border-t border-neutral-200 flex flex-col md:flex-row items-center justify-between gap-4">
+            <p className="text-xs text-neutral-400 font-medium">
+              &copy; {new Date().getFullYear()} ILIAGPT. Todos los derechos reservados.
+            </p>
+            <p className="text-[11px] text-neutral-400 text-center md:text-right max-w-md leading-relaxed">
+              Al enviar un mensaje a ILIAGPT aceptas nuestros{" "}
+              <Link href="/terms" className="underline hover:text-black transition-colors">Terminos</Link>{" "}
+              y reconoces nuestra{" "}
+              <Link href="/privacy-policy" className="underline hover:text-black transition-colors">Politica de privacidad</Link>.
+            </p>
+          </div>
+        </div>
       </footer>
+
+      {/* ════════════════════ INLINE STYLES ════════════════════ */}
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .animate-marquee {
+          animation: marquee 30s linear infinite;
+        }
+      `}</style>
     </div>
   );
 }

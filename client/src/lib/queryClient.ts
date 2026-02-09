@@ -145,22 +145,57 @@ function getReadableErrorMessage(error: string): string {
   return 'Something went wrong';
 }
 
+const TOAST_COOLDOWN_MS = 30_000;
+const lastToastAtByKey = new Map<string, number>();
+const OFFLINE_TOAST_ID = "network-offline";
+let hasBoundNetworkListeners = false;
+
+function maybeBindNetworkListeners() {
+  if (hasBoundNetworkListeners) return;
+  hasBoundNetworkListeners = true;
+
+  window.addEventListener("online", () => {
+    lastToastAtByKey.delete(OFFLINE_TOAST_ID);
+    toast.dismiss(OFFLINE_TOAST_ID);
+  });
+}
+
 export function showErrorToast(
   message: string,
-  options?: { 
+  options?: {
     onRetry?: () => void;
     description?: string;
   }
 ) {
+  maybeBindNetworkListeners();
+
   const toastMessage = getReadableErrorMessage(message);
-  
+
+  // Use stable ids so Sonner replaces instead of stacking (especially important for 429 spam).
+  const toastId = (() => {
+    if (toastMessage === "No internet connection") return OFFLINE_TOAST_ID;
+    if (toastMessage === "Too many requests, please wait") return "rate-limit";
+    if (toastMessage === "Server temporarily unavailable") return "server-unavailable";
+    if (toastMessage === "Request timed out") return "request-timeout";
+    if (toastMessage === "Network error occurred") return "network-error";
+    return "global-error";
+  })();
+
+  const now = Date.now();
+  const lastAt = lastToastAtByKey.get(toastId);
+  if (lastAt && now - lastAt < TOAST_COOLDOWN_MS) return;
+  lastToastAtByKey.set(toastId, now);
+
   toast.error(toastMessage, {
+    id: toastId,
     description: options?.description,
     duration: options?.onRetry ? 10000 : 5000,
-    action: options?.onRetry ? {
-      label: "Retry",
-      onClick: options.onRetry
-    } : undefined,
+    action: options?.onRetry
+      ? {
+          label: "Retry",
+          onClick: options.onRetry,
+        }
+      : undefined,
   });
 }
 

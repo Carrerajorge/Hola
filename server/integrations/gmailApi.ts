@@ -1,6 +1,7 @@
 import { google, gmail_v1 } from "googleapis";
 import { storage } from "../storage";
 import type { GmailOAuthToken } from "@shared/schema";
+import { sanitizePlainText } from "../lib/textSanitizers";
 
 export type GmailUserId = string;
 
@@ -116,7 +117,7 @@ export async function gmailFetchThread(gmail: gmail_v1.Gmail, args: { threadId: 
       to: getHeader(headers, "To"),
       subject: getHeader(headers, "Subject"),
       date: getHeader(headers, "Date"),
-      body: body.text || body.html.replace(/<[^>]*>/g, " ").trim(),
+      body: body.text || sanitizePlainText(body.html, { maxLen: 20000, collapseWs: true }),
       snippet: msg.snippet,
     });
   }

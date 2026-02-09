@@ -134,121 +134,83 @@ MEMORY_MAX_ATOMS=1000              # Maximum memory atoms
 ### Analyze Prompt Complexity
 
 ```bash
-curl -X POST http://localhost:5000/api/admin/agentic/analyze \
+curl -X POST http://localhost:5000/api/chat/complexity \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Create a user and send them a welcome email"}'
+  -d '{"message":"Create a user and send them a welcome email","hasAttachments":false}'
 ```
 
 Response:
 ```json
 {
-  "score": 6,
-  "dimensions": {
-    "linguistic": 4,
-    "semantic": 5,
-    "contextual": 6,
-    "technical": 5,
-    "temporal": 3
-  },
-  "suggestedTools": ["create_user", "email_send"],
-  "estimatedSteps": 2
+  "agent_required": true,
+  "agent_reason": "...",
+  "complexity_score": 6,
+  "category": "...",
+  "signals": ["..."],
+  "recommended_path": "...",
+  "estimated_tokens": 1234,
+  "dimensions": { "...": 0 }
 }
 ```
 
-### Map Intent to Tools
+### Route a Message (PARE)
 
 ```bash
-curl -X POST http://localhost:5000/api/admin/agentic/intent \
+curl -X POST http://localhost:5000/api/chat/route \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Listar todos los usuarios activos", "language": "es"}'
+  -d '{"message":"Generate monthly report and email to all admins","hasAttachments":false}'
 ```
 
 Response:
 ```json
 {
-  "intent": "list_users",
-  "confidence": 0.95,
-  "tools": ["list_users"],
-  "language": "es",
-  "entities": {
-    "filter": "active"
-  }
+  "route": "agent",
+  "confidence": 0.9,
+  "reasons": ["..."],
+  "toolNeeds": ["..."],
+  "planHint": ["..."]
 }
 ```
 
-### Execute Orchestrated Workflow
+### Analyze Intent (Intent Engine)
 
 ```bash
-curl -X POST http://localhost:5000/api/admin/agentic/orchestrate \
+curl -X POST http://localhost:5000/api/chat/intent/analyze \
   -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Generate monthly report and email to all admins",
-    "options": {
-      "parallel": true,
-      "maxRetries": 3
-    }
-  }'
+  -d '{"message":"Listar todos los usuarios activos"}'
 ```
 
-Response:
-```json
-{
-  "orchestrationId": "orch_abc123",
-  "status": "running",
-  "steps": [
-    {"tool": "generate_report", "status": "completed"},
-    {"tool": "list_users", "status": "running"},
-    {"tool": "email_send", "status": "pending"}
-  ],
-  "progress": 33
-}
-```
+### Start Agent Run (Agent Mode)
 
-### Get Tool by ID
+> Requires authentication (session cookie).
 
 ```bash
-curl http://localhost:5000/api/admin/agentic/tools/create_user
-```
-
-Response:
-```json
-{
-  "id": "create_user",
-  "name": "Create User",
-  "description": "Create a new user account",
-  "category": "users",
-  "capabilities": ["create user", "add user", "new user", "crear usuario"],
-  "endpoint": "/api/admin/users",
-  "method": "POST",
-  "isEnabled": true,
-  "usageCount": 150,
-  "successRate": 98.5,
-  "healthStatus": "healthy"
-}
-```
-
-### Store Memory Atom
-
-```bash
-curl -X POST http://localhost:5000/api/admin/agentic/memory/store \
+curl -X POST http://localhost:5000/api/agent/runs \
   -H "Content-Type: application/json" \
-  -d '{
-    "key": "user_preference",
-    "value": {"theme": "dark", "language": "es"},
-    "context": "session_123"
-  }'
+  -H "Cookie: connect.sid=..." \
+  -d '{"chatId":"chat_123","messageId":"msg_123","message":"Create a report and export it as CSV","idempotencyKey":"run_123"}'
 ```
 
-### Report a Gap
+### Get Tool Metadata (Registry)
 
 ```bash
-curl -X POST http://localhost:5000/api/admin/agentic/gaps \
+curl http://localhost:5000/api/registry/tools
+curl http://localhost:5000/api/registry/tools/<toolName>
+```
+
+### Store Memory
+
+```bash
+curl -X POST http://localhost:5000/api/memory \
   -H "Content-Type: application/json" \
-  -d '{
-    "type": "missing_tool",
-    "description": "Cannot export to PowerPoint format",
-    "context": {"prompt": "Export report as PPTX"}
-  }'
+  -H "Cookie: connect.sid=..." \
+  -d '{"type":"preference","content":"Theme: dark; language: es","importance":0.7,"context":"session_123"}'
+```
+
+### List Capability Gaps (Admin)
+
+```bash
+curl "http://localhost:5000/api/admin/agent/gaps?status=open&limit=25"
 ```
 
 ## Security

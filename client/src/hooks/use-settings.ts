@@ -117,7 +117,7 @@ interface ApiUserSettings {
 
 const defaultSettings: UserSettings = {
   // Display
-  appearance: "system",
+  appearance: "light",
   accentColor: "default",
   fontSize: "medium",
   density: "comfortable",

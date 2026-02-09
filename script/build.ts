@@ -44,7 +44,16 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  await viteBuild();
+  // Some environments terminate long-running commands that don't emit output.
+  // Emit a small heartbeat while Vite is working to keep logs alive.
+  const clientHeartbeat = setInterval(() => {
+    console.log("[build] client build still running...");
+  }, 15000);
+  try {
+    await viteBuild();
+  } finally {
+    clearInterval(clientHeartbeat);
+  }
 
   await bumpBuiltSwCleanupVersion();
 
@@ -74,6 +83,14 @@ async function buildAll() {
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+
+// Some dependencies still reference CommonJS globals (module/exports) even when bundled.
+// When output format is ESM, these are not defined by Node.
+// Provide a minimal shim to avoid runtime crashes like:
+//   ReferenceError: module is not defined in ES module scope
+const module = { exports: {} };
+const exports = module.exports;
+
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
