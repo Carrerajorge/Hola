@@ -31,7 +31,29 @@ COPY package.json package-lock.json ./
 RUN npm ci --only=production --ignore-scripts
 
 # ============================================
-# Stage 4: Production Runner
+# Stage 4: Sandbox Runner
+# ============================================
+FROM node:25-alpine AS sandbox-runner
+
+WORKDIR /app
+
+# docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
+RUN apk add --no-cache docker-cli bash
+
+ENV NODE_ENV=production
+ENV SANDBOX_RUNNER_PORT=8080
+
+# Prod deps + built artifacts
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 8080
+
+CMD ["node", "dist/sandbox-runner.cjs"]
+
+# ============================================
+# Stage 5: Production Runner
 # ============================================
 FROM node:25-alpine AS runner
 WORKDIR /app
