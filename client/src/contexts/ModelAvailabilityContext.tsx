@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useSettingsContext } from "@/contexts/SettingsContext";
@@ -51,10 +51,10 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       if (!res.ok) throw new Error("Failed to fetch models");
       return res.json();
     },
-    refetchInterval: 30000,
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
+    refetchInterval: 120000,
+    staleTime: 60000,
+    gcTime: 300000,
+    refetchOnMount: true,
     refetchOnWindowFocus: true,
   });
 
@@ -151,6 +151,24 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
     if (selectedModelId === target.id || selectedModelId === target.modelId) return;
     setSelectedModelIdState(target.id);
   }, [enabledModels, selectedModelId, settings.defaultModel]);
+
+  // Trigger backend warmup when the user switches to a different model.
+  const prevModelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedModelId || selectedModelId === prevModelRef.current) return;
+    prevModelRef.current = selectedModelId;
+
+    const model = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
+    if (!model?.modelId) return;
+
+    fetch("/api/models/warmup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model.modelId }),
+    }).catch(() => {
+      // Warmup is best-effort; ignore failures.
+    });
+  }, [selectedModelId, enabledModels]);
 
   const toggleMutation = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {

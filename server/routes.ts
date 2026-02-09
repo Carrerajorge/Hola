@@ -996,6 +996,34 @@ export async function registerRoutes(
     }
   });
 
+  // ===== Model Warmup Endpoint =====
+  app.post("/api/models/warmup", async (req: Request, res: Response) => {
+    try {
+      const { model } = req.body;
+      if (!model || typeof model !== "string") {
+        return res.status(400).json({ error: "model is required" });
+      }
+
+      // Validate the model is actually available before warming up
+      const allModels = await storage.getAiModels();
+      const isValid = allModels.some((m: any) => m.modelId === model && m.isEnabled === "true");
+      if (!isValid) {
+        return res.status(400).json({ error: "Model not available" });
+      }
+
+      const { modelWarmupManager } = await import("./lib/modelWarmup");
+      // Fire and forget - don't block the response on LLM roundtrip
+      modelWarmupManager.warmupModel(model).catch((err) => {
+        console.warn(`[Models] Warmup failed for ${model}:`, err?.message || err);
+      });
+
+      res.json({ status: "warming", model });
+    } catch (error: any) {
+      console.error("[Models] Warmup error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===== AI Quality Stats & Content Filter Endpoints =====
 
   // GET /api/ai/quality-stats - Return quality statistics

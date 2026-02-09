@@ -36,12 +36,10 @@ class ModelWarmupManager {
     });
 
     try {
-      await llmGateway.sendMessage({
-        messages: [{ role: "user", content: "ping" }],
-        model,
-        maxTokens: 1,
-        stream: false,
-      });
+      await llmGateway.chat(
+        [{ role: "user", content: "ping" }],
+        { model, maxTokens: 1, temperature: 0, skipCache: true }
+      );
 
       this.connections.set(model, {
         model,

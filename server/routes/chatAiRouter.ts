@@ -42,6 +42,7 @@ import { auditLog } from "../services/auditLogger";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
+import { modelWarmupManager } from "../lib/modelWarmup";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -958,6 +959,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
+      // Track model usage for warmup manager
+      modelWarmupManager.markModelUsed(effectiveModel);
+
       // Session metadata for SSE events
       const sessionMetadata = gptSessionContract ? {
         gpt_id: gptSessionContract.gptId,
@@ -1706,6 +1710,7 @@ ${attachmentContext}`;
         : questionClassification.maxTokens * 4; // Apply stricter limit for factual questions
 
       console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
+      console.log(`[Stream] Using model: ${effectiveModel} (requested: ${model || 'none'})`);
 
       // Apply latency-lane-aware token limit:
       //  fast → hard cap to keep response short & snappy
@@ -1733,6 +1738,7 @@ ${attachmentContext}`;
         {
           userId: userId || conversationId || "anonymous",
           requestId,
+          model: effectiveModel,
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
         }
