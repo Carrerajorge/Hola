@@ -127,7 +127,7 @@
     "@uppy/core": "^5.2.0",
     "@uppy/dashboard": "^5.1.1",
     "@uppy/react": "^5.1.1",
-    "@upstash/redis": "^1.36.1",
+    "@upstash/redis": "^1.36.2",
     "@vitest/coverage-v8": "^4.0.16",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "asciimath2tex": "^1.5.0",
