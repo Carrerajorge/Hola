@@ -2855,8 +2855,10 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: `req_${Date.now()}`
       };
+      // Show user message immediately (optimistic update) — BEFORE any async work
+      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
       onSendMessage(userMessage);
-      
+
       // Stream the response using the all-in-one hook
       // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
       const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
@@ -4027,6 +4029,7 @@ export function ChatInterface({
             }
           };
 
+          setOptimisticMessages((prev: Message[]) => [...prev, formPreviewMsg]);
           onSendMessage(formPreviewMsg);
           // Note: markRequestComplete is called inside addMessage after persistence
           setAiState("idle");
@@ -4081,6 +4084,7 @@ export function ChatInterface({
               userMessageId: userMsgId,
               webSources: data.webSources,
             };
+            setOptimisticMessages((prev: Message[]) => [...prev, gmailResponseMsg]);
             onSendMessage(gmailResponseMsg);
           } else {
             const gmailErrorMsg: Message = {
@@ -4091,6 +4095,7 @@ export function ChatInterface({
               requestId: generateRequestId(),
               userMessageId: userMsgId
             };
+            setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
             onSendMessage(gmailErrorMsg);
           }
         } catch (error) {
@@ -4103,6 +4108,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, gmailErrorMsg]);
           onSendMessage(gmailErrorMsg);
         }
 
@@ -4134,6 +4140,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, orchestratorMsg]);
           onSendMessage(orchestratorMsg);
         } catch (err) {
           console.error("[Orchestrator] Error:", err);
@@ -4145,6 +4152,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId
           };
+          setOptimisticMessages((prev: Message[]) => [...prev, errorMsg]);
           onSendMessage(errorMsg);
         }
 
@@ -4232,6 +4240,7 @@ export function ChatInterface({
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
               };
+              setOptimisticMessages((prev: Message[]) => [...prev, aiMsg]);
               onSendMessage(aiMsg);
 
               setIsGeneratingImage(false);
