@@ -116,7 +116,8 @@ const EMOTION_LEXICON: Record<string, { emotion: PrimaryEmotion; intensity: numb
   'miedo': [{ emotion: 'fear', intensity: 0.8 }],
   'asustado': [{ emotion: 'fear', intensity: 0.8 }],
   'preocupado': [{ emotion: 'fear', intensity: 0.6 }],
-  'ansioso': [{ emotion: 'fear', intensity: 0.7 }],
+  // Can mean both anxious (fear) and eager (anticipation) depending on context.
+  'ansioso': [{ emotion: 'fear', intensity: 0.7 }, { emotion: 'anticipation', intensity: 0.6 }],
   'nervioso': [{ emotion: 'fear', intensity: 0.6 }],
   'aterrorizado': [{ emotion: 'fear', intensity: 0.95 }],
 
@@ -138,7 +139,6 @@ const EMOTION_LEXICON: Record<string, { emotion: PrimaryEmotion; intensity: numb
 
   // Español - Anticipación
   'emocionado': [{ emotion: 'anticipation', intensity: 0.8 }, { emotion: 'joy', intensity: 0.5 }],
-  'ansioso': [{ emotion: 'anticipation', intensity: 0.6 }, { emotion: 'fear', intensity: 0.4 }],
   'esperando': [{ emotion: 'anticipation', intensity: 0.5 }],
 
   // English - Joy
@@ -192,7 +192,6 @@ const EMOTION_LEXICON: Record<string, { emotion: PrimaryEmotion; intensity: numb
 
   // English - Disgust
   'disgusted': [{ emotion: 'disgust', intensity: 0.9 }],
-  'horrible': [{ emotion: 'disgust', intensity: 0.8 }],
   'awful': [{ emotion: 'disgust', intensity: 0.75 }],
   'gross': [{ emotion: 'disgust', intensity: 0.7 }],
 
