@@ -119,6 +119,9 @@ import { compression } from "./middleware/compression";
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
 import computerUseRouter from "./routes/computerUseRouter";
+import { createBrowserControlRouter } from "./routes/browserControlRouter";
+import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
+import { createWorkflowRouter } from "./routes/workflowRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -599,6 +602,11 @@ export async function registerRoutes(
 
   // ===== Computer Use / Agentic Control =====
   app.use("/api/computer-use", computerUseRouter);
+
+  // ===== Browser & Terminal Control =====
+  app.use("/api/browser-control", createBrowserControlRouter());
+  app.use("/api/terminal", createTerminalControlRouter());
+  app.use("/api/workflows", createWorkflowRouter());
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
@@ -1572,6 +1580,49 @@ export async function registerRoutes(
           clients.delete(ws);
           if (clients.size === 0) {
             browserClients.delete(subscribedSessionId);
+          }
+        }
+      }
+    });
+  });
+
+  // ===== Terminal WebSocket =====
+  const terminalWss = new WebSocketServer({ server: httpServer, path: "/ws/terminal" });
+
+  createAuthenticatedWebSocketHandler(terminalWss, true, (ws: AuthenticatedWebSocket) => {
+    let subscribedSessionId: string | null = null;
+
+    ws.on("message", (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+
+        if (data.type === "subscribe" && data.sessionId) {
+          subscribedSessionId = data.sessionId;
+          if (!terminalClients.has(data.sessionId)) {
+            terminalClients.set(data.sessionId, new Set());
+          }
+          terminalClients.get(data.sessionId)!.add(ws);
+          ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
+        } else if (data.type === "input" && subscribedSessionId) {
+          // Forward input to terminal session (for interactive commands)
+          ws.send(JSON.stringify({
+            type: "ack",
+            sessionId: subscribedSessionId,
+            timestamp: Date.now(),
+          }));
+        }
+      } catch (e) {
+        console.error("Terminal WS message parse error:", e);
+      }
+    });
+
+    ws.on("close", () => {
+      if (subscribedSessionId) {
+        const clients = terminalClients.get(subscribedSessionId);
+        if (clients) {
+          clients.delete(ws);
+          if (clients.size === 0) {
+            terminalClients.delete(subscribedSessionId);
           }
         }
       }
