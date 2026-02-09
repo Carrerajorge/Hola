@@ -1,13 +1,13 @@
 /**
  * User Memory Store
- * 
+ *
  * Cross-session persistent memory for user preferences, facts, and context.
  * Survives across conversations and provides long-term personalization.
+ *
+ * Delegates to SemanticMemoryStore for DB persistence, with in-memory fallback.
  */
 
-import { db } from "../db";
-import { eq, desc, and, gte } from "drizzle-orm";
-import { storage } from "../storage";
+import { semanticMemoryStore } from "./SemanticMemoryStore";
 
 // ============================================================================
 // TYPES
@@ -44,7 +44,7 @@ export interface MemoryStats {
 }
 
 // ============================================================================
-// IN-MEMORY STORE (Fallback when DB tables don't exist)
+// IN-MEMORY STORE (Fallback when DB is unavailable)
 // ============================================================================
 
 class InMemoryUserStore {
@@ -150,16 +150,23 @@ class InMemoryUserStore {
     }
 }
 
+// Map UserMemory types to SemanticMemoryStore types
+const typeMap: Record<UserMemory["memoryType"], "fact" | "preference" | "conversation" | "instruction" | "note"> = {
+    fact: "fact",
+    preference: "preference",
+    context: "conversation",
+    instruction: "instruction",
+};
+
 // ============================================================================
 // USER MEMORY STORE
 // ============================================================================
 
 export class UserMemoryStore {
     private inMemoryStore = new InMemoryUserStore();
-    private useInMemory = true; // Will try DB first, fall back to memory
 
     constructor() {
-        console.log("[UserMemoryStore] Initialized (using in-memory fallback)");
+        console.log("[UserMemoryStore] Initialized with DB persistence via SemanticMemoryStore");
     }
 
     /**
@@ -172,18 +179,45 @@ export class UserMemoryStore {
         type: UserMemory["memoryType"] = "fact",
         options: { confidence?: number; source?: UserMemory["source"]; expiresAt?: Date } = {}
     ): Promise<UserMemory> {
-        const memory = await this.inMemoryStore.set({
-            userId,
-            memoryType: type,
-            memoryKey: key,
-            memoryValue: value,
-            confidence: options.confidence ?? 0.8,
-            source: options.source ?? "extracted",
-            expiresAt: options.expiresAt
-        });
+        try {
+            // Persist via SemanticMemoryStore (which writes to DB)
+            await semanticMemoryStore.initialize();
+            const semanticType = typeMap[type] || "note";
+            const chunk = await semanticMemoryStore.remember(userId, `${key}: ${value}`, semanticType, {
+                source: options.source === "explicit" ? "explicit" : "conversation",
+                confidence: options.confidence ?? 0.8,
+                tags: [key, type],
+            });
 
-        console.log(`[UserMemoryStore] Remembered: ${type}:${key} for user ${userId.slice(0, 8)}`);
-        return memory;
+            const memory: UserMemory = {
+                id: chunk.id,
+                userId,
+                memoryType: type,
+                memoryKey: key,
+                memoryValue: value,
+                confidence: options.confidence ?? 0.8,
+                accessCount: chunk.metadata.accessCount,
+                source: options.source ?? "extracted",
+                lastAccessed: new Date(),
+                createdAt: chunk.metadata.createdAt,
+                expiresAt: options.expiresAt,
+            };
+
+            console.log(`[UserMemoryStore] Remembered: ${type}:${key} for user ${userId.slice(0, 8)}`);
+            return memory;
+        } catch (error) {
+            console.warn("[UserMemoryStore] DB persist failed, using in-memory fallback:", error);
+            const memory = await this.inMemoryStore.set({
+                userId,
+                memoryType: type,
+                memoryKey: key,
+                memoryValue: value,
+                confidence: options.confidence ?? 0.8,
+                source: options.source ?? "extracted",
+                expiresAt: options.expiresAt
+            });
+            return memory;
+        }
     }
 
     /**
@@ -193,19 +227,61 @@ export class UserMemoryStore {
         userId: string,
         options: { types?: UserMemory["memoryType"][]; limit?: number; minConfidence?: number } = {}
     ): Promise<UserMemory[]> {
-        return this.inMemoryStore.query({
-            userId,
-            types: options.types,
-            limit: options.limit ?? 50,
-            minConfidence: options.minConfidence
-        });
+        try {
+            await semanticMemoryStore.initialize();
+            const semanticTypes = options.types?.map(t => typeMap[t]).filter(Boolean);
+            const chunks = await semanticMemoryStore.recall(userId, {
+                types: semanticTypes as any[],
+                limit: options.limit ?? 50,
+                sortBy: "recent",
+            });
+
+            return chunks
+                .filter(c => !options.minConfidence || c.metadata.confidence >= options.minConfidence)
+                .map(c => {
+                    // Parse key:value from content if possible
+                    const colonIndex = c.content.indexOf(": ");
+                    const memoryKey = colonIndex > 0 ? c.content.slice(0, colonIndex) : c.type;
+                    const memoryValue = colonIndex > 0 ? c.content.slice(colonIndex + 2) : c.content;
+
+                    // Reverse-map type
+                    const reverseTypeMap: Record<string, UserMemory["memoryType"]> = {
+                        fact: "fact",
+                        preference: "preference",
+                        conversation: "context",
+                        instruction: "instruction",
+                        note: "fact",
+                    };
+
+                    return {
+                        id: c.id,
+                        userId: c.userId,
+                        memoryType: reverseTypeMap[c.type] || "fact",
+                        memoryKey,
+                        memoryValue,
+                        confidence: c.metadata.confidence,
+                        accessCount: c.metadata.accessCount,
+                        source: (c.metadata.source === "explicit" ? "explicit" : "extracted") as UserMemory["source"],
+                        lastAccessed: c.metadata.lastAccessed,
+                        createdAt: c.metadata.createdAt,
+                    };
+                });
+        } catch (error) {
+            console.warn("[UserMemoryStore] DB recall failed, using in-memory fallback:", error);
+            return this.inMemoryStore.query({
+                userId,
+                types: options.types,
+                limit: options.limit ?? 50,
+                minConfidence: options.minConfidence
+            });
+        }
     }
 
     /**
      * Get specific memory by key
      */
     async get(userId: string, key: string): Promise<UserMemory | null> {
-        const memories = await this.inMemoryStore.get(userId);
+        const memories = await this.recall(userId);
         return memories.find(m => m.memoryKey === key) || null;
     }
 
@@ -213,14 +289,38 @@ export class UserMemoryStore {
      * Forget a specific memory
      */
     async forget(userId: string, key: string): Promise<boolean> {
-        return this.inMemoryStore.delete(userId, key);
+        try {
+            const memories = await this.recall(userId);
+            const memory = memories.find(m => m.memoryKey === key);
+            if (memory) {
+                await semanticMemoryStore.initialize();
+                return semanticMemoryStore.forget(userId, memory.id);
+            }
+            return false;
+        } catch (error) {
+            console.warn("[UserMemoryStore] DB forget failed, using in-memory fallback:", error);
+            return this.inMemoryStore.delete(userId, key);
+        }
     }
 
     /**
      * Get user memory statistics
      */
     async getStats(userId: string): Promise<MemoryStats> {
-        return this.inMemoryStore.getStats(userId);
+        try {
+            await semanticMemoryStore.initialize();
+            const stats = await semanticMemoryStore.getStats(userId);
+            return {
+                totalMemories: stats.totalMemories,
+                byType: stats.byType,
+                avgConfidence: stats.avgConfidence / 100, // stats returns 0-100, normalize to 0-1
+                oldestMemory: null,
+                mostAccessed: null,
+            };
+        } catch (error) {
+            console.warn("[UserMemoryStore] DB stats failed, using in-memory fallback:", error);
+            return this.inMemoryStore.getStats(userId);
+        }
     }
 
     /**

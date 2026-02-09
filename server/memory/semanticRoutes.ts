@@ -25,10 +25,13 @@ router.post("/search", async (req: Request, res: Response) => {
         const {
             query,
             limit = 10,
-            min_score = 0.3,
+            min_score,
+            threshold,
             types,
             hybrid = true
         } = req.body;
+
+        const minScore = min_score ?? threshold ?? 0.3;
 
         if (!query || typeof query !== "string") {
             return res.status(400).json({ error: "Query string required" });
@@ -38,7 +41,7 @@ router.post("/search", async (req: Request, res: Response) => {
 
         const results = await semanticMemoryStore.search(userId, query, {
             limit,
-            minScore: min_score,
+            minScore,
             types,
             hybridSearch: hybrid
         });
@@ -54,7 +57,7 @@ router.post("/search", async (req: Request, res: Response) => {
                 metadata: {
                     source: r.chunk.metadata.source,
                     created_at: r.chunk.metadata.createdAt,
-                    confidence: r.chunk.metadata.confidence
+                    confidence: Math.round(r.chunk.metadata.confidence * 100)
                 }
             })),
             count: results.length
@@ -149,7 +152,10 @@ router.get("/recall", async (req: Request, res: Response) => {
                 id: m.id,
                 content: m.content,
                 type: m.type,
-                metadata: m.metadata
+                metadata: {
+                    ...m.metadata,
+                    confidence: Math.round(m.metadata.confidence * 100),
+                }
             })),
             count: memories.length
         });

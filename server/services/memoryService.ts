@@ -109,29 +109,27 @@ export class MemoryService {
     } = {}
   ): Promise<MemoryEntry[]> {
     const { types, limit = 20, minImportance = 0 } = options;
-    
-    let query = sql`
-      SELECT * FROM user_memories 
-      WHERE user_id = ${userId}
-      AND importance >= ${minImportance}
-    `;
-    
+
+    let result;
+
     if (types && types.length > 0) {
-      query = sql`
-        SELECT * FROM user_memories 
+      result = await db.execute(sql`
+        SELECT * FROM user_memories
         WHERE user_id = ${userId}
         AND importance >= ${minImportance}
         AND type = ANY(${types})
-      `;
+        ORDER BY importance DESC, last_accessed_at DESC
+        LIMIT ${limit}
+      `);
+    } else {
+      result = await db.execute(sql`
+        SELECT * FROM user_memories
+        WHERE user_id = ${userId}
+        AND importance >= ${minImportance}
+        ORDER BY importance DESC, last_accessed_at DESC
+        LIMIT ${limit}
+      `);
     }
-    
-    const result = await db.execute(sql`
-      SELECT * FROM user_memories 
-      WHERE user_id = ${userId}
-      AND importance >= ${minImportance}
-      ORDER BY importance DESC, last_accessed_at DESC
-      LIMIT ${limit}
-    `);
     
     // Update access counts
     const ids = result.rows?.map((r: any) => r.id) || [];
