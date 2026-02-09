@@ -191,12 +191,12 @@ export const slidesGenerateTool: ToolDefinition = {
       description: "Slide data for 'add_slide' action",
       properties: {
         title: { type: "string", description: "Slide title" },
-        bullets: { type: "array", description: "Bullet points", items: { type: "string" } },
+        bullets: { type: "array", description: "Bullet points", items: { type: "string", description: "A bullet point text" } },
         notes: { type: "string", description: "Speaker notes" }
       }
     },
     presentationId: {
-      type: "string",
+      type: "string" as const,
       description: "ID of existing presentation (for add_slide/export)"
     },
     filename: {

@@ -71,7 +71,7 @@ async function semanticScholarSearch(query: string, limit: number): Promise<Acad
       authors,
       doi,
       abstract: (p?.abstract || '').toString() || undefined,
-      source: 'semantic_scholar',
+      source: 'semantic_scholar' as const,
     };
   }).filter(x => x.title);
 }
@@ -106,7 +106,7 @@ async function crossrefSearch(query: string, limit: number): Promise<AcademicSou
       authors,
       doi,
       abstract: (it?.abstract || '').toString() || undefined,
-      source: 'crossref',
+      source: 'crossref' as const,
     };
   }).filter(x => x.title);
 }

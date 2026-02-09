@@ -3,6 +3,7 @@
  * Prevent cascade failures with automatic failover
  */
 
+// @ts-ignore - opossum has no type declarations
 import CircuitBreaker from 'opossum';
 import { FALLBACK_CHAINS } from '../lib/modelRegistry';
 

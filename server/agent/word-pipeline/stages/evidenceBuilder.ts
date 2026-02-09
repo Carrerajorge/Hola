@@ -78,7 +78,7 @@ export class EvidenceBuilderStage implements Stage<EvidenceInput, EvidenceOutput
               id: sourceId,
               url: result.url,
               title: result.title || "Academic Source",
-              author: result.author,
+              author: result.authors?.[0] || result.title || "Unknown",
               publishedDate: result.year?.toString(),
               accessedAt: new Date().toISOString(),
               type: "web",

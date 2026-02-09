@@ -98,7 +98,7 @@ apiKeysRouter.post("/", async (req, res) => {
     await auditLog(req, {
       action: "api_key.created",
       resource: "api_keys",
-      resourceId: result.rows?.[0]?.id,
+      resourceId: result.rows?.[0]?.id as string | undefined,
       details: { name, permissions },
       category: "security",
       severity: "warning"

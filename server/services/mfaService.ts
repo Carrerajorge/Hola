@@ -3,6 +3,7 @@
  * Implements TOTP-based two-factor authentication
  */
 
+// @ts-ignore - otplib may not have type declarations
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import crypto from 'crypto';

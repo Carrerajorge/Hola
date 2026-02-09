@@ -712,4 +712,4 @@ export async function getSelfHealingMetricsText(): Promise<string> {
   return metricsRegistry.metrics();
 }
 
-export { SelfHealingManager };
+// SelfHealingManager is already exported at its class declaration

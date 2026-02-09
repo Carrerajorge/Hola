@@ -105,11 +105,11 @@ advancedAnalyticsRouter.get("/funnel", async (req, res) => {
     ]);
 
     const funnel = [
-      { stage: "Visitors", count: parseInt(visitorsResult.rows?.[0]?.count || "1000"), color: "#3b82f6" },
-      { stage: "Signups", count: parseInt(signupsResult.rows?.[0]?.count || "0"), color: "#8b5cf6" },
-      { stage: "First Chat", count: parseInt(firstChatResult.rows?.[0]?.count || "0"), color: "#10b981" },
-      { stage: "Engaged (5+ chats)", count: parseInt(multiChatResult.rows?.[0]?.count || "0"), color: "#f59e0b" },
-      { stage: "Paid", count: parseInt(paidResult.rows?.[0]?.count || "0"), color: "#ef4444" }
+      { stage: "Visitors", count: parseInt(String(visitorsResult.rows?.[0]?.count ?? "1000")), color: "#3b82f6" },
+      { stage: "Signups", count: parseInt(String(signupsResult.rows?.[0]?.count ?? "0")), color: "#8b5cf6" },
+      { stage: "First Chat", count: parseInt(String(firstChatResult.rows?.[0]?.count ?? "0")), color: "#10b981" },
+      { stage: "Engaged (5+ chats)", count: parseInt(String(multiChatResult.rows?.[0]?.count ?? "0")), color: "#f59e0b" },
+      { stage: "Paid", count: parseInt(String(paidResult.rows?.[0]?.count ?? "0")), color: "#ef4444" }
     ];
 
     // Calculate conversion rates
@@ -155,7 +155,7 @@ advancedAnalyticsRouter.get("/heatmap", async (req, res) => {
         heatmap.push({
           day: days[d],
           hour: h,
-          value: parseInt(match?.activity_count || "0")
+          value: parseInt(String(match?.activity_count ?? "0"))
         });
       }
     }
@@ -305,9 +305,9 @@ advancedAnalyticsRouter.get("/engagement", async (req, res) => {
       `)
     ]);
 
-    const dauCount = parseInt(dau.rows?.[0]?.count || "0");
-    const wauCount = parseInt(wau.rows?.[0]?.count || "0");
-    const mauCount = parseInt(mau.rows?.[0]?.count || "0");
+    const dauCount = parseInt(String(dau.rows?.[0]?.count ?? "0"));
+    const wauCount = parseInt(String(wau.rows?.[0]?.count ?? "0"));
+    const mauCount = parseInt(String(mau.rows?.[0]?.count ?? "0"));
 
     res.json({
       dau: dauCount,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+// @ts-ignore - opossum has no type declarations
 import CircuitBreaker from "opossum";
 import { llmGateway } from "../../lib/llmGateway";
 import {
@@ -74,18 +75,17 @@ async function callLLMClassifier(
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await llmGateway.chat({
-      messages: [
+    const response = await llmGateway.chat(
+      [
         { role: "system", content: LLM_CLASSIFIER_PROMPT },
         { role: "user", content: `Classify this message:\n\n"${originalText}"` }
       ],
-      temperature: 0.1,
-      max_tokens: 500
-    });
+      { temperature: 0.1, maxTokens: 500 }
+    );
 
     clearTimeout(timeoutId);
 
-    const content = response.choices[0]?.message?.content || "";
+    const content = (response as any).choices?.[0]?.message?.content || response.content || "";
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {

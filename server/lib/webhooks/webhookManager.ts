@@ -3,7 +3,7 @@
  * Unified handling for Stripe, SendGrid, Internal Hooks with signature verification
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import * as crypto from 'crypto';
 
 type WebhookHandler = (payload: any, headers: Record<string, any>) => Promise<void>;

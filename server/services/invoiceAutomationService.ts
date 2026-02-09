@@ -198,7 +198,7 @@ export async function sendInvoiceEmailIdempotent(params: {
 
   const emailResult = await sendPaymentEmail(to, {
     invoiceId: invoiceIdForDisplay,
-    amount,
+    amount: parseFloat(amount) || 0,
     currency,
     status,
     invoiceUrl,

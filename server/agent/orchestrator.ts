@@ -98,7 +98,7 @@ class AgentOrchestrator {
             await fetch(uploadURL, {
               method: "PUT",
               headers: { "Content-Type": "image/png" },
-              body: navResult.screenshot
+              body: navResult.screenshot as any
             });
             screenshotPath = storagePath;
 

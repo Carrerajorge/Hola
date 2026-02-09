@@ -74,7 +74,8 @@ import {
   Zap,
   FileSpreadsheet,
   Table,
-  FolderOpen
+  FolderOpen,
+  Copy
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";

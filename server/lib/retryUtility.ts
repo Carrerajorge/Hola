@@ -186,6 +186,7 @@ export async function withCircuitBreaker<T>(
     // Lazy load opossum
     if (opossum === null) {
         try {
+            // @ts-ignore - opossum has no type declarations
             opossum = await import('opossum');
         } catch {
             // Fallback if opossum not installed

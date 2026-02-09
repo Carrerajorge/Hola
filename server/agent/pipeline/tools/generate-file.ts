@@ -85,7 +85,7 @@ export const generateFileTool: ToolDefinition = {
           await fetch(uploadURL, {
             method: "PUT",
             headers: { "Content-Type": mimeType },
-            body: contentBuffer
+            body: contentBuffer as any
           });
           storagePath = path;
         } catch (e) {

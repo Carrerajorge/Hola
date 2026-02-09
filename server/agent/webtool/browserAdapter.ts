@@ -59,11 +59,11 @@ export class PlaywrightBrowserAdapter implements IBrowserAdapter {
   ): Promise<BrowseResult> {
     const validatedUrl = validateOrThrow(BrowserUrlSchema, url, "BrowserAdapter.browse.url");
     
-    const request: BrowseRequest = validateOrThrow(
+    const request = validateOrThrow(
       BrowseRequestSchema,
       { url: validatedUrl, options },
       "BrowserAdapter.browse"
-    );
+    ) as BrowseRequest;
     
     const mergedOptions: BrowseOptions = {
       ...DEFAULT_BROWSE_OPTIONS,

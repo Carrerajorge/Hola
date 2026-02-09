@@ -5,6 +5,7 @@
 
 import { db } from '../db';
 import { sql } from 'drizzle-orm';
+// @ts-ignore - archiver has no type declarations
 import archiver from 'archiver';
 import { Writable } from 'stream';
 
@@ -120,7 +121,7 @@ class DataExportService {
       SELECT id, email, username as name, created_at, settings 
       FROM users WHERE id = ${userId}
     `);
-        const user = userResult.rows?.[0];
+        const user = userResult.rows?.[0] as any;
 
         if (!user) {
             throw new Error('User not found');

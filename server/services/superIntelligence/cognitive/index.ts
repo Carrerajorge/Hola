@@ -261,9 +261,11 @@ export class CognitiveCore {
       ['working', 'short_term', 'episodic', 'semantic'];
 
     for (const tier of tiers) {
-      const tierMemories = await this.memory.search(context.userId, context.query, {
+      const tierMemories = this.memory.search({
+        text: context.query,
         tier,
-        limit: 5
+        limit: 5,
+        userId: context.userId
       });
       memories.push(...tierMemories);
     }
@@ -280,14 +282,6 @@ export class CognitiveCore {
     understanding: CognitiveResult['understanding'],
     memories: any[]
   ): Promise<any> {
-    // Build reasoning context
-    const reasoningContext = {
-      query: context.query,
-      understanding,
-      memories: memories.map(m => m.content).slice(0, 5),
-      userProfile: context.userProfile
-    };
-
     // Determine reasoning type based on query
     let reasoningType: 'deductive' | 'inductive' | 'abductive' | 'causal' = 'deductive';
 
@@ -301,19 +295,24 @@ export class CognitiveCore {
     }
 
     // Execute reasoning
-    const result = await this.reasoning.reason({
-      type: reasoningType,
-      premises: [
-        { type: 'fact', content: `User query: ${context.query}` },
-        ...memories.slice(0, 3).map(m => ({ type: 'fact' as const, content: m.content }))
-      ],
-      goal: 'Provide accurate and helpful response',
-      context: reasoningContext
-    });
+    const result = await this.reasoning.reason(
+      context.query,
+      {
+        facts: memories.slice(0, 3).map((m: any, i: number) => ({
+          id: `fact_${i}`,
+          statement: m.item?.content || m.content || String(m),
+          confidence: 0.7,
+          source: 'memory',
+          timestamp: new Date(),
+          tags: []
+        })),
+        goals: ['Provide accurate and helpful response'],
+      }
+    );
 
     return {
       approach: reasoningType,
-      steps: result.chain?.steps || [],
+      steps: result.reasoning?.steps || [],
       confidence: result.confidence || 0.7,
       conclusion: result.conclusion
     };
@@ -339,26 +338,16 @@ export class CognitiveCore {
     }
 
     // Create a plan for complex tasks
-    const planResult = await this.planning.createPlan({
-      goal: context.query,
-      context: {
-        userId: context.userId,
-        reasoning: reasoningResult
-      },
-      constraints: {
-        maxSteps: 10,
-        timeLimit: 30000
-      }
-    });
+    const planResult = await this.planning.createPlan(context.query);
 
     return {
-      id: planResult.id,
-      tasks: planResult.tasks.map(t => ({
+      id: planResult.plan.id,
+      tasks: planResult.plan.tasks.map((t: any) => ({
         id: t.id,
         name: t.name,
         status: t.status
       })),
-      estimatedSteps: planResult.tasks.length
+      estimatedSteps: planResult.plan.tasks.length
     };
   }
 
@@ -461,31 +450,34 @@ export class CognitiveCore {
     response: CognitiveResult['response']
   ): Promise<void> {
     // Store in episodic memory
-    await this.memory.store(context.userId, {
-      type: 'episodic',
-      content: JSON.stringify({
+    this.memory.store(
+      JSON.stringify({
         query: context.query,
         understanding: understanding.keyPoints,
         response: response.content,
         confidence: reasoningResult.confidence
       }),
-      metadata: {
+      'episodic',
+      'episode',
+      {
+        userId: context.userId,
         sessionId: context.sessionId,
-        intent: context.intent,
-        timestamp: Date.now()
+        tags: context.intent ? [context.intent] : [],
       }
-    });
+    );
 
     // If high confidence reasoning, store in semantic memory
     if (reasoningResult.confidence > 0.8 && reasoningResult.conclusion) {
-      await this.memory.store(context.userId, {
-        type: 'semantic',
-        content: reasoningResult.conclusion,
-        metadata: {
+      this.memory.store(
+        reasoningResult.conclusion,
+        'semantic',
+        'fact',
+        {
           source: 'reasoning',
-          confidence: reasoningResult.confidence
+          confidence: reasoningResult.confidence,
+          userId: context.userId,
         }
-      });
+      );
     }
   }
 
@@ -555,9 +547,6 @@ export class CognitiveCore {
 // Export singleton instance
 export const cognitiveCore = new CognitiveCore();
 
-// Export instances
-export { reasoningEngine, planningEngine, memoryHierarchy };
-
 /**
  * Initialize the cognitive system
  */
@@ -565,9 +554,9 @@ export async function initializeCognitiveSystem(): Promise<void> {
   console.log('[CognitiveSystem] Initializing cognitive architecture...');
 
   // Initialize sub-components
-  await reasoningEngine.initialize?.();
-  await planningEngine.initialize?.();
-  await memoryHierarchy.initialize?.();
+  await (reasoningEngine as any).initialize?.();
+  await (planningEngine as any).initialize?.();
+  await (memoryHierarchy as any).initialize?.();
 
   console.log('[CognitiveSystem] Cognitive architecture initialized');
   console.log('[CognitiveSystem] - ReasoningEngine: ready');

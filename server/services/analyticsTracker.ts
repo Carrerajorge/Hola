@@ -166,12 +166,9 @@ class AnalyticsTrackerService extends EventEmitter {
 
       // Create analytics snapshot with counts
       await storage.createAnalyticsSnapshot({
-        activeUsersNow: this.sessions.size,
-        queriesPerMinute: eventCounts["chat_query"] || 0,
-        tokensConsumedToday: 0,
-        revenueToday: "0",
-        avgLatencyMs: 0,
-        errorRatePercentage: "0"
+        date: new Date(),
+        activeUsers: this.sessions.size,
+        totalQueries: eventCounts["chat_query"] || 0,
       });
 
       console.log(`[AnalyticsTracker] Flushed ${eventsToFlush.length} events`);

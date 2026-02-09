@@ -131,7 +131,7 @@ async function fetchUser(): Promise<User | null> {
             isAnonymous: true,
             username: `Guest-${identity.userId.slice(0, 4)}`,
             role: 'user',
-          } as User;
+          } as unknown as User;
         }
       }
     } catch (e) {

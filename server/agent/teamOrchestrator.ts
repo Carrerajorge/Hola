@@ -129,7 +129,7 @@ export class TeamOrchestrator extends EventEmitter {
         this.results.clear();
         this.aborted = false;
 
-        let currentPlan = { ...plan, status: "executing" as const };
+        let currentPlan: TaskPlan = { ...plan, status: "executing" as const };
         const executionWaves = getExecutionOrder(currentPlan);
 
         // Handle abort signal
@@ -149,12 +149,12 @@ export class TeamOrchestrator extends EventEmitter {
             // Update plan with results
             for (const result of waveResults) {
                 currentPlan = updateSubtaskStatus(
-                    currentPlan,
+                    currentPlan as any as Parameters<typeof updateSubtaskStatus>[0],
                     result.taskId,
                     result.success ? "completed" : "failed",
                     result.output,
                     result.success ? undefined : String(result.output)
-                );
+                ) as typeof currentPlan;
                 this.results.set(result.taskId, result);
             }
 

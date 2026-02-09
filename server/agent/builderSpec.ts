@@ -212,7 +212,7 @@ export const DocTableSchema = z.object({
 });
 export type DocTable = z.infer<typeof DocTableSchema>;
 
-export const DocSectionSchema = z.object({
+export const DocSectionSchema: z.ZodType<any> = z.object({
   id: z.string().default(() => randomUUID()),
   heading: z.string().min(1).max(500),
   level: HeadingLevelSchema.default("h2"),
@@ -489,7 +489,7 @@ export type Component = z.infer<typeof BaseComponentSchema> & {
   children?: (string | Component)[];
 };
 
-export const ComponentSchema: z.ZodType<Component> = BaseComponentSchema.extend({
+export const ComponentSchema: z.ZodType<Component, any, any> = BaseComponentSchema.extend({
   children: z.lazy(() => z.array(z.union([z.string(), ComponentSchema]))).optional(),
 });
 

@@ -315,7 +315,7 @@ class MetricsCollector extends EventEmitter {
             result = result.filter(m => m.name === filter.name);
         }
         if (filter?.since) {
-            result = result.filter(m => m.timestamp >= filter.since);
+            result = result.filter(m => m.timestamp >= filter.since!);
         }
         if (filter?.jobId) {
             result = result.filter(m => m.jobId === filter.jobId);
@@ -436,7 +436,7 @@ class AuditLogger extends EventEmitter {
             result = result.filter(e => e.severity === filter.severity);
         }
         if (filter?.since) {
-            result = result.filter(e => e.timestamp >= filter.since);
+            result = result.filter(e => e.timestamp >= filter.since!);
         }
 
         return result;

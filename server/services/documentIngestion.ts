@@ -230,7 +230,7 @@ export async function detectFileType(
     // Try to detect by content
     try {
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as any);
       return 'xlsx';
     } catch {
       try {
@@ -289,7 +289,7 @@ export async function extractMetadata(
   switch (fileType) {
     case 'xlsx': {
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as any);
       metadata.sheetCount = workbook.worksheets.length;
       break;
     }
@@ -321,7 +321,7 @@ export async function extractMetadata(
 
 async function parseExcelXlsx(buffer: Buffer): Promise<DocumentSheet[]> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(buffer as any);
 
   const sheets: DocumentSheet[] = [];
 
@@ -655,7 +655,7 @@ async function parseRtf(buffer: Buffer): Promise<DocumentSheet[]> {
 
 async function parseImage(buffer: Buffer, fileName: string): Promise<DocumentSheet[]> {
   try {
-    const ocrResult = await ocrService.performOCR(buffer);
+    const ocrResult = await performOCR(buffer);
     const text = ocrResult.text || "";
     
     if (!text.trim()) {

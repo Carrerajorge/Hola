@@ -66,6 +66,9 @@ export class ConsistencyAgent extends BaseAgent {
             name: 'ConsistencyAgent',
             description: 'Ensures cross-document coherence between Word, Excel, and PPT',
             model: DEFAULT_MODEL,
+            temperature: 0.3,
+            maxTokens: 4096,
+            timeout: 60000,
             systemPrompt: `You are a meticulous consistency checker for multi-document packages.
 Your job is to verify that:
 1. Claims in Word documents are supported by data in Excel
@@ -92,23 +95,23 @@ Be thorough and flag any discrepancies, even minor ones.`,
             const report = await this.checkConsistency(documents, evidencePack);
 
             return {
+                taskId: task.id || "",
+                agentId: "ConsistencyAgent",
                 success: report.passed,
                 output: {
                     report,
                     summary: this.generateSummary(report),
                 },
-                metadata: {
-                    duration: Date.now() - startTime,
-                    issueCount: report.issues.length,
-                    coverageScore: report.traceMap.coverageScore,
-                },
+                duration: Date.now() - startTime,
             };
         } catch (error) {
             return {
+                taskId: task.id || "",
+                agentId: "ConsistencyAgent",
                 success: false,
                 output: null,
                 error: error instanceof Error ? error.message : 'Consistency check failed',
-                metadata: { duration: Date.now() - startTime },
+                duration: Date.now() - startTime,
             };
         }
     }
@@ -459,14 +462,14 @@ Respond in JSON:
             {
                 name: 'cross_document_consistency',
                 description: 'Verify consistency between Word, Excel, and PPT documents',
-                inputSchema: { documents: 'DocumentContent', evidencePack: 'EvidencePack?' },
-                outputSchema: { report: 'ConsistencyReport' },
+                inputSchema: z.object({ documents: z.any(), evidencePack: z.any().optional() }),
+                outputSchema: z.object({ report: z.any() }),
             },
             {
                 name: 'trace_map_generation',
                 description: 'Generate traceability map linking claims to evidence',
-                inputSchema: { claims: 'Claim[]', evidence: 'Evidence[]' },
-                outputSchema: { traceMap: 'TraceMap' },
+                inputSchema: z.object({ claims: z.array(z.any()), evidence: z.array(z.any()) }),
+                outputSchema: z.object({ traceMap: z.any() }),
             },
         ];
     }

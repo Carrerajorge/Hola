@@ -55,7 +55,7 @@ Responde SOLO con un JSON en este formato:
     const startTime = Date.now();
     try {
       const response = await Promise.race([
-        llmGateway.sendMessage({
+        (llmGateway as any).sendMessage({
           messages: [{ role: "user", content: verificationPrompt }],
           model,
           maxTokens: 500,
@@ -182,7 +182,7 @@ export async function getConsensusResponse(
     const startTime = Date.now();
     try {
       const response = await Promise.race([
-        llmGateway.sendMessage({
+        (llmGateway as any).sendMessage({
           messages: [{ role: "user", content: prompt }],
           model,
           maxTokens: 2000,

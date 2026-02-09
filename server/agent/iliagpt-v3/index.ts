@@ -191,7 +191,7 @@ export class IliagptSystem {
     this.services.set("memory", this.memory);
     this.services.set("events", this.events);
 
-    this.events.on("tool.failed", (p: Record<string, unknown>) => this.logger.warn("tool.failed", p));
+    this.events.on("tool.failed", (p: unknown) => this.logger.warn("tool.failed", p as Record<string, unknown>));
   }
 
   private makeContext(user?: UserIdentity): ToolContext {

@@ -127,17 +127,17 @@ export class EncryptionService {
         const key = await crypto.subtle.deriveKey(
             {
                 name: "PBKDF2",
-                salt: actualSalt,
+                salt: actualSalt as BufferSource,
                 iterations: this.config.iterations,
                 hash: "SHA-256",
             },
             keyMaterial,
-            { name: this.config.algorithm, length: this.config.keyLength },
+            { name: this.config.algorithm, length: this.config.keyLength } as AesKeyGenParams,
             true,
             ["encrypt", "decrypt"]
         );
 
-        return { key, salt: arrayBufferToBase64(actualSalt.buffer) };
+        return { key, salt: arrayBufferToBase64(actualSalt.buffer as ArrayBuffer) };
     }
 
     /**
@@ -172,14 +172,14 @@ export class EncryptionService {
         const data = encoder.encode(plaintext);
 
         const encrypted = await crypto.subtle.encrypt(
-            { name: this.config.algorithm, iv },
+            { name: this.config.algorithm, iv } as AesGcmParams,
             key,
             data
         );
 
         return {
             ciphertext: arrayBufferToBase64(encrypted),
-            iv: arrayBufferToBase64(iv.buffer),
+            iv: arrayBufferToBase64(iv.buffer as ArrayBuffer),
             algorithm: this.config.algorithm,
         };
     }
@@ -359,7 +359,7 @@ export class EncryptionService {
      */
     generateSecureToken(length: number = 32): string {
         const bytes = generateRandomBytes(length);
-        return arrayBufferToBase64(bytes.buffer);
+        return arrayBufferToBase64(bytes.buffer as ArrayBuffer);
     }
 
     /**

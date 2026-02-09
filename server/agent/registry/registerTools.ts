@@ -55,6 +55,8 @@ function createTool<TInput extends Record<string, unknown>>(
       tags: [category.toLowerCase()],
       implementationStatus: options.implementationStatus || "implemented",
       requiresCredentials: options.requiresCredentials || [],
+      deprecated: false,
+      experimental: (options as any).experimental || false,
     },
     config: { ...DEFAULT_CONFIG, ...options.config },
     inputSchema,
@@ -139,7 +141,7 @@ function registerWebTools(): void {
     ToolOutputSchema,
     async (input) => {
       const result = await realWebSearch({ query: input.query, maxResults: input.maxResults });
-      return { success: result.success, data: result.data, message: result.message };
+      return { success: result.success, data: result.data, message: result.message || "" };
     },
     EXTERNAL_CONFIG
   ));
@@ -156,7 +158,7 @@ function registerWebTools(): void {
     ToolOutputSchema,
     async (input) => {
       const result = await realBrowseUrl({ url: input.url });
-      return { success: result.success, data: result.data, message: result.message };
+      return { success: result.success, data: result.data, message: result.message || "" };
     },
     EXTERNAL_CONFIG
   ));
@@ -375,8 +377,8 @@ function registerDataTools(): void {
     }),
     ToolOutputSchema,
     async (input) => {
-      const result = await realDataAnalyze({ data: input.data, operation: input.operation });
-      return { success: result.success, data: result.data, message: result.message };
+      const result = await realDataAnalyze({ data: input.data, operation: input.operation || "statistics" });
+      return { success: result.success, data: result.data, message: (result as any).message || "" };
     },
     FAST_CONFIG
   ));
@@ -440,8 +442,8 @@ function registerDataTools(): void {
     }),
     ToolOutputSchema,
     async (input) => {
-      const lines = input.input.split("\n").filter(l => l.trim());
-      const headers = lines[0]?.split(input.delimiter) || [];
+      const lines = input.input.split("\n").filter((l: string) => l.trim());
+      const headers = lines[0]?.split(input.delimiter || ",") || [];
       return { success: true, data: { headers, rows: lines.slice(1) }, message: "CSV parsed" };
     },
     FAST_CONFIG
@@ -492,7 +494,7 @@ function registerDocumentTools(): void {
     ToolOutputSchema,
     async (input) => {
       const result = await realDocumentCreate({ title: input.title, content: input.content, type: input.type });
-      return { success: result.success, data: result.data, message: result.message };
+      return { success: result.success, data: result.data, message: result.message || "" };
     },
     DEFAULT_CONFIG
   ));
@@ -509,7 +511,7 @@ function registerDocumentTools(): void {
     ToolOutputSchema,
     async (input) => {
       const result = await realPdfGenerate({ title: input.title, content: input.content });
-      return { success: result.success, data: result.data, message: result.message };
+      return { success: result.success, data: result.data, message: result.message || "" };
     },
     DEFAULT_CONFIG
   ));
@@ -940,8 +942,9 @@ function registerSecurityTools(): void {
     ToolOutputSchema,
     async (input) => {
       const crypto = await import("crypto");
-      const hash = crypto.createHash(input.algorithm === "bcrypt" ? "sha256" : input.algorithm)
-        .update(input.data)
+      const algo = (input.algorithm || "sha256") === "bcrypt" ? "sha256" : (input.algorithm || "sha256");
+      const hash = crypto.createHash(algo)
+        .update(input.data || "")
         .digest("hex");
       return { success: true, data: { hash }, message: "Hash generated" };
     },
@@ -966,7 +969,7 @@ function registerSecurityTools(): void {
       if (input.includeNumbers) pool += nums;
       if (input.includeSymbols) pool += symbols;
       let password = "";
-      for (let i = 0; i < input.length; i++) {
+      for (let i = 0; i < (input.length || 16); i++) {
         password += pool[Math.floor(Math.random() * pool.length)];
       }
       return { success: true, data: { password }, message: "Password generated" };
@@ -1213,7 +1216,7 @@ function registerUtilityTools(): void {
     ToolOutputSchema,
     async (input) => {
       const crypto = await import("crypto");
-      const uuids = Array.from({ length: input.count }, () => crypto.randomUUID());
+      const uuids = Array.from({ length: input.count || 1 }, () => crypto.randomUUID());
       return { success: true, data: { uuids }, message: "UUIDs generated" };
     },
     FAST_CONFIG

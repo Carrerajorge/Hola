@@ -114,7 +114,7 @@ export const useChatStore = create<ChatState>()(
                 updateMessage: (chatId, messageId, content) => set((state) => {
                     const messages = state.messages.get(chatId);
                     if (messages) {
-                        const message = messages.find(m => m.id === messageId);
+                        const message = messages.find((m: Message) => m.id === messageId);
                         if (message) {
                             message.content = content;
                         }
@@ -124,7 +124,7 @@ export const useChatStore = create<ChatState>()(
                 deleteMessage: (chatId, messageId) => set((state) => {
                     const messages = state.messages.get(chatId);
                     if (messages) {
-                        const index = messages.findIndex(m => m.id === messageId);
+                        const index = messages.findIndex((m: Message) => m.id === messageId);
                         if (index !== -1) {
                             messages.splice(index, 1);
                         }
@@ -267,7 +267,7 @@ export const useUIStore = create<UIState>()(
                 state.toasts.push({ id: crypto.randomUUID(), type, message });
             }),
             removeToast: (id) => set((state) => {
-                state.toasts = state.toasts.filter(t => t.id !== id);
+                state.toasts = state.toasts.filter((t: { id: string; type: string; message: string }) => t.id !== id);
             }),
         })),
         { name: 'ui-store' }

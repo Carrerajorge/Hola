@@ -260,8 +260,8 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
     toast.success("Skill eliminado");
   };
 
-  const handleDuplicateSkill = (id: string) => {
-    const newSkill = duplicateSkill(id);
+  const handleDuplicateSkill = async (id: string) => {
+    const newSkill = await duplicateSkill(id);
     if (newSkill) {
       toast.success("Skill duplicado");
     }

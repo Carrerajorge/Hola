@@ -614,6 +614,11 @@ export class PerformanceAuditor extends EventEmitter {
     return hash.toString(36);
   }
 
+  private processMetric(metric: ServiceMetrics): void {
+    // Log or further process the metric if needed
+    Logger.debug(`[PerformanceAuditor] Processing metric for ${metric.serviceName}: ${metric.totalCalls} calls, ${metric.errorRate.toFixed(4)} error rate`);
+  }
+
   private checkThresholds(metrics: ServiceMetrics): void {
     if (metrics.p95Latency > THRESHOLDS.latency.critical) {
       this.emit('threshold-exceeded', {

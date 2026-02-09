@@ -1573,7 +1573,7 @@ const generateDocumentTool: ToolDefinition = {
         await fetch(upload.uploadUrl, {
           method: "PUT",
           headers: { "Content-Type": mimeType },
-          body: buffer,
+          body: buffer as any,
         });
 
         const ext = extension;
@@ -2133,7 +2133,7 @@ const shellCommandTool: ToolDefinition = {
         context.signal.addEventListener("abort", abortHandler, { once: true });
       }
 
-      child.on("close", (code, signal) => {
+      child.on("close", (code: number | null, signal: string | null) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 
@@ -2176,7 +2176,7 @@ const shellCommandTool: ToolDefinition = {
         });
       });
 
-      child.on("error", (err) => {
+      child.on("error", (err: Error) => {
         clearTimeout(timeoutHandle);
         context.signal?.removeEventListener?.("abort", abortHandler as any);
 

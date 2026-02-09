@@ -694,10 +694,10 @@ export class IntentDetector extends EventEmitter {
       if (data) {
         const parsed = JSON.parse(data);
         this.intentHistory = new Map(
-          Object.entries(parsed).map(([k, v]: [string, any[]]) => [
+          Object.entries(parsed).map(([k, v]: [string, any]) => [
             k,
-            v.map(intent => ({ ...intent, timestamp: new Date(intent.timestamp) }))
-          ])
+            (v as any[]).map((intent: any) => ({ ...intent, timestamp: new Date(intent.timestamp) }))
+          ] as [string, Intent[]])
         );
         Logger.info('[IntentDetector] Data restored');
       }

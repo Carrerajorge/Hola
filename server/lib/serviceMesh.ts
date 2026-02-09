@@ -272,11 +272,11 @@ export function registerCoreServices(): void {
         checkIntervalMs: 30000,
         healthCheck: async () => {
             const { env } = await import('../config/env');
-            if (!env.REDIS_URL) return true; // Skip if not configured
+            if (!(env as any).REDIS_URL) return true; // Skip if not configured
 
             try {
                 const Redis = (await import('ioredis')).default;
-                const client = new Redis(env.REDIS_URL, {
+                const client = new Redis((env as any).REDIS_URL, {
                     connectTimeout: 3000,
                     lazyConnect: true
                 });

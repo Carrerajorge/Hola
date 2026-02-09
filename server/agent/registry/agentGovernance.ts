@@ -211,7 +211,7 @@ export class AgentStateMachine {
   }
 
   isActive(): boolean {
-    return [AgentGovernanceState.PLANNING, AgentGovernanceState.EXECUTING, AgentGovernanceState.VERIFYING].includes(this.state);
+    return ([AgentGovernanceState.PLANNING, AgentGovernanceState.EXECUTING, AgentGovernanceState.VERIFYING] as AgentGovernanceStateType[]).includes(this.state);
   }
 
   isPaused(): boolean {

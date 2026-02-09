@@ -10,7 +10,7 @@ const xlsxChart = new XLSXChart();
 const templatePath = path.join(__dirname, 'templates', 'etl_template_chart.xlsx');
 
 // Create a simple template with a bar chart
-const opts = {
+const opts: any = {
   file: templatePath,
   chart: 'column',
   titles: ['Country A', 'Country B', 'Country C'],

@@ -1,5 +1,10 @@
 import * as ExcelJSModule from 'exceljs';
+import type ExcelJSTypes from 'exceljs';
 const ExcelJS = (ExcelJSModule as any).default || ExcelJSModule;
+type ExcelJSWorksheet = ExcelJSTypes.Worksheet;
+type ExcelJSCell = ExcelJSTypes.Cell;
+type ExcelJSRow = ExcelJSTypes.Row;
+type ExcelJSWorkbook = ExcelJSTypes.Workbook;
 import JSZip from 'jszip';
 import {
   WorkbookSheets,
@@ -66,7 +71,7 @@ async function generateChartWorkbook(clean: NormalizedRecord[], dashboard: Workb
   const headerRow = sheet.addRow(['Country', 'Total Records', 'Avg Value (M)']);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
-  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  headerRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const countries = Array.from(byCountry.keys()).slice(0, 10);
 
@@ -109,7 +114,7 @@ async function generateDataWorkbook(sheets: WorkbookSheets): Promise<Buffer> {
   return Buffer.from(buffer);
 }
 
-function buildReadmeSheet(workbook: ExcelJS.Workbook, readme: WorkbookSheets['readme']): void {
+function buildReadmeSheet(workbook: ExcelJSWorkbook, readme: WorkbookSheets['readme']): void {
   const sheet = workbook.addWorksheet('00_README');
   sheet.getColumn(1).width = 20;
   sheet.getColumn(2).width = 80;
@@ -144,13 +149,13 @@ function buildReadmeSheet(workbook: ExcelJS.Workbook, readme: WorkbookSheets['re
   sheet.addRow(['Contact:', readme.contacts]);
 }
 
-function buildSourcesSheet(workbook: ExcelJS.Workbook, sources: SourceMetadata[]): void {
+function buildSourcesSheet(workbook: ExcelJSWorkbook, sources: SourceMetadata[]): void {
   const sheet = workbook.addWorksheet('01_SOURCES');
   const headers = ['Source_ID', 'Provider', 'URL', 'Method', 'Timestamp', 'Indicator', 'Country', 'Unit', 'Frequency', 'Notes'];
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
-  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  headerRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const source of sources) {
     sheet.addRow([source.sourceId, source.provider, source.url, source.method, source.timestamp, source.indicator, source.country, source.unit, source.frequency, source.notes]);
@@ -172,13 +177,13 @@ function buildSourcesSheet(workbook: ExcelJS.Workbook, sources: SourceMetadata[]
   }
 }
 
-function buildRawSheet(workbook: ExcelJS.Workbook, raw: RawDataRecord[]): void {
+function buildRawSheet(workbook: ExcelJSWorkbook, raw: RawDataRecord[]): void {
   const sheet = workbook.addWorksheet('02_RAW');
   const headers = ['Source_ID', 'Provider', 'Indicator', 'Country', 'Timestamp', 'Record_Count', 'Raw_JSON_Sample'];
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF70AD47' } };
-  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  headerRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const record of raw) {
     const rawSample = JSON.stringify(record.rawData).substring(0, 500) + '...';
@@ -195,7 +200,7 @@ function buildRawSheet(workbook: ExcelJS.Workbook, raw: RawDataRecord[]): void {
   sheet.getColumn(7).width = 80;
 }
 
-function buildCleanSheet(workbook: ExcelJS.Workbook, clean: NormalizedRecord[]): void {
+function buildCleanSheet(workbook: ExcelJSWorkbook, clean: NormalizedRecord[]): void {
   const sheet = workbook.addWorksheet('03_CLEAN');
   const headers = ['Date', 'Country', 'Country_Code', 'Indicator', 'Indicator_Code', 'Value', 'Unit', 'Frequency', 'Source_ID'];
   const headerRow = sheet.addRow(headers);
@@ -222,7 +227,7 @@ function buildCleanSheet(workbook: ExcelJS.Workbook, clean: NormalizedRecord[]):
   }
 }
 
-function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['model'], clean: NormalizedRecord[]): void {
+function buildModelSheet(workbook: ExcelJSWorkbook, model: WorkbookSheets['model'], clean: NormalizedRecord[]): void {
   const sheet = workbook.addWorksheet('04_MODEL');
 
   sheet.addRow(['METRIC DEFINITIONS']);
@@ -230,7 +235,7 @@ function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['mode
   const defHeaderRow = sheet.addRow(defHeaders);
   defHeaderRow.font = { bold: true };
   defHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9C27B0' } };
-  defHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  defHeaderRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const metric of model.metrics) {
     sheet.addRow([metric.id, metric.name, metric.formula, metric.description]);
@@ -244,7 +249,7 @@ function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['mode
   const summaryHeaderRow = sheet.addRow(summaryHeaders);
   summaryHeaderRow.font = { bold: true };
   summaryHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2196F3' } };
-  summaryHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  summaryHeaderRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const grouped = new Map<string, NormalizedRecord[]>();
   for (const record of clean) {
@@ -303,7 +308,7 @@ function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['mode
   sheet.getColumn(8).numFmt = '#,##0.00';
 }
 
-function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookSheets['dashboard'], clean: NormalizedRecord[]): void {
+function buildDashboardSheet(workbook: ExcelJSWorkbook, dashboard: WorkbookSheets['dashboard'], clean: NormalizedRecord[]): void {
   const sheet = workbook.addWorksheet('05_DASHBOARD');
 
   sheet.addRow(['DATA DASHBOARD']);
@@ -315,7 +320,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   const countryHeaderRow = sheet.addRow(countryHeaders);
   countryHeaderRow.font = { bold: true };
   countryHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00BCD4' } };
-  countryHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  countryHeaderRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const byCountry = new Map<string, NormalizedRecord[]>();
   for (const r of clean) {
@@ -337,7 +342,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   const indHeaderRow = sheet.addRow(indHeaders);
   indHeaderRow.font = { bold: true };
   indHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF5722' } };
-  indHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  indHeaderRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const byIndicator = new Map<string, NormalizedRecord[]>();
   for (const r of clean) {
@@ -360,7 +365,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   sheet.getColumn(5).width = 15;
 }
 
-function buildAuditSheet(workbook: ExcelJS.Workbook, audit: WorkbookSheets['audit']): void {
+function buildAuditSheet(workbook: ExcelJSWorkbook, audit: WorkbookSheets['audit']): void {
   const sheet = workbook.addWorksheet('06_AUDIT');
 
   sheet.addRow(['AUDIT RESULTS']);
@@ -384,7 +389,7 @@ function buildAuditSheet(workbook: ExcelJS.Workbook, audit: WorkbookSheets['audi
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF607D8B' } };
-  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  headerRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const test of audit.tests) {
     const row = sheet.addRow([test.name, test.category, test.result, test.details, test.value ?? 'N/A', test.threshold ?? 'N/A']);
@@ -407,7 +412,7 @@ function buildAuditSheet(workbook: ExcelJS.Workbook, audit: WorkbookSheets['audi
   sheet.getColumn(6).width = 15;
 }
 
-function buildDictionarySheet(workbook: ExcelJS.Workbook): void {
+function buildDictionarySheet(workbook: ExcelJSWorkbook): void {
   const sheet = workbook.addWorksheet('00_DICTIONARY');
 
   sheet.addRow(['DATA DICTIONARY']);
@@ -418,7 +423,7 @@ function buildDictionarySheet(workbook: ExcelJS.Workbook): void {
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF673AB7' } };
-  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+  headerRow.eachCell((cell: any) => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const definitions = [
     // 01_SOURCES

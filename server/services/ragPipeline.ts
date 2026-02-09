@@ -159,8 +159,8 @@ export async function generateEmbeddingGemini(text: string): Promise<number[]> {
     if (result.embeddings?.[0]?.values) {
       return result.embeddings[0].values;
     }
-    if (result.embedding?.values) {
-      return result.embedding.values;
+    if ((result as any).embedding?.values) {
+      return (result as any).embedding.values;
     }
     return generateFallbackEmbedding(text);
   } catch (error) {
@@ -217,7 +217,7 @@ export async function indexDocument(
 ): Promise<{ chunksCreated: number; processingTimeMs: number }> {
   const startTime = Date.now();
   
-  const text = await extractContent(buffer, mimeType, fileName);
+  const text = await extractContent(buffer, mimeType);
   if (!text || text.length < 10) {
     throw new Error('No extractable text content found in document');
   }

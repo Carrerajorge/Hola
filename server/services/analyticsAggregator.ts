@@ -289,5 +289,5 @@ export function stopAggregator(): void {
 
 export async function getAggregatedMetrics(provider?: string, hours: number = 24) {
   const startDate = new Date(Date.now() - hours * 60 * 60 * 1000);
-  return storage.getProviderMetrics({ provider, startDate });
+  return storage.getProviderMetrics(provider, startDate);
 }

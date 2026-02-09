@@ -78,7 +78,7 @@ Genera el plan óptimo.`;
 
     const result = await geminiChat(
       [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      { model: "gemini-2.0-flash", maxOutputTokens: 800, temperature: 0.2 }
+      { model: "gemini-2.5-flash", maxOutputTokens: 800, temperature: 0.2 }
     );
 
     const responseText = result.content?.trim() || "";

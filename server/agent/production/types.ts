@@ -241,7 +241,7 @@ export interface TraceLink {
 export interface TraceMap {
     links: TraceLink[];
     inconsistencies: Array<{
-        type: 'missing' | 'mismatch' | 'contradiction';
+        type: 'missing' | 'mismatch' | 'contradiction' | 'orphan';
         description: string;
         locations: string[];
     }>;

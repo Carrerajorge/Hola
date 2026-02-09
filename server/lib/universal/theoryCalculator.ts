@@ -3,7 +3,7 @@
  * Tasks 531-540: Grand Unified Theory simulations, higher-dimensional math
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 
 // ============================================================================
 // Types

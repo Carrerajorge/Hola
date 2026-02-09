@@ -274,7 +274,8 @@ class HeuristicExtractor {
                         verb,
                         object: sentence.trim(),
                         params: [],
-                        dependencies: []
+                        dependencies: [],
+                        tool_hints: [],
                     });
                     break; // One task per sentence
                 }

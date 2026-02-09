@@ -1,5 +1,10 @@
-import * as ExcelJSModule from "exceljs";
-const ExcelJS = ExcelJSModule.default || ExcelJSModule;
+import ExcelJSModule from "exceljs";
+const ExcelJS = ExcelJSModule;
+type ExcelJSWorkbook = InstanceType<typeof ExcelJS.Workbook>;
+type ExcelJSWorksheet = ReturnType<ExcelJSWorkbook["addWorksheet"]>;
+type ExcelJSCell = ReturnType<ExcelJSWorksheet["getCell"]>;
+type ExcelJSRow = ReturnType<ExcelJSWorksheet["getRow"]>;
+type ExcelJSColumn = Partial<{ header: string; key: string; width: number; style: any }>;
 import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec, HeaderStyle } from "../../shared/documentSpecs";
 import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
 import { formatLatexForExcel } from "./richText/latexToImage";
@@ -8,13 +13,13 @@ const FORMULA_PREFIXES = ["=", "+", "-", "@"];
 
 interface ExcelRichTextRun {
   text: string;
-  font?: Partial<ExcelJS.Font>;
+  font?: Partial<any>;
 }
 
 function tokensToExcelRichText(tokens: RichTextToken[]): ExcelRichTextRun[] {
   return tokens.map((token) => {
     let displayText = token.text;
-    const font: Partial<ExcelJS.Font> = {};
+    const font: Partial<any> = {};
 
     if (token.bold) font.bold = true;
     if (token.italic) font.italic = true;
@@ -40,7 +45,7 @@ function tokensToExcelRichText(tokens: RichTextToken[]): ExcelRichTextRun[] {
   });
 }
 
-function applyRichTextToCell(cell: ExcelJS.Cell, value: any): void {
+function applyRichTextToCell(cell: any, value: any): void {
   if (value === null || value === undefined) {
     cell.value = "";
     return;
@@ -153,7 +158,7 @@ export async function renderExcelFromSpec(spec: ExcelSpec): Promise<Buffer> {
   return Buffer.from(buffer);
 }
 
-function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
+function renderTable(worksheet: any, table: TableSpec): void {
   const anchor = parseCellReference(table.anchor);
   const startRow = anchor.row;
   const startCol = anchor.col;
@@ -235,7 +240,7 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
 }
 
 function applyHeaderStyle(
-  worksheet: ExcelJS.Worksheet,
+  worksheet: any,
   headerRow: number,
   startCol: number,
   headers: string[],
@@ -246,7 +251,7 @@ function applyHeaderStyle(
   headers.forEach((_, colIdx) => {
     const cell = row.getCell(startCol + colIdx);
     
-    const fontOptions: Partial<ExcelJS.Font> = {};
+    const fontOptions: Partial<any> = {};
     if (style.bold !== false) {
       fontOptions.bold = true;
     }
@@ -262,7 +267,7 @@ function applyHeaderStyle(
       };
     }
 
-    const alignmentOptions: Partial<ExcelJS.Alignment> = {};
+    const alignmentOptions: Partial<any> = {};
     if (style.text_align) {
       alignmentOptions.horizontal = style.text_align;
     }
@@ -278,7 +283,7 @@ function applyHeaderStyle(
 }
 
 function applyAutoFitForTable(
-  worksheet: ExcelJS.Worksheet,
+  worksheet: any,
   table: TableSpec,
   startCol: number
 ): void {
@@ -299,7 +304,7 @@ function applyAutoFitForTable(
   });
 }
 
-function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: string): void {
+function renderChart(worksheet: any, chart: ChartSpec, sheetName: string): void {
   try {
     const position = parseCellReference(chart.position || "H2");
     const cell = worksheet.getRow(position.row).getCell(position.col);
@@ -313,7 +318,7 @@ function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: 
   }
 }
 
-function applyLayout(worksheet: ExcelJS.Worksheet, layout: SheetLayoutSpec): void {
+function applyLayout(worksheet: any, layout: SheetLayoutSpec): void {
   if (layout.freeze_panes) {
     const freeze = parseCellReference(layout.freeze_panes);
     worksheet.views = [
@@ -322,7 +327,7 @@ function applyLayout(worksheet: ExcelJS.Worksheet, layout: SheetLayoutSpec): voi
   }
 
   if (layout.show_gridlines === false) {
-    worksheet.views = worksheet.views?.map(v => ({ ...v, showGridLines: false })) || 
+    worksheet.views = worksheet.views?.map((v: any) => ({ ...v, showGridLines: false })) ||
       [{ showGridLines: false }];
   }
 
@@ -335,10 +340,10 @@ function applyLayout(worksheet: ExcelJS.Worksheet, layout: SheetLayoutSpec): voi
   }
 
   if (layout.auto_fit_columns !== false) {
-    worksheet.columns?.forEach(column => {
+    worksheet.columns?.forEach((column: any) => {
       if (column.width === undefined || column.width === 8.43) {
         const values: any[] = [];
-        column.eachCell?.({ includeEmpty: false }, cell => {
+        column.eachCell?.({ includeEmpty: false }, (cell: any) => {
           values.push(cell.value);
         });
         if (values.length > 0) {

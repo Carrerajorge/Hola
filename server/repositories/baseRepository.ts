@@ -69,7 +69,7 @@ export async function withTransaction<T>(
   callback: (tx: typeof db) => Promise<T>
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    return callback(tx as typeof db);
+    return callback(tx as unknown as typeof db);
   });
 }
 

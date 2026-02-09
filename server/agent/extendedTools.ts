@@ -578,8 +578,8 @@ export const textProcessTool: ToolDefinition = {
 
             switch (input.operation) {
                 case "word_count": {
-                    const words = input.text.trim().split(/\s+/).filter(w => w.length > 0);
-                    result = { wordCount: words.length, uniqueWords: new Set(words.map(w => w.toLowerCase())).size };
+                    const words = input.text.trim().split(/\s+/).filter((w: string) => w.length > 0);
+                    result = { wordCount: words.length, uniqueWords: new Set(words.map((w: string) => w.toLowerCase())).size };
                     break;
                 }
 
@@ -608,7 +608,7 @@ export const textProcessTool: ToolDefinition = {
 
                 case "extract_numbers": {
                     const numbers = input.text.match(/-?\d+\.?\d*/g) || [];
-                    result = { numbers: numbers.map(n => parseFloat(n)), count: numbers.length };
+                    result = { numbers: numbers.map((n: string) => parseFloat(n)), count: numbers.length };
                     break;
                 }
 
@@ -621,7 +621,7 @@ export const textProcessTool: ToolDefinition = {
                     break;
 
                 case "to_titlecase":
-                    result = { output: input.text.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.slice(1).toLowerCase()) };
+                    result = { output: input.text.replace(/\w\S*/g, (txt: string) => txt.charAt(0).toUpperCase() + txt.slice(1).toLowerCase()) };
                     break;
 
                 case "remove_duplicates": {

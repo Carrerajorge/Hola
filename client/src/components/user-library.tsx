@@ -46,54 +46,82 @@ const GUTTER_SIZE = 16;
 const ITEM_HEIGHT = 200; // Approximate height of card + text
 const OPTS_MIN_COLUMN_WIDTH = 180;
 
+interface VirtualGridCellExtraProps {
+  items: LibraryFile[];
+  columnCount: number;
+  columnWidth: number;
+  onSelect: (item: LibraryFile) => void;
+  onDelete: (item: LibraryFile) => void;
+  onDownload: (item: LibraryFile) => void;
+}
+
+function VirtualGridCell({
+  columnIndex,
+  rowIndex,
+  style,
+  items,
+  columnCount,
+  columnWidth,
+  onSelect,
+  onDelete,
+  onDownload,
+}: {
+  ariaAttributes: { "aria-colindex": number; role: "gridcell" };
+  columnIndex: number;
+  rowIndex: number;
+  style: React.CSSProperties;
+} & VirtualGridCellExtraProps) {
+  const index = rowIndex * columnCount + columnIndex;
+  if (index >= items.length) return null;
+  const item = items[index];
+
+  const itemStyle = {
+    ...style,
+    left: Number(style.left),
+    top: Number(style.top),
+    width: columnWidth,
+    height: ITEM_HEIGHT,
+  };
+
+  return (
+    <div style={itemStyle}>
+      <MediaThumbnail
+        item={item}
+        onClick={() => onSelect(item)}
+        onDelete={() => onDelete(item)}
+        onDownload={() => onDownload(item)}
+      />
+    </div>
+  );
+}
+
 function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
   return (
-    <AutoSizer>
-      {({ height, width }: { height: number; width: number }) => {
-        const columnCount = Math.floor((width + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
+    <AutoSizer
+      renderProp={({ height, width }: { height: number | undefined; width: number | undefined }) => {
+        const safeHeight = height ?? 400;
+        const safeWidth = width ?? 600;
+        const columnCount = Math.floor((safeWidth + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
         const safeColumnCount = Math.max(1, columnCount);
-        const columnWidth = (width - (safeColumnCount - 1) * GUTTER_SIZE) / safeColumnCount;
+        const columnWidth = (safeWidth - (safeColumnCount - 1) * GUTTER_SIZE) / safeColumnCount;
         const rowCount = Math.ceil(items.length / safeColumnCount);
 
         return (
-          <Grid
+          <Grid<VirtualGridCellExtraProps>
+            cellComponent={VirtualGridCell}
+            cellProps={{ items, columnCount: safeColumnCount, columnWidth, onSelect, onDelete, onDownload }}
             columnCount={safeColumnCount}
             columnWidth={columnWidth + GUTTER_SIZE}
-            height={height}
+            defaultHeight={safeHeight}
+            defaultWidth={safeWidth}
             rowCount={rowCount}
             rowHeight={ITEM_HEIGHT + GUTTER_SIZE}
-            width={width}
             className="px-6 py-4"
-          >
-            {({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
-              const index = rowIndex * safeColumnCount + columnIndex;
-              if (index >= items.length) return null;
-              const item = items[index];
-
-              // Adjust style for gutter
-              const itemStyle = {
-                ...style,
-                left: Number(style.left),
-                top: Number(style.top),
-                width: columnWidth,
-                height: ITEM_HEIGHT,
-              };
-
-              return (
-                <div style={itemStyle}>
-                  <MediaThumbnail
-                    item={item}
-                    onClick={() => onSelect(item)}
-                    onDelete={() => onDelete(item)}
-                    onDownload={() => onDownload(item)}
-                  />
-                </div>
-              );
-            }}
-          </Grid>
+            style={{ height: safeHeight, width: safeWidth }}
+          />
         );
       }}
-    </AutoSizer>
+    />
   );
 }
 
@@ -112,6 +140,7 @@ function EmptyState({ filter }: { filter: FilterType }) {
     image: "No tienes imágenes guardadas",
     video: "No tienes videos guardados",
     document: "No tienes documentos guardados",
+    app: "No tienes apps guardadas",
   };
 
   return (

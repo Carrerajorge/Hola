@@ -171,7 +171,7 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
   if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
     try {
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(content);
+      await workbook.xlsx.load(content as any);
       
       let text = "";
       workbook.eachSheet((worksheet) => {

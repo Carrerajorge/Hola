@@ -360,7 +360,7 @@ export async function validateGeneratedExcelBuffer(buffer: Buffer): Promise<Post
     // Try to parse with ExcelJS
     const ExcelJS = await import("exceljs");
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
 
     // Get sheet information
     metadata.sheetCount = workbook.worksheets.length;

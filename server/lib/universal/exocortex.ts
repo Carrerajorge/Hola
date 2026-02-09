@@ -3,7 +3,7 @@
  * Tasks 521-530: BCI integration, thought-to-text, external cognitive offloading
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import { EventEmitter } from 'events';
 
 // ============================================================================
@@ -47,6 +47,12 @@ export class ExocortexInterface extends EventEmitter {
             this.processBuffer(); // Analyze chunk
             this.buffer = [];
         }
+    }
+
+    private processBuffer(): void {
+        // Analyze buffered neural signals
+        Logger.info(`[Exocortex] Processing ${this.buffer.length} buffered signals`);
+        this.emit('bufferProcessed', { count: this.buffer.length });
     }
 
     // ========================================================================

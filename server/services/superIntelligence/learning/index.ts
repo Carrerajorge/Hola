@@ -17,13 +17,7 @@ import { rewardModel } from './RewardModel';
 import { selfCritique } from './SelfCritique';
 import { continuousLearner } from './ContinuousLearner';
 
-// Export singleton instances
-export {
-  feedbackCollector,
-  rewardModel,
-  selfCritique,
-  continuousLearner
-};
+// Singleton instances are already exported via export * above
 
 /**
  * Initialize the complete learning system

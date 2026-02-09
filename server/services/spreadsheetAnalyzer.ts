@@ -140,7 +140,7 @@ export async function createUpload(
 ): Promise<SpreadsheetUpload> {
   const [upload] = await db
     .insert(spreadsheetUploads)
-    .values(data)
+    .values(data as any)
     .returning();
   return upload;
 }
@@ -174,7 +174,7 @@ export async function updateUploadStatus(
   const [updated] = await db
     .update(spreadsheetUploads)
     .set({
-      status,
+      status: status as any,
       errorMessage: errorMessage ?? null,
     })
     .where(eq(spreadsheetUploads.id, id))
@@ -209,7 +209,7 @@ export async function createAnalysisSession(
 ): Promise<SpreadsheetAnalysisSession> {
   const [session] = await db
     .insert(spreadsheetAnalysisSessions)
-    .values(data)
+    .values(data as any)
     .returning();
   return session;
 }
@@ -242,7 +242,7 @@ export async function createAnalysisOutput(
 ): Promise<SpreadsheetAnalysisOutput> {
   const [output] = await db
     .insert(spreadsheetAnalysisOutputs)
-    .values(data)
+    .values(data as any)
     .returning();
   return output;
 }
@@ -262,7 +262,7 @@ export async function createAnalysisJob(
 ): Promise<SpreadsheetAnalysisJob> {
   const [job] = await db
     .insert(spreadsheetAnalysisJobs)
-    .values(data)
+    .values(data as any)
     .returning();
   return job;
 }
@@ -341,7 +341,7 @@ export async function parseSpreadsheet(
 
 async function parseExcelXlsx(buffer: Buffer): Promise<ParsedSpreadsheet> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(buffer as any);
 
   const sheets: SheetInfo[] = [];
 
@@ -887,7 +887,7 @@ function columnIndexToLetter(colIndex: number): string {
 
 export async function analyzeWorkbook(buffer: Buffer): Promise<WorkbookSummary> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+  await workbook.xlsx.load(buffer as any);
 
   const sheets: SheetInfo[] = [];
   workbook.eachSheet((worksheet, sheetIndex) => {

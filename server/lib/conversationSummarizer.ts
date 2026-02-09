@@ -63,7 +63,7 @@ export async function summarizeConversation(
   const prompt = SUMMARY_PROMPT + conversationText + `\n\nIdioma del resumen: ${language === "es" ? "español" : "inglés"}`;
 
   try {
-    const response = await llmGateway.sendMessage({
+    const response = await (llmGateway as any).sendMessage({
       messages: [{ role: "user", content: prompt }],
       model: "gemini-2.0-flash",
       maxTokens: 1000,

@@ -56,7 +56,7 @@ export function getConnectorThresholds(connector: ConnectorName): ConnectorThres
 
 export function checkConnectorHealth(connector: ConnectorName): ConnectorHealthResult {
   return { connector, healthy: true, issues: [], stats: null };
-  const stats = getConnectorStats(connector);
+  const stats = getConnectorStats(connector) as NonNullable<ReturnType<typeof getConnectorStats>>;
   const thresholds = getConnectorThresholds(connector);
   const issues: ConnectorIssue[] = [];
 

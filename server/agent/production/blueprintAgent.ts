@@ -24,7 +24,7 @@ const MODEL = 'grok-4-1-fast-non-reasoning';
 // Schemas
 // ============================================================================
 
-export const SectionSchema = z.object({
+export const SectionSchema: z.ZodType<any> = z.object({
     id: z.string(),
     title: z.string(),
     level: z.number().min(1).max(4),

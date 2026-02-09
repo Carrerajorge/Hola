@@ -5,7 +5,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
-import { audit } from './auditLog';
+import { logAudit } from './auditLog';
 
 // Error types
 export class AppError extends Error {
@@ -216,15 +216,18 @@ export function errorHandler(
 
     // Audit high-severity errors
     if (appError.statusCode >= 500) {
-        audit.adminAction(
-            (req as any).user?.id || 0,
+        logAudit(
+            'admin_action' as any,
             'server_error',
             {
-                code: appError.code,
-                path: req.path,
-                message: appError.message,
-            },
-            req
+                userId: (req as any).user?.id || '0',
+                details: {
+                    code: appError.code,
+                    path: req.path,
+                    message: appError.message,
+                },
+                ipAddress: req.ip || '',
+            }
         );
     }
 

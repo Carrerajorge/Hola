@@ -101,8 +101,8 @@ export class DocumentCreator {
     return publicUrl;
   }
 
-  private getChartType(type: "bar" | "line" | "pie"): PptxGenJS.CHART_NAME {
-    const chartTypes: Record<string, PptxGenJS.CHART_NAME> = {
+  private getChartType(type: "bar" | "line" | "pie"): string {
+    const chartTypes: Record<string, string> = {
       bar: "bar",
       line: "line",
       pie: "pie",
@@ -413,7 +413,7 @@ export class DocumentCreator {
         if (sheetData.rows) sheetData.rows.forEach(r => worksheet.addRow(r));
       }
 
-      const buffer = await workbook.xlsx.writeBuffer() as Buffer;
+      const buffer = await workbook.xlsx.writeBuffer() as unknown as Buffer;
       const publicUrl = await getStorageService().upload(outputKey, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
       return {

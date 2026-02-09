@@ -1,9 +1,12 @@
 import { randomUUID } from "crypto";
 import { agentEventBus } from "./eventBus";
 import { PAREOrchestrator, RobustRouteResult } from "../services/pare/orchestrator";
-import { plannerAgent, PlanningContext, AgentPlan } from "./roles/plannerAgent";
-import { executorAgent, ExecutionContext, StepResult } from "./roles/executorAgent";
-import { verifierAgent, RunResultPackage } from "./roles/verifierAgent";
+import { plannerAgent, PlanningContext } from "./roles/plannerAgent";
+import { executorAgent, StepResult } from "./roles/executorAgent";
+import type { ExecutionContext } from "./roles/executorAgent";
+import { verifierAgent } from "./roles/verifierAgent";
+import type { RunResultPackage } from "./roles/verifierAgent";
+import type { AgentPlan } from "./contracts";
 import type { TraceEventType } from "@shared/schema";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps } from "@shared/schema";
@@ -246,9 +249,9 @@ export class AgentPipeline {
         status: "running",
         plan: {
           objective: plan.objective,
-          steps: plan.steps.map((s, i) => ({
+          steps: plan.steps.map((s: any, i: number) => ({
             index: i,
-            toolName: s.tool,
+            toolName: s.toolName || s.tool,
             description: s.description,
           })),
         },
@@ -258,9 +261,9 @@ export class AgentPipeline {
       await this.emitEvent(runId, "plan_created", {
         plan: {
           objective: plan.objective,
-          steps: plan.steps.map((s, i) => ({
+          steps: plan.steps.map((s: any, i: number) => ({
             index: i,
-            toolName: s.tool,
+            toolName: s.toolName || s.tool,
             description: s.description,
           })),
           estimatedTime: `${plan.steps.length * 5}s`,
@@ -269,7 +272,7 @@ export class AgentPipeline {
 
       const introMessage = PREMIUM_INTRO_TEMPLATE(
         plan.steps.length,
-        plan.steps.map(s => s.tool)
+        plan.steps.map((s: any) => s.toolName || s.tool)
       );
 
       await this.emitEvent(runId, "thinking", {
@@ -293,13 +296,13 @@ export class AgentPipeline {
 
         await this.updateRunStatus(runId, {
           status: "failed",
-          error: executionResult.error,
+          error: executionResult.error || "Unknown error",
           completedSteps: state.steps.filter(s => s.success).length,
           completedAt: new Date(),
         });
 
         await this.emitEvent(runId, "error", {
-          error: { message: executionResult.error, code: "EXECUTION_FAILED" },
+          error: { message: executionResult.error || "Unknown error", code: "EXECUTION_FAILED" },
         });
 
         return {
@@ -406,7 +409,7 @@ export class AgentPipeline {
     const result = this.pareOrchestrator.robustRoute(request.message, attachments);
 
     await this.emitEvent(runId, "thinking", {
-      output_snippet: `Analizando solicitud... Detectado: ${result.intent.category} (confianza: ${(result.confidence * 100).toFixed(0)}%)`,
+      output_snippet: `Analizando solicitud... Detectado: ${result.intent} (confianza: ${(result.confidence * 100).toFixed(0)}%)`,
       metadata: {
         intent: result.intent,
         route: result.route,
@@ -429,20 +432,23 @@ export class AgentPipeline {
     const planningContext: PlanningContext = {
       runId,
       userId: request.userId,
-      message: request.message,
+      userPlan: "pro" as const,
+      chatId: request.chatId,
+      correlationId: runId,
       conversationHistory: request.conversationHistory?.map(m => ({
         role: m.role as "user" | "assistant" | "system",
         content: m.content,
       })) || [],
       availableTools: routeResult.tools,
+      maxSteps: 10,
+      requireCitations: false,
       constraints: {
-        maxSteps: 10,
-        timeoutMs: 60000,
-        allowedTools: routeResult.tools,
+        maxTimeMs: 60000,
+        allowedCapabilities: routeResult.tools,
       },
     };
 
-    const plan = await plannerAgent.generatePlan(planningContext);
+    const plan = await plannerAgent.generatePlan(request.message, planningContext);
 
     return plan;
   }
@@ -472,21 +478,21 @@ export class AgentPipeline {
       const planStep = state.plan.steps[i];
       state.currentStepIndex = i;
 
-      await this.persistStep(runId, i, planStep.tool, planStep.inputs, "running");
+      await this.persistStep(runId, i, planStep.toolName, planStep.input, "running");
 
       await this.updateRunStatus(runId, { currentStepIndex: i });
 
       await this.emitEvent(runId, "step_started", {
         stepIndex: i,
-        tool_name: planStep.tool,
+        tool_name: planStep.toolName,
         command: planStep.description,
       });
 
       await this.emitEvent(runId, "tool_call", {
         stepIndex: i,
-        tool_name: planStep.tool,
+        tool_name: planStep.toolName,
         command: planStep.description,
-        metadata: { inputs: planStep.inputs, agentName: planStep.agent || "ExecutorAgent" },
+        metadata: { inputs: planStep.input, agentName: (planStep as any).agent || "ExecutorAgent" },
       });
 
       toolCallCount++;
@@ -495,17 +501,12 @@ export class AgentPipeline {
         const executionContext: ExecutionContext = {
           runId,
           userId: request.userId,
-          stepIndex: i,
-          tool: planStep.tool,
-          inputs: planStep.inputs,
-          previousResults: steps,
-          conversationHistory: request.conversationHistory?.map(m => ({
-            role: m.role as "user" | "assistant" | "system",
-            content: m.content,
-          })) || [],
+          userPlan: "pro" as const,
+          chatId: request.chatId,
+          correlationId: runId,
         };
 
-        const result = await executorAgent.executeStep(executionContext);
+        const result = await executorAgent.executeStep(planStep, executionContext);
         steps.push(result);
 
         if (result.artifacts) {
@@ -530,7 +531,7 @@ export class AgentPipeline {
 
         await this.emitEvent(runId, "tool_output", {
           stepIndex: i,
-          tool_name: planStep.tool,
+          tool_name: planStep.toolName,
           output_snippet: typeof result.output === "string" 
             ? result.output.slice(0, 500) 
             : JSON.stringify(result.output).slice(0, 500),
@@ -546,27 +547,28 @@ export class AgentPipeline {
 
           await this.emitEvent(runId, "step_completed", {
             stepIndex: i,
-            tool_name: planStep.tool,
+            tool_name: planStep.toolName,
           });
         } else {
+          const errorMsg = typeof result.error === 'string' ? result.error : result.error?.message || "Unknown error";
           await this.updateStepStatus(runId, i, {
             status: "failed",
-            error: result.error || "Unknown error",
+            error: errorMsg,
             completedAt: new Date(),
           });
 
           await this.emitEvent(runId, "step_failed", {
             stepIndex: i,
-            tool_name: planStep.tool,
-            error: { message: result.error || "Unknown error" },
+            tool_name: planStep.toolName,
+            error: { message: errorMsg },
           });
 
-          if (i < state.plan.steps.length - 1 && !planStep.critical) {
+          if (i < state.plan.steps.length - 1 && !planStep.optional) {
             retryCount++;
             await this.emitEvent(runId, "step_retried", {
               stepIndex: i,
-              tool_name: planStep.tool,
-              metadata: { retryCount, reason: result.error },
+              tool_name: planStep.toolName,
+              metadata: { retryCount, reason: errorMsg },
             });
             continue;
           }
@@ -577,18 +579,21 @@ export class AgentPipeline {
             toolCallCount,
             retryCount,
             failed: true,
-            error: result.error || "Step failed",
+            error: errorMsg,
           };
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         steps.push({
           stepIndex: i,
-          tool: planStep.tool,
+          toolName: planStep.toolName,
           success: false,
-          error: errorMessage,
+          error: { code: "EXCEPTION", message: errorMessage, retryable: false },
           output: null,
           durationMs: 0,
+          retryCount: 0,
+          artifacts: [],
+          citations: [],
         });
 
         await this.updateStepStatus(runId, i, {
@@ -599,7 +604,7 @@ export class AgentPipeline {
 
         await this.emitEvent(runId, "step_failed", {
           stepIndex: i,
-          tool_name: planStep.tool,
+          tool_name: planStep.toolName,
           error: { message: errorMessage },
         });
 
@@ -648,8 +653,9 @@ export class AgentPipeline {
 
     const verificationPackage: RunResultPackage = {
       runId,
-      plan: state.plan,
-      steps: state.steps,
+      correlationId: runId,
+      objective: state.plan?.objective || "",
+      stepResults: state.steps,
       artifacts: state.artifacts.map(a => ({
         id: randomUUID(),
         type: a.type as any,
@@ -657,17 +663,18 @@ export class AgentPipeline {
         path: a.url || "",
         createdAt: new Date(),
       })),
+      citations: [],
     };
 
     try {
       const verificationResult = await verifierAgent.verify(verificationPackage);
 
       return {
-        passed: verificationResult.overallSuccess,
-        confidence: verificationResult.confidence,
-        summary: verificationResult.summary,
-        canRetry: !verificationResult.overallSuccess && successRate > 0.5,
-        issues: verificationResult.issues || [],
+        passed: verificationResult.passed,
+        confidence: verificationResult.score,
+        summary: `Verificación completada: score=${verificationResult.score.toFixed(2)}`,
+        canRetry: !verificationResult.passed && successRate > 0.5,
+        issues: verificationResult.issues.map(iss => iss.description),
       };
     } catch (error) {
       console.error(`[Pipeline] Verification error for run ${runId}:`, error);
@@ -732,7 +739,7 @@ export class AgentPipeline {
     }
   ): Promise<void> {
     try {
-      await agentEventBus.emit(runId, eventType, options);
+      await agentEventBus.emit(runId, eventType, options as any);
     } catch (error) {
       console.error(`[Pipeline] Failed to emit event ${eventType} for run ${runId}:`, error);
     }

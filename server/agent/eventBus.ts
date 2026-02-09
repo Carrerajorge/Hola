@@ -95,7 +95,11 @@ class AgentEventBus extends EventEmitter {
     }
   }
 
-  async emit(runId: string, eventType: TraceEventType, options?: Partial<Omit<TraceEvent, 'event_type' | 'runId' | 'timestamp'>>): Promise<TraceEvent> {
+  // @ts-ignore - async override of EventEmitter.emit for trace events
+  async emit(runId: string, eventType: TraceEventType, options?: Partial<Omit<TraceEvent, 'event_type' | 'runId' | 'timestamp'>>): Promise<TraceEvent>
+  // @ts-ignore
+  async emit(...args: any[]): Promise<any> {
+    const [runId, eventType, options] = args as [string, TraceEventType, Partial<Omit<TraceEvent, 'event_type' | 'runId' | 'timestamp'>> | undefined];
     const event = createTraceEvent(eventType, runId, options);
 
     if (!this.eventHistory.has(runId)) {

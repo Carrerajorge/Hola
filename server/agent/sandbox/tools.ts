@@ -886,12 +886,13 @@ export class GenerateTool extends BaseTool {
       switch (type) {
         case "image":
           const { generateImage } = await import("../../services/imageGeneration");
-          const imageResult = await generateImage(prompt);
-          
-          if (imageResult && imageResult.success && imageResult.imageUrl) {
+          const imageResult = await generateImage(prompt) as any;
+
+          if (imageResult && (imageResult.success || imageResult.imageBase64)) {
+            const imageUrl = imageResult.imageUrl || (imageResult.imageBase64 ? `data:${imageResult.mimeType || 'image/png'};base64,${imageResult.imageBase64}` : undefined);
             return this.createResult(
               true,
-              { url: imageResult.imageUrl, type: "image", prompt, dimensions: size },
+              { url: imageUrl, type: "image", prompt, dimensions: size },
               `Image generated successfully`,
               undefined,
               startTime,

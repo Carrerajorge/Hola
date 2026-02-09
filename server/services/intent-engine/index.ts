@@ -285,7 +285,7 @@ function generateClarificationQuestion(
   ruleResult: RuleMatchResult,
   locale: SupportedLocale
 ): string {
-  const questions: Record<SupportedLocale, Record<string, string>> = {
+  const questions: Partial<Record<SupportedLocale, Record<string, string>>> = {
     es: {
       format: "¿En qué formato lo quieres? (PowerPoint, Word o Excel)",
       topic: "¿Sobre qué tema te gustaría que trate?",
@@ -318,7 +318,7 @@ function generateClarificationQuestion(
     }
   };
 
-  const localeQuestions = questions[locale] || questions.en;
+  const localeQuestions = questions[locale] || questions.en || { format: "What format would you like?", topic: "What topic?", general: "Could you give me more details?" };
 
   if (ruleResult.has_creation_verb && !ruleResult.output_format) {
     return localeQuestions.format;
@@ -420,7 +420,7 @@ export async function routeIntent(
           router_version: ROUTER_VERSION,
           processing_time_ms: Date.now() - startTime,
           cache_hit: false,
-          compound_plan: serializeCompoundResult(compoundResult)
+          compound_plan: serializeCompoundResult(compoundResult) as any
         };
         
         endTrace(ctx, result, true);
@@ -431,10 +431,9 @@ export async function routeIntent(
         const result: IntentResult = {
           intent: "CREATE_DOCUMENT",
           output_format: compoundResult.output_format,
-          slots: { 
+          slots: {
             topic: compoundResult.topic || undefined,
-            doc_type: compoundResult.doc_type || undefined
-          },
+          } as any,
           confidence: compoundResult.confidence,
           normalized_text: normalized,
           matched_patterns: ["compound_research_document"],
@@ -444,7 +443,7 @@ export async function routeIntent(
           router_version: ROUTER_VERSION,
           processing_time_ms: Date.now() - startTime,
           cache_hit: false,
-          compound_plan: serializeCompoundResult(compoundResult)
+          compound_plan: serializeCompoundResult(compoundResult) as any
         };
         
         if (effectiveConfig.enableCache) {

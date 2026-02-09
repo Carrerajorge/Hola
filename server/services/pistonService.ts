@@ -501,8 +501,8 @@ export async function executeCode(
           artifacts: localResult.artifacts.map((a) => ({
             type: a.type,
             name: a.name,
-            data: a.data,
-            mimeType: a.mimeType,
+            data: a.data || "",
+            mimeType: a.mimeType || "",
           })),
         };
       } catch (fallbackError: any) {

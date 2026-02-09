@@ -519,7 +519,7 @@ modelsRouter.get("/usage", async (req, res) => {
                 byModel[key] = { requests: 0, tokens: 0, errors: 0, avgLatency: 0 };
             }
             byModel[key].requests += m.totalRequests || 0;
-            byModel[key].tokens += m.totalTokens || 0;
+            byModel[key].tokens += (m.tokensIn || 0) + (m.tokensOut || 0);
             byModel[key].errors += m.errorCount || 0;
             byModel[key].avgLatency = m.avgLatency || byModel[key].avgLatency;
         });

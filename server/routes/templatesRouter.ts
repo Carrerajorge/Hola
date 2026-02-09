@@ -112,7 +112,7 @@ templatesRouter.post("/", async (req, res) => {
     await auditLog(req, {
       action: "template.created",
       resource: "prompt_templates",
-      resourceId: result.rows?.[0]?.id,
+      resourceId: result.rows?.[0]?.id as string | undefined,
       details: { name, category },
       category: "user",
       severity: "info"
@@ -192,8 +192,8 @@ templatesRouter.post("/:id/use", async (req, res) => {
     }
     
     const template = result.rows[0];
-    let content = template.content;
-    
+    let content = String(template.content || '');
+
     // Replace variables
     Object.entries(variables).forEach(([key, value]) => {
       content = content.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value as string);

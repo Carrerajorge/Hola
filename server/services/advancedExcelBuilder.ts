@@ -339,7 +339,7 @@ export class AdvancedExcelBuilder {
                 const [start, end] = v.range.split(":");
 
                 if (v.type === "list" && v.values) {
-                    sheet.dataValidations.add(v.range, {
+                    (sheet as any).dataValidations.add(v.range, {
                         type: "list",
                         allowBlank: true,
                         formulae: [`"${v.values.join(",")}"`],
@@ -348,7 +348,7 @@ export class AdvancedExcelBuilder {
                         error: v.errorMessage || "Por favor seleccione un valor de la lista"
                     });
                 } else if (v.type === "number") {
-                    sheet.dataValidations.add(v.range, {
+                    (sheet as any).dataValidations.add(v.range, {
                         type: "whole",
                         allowBlank: true,
                         operator: "between",
@@ -390,7 +390,7 @@ export class AdvancedExcelBuilder {
                             gradient: true,
                             color: { argb: this.theme.accentColor }
                         }
-                    }]
+                    } as any]
                 });
             }
         }
@@ -434,7 +434,7 @@ export class AdvancedExcelBuilder {
             const row = [stat];
             for (let col = 1; col < numCols; col++) {
                 const colLetter = String.fromCharCode(65 + col);
-                row.push({ formula: `${formulas[i]}('${dataSheetName}'!${colLetter}2:${colLetter}${numRows + 1})` });
+                row.push({ formula: `${formulas[i]}('${dataSheetName}'!${colLetter}2:${colLetter}${numRows + 1})` } as any);
             }
             sheet.addRow(row);
         });

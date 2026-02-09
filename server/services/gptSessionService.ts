@@ -123,7 +123,7 @@ export async function createGptSession(chatId: string | null, gptId: string): Pr
 
   const capabilities = (gpt.capabilities as any) || DEFAULT_CAPABILITIES;
   const toolPermissions = gpt.toolPermissions || { mode: 'allowlist' as const, tools: [], actionsEnabled: true };
-  const runtimePolicy = gpt.runtimePolicy || { enforceModel: false, modelFallbacks: [] };
+  const runtimePolicy = gpt.runtimePolicy || { enforceModel: false, modelFallbacks: [] as string[], allowClientOverride: false, maxTokensOverride: undefined as number | undefined, temperatureOverride: undefined as number | undefined };
 
   let enforcedModelId: string | null = null;
   if (runtimePolicy.enforceModel && gpt.recommendedModel) {

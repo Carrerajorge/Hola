@@ -129,7 +129,7 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
 
 usersRouter.patch("/:id", async (req, res) => {
     try {
-        const previousUser = await storage.getUserById(req.params.id);
+        const previousUser = await storage.getUser(req.params.id);
         const user = await storage.updateUser(req.params.id, req.body);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
@@ -162,7 +162,7 @@ usersRouter.patch("/:id", async (req, res) => {
 
 usersRouter.delete("/:id", async (req, res) => {
     try {
-        const userToDelete = await storage.getUserById(req.params.id);
+        const userToDelete = await storage.getUser(req.params.id);
         await storage.deleteUser(req.params.id);
         
         // Enhanced audit log with deleted user info
@@ -206,11 +206,10 @@ usersRouter.post("/:id/block", async (req, res) => {
     try {
         const { reason } = req.body || {};
         const previousUser = await storage.getUser(req.params.id);
-        const user = await storage.updateUser(req.params.id, { 
+        const user = await storage.updateUser(req.params.id, {
             status: "blocked",
-            blockedAt: new Date(),
             blockReason: reason || "Blocked by admin"
-        });
+        } as any);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -236,11 +235,10 @@ usersRouter.post("/:id/block", async (req, res) => {
 usersRouter.post("/:id/unblock", async (req, res) => {
     try {
         const previousUser = await storage.getUser(req.params.id);
-        const user = await storage.updateUser(req.params.id, { 
+        const user = await storage.updateUser(req.params.id, {
             status: "active",
-            blockedAt: null,
             blockReason: null
-        });
+        } as any);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }

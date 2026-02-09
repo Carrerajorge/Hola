@@ -28,10 +28,9 @@ class RedisConversationCache {
     try {
       this.client = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
-        retryDelayOnFailover: 100,
         enableReadyCheck: true,
         lazyConnect: true,
-      });
+      } as any);
 
       this.client.on("connect", () => {
         console.log("[RedisConversationCache] Connected to Redis");

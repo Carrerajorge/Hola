@@ -404,15 +404,15 @@ export async function fuseVisionModels(
     });
 
     const contributions = (await Promise.all(visionPromises))
-        .filter((c): c is ModelContribution => c !== null);
+        .filter((c): c is NonNullable<typeof c> => c !== null) as ModelContribution[];
 
     const result = mergeTextResults(contributions);
-    const avgConfidence = contributions.reduce((s, c) => s + c.confidence, 0) / contributions.length;
+    const avgConfidence = contributions.reduce((s: number, c: ModelContribution) => s + c.confidence, 0) / contributions.length;
 
     return {
         result,
         confidence: avgConfidence,
-        models: contributions,
+        models: contributions as ModelContribution[],
         processingTimeMs: contributions.reduce((max, c) => Math.max(max, c.latencyMs), 0),
         fusionMethod: "weighted_average",
     };

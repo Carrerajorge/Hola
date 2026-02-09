@@ -140,38 +140,38 @@ export class IliagptBridge {
     const internalEvents = this.system.getService<{ on: (event: string, handler: (p: unknown) => void) => void }>("events");
     
     internalEvents.on("tool.started", (payload: any) => {
-      legacyEventBus.emit(payload.runId || uid("run"), "tool_start", {
+      legacyEventBus.emit(payload.runId || uid("run"), "tool_call_started", {
         tool_name: payload.tool,
         metadata: { traceId: payload.traceId, requestId: payload.requestId },
       }).catch(() => {});
     });
 
     internalEvents.on("tool.succeeded", (payload: any) => {
-      legacyEventBus.emit(payload.runId || uid("run"), "tool_end", {
+      legacyEventBus.emit(payload.runId || uid("run"), "tool_call_succeeded", {
         tool_name: payload.tool,
-        status: "success",
+        status: "completed" as const,
         metadata: { traceId: payload.traceId, requestId: payload.requestId },
       }).catch(() => {});
     });
 
     internalEvents.on("tool.failed", (payload: any) => {
-      legacyEventBus.emit(payload.runId || uid("run"), "tool_end", {
+      legacyEventBus.emit(payload.runId || uid("run"), "tool_call_failed", {
         tool_name: payload.tool,
-        status: "error",
-        error: payload.err,
+        status: "failed" as const,
+        error: { message: typeof payload.err === 'string' ? payload.err : String(payload.err) },
         metadata: { traceId: payload.traceId, requestId: payload.requestId },
       }).catch(() => {});
     });
 
     internalEvents.on("workflow.started", (payload: any) => {
-      legacyEventBus.emit(payload.runId || uid("run"), "planning_start", {
-        plan: { workflowId: payload.workflowId, steps: payload.steps },
+      legacyEventBus.emit(payload.runId || uid("run"), "plan_created", {
+        plan: { objective: payload.workflowId || "", steps: (payload.steps || []).map((s: any, i: number) => ({ index: i, toolName: s.tool || s.name || "", description: s.description || "" })) },
         metadata: { traceId: payload.traceId, requestId: payload.requestId },
       }).catch(() => {});
     });
 
     internalEvents.on("workflow.succeeded", (payload: any) => {
-      legacyEventBus.emit(payload.runId || uid("run"), "run_complete", {
+      legacyEventBus.emit(payload.runId || uid("run"), "done", {
         summary: `Workflow ${payload.workflowId} completed`,
         metadata: { traceId: payload.traceId, requestId: payload.requestId },
       }).catch(() => {});

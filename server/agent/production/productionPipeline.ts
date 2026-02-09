@@ -699,8 +699,7 @@ export class ProductionPipeline extends EventEmitter {
                 mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 size: excelResult.buffer.length,
                 metadata: {
-                    rows: Math.max(0, excelData.length - 1),
-                    columns: excelData[0]?.length || 0,
+                    sheetCount: 1,
                 },
             });
 
@@ -748,7 +747,7 @@ export class ProductionPipeline extends EventEmitter {
                 buffer: pptResult.buffer,
                 mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
                 size: pptResult.buffer.length,
-                metadata: { slides: sections.length },
+                metadata: { slideCount: sections.length },
             });
 
             completed++;
@@ -797,11 +796,11 @@ export class ProductionPipeline extends EventEmitter {
             const headers = ['Título', 'Autores', 'Año', 'Revista/Conferencia', 'DOI', 'URL', 'Resumen', 'Cita'];
             const rows: any[][] = [headers];
 
-            const safeText = (v: any) => {
+            const safeText = (v: any): string => {
                 if (v == null) return '';
                 if (typeof v === 'string') return v;
                 if (typeof v === 'number') return String(v);
-                if (Array.isArray(v)) return v.map(x => safeText(x)).filter(Boolean).join(', ');
+                if (Array.isArray(v)) return v.map((x: any) => safeText(x)).filter(Boolean).join(', ');
                 if (typeof v === 'object') {
                     // common patterns
                     if ((v as any).name) return safeText((v as any).name);
@@ -1022,7 +1021,7 @@ export async function startProductionPipeline(
 
     // Create work order
     const workOrder = await createWorkOrder({
-        routerResult,
+        routerResult: { ...routerResult, constraints: (routerResult as any).constraints || {} } as any,
         message,
         userId,
         chatId,

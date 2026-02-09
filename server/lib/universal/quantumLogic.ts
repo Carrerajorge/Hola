@@ -3,7 +3,7 @@
  * Tasks 501-510: Qubit simulation, superposition states, entanglement logic
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 
 // ============================================================================
 // Types

@@ -7,7 +7,7 @@ export class FormulaEngineWorker {
     private grid: SparseGrid;
 
     constructor() {
-        this.grid = new SparseGrid(10000, 10000); // Default max size
+        this.grid = new SparseGrid({ maxRows: 10000, maxCols: 10000 }); // Default max size
         this.engine = new FormulaEngine(this.grid);
     }
 

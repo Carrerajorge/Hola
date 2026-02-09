@@ -308,9 +308,10 @@ router.post("/compile", async (req: Request, res: Response) => {
         markdown: s.markdown,
         claims: result.state.claims.filter(c => c.sectionId === s.sectionId),
         wordCount: s.wordCount,
-        entities: s.entities || [],
+        generatedAt: s.generatedAt,
+        iteration: s.iteration,
       }));
-      
+
       const renderTree = layoutPlanner.planLayout(sectionContents);
       const renderTreeValidation = validateRenderTree(renderTree);
       

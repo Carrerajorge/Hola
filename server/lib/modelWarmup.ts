@@ -36,7 +36,7 @@ class ModelWarmupManager {
     });
 
     try {
-      await llmGateway.sendMessage({
+      await (llmGateway as any).sendMessage({
         messages: [{ role: "user", content: "ping" }],
         model,
         maxTokens: 1,

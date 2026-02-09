@@ -69,7 +69,8 @@ export class Extractor {
                         verb: verb,
                         object: block.content, // Simplified: whole block as context
                         params: [],
-                        dependencies: []
+                        dependencies: [],
+                        tool_hints: [],
                     });
                 }
             }

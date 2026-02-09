@@ -182,6 +182,7 @@ function parseMarkdownTable(
     rows.push({
       cells: cells.map((cell) => ({
         runs: parseInlineMarkdown(cell),
+        isHeader: false,
       })),
     });
     i++;

@@ -8,6 +8,7 @@
  * - Persistence and recovery
  */
 
+// @ts-ignore - yjs may not have type declarations
 import * as Y from "yjs";
 import { WebSocket, WebSocketServer } from "ws";
 import http from "http";
@@ -113,7 +114,7 @@ function handleConnection(ws: WebSocket, req: http.IncomingMessage) {
     // Register client
     const clientInfo: ClientInfo = {
         clientId,
-        userId,
+        userId: userId || undefined,
         userName,
         color: availableColor,
         connectedAt: new Date(),

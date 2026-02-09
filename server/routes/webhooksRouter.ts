@@ -115,9 +115,9 @@ webhooksRouter.post("/", async (req, res) => {
     await auditLog(req, {
       action: "webhook.created",
       resource: "webhooks",
-      resourceId: result.rows?.[0]?.id,
+      resourceId: result.rows?.[0]?.id as string | undefined,
       details: { name, url, events },
-      category: "integration",
+      category: "config",
       severity: "info"
     });
     
@@ -207,7 +207,7 @@ webhooksRouter.post("/:id/test", async (req, res) => {
       data: { message: 'This is a test webhook' }
     };
     
-    const result = await sendWebhook(webhook, 'test', testPayload);
+    const result = await sendWebhook(webhook as unknown as Webhook, 'test', testPayload);
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -310,7 +310,7 @@ export async function dispatchWebhook(eventType: string, payload: any, userId?: 
     
     // Send to all matching webhooks (async, don't wait)
     for (const webhook of webhooks) {
-      sendWebhook(webhook as Webhook, eventType, {
+      sendWebhook(webhook as unknown as Webhook, eventType, {
         event: eventType,
         timestamp: new Date().toISOString(),
         data: payload

@@ -72,7 +72,7 @@ export class RetrievalPipeline {
       RetrievalRequestSchema,
       request,
       "RetrievalPipeline.retrieve"
-    );
+    ) as RetrievalRequest;
     
     const startTime = Date.now();
     const errors: RetrievalPipelineResult["errors"] = [];

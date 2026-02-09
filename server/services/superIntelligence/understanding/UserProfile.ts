@@ -272,14 +272,14 @@ export class UserProfileManager extends EventEmitter {
     if (profile) return profile;
 
     // Intentar desde Redis
-    profile = await this.loadFromRedis(userId);
+    profile = await this.loadFromRedis(userId) ?? undefined;
     if (profile) {
       this.profiles.set(userId, profile);
       return profile;
     }
 
     // Intentar desde base de datos
-    profile = await this.loadFromDatabase(userId);
+    profile = await this.loadFromDatabase(userId) ?? undefined;
     if (profile) {
       this.profiles.set(userId, profile);
       await this.saveToRedis(profile);

@@ -22,6 +22,7 @@ import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
+// @ts-ignore - no type declarations available
 import hpp from "hpp";
 import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
@@ -146,7 +147,7 @@ export function log(message: string, source = "express") {
         log("[WARNING] No LLM providers available - chat will not work");
       }
     } catch (error) {
-      log("[WARNING] LLM health check failed:", error);
+      log("[WARNING] LLM health check failed:", error as string);
     }
   }
 

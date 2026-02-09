@@ -247,7 +247,7 @@ agentRouter.get("/users", async (req, res) => {
                 ilike(users.email, pattern),
                 ilike(users.fullName, pattern),
                 ilike(users.id, pattern),
-            ));
+            )) as any;
         }
 
         const rows = await query
@@ -544,7 +544,7 @@ agentRouter.get("/memory/stats", async (req, res) => {
         }).from(agentMemoryStore);
 
         if (userId) {
-            totalsQuery = totalsQuery.where(eq(agentMemoryStore.userId, userId));
+            totalsQuery = totalsQuery.where(eq(agentMemoryStore.userId, userId)) as any;
         }
 
         const [totals] = await totalsQuery;
@@ -555,7 +555,7 @@ agentRouter.get("/memory/stats", async (req, res) => {
         }).from(agentMemoryStore);
 
         if (userId) {
-            typesQuery = typesQuery.where(eq(agentMemoryStore.userId, userId));
+            typesQuery = typesQuery.where(eq(agentMemoryStore.userId, userId)) as any;
         }
 
         const typeRows = await typesQuery.groupBy(agentMemoryStore.memoryType);

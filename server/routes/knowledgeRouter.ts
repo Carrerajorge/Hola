@@ -63,6 +63,7 @@ knowledgeRouter.post("/", async (req, res) => {
         }
 
         const node = await knowledgeBaseService.createNode(userId, {
+            userId,
             title,
             content,
             nodeType,
@@ -90,6 +91,7 @@ knowledgeRouter.post("/:id/relate", async (req, res) => {
         }
 
         const edge = await knowledgeBaseService.addEdge(userId, {
+            userId,
             sourceNodeId: req.params.id,
             targetNodeId: targetId,
             relationType,

@@ -4,6 +4,7 @@ import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { ChatErrorBoundary } from "@/components/error-boundaries";
 import type { Gpt } from "@/components/gpt-explorer";
+import type { ActiveGpt, AiState } from "@/types/chat";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useMediaLibrary } from "@/hooks/use-media-library";
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
@@ -681,9 +682,9 @@ export default function Home() {
               isSidebarOpen={isSidebarOpen}
               onToggleSidebar={() => setIsSidebarOpen(true)}
               onCloseSidebar={() => setIsSidebarOpen(false)}
-              activeGpt={activeGpt}
-              aiState={aiState}
-            setAiState={setAiState}
+              activeGpt={activeGpt as ActiveGpt | null}
+              aiState={aiState as AiState}
+            setAiState={setAiState as React.Dispatch<React.SetStateAction<AiState>>}
             aiStateChatId={aiStateChatId}
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}

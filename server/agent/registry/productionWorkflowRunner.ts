@@ -506,7 +506,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
     try {
       for (const step of run.plan.steps) {
-        if (run.status === "cancelled" || run.status === "timeout") break;
+        if ((run.status as string) === "cancelled" || (run.status as string) === "timeout") break;
 
         run.currentStepIndex = step.stepIndex;
         run.updatedAt = new Date().toISOString();
@@ -878,7 +878,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
     switch (toolName) {
       case "image_generate": {
-        const { generateImage, editImage, classifyImageIntent } = await import("../../services/imageGeneration");
+        const { generateImage, editImage } = await import("../../services/imageGeneration");
 
         const parsed = ImageGenerateSchema.safeParse(input);
         const validInput = parsed.success ? parsed.data : { prompt: undefined, lastImageBase64: null, lastImageId: null, specificImageBase64: null, specificImageId: null, chatId: undefined };
@@ -889,18 +889,19 @@ export class ProductionWorkflowRunner extends EventEmitter {
         const specificImageBase64 = validInput.specificImageBase64 || null;
         const specificImageId = validInput.specificImageId || null;
 
-        const intent = classifyImageIntent(prompt, !!lastImageBase64);
-        console.log(`[WorkflowRunner] image_generate: Mode=${intent.mode}, prompt="${prompt.slice(0, 50)}..."`);
+        const genIntent = classifyIntent(prompt);
+        const imageMode = lastImageBase64 ? 'edit_last' : specificImageBase64 ? 'edit_specific' : 'generate';
+        console.log(`[WorkflowRunner] image_generate: Mode=${imageMode}, intent=${genIntent}, prompt="${prompt.slice(0, 50)}..."`);
 
         try {
           let result;
           let parentId: string | null = null;
 
-          if (intent.mode === 'edit_last' && lastImageBase64) {
+          if (imageMode === 'edit_last' && lastImageBase64) {
             console.log(`[WorkflowRunner] image_generate: Editing last image (id: ${lastImageId})`);
             result = await editImage(lastImageBase64, prompt);
             parentId = lastImageId;
-          } else if (intent.mode === 'edit_specific' && specificImageBase64) {
+          } else if (imageMode === 'edit_specific' && specificImageBase64) {
             console.log(`[WorkflowRunner] image_generate: Editing specific image (id: ${specificImageId})`);
             result = await editImage(specificImageBase64, prompt);
             parentId = specificImageId;
@@ -915,7 +916,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
           const stats = fs.statSync(filePath);
           const artifactId = crypto.randomUUID();
-          console.log(`[WorkflowRunner] image_generate: Saved to ${filePath} (${stats.size} bytes, model: ${result.model}, mode: ${intent.mode})`);
+          console.log(`[WorkflowRunner] image_generate: Saved to ${filePath} (${stats.size} bytes, model: ${result.model}, mode: ${imageMode})`);
 
           const artifact: ArtifactInfo = {
             artifactId,
@@ -935,7 +936,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
                 prompt,
                 `/api/artifacts/${path.basename(filePath)}`,
                 result.model || "gemini-image",
-                intent.mode as "generate" | "edit_last" | "edit_specific",
+                imageMode as "generate" | "edit_last" | "edit_specific",
                 {
                   parentImageId: parentId || undefined,
                   base64Preview: result.imageBase64.slice(0, 500),
@@ -954,7 +955,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
               filePath,
               prompt,
               model: result.model,
-              mode: intent.mode,
+              mode: imageMode,
               imageId: artifactId,
               parentId,
               imageBase64: result.imageBase64,

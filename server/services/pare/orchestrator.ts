@@ -177,7 +177,7 @@ export class PAREOrchestrator {
         executionPlan: this.createEmptyPlan(prompt),
         requiresClarification: true,
         clarificationQuestions: questions,
-        contextUsed: context || {},
+        contextUsed: (context || {}) as Record<string, unknown>,
         analysisMetadata: {
           durationMs: Date.now() - startTime,
           primaryIntent: intents[0]?.category || null,
@@ -199,7 +199,7 @@ export class PAREOrchestrator {
       intents,
       entities,
       toolCandidates,
-      context
+      context as Record<string, unknown> | undefined
     );
 
     console.log(`[PARE] Generated plan with ${executionPlan.nodes.length} tasks (${Date.now() - startTime}ms)`);
@@ -213,7 +213,7 @@ export class PAREOrchestrator {
       executionPlan,
       requiresClarification: false,
       clarificationQuestions: [],
-      contextUsed: context || {},
+      contextUsed: (context || {}) as Record<string, unknown>,
       analysisMetadata: {
         durationMs: Date.now() - startTime,
         primaryIntent: intents[0]?.category || null,
@@ -381,7 +381,7 @@ Responde SOLO con JSON: {"questions":["pregunta1","pregunta2"]}`;
 
       const result = await geminiChat(
         [{ role: "user", parts: [{ text: `${systemPrompt}\n\nPrompt: ${prompt}\nIntenciones: ${intentsStr}\nEntidades: ${entitiesStr}` }] }],
-        { model: "gemini-2.0-flash", maxOutputTokens: 150, temperature: 0.3 }
+        { model: "gemini-2.5-flash", maxOutputTokens: 150, temperature: 0.3 }
       );
 
       const responseText = result.content?.trim() || "";

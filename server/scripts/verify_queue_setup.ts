@@ -12,6 +12,10 @@ async function verifyQueue() {
         throw new Error("agentWorker is null - Redis not configured?");
     }
 
+    // Non-null assertion: guards above guarantee these are non-null
+    const queue = agentQueue;
+    const worker = agentWorker;
+
     // Mock agentManager.executeRun to avoid full agent complexity for this test
     const originalExecute = agentManager.executeRun;
     agentManager.executeRun = async (runId) => {
@@ -23,7 +27,7 @@ async function verifyQueue() {
 
     // Add a job
     console.log(`Adding job for run ${testRunId}...`);
-    await agentQueue.add("agent-execution", {
+    await queue.add("agent-execution", {
         runId: testRunId,
         chatId: "test-chat",
         userId: "test-user",
@@ -36,7 +40,7 @@ async function verifyQueue() {
             reject(new Error("Timeout waiting for job completion"));
         }, 5000);
 
-        agentWorker.on("completed", (job) => {
+        worker.on("completed", (job) => {
             if (job.data.runId === testRunId) {
                 console.log(`Job ${job.id} completed successfully!`);
                 clearTimeout(timeout);
@@ -46,7 +50,7 @@ async function verifyQueue() {
             }
         });
 
-        agentWorker.on("failed", (job, err) => {
+        worker.on("failed", (job, err) => {
             if (job && job.data.runId === testRunId) {
                 console.error(`Job ${job.id} failed:`, err);
                 clearTimeout(timeout);
@@ -59,13 +63,13 @@ async function verifyQueue() {
 verifyQueue()
     .then(async () => {
         console.log("Verification Passed!");
-        await agentQueue.close();
-        await agentWorker.close();
+        await agentQueue?.close();
+        await agentWorker?.close();
         process.exit(0);
     })
     .catch(async (err) => {
         console.error("Verification Failed:", err);
-        await agentQueue.close();
-        await agentWorker.close();
+        await agentQueue?.close();
+        await agentWorker?.close();
         process.exit(1);
     });

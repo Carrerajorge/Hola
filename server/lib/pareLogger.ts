@@ -140,7 +140,7 @@ class PareLoggerImpl implements PareLogger {
       message,
       ...this.context,
       elapsedMs,
-      ...(data ? redactPII(data) : {}),
+      ...(data ? redactPII(data) as Record<string, unknown> : {}),
     };
 
     const output = safeStringify(logEntry);

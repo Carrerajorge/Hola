@@ -28,14 +28,9 @@ export {
 
 // Rate Limiting
 export {
-    createRateLimiter,
     authRateLimiter,
     apiRateLimiter,
-    chatRateLimiter,
-    uploadRateLimiter,
-    adminRateLimiter,
-    searchRateLimiter,
-} from './rateLimiter';
+} from './dynamicRateLimiting';
 
 // Retry Logic
 export {

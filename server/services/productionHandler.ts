@@ -207,7 +207,7 @@ async function saveArtifact(
         await fetch(upload.uploadUrl, {
             method: "PUT",
             headers: { "Content-Type": contentType },
-            body: artifact.buffer,
+            body: artifact.buffer as any,
         });
 
         const ext = path.extname(storedFilename).replace(/^\./, "");
@@ -230,7 +230,7 @@ async function saveArtifact(
             },
         });
 
-        library = { fileUuid: saved.uuid, storageUrl: saved.storageUrl };
+        library = { fileUuid: saved.uuid, storageUrl: saved.storageUrl ?? '' };
     } catch (e: any) {
         console.warn("[ProductionHandler] Failed to save artifact to Library:", e?.message || e);
     }

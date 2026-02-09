@@ -182,7 +182,7 @@ export function responseCache(options: ResponseCacheOptions = {}): RequestHandle
           } else if (body instanceof Buffer) {
             bodyStr = body.toString("utf-8");
           } else {
-            bodyStr = body;
+            bodyStr = body as string;
           }
 
           responseBody = bodyStr;

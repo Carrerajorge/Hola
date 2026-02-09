@@ -95,6 +95,7 @@ async function sendViaResend(options: EmailOptions): Promise<EmailResult> {
  */
 async function sendViaSMTP(options: EmailOptions): Promise<EmailResult> {
     try {
+        // @ts-ignore - nodemailer may not have type declarations
         const nodemailer = await import("nodemailer");
 
         const transporter = nodemailer.default.createTransport({

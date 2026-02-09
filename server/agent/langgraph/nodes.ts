@@ -32,7 +32,7 @@ function validateAndFixToolArgs(
   }
 
   const errors = parseResult.error.errors;
-  const validationErrors = errors.map(e => `${e.path.join('.')}: ${e.message}`);
+  const validationErrors = errors.map((e: any) => `${e.path.join('.')}: ${e.message}`);
   const fixedArgs = { ...args };
   let fixApplied = false;
 
@@ -182,7 +182,7 @@ export async function plannerNode(state: AgentState): Promise<Partial<AgentState
 
     const aiMessage = new AIMessage({
       content: assistantMessage.content || "",
-      tool_calls: toolCalls?.map((tc) => ({
+      tool_calls: toolCalls?.map((tc: any) => ({
         id: tc.id,
         name: tc.function.name,
         args: JSON.parse(tc.function.arguments || "{}"),
@@ -252,7 +252,7 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
       continue;
     }
 
-    const validation = validateAndFixToolArgs(tool, toolCall.args || {}, userMessageContent);
+    const validation = validateAndFixToolArgs(tool as DynamicStructuredTool<any>, toolCall.args || {}, userMessageContent);
     
     if (validation.error) {
       console.log(`[ExecutorNode] ${toolCall.name}: ${validation.error}`);
@@ -278,7 +278,7 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
     const argsToUse = validation.fixedArgs;
 
     try {
-      const result = await tool.invoke(argsToUse);
+      const result = await (tool as DynamicStructuredTool<any>).invoke(argsToUse);
 
       toolResults.push(
         new ToolMessage({

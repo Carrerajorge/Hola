@@ -170,6 +170,7 @@ function GridCell({
   selectable,
   columnCount
 }: {
+  ariaAttributes: { "aria-colindex": number; role: "gridcell" };
   columnIndex: number;
   rowIndex: number;
   style: React.CSSProperties;
@@ -226,7 +227,7 @@ function VirtualizedGrid({
   }), [items, selectedId, onSelect, onDelete, onDownload, selectable, columnCount]);
 
   return (
-    <Grid
+    <Grid<CellProps>
       cellComponent={GridCell}
       cellProps={cellProps}
       columnCount={columnCount}

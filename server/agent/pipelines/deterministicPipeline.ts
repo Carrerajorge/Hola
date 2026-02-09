@@ -569,14 +569,12 @@ Responde en formato JSON con la siguiente estructura:
 }`;
 
     try {
-      const response = await llmGateway.complete({
-        model: "gemini-2.5-flash",
-        messages: [{ role: "user", content: analysisPrompt }],
-        temperature: 0.3,
-        maxTokens: 2000,
-      });
+      const response = await llmGateway.chat(
+        [{ role: "user", content: analysisPrompt }],
+        { model: "gemini-2.5-flash", temperature: 0.3, maxTokens: 2000 }
+      );
 
-      const content = response.choices[0]?.message?.content || "{}";
+      const content = (response as any).choices?.[0]?.message?.content || (response as any).content || "{}";
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       
       if (jsonMatch) {
@@ -723,8 +721,7 @@ Responde en formato JSON con la siguiente estructura:
         
         try {
           const result = await generateImage(
-            `Professional illustration for presentation about ${this.state!.topic}. Modern, clean design. Slide ${i + 1}.`,
-            { timeout: 30000 }
+            `Professional illustration for presentation about ${this.state!.topic}. Modern, clean design. Slide ${i + 1}.`
           );
           
           this.state!.images.push({

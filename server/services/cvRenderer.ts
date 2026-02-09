@@ -129,11 +129,11 @@ function templateConfigToInternal(templateConfig: CvTemplateConfig, spec?: CvSpe
     if (spec.color_scheme.primary) {
       config.primaryColor = hexToRgb(spec.color_scheme.primary);
     }
-    if (spec.color_scheme.text) {
-      config.textColor = hexToRgb(spec.color_scheme.text);
+    if ((spec.color_scheme as any).text) {
+      config.textColor = hexToRgb((spec.color_scheme as any).text);
     }
-    if (spec.color_scheme.background) {
-      config.backgroundColor = hexToRgb(spec.color_scheme.background);
+    if ((spec.color_scheme as any).background) {
+      config.backgroundColor = hexToRgb((spec.color_scheme as any).background);
     }
   }
 

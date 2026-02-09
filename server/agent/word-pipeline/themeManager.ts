@@ -89,9 +89,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Business-focused professional styling",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Cambria", size: 26, weight: "bold", color: "#1F4E79" },
-      heading2: { family: "Cambria", size: 18, weight: "bold", color: "#2E75B6" },
-      body: { family: "Calibri", size: 11, weight: "normal" }
+      heading1: { family: "Cambria", size: 26, weight: "bold", style: 'normal' as const, color: "#1F4E79" },
+      heading2: { family: "Cambria", size: 18, weight: "bold", style: 'normal' as const, color: "#2E75B6" },
+      body: { family: "Calibri", size: 11, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,
@@ -108,9 +108,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Contemporary minimalist design",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Segoe UI Light", size: 28, weight: "light" },
-      heading2: { family: "Segoe UI", size: 16, weight: "normal" },
-      body: { family: "Segoe UI", size: 10, weight: "normal" }
+      heading1: { family: "Segoe UI Light", size: 28, weight: "light", style: 'normal' as const },
+      heading2: { family: "Segoe UI", size: 16, weight: "normal", style: 'normal' as const },
+      body: { family: "Segoe UI", size: 10, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,
@@ -128,9 +128,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Traditional academic paper styling",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Times New Roman", size: 14, weight: "bold" },
-      heading2: { family: "Times New Roman", size: 12, weight: "bold" },
-      body: { family: "Times New Roman", size: 12, weight: "normal" }
+      heading1: { family: "Times New Roman", size: 14, weight: "bold", style: 'normal' as const },
+      heading2: { family: "Times New Roman", size: 12, weight: "bold", style: 'normal' as const },
+      body: { family: "Times New Roman", size: 12, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,
@@ -147,9 +147,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Enterprise business styling",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Arial", size: 24, weight: "bold", color: "#003366" },
-      heading2: { family: "Arial", size: 16, weight: "bold", color: "#003366" },
-      body: { family: "Arial", size: 11, weight: "normal" }
+      heading1: { family: "Arial", size: 24, weight: "bold", style: 'normal' as const, color: "#003366" },
+      heading2: { family: "Arial", size: 16, weight: "bold", style: 'normal' as const, color: "#003366" },
+      body: { family: "Arial", size: 11, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,
@@ -167,9 +167,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Ultra-clean minimal design",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Helvetica", size: 20, weight: "bold" },
-      heading2: { family: "Helvetica", size: 14, weight: "bold" },
-      body: { family: "Helvetica", size: 10, weight: "normal" }
+      heading1: { family: "Helvetica", size: 20, weight: "bold", style: 'normal' as const },
+      heading2: { family: "Helvetica", size: 14, weight: "bold", style: 'normal' as const },
+      body: { family: "Helvetica", size: 10, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,
@@ -187,9 +187,9 @@ const THEMES: Record<ThemeId, ThemeDefinition> = {
     description: "Bold creative styling",
     typography: {
       ...DEFAULT_TYPOGRAPHY,
-      heading1: { family: "Georgia", size: 28, weight: "bold", color: "#8B4513" },
-      heading2: { family: "Georgia", size: 18, weight: "bold", color: "#A0522D" },
-      body: { family: "Palatino Linotype", size: 11, weight: "normal" }
+      heading1: { family: "Georgia", size: 28, weight: "bold", style: 'normal' as const, color: "#8B4513" },
+      heading2: { family: "Georgia", size: 18, weight: "bold", style: 'normal' as const, color: "#A0522D" },
+      body: { family: "Palatino Linotype", size: 11, weight: "normal", style: 'normal' as const }
     },
     colorPalette: {
       ...DEFAULT_COLOR_PALETTE,

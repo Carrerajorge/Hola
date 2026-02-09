@@ -280,7 +280,7 @@ async function parsePdfLayoutAware(buffer: Buffer, fileName: string): Promise<La
   let tableCounter = 0;
 
   // Split by pages (form feeds)
-  const pages = text.split(/\f/).filter(p => p.trim());
+  const pages = text.split(/\f/).filter((p: any) => p.trim());
   const effectivePages = pages.length > 0 ? pages : [text];
 
   for (let pageIdx = 0; pageIdx < effectivePages.length; pageIdx++) {
@@ -711,7 +711,7 @@ async function parseExcelLayoutAware(buffer: Buffer, fileName: string, format: '
 
   if (format === 'xlsx') {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(buffer as any);
 
     workbook.eachSheet((worksheet, sheetIndex) => {
       const sheetId = `sec-${++sectionCounter}`;

@@ -151,7 +151,7 @@ financeRouter.get("/payments", async (req, res) => {
             .select({ count: sql<number>`count(*)::int` })
             .from(payments)
             .leftJoin(users, eq(payments.userId, users.id));
-        if (whereClause) countQuery = countQuery.where(whereClause);
+        if (whereClause) countQuery = countQuery.where(whereClause) as any;
         const [{ count: total = 0 } = {} as any] = await countQuery;
 
         let listQuery = dbRead
@@ -175,7 +175,7 @@ financeRouter.get("/payments", async (req, res) => {
             })
             .from(payments)
             .leftJoin(users, eq(payments.userId, users.id));
-        if (whereClause) listQuery = listQuery.where(whereClause);
+        if (whereClause) listQuery = listQuery.where(whereClause) as any;
 
         const paginatedPayments = await listQuery
             .orderBy(orderByClause, desc(payments.createdAt))
@@ -232,7 +232,7 @@ financeRouter.get("/payments/stats", async (req, res) => {
             .from(payments)
             .leftJoin(users, eq(payments.userId, users.id))
             .groupBy(payments.currency);
-        if (whereClause) currencyQuery = currencyQuery.where(whereClause);
+        if (whereClause) currencyQuery = currencyQuery.where(whereClause) as any;
 
         const currencyRows = await currencyQuery;
 
@@ -415,7 +415,7 @@ financeRouter.post("/payments/sync-stripe", async (req, res) => {
         await auditLog(req as any, {
             action: AuditActions.ADMIN_IMPORT_DATA,
             resource: "payments",
-            resourceId: null,
+            resourceId: undefined,
             details: {
                 source: "stripe",
                 async: false,
@@ -512,7 +512,7 @@ financeRouter.get("/payments/export", async (req, res) => {
             .from(payments)
             .leftJoin(users, eq(payments.userId, users.id))
             .orderBy(orderByClause, desc(payments.createdAt));
-        if (whereClause) exportQuery = exportQuery.where(whereClause);
+        if (whereClause) exportQuery = exportQuery.where(whereClause) as any;
 
         const paymentRows = await exportQuery;
 
@@ -989,7 +989,7 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
         }
 
         // Get user email
-        const user = await storage.getUser(invoice.userId);
+        const user = await storage.getUser(invoice.userId as string);
         if (!user?.email) {
             return res.status(400).json({ error: "User has no email address" });
         }
@@ -997,7 +997,7 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
         // Send email
         const emailResult = await sendPaymentEmail(user.email, {
             invoiceId: invoice.id,
-            amount: invoice.amount || 0,
+            amount: Number(invoice.amount) || 0,
             currency: invoice.currency || "USD",
             status: (invoice.status as "paid" | "pending" | "failed") || "pending",
             invoiceUrl: `${process.env.APP_URL || "https://iliagpt.com"}/billing/invoices/${invoice.id}`

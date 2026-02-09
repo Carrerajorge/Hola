@@ -3,7 +3,7 @@
  * Handles background conversion of documents (e.g., DOCX -> PDF, Excel -> JSON)
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import { fileProcessingQueue } from '../fileProcessingQueue';
 import { officeWorkerPool } from './workerPool';
 

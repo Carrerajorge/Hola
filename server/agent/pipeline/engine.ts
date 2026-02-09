@@ -123,8 +123,8 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
       );
     };
     
-    const textArtifactFromLastResult = lastResult?.output?.artifacts?.length > 0 
-      ? findTextArtifact(lastResult.output.artifacts) 
+    const textArtifactFromLastResult = (lastResult?.output?.artifacts?.length ?? 0) > 0
+      ? findTextArtifact(lastResult!.output!.artifacts ?? [])
       : undefined;
     
     const textArtifactFromGlobal = artifacts.length > 0 

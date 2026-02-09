@@ -209,7 +209,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      const userId = effectiveUserId;
+      const userId = getOrCreateSecureUserId(req);
 
       // CONTEXT FIX: Augment client messages with server-side history
       const messages = await conversationMemoryManager.augmentWithHistory(
@@ -1322,7 +1322,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       // Default question classification for token limits
       const questionClassification = {
-        type: 'general',
+        type: 'open_ended' as const,
         maxTokens: 1000
       } as Partial<QuestionClassification>;
 
@@ -1709,7 +1709,7 @@ ${attachmentContext}`;
       const effectiveMaxTokens = questionClassification.type === 'summary' ||
         questionClassification.type === 'analysis'
         ? 2000 // Allow longer responses for summaries/analysis
-        : questionClassification.maxTokens * 4; // Apply stricter limit for factual questions
+        : (questionClassification.maxTokens ?? 1000) * 4; // Apply stricter limit for factual questions
 
       console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
 

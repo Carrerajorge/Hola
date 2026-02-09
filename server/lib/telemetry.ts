@@ -81,9 +81,12 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
 
     try {
         // Try to load OpenTelemetry SDK
+        // @ts-ignore - optional dependency
         const { NodeSDK } = await import("@opentelemetry/sdk-node");
+        // @ts-ignore - optional dependency
         const { getNodeAutoInstrumentations } = await import("@opentelemetry/auto-instrumentations-node");
-        const { Resource } = await import("@opentelemetry/resources");
+        const resourcesMod = await import("@opentelemetry/resources");
+        const Resource = (resourcesMod as any).Resource || (resourcesMod as any).default?.Resource;
         const { SemanticResourceAttributes } = await import("@opentelemetry/semantic-conventions");
 
         // Create exporter based on config
@@ -91,6 +94,7 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
 
         switch (config.exporterType) {
             case "jaeger":
+                // @ts-ignore - optional dependency
                 const { JaegerExporter } = await import("@opentelemetry/exporter-jaeger");
                 exporter = new JaegerExporter({
                     endpoint: config.exporterEndpoint || "http://localhost:14268/api/traces",
@@ -98,6 +102,7 @@ export async function initTelemetry(customConfig: Partial<TelemetryConfig> = {})
                 break;
 
             case "zipkin":
+                // @ts-ignore - optional dependency
                 const { ZipkinExporter } = await import("@opentelemetry/exporter-zipkin");
                 exporter = new ZipkinExporter({
                     url: config.exporterEndpoint || "http://localhost:9411/api/v2/spans",

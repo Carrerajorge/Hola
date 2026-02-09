@@ -72,7 +72,7 @@ export const FontSpecSchema = z.object({
   family: z.string(),
   size: z.number().positive(),
   weight: z.enum(["normal", "bold", "light"]).default("normal"),
-  style: z.enum(["normal", "italic"]).default("normal"),
+  style: z.enum(["normal", "italic"]).optional().default("normal"),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional()
 });
 export type FontSpec = z.infer<typeof FontSpecSchema>;
@@ -224,20 +224,20 @@ export const DocumentSpecSchema = z.object({
 export type DocumentSpec = z.infer<typeof DocumentSpecSchema>;
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
-  heading1: { family: "Calibri", size: 24, weight: "bold" },
-  heading2: { family: "Calibri", size: 18, weight: "bold" },
-  heading3: { family: "Calibri", size: 14, weight: "bold" },
-  heading4: { family: "Calibri", size: 12, weight: "bold" },
-  body: { family: "Calibri", size: 11, weight: "normal" },
+  heading1: { family: "Calibri", size: 24, weight: "bold", style: 'normal' as const },
+  heading2: { family: "Calibri", size: 18, weight: "bold", style: 'normal' as const },
+  heading3: { family: "Calibri", size: 14, weight: "bold", style: 'normal' as const },
+  heading4: { family: "Calibri", size: 12, weight: "bold", style: 'normal' as const },
+  body: { family: "Calibri", size: 11, weight: "normal", style: 'normal' as const },
   caption: { family: "Calibri", size: 9, weight: "normal", style: "italic" },
   quote: { family: "Calibri", size: 11, weight: "normal", style: "italic" },
-  code: { family: "Consolas", size: 10, weight: "normal" },
-  tableHeader: { family: "Calibri", size: 11, weight: "bold" },
-  tableBody: { family: "Calibri", size: 10, weight: "normal" },
-  footnote: { family: "Calibri", size: 9, weight: "normal" },
-  toc: { family: "Calibri", size: 11, weight: "normal" },
-  header: { family: "Calibri", size: 10, weight: "normal" },
-  footer: { family: "Calibri", size: 10, weight: "normal" }
+  code: { family: "Consolas", size: 10, weight: "normal", style: 'normal' as const },
+  tableHeader: { family: "Calibri", size: 11, weight: "bold", style: 'normal' as const },
+  tableBody: { family: "Calibri", size: 10, weight: "normal", style: 'normal' as const },
+  footnote: { family: "Calibri", size: 9, weight: "normal", style: 'normal' as const },
+  toc: { family: "Calibri", size: 11, weight: "normal", style: 'normal' as const },
+  header: { family: "Calibri", size: 10, weight: "normal", style: 'normal' as const },
+  footer: { family: "Calibri", size: 10, weight: "normal", style: 'normal' as const }
 };
 
 export const DEFAULT_COLOR_PALETTE: ColorPalette = {
@@ -278,15 +278,15 @@ export const DEFAULT_MARGINS: Margins = {
 
 export const CV_TYPOGRAPHY: Typography = {
   ...DEFAULT_TYPOGRAPHY,
-  heading1: { family: "Calibri Light", size: 28, weight: "light" },
-  heading2: { family: "Calibri", size: 14, weight: "bold", color: "#1F4E79" },
-  body: { family: "Calibri", size: 10, weight: "normal" }
+  heading1: { family: "Calibri Light", size: 28, weight: "light", style: 'normal' as const },
+  heading2: { family: "Calibri", size: 14, weight: "bold", color: "#1F4E79", style: 'normal' as const },
+  body: { family: "Calibri", size: 10, weight: "normal", style: 'normal' as const }
 };
 
 export const LETTER_TYPOGRAPHY: Typography = {
   ...DEFAULT_TYPOGRAPHY,
-  heading1: { family: "Times New Roman", size: 14, weight: "bold" },
-  body: { family: "Times New Roman", size: 12, weight: "normal" }
+  heading1: { family: "Times New Roman", size: 14, weight: "bold", style: 'normal' as const },
+  body: { family: "Times New Roman", size: 12, weight: "normal", style: 'normal' as const }
 };
 
 export const DOCUMENT_TYPE_DEFAULTS: Record<DocumentType, {
@@ -347,7 +347,7 @@ export const DOCUMENT_TYPE_DEFAULTS: Record<DocumentType, {
   },
   ESSAY: {
     page_setup: { size: "A4", orientation: "portrait", columns: 1 },
-    typography: { ...DEFAULT_TYPOGRAPHY, body: { family: "Times New Roman", size: 12, weight: "normal" } },
+    typography: { ...DEFAULT_TYPOGRAPHY, body: { family: "Times New Roman", size: 12, weight: "normal", style: 'normal' as const } },
     color_palette: DEFAULT_COLOR_PALETTE,
     spacing: { ...DEFAULT_SPACING, lineHeight: 2.0 },
     sections: ["title_page", "introduction", "body", "conclusions", "bibliography"]

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as fsp from "fs/promises";
 import * as path from "path";
+// @ts-ignore - no type declarations for mime-types
 import * as mime from "mime-types";
 import { FileInfo, FileOperationResult, FileManagerStats } from "./types";
 import { SecurityGuard } from "./securityGuard";
@@ -46,7 +47,7 @@ export class FileManager {
   async read(filePath: string, encoding: BufferEncoding = "utf-8"): Promise<FileOperationResult> {
     const validation = this.validatePath(filePath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "read", path: filePath, error: validation.reason };
+      return { success: false, operation: "read", path: filePath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -62,9 +63,9 @@ export class FileManager {
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { success: false, operation: "read", path: filePath, error: "Archivo no encontrado" };
+        return { success: false, operation: "read", path: filePath, error: "Archivo no encontrado", message: "Archivo no encontrado" };
       }
-      return { success: false, operation: "read", path: filePath, error: String(error) };
+      return { success: false, operation: "read", path: filePath, error: String(error), message: String(error) };
     }
   }
 
@@ -76,12 +77,12 @@ export class FileManager {
     const { encoding = "utf-8", createDirs = true } = options;
     const validation = this.validatePath(filePath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "write", path: filePath, error: validation.reason };
+      return { success: false, operation: "write", path: filePath, error: validation.reason, message: validation.reason };
     }
 
     const contentSize = Buffer.byteLength(content, encoding);
     if (contentSize > this.maxFileSize) {
-      return { success: false, operation: "write", path: filePath, error: "Archivo excede el tamaño máximo" };
+      return { success: false, operation: "write", path: filePath, error: "Archivo excede el tamaño máximo", message: "Archivo excede el tamaño máximo" };
     }
 
     try {
@@ -99,14 +100,14 @@ export class FileManager {
         message: `Archivo escrito: ${contentSize} bytes`,
       };
     } catch (error) {
-      return { success: false, operation: "write", path: filePath, error: String(error) };
+      return { success: false, operation: "write", path: filePath, error: String(error), message: String(error) };
     }
   }
 
   async append(filePath: string, content: string, encoding: BufferEncoding = "utf-8"): Promise<FileOperationResult> {
     const validation = this.validatePath(filePath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "append", path: filePath, error: validation.reason };
+      return { success: false, operation: "append", path: filePath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -118,14 +119,14 @@ export class FileManager {
         message: `Contenido añadido: ${content.length} bytes`,
       };
     } catch (error) {
-      return { success: false, operation: "append", path: filePath, error: String(error) };
+      return { success: false, operation: "append", path: filePath, error: String(error), message: String(error) };
     }
   }
 
   async delete(filePath: string, recursive: boolean = false): Promise<FileOperationResult> {
     const validation = this.validatePath(filePath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "delete", path: filePath, error: validation.reason };
+      return { success: false, operation: "delete", path: filePath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -143,23 +144,23 @@ export class FileManager {
       return { success: true, operation: "delete", path: validation.resolvedPath, message: "Eliminado correctamente" };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { success: false, operation: "delete", path: filePath, error: "Archivo o directorio no existe" };
+        return { success: false, operation: "delete", path: filePath, error: "Archivo o directorio no existe", message: "Archivo o directorio no existe" };
       }
-      return { success: false, operation: "delete", path: filePath, error: String(error) };
+      return { success: false, operation: "delete", path: filePath, error: String(error), message: String(error) };
     }
   }
 
   async mkdir(dirPath: string, parents: boolean = true): Promise<FileOperationResult> {
     const validation = this.validatePath(dirPath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "mkdir", path: dirPath, error: validation.reason };
+      return { success: false, operation: "mkdir", path: dirPath, error: validation.reason, message: validation.reason };
     }
 
     try {
       await fsp.mkdir(validation.resolvedPath, { recursive: parents });
       return { success: true, operation: "mkdir", path: validation.resolvedPath, message: "Directorio creado" };
     } catch (error) {
-      return { success: false, operation: "mkdir", path: dirPath, error: String(error) };
+      return { success: false, operation: "mkdir", path: dirPath, error: String(error), message: String(error) };
     }
   }
 
@@ -170,7 +171,7 @@ export class FileManager {
   ): Promise<FileOperationResult> {
     const validation = this.validatePath(dirPath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "list_dir", path: dirPath, error: validation.reason };
+      return { success: false, operation: "list_dir", path: dirPath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -189,12 +190,13 @@ export class FileManager {
         operation: "list_dir",
         path: validation.resolvedPath,
         data: { items, count: items.length, pattern },
+        message: `Listado: ${items.length} elementos`,
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { success: false, operation: "list_dir", path: dirPath, error: "Directorio no existe" };
+        return { success: false, operation: "list_dir", path: dirPath, error: "Directorio no existe", message: "Directorio no existe" };
       }
-      return { success: false, operation: "list_dir", path: dirPath, error: String(error) };
+      return { success: false, operation: "list_dir", path: dirPath, error: String(error), message: String(error) };
     }
   }
 
@@ -249,6 +251,7 @@ export class FileManager {
         operation: "exists",
         path: validation.resolvedPath,
         data: { exists: true, isFile: stat.isFile(), isDir: stat.isDirectory() },
+        message: "Archivo existe",
       };
     } catch {
       return {
@@ -256,6 +259,7 @@ export class FileManager {
         operation: "exists",
         path: validation.resolvedPath,
         data: { exists: false, isFile: false, isDir: false },
+        message: "Archivo no existe",
       };
     }
   }
@@ -263,17 +267,17 @@ export class FileManager {
   async getInfo(filePath: string): Promise<FileOperationResult> {
     const validation = this.validatePath(filePath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "get_info", path: filePath, error: validation.reason };
+      return { success: false, operation: "get_info", path: filePath, error: validation.reason, message: validation.reason };
     }
 
     try {
       const info = await this.getFileInfo(validation.resolvedPath);
       if (!info) {
-        return { success: false, operation: "get_info", path: filePath, error: "Archivo no existe" };
+        return { success: false, operation: "get_info", path: filePath, error: "Archivo no existe", message: "Archivo no existe" };
       }
-      return { success: true, operation: "get_info", path: validation.resolvedPath, data: info };
+      return { success: true, operation: "get_info", path: validation.resolvedPath, data: info, message: "Información obtenida" };
     } catch (error) {
-      return { success: false, operation: "get_info", path: filePath, error: String(error) };
+      return { success: false, operation: "get_info", path: filePath, error: String(error), message: String(error) };
     }
   }
 
@@ -302,7 +306,7 @@ export class FileManager {
     const dstValidation = this.validatePath(dst);
 
     if (!srcValidation.isAllowed || !dstValidation.isAllowed) {
-      return { success: false, operation: "copy", path: src, error: "Ruta origen o destino no permitida" };
+      return { success: false, operation: "copy", path: src, error: "Ruta origen o destino no permitida", message: "Ruta origen o destino no permitida" };
     }
 
     try {
@@ -322,7 +326,7 @@ export class FileManager {
         message: `Copiado de ${src} a ${dst}`,
       };
     } catch (error) {
-      return { success: false, operation: "copy", path: src, error: String(error) };
+      return { success: false, operation: "copy", path: src, error: String(error), message: String(error) };
     }
   }
 
@@ -347,7 +351,7 @@ export class FileManager {
     const dstValidation = this.validatePath(dst);
 
     if (!srcValidation.isAllowed || !dstValidation.isAllowed) {
-      return { success: false, operation: "move", path: src, error: "Ruta origen o destino no permitida" };
+      return { success: false, operation: "move", path: src, error: "Ruta origen o destino no permitida", message: "Ruta origen o destino no permitida" };
     }
 
     try {
@@ -361,7 +365,7 @@ export class FileManager {
         message: `Movido de ${src} a ${dst}`,
       };
     } catch (error) {
-      return { success: false, operation: "move", path: src, error: String(error) };
+      return { success: false, operation: "move", path: src, error: String(error), message: String(error) };
     }
   }
 
@@ -371,9 +375,9 @@ export class FileManager {
 
     try {
       const data = JSON.parse(result.data as string) as T;
-      return { success: true, operation: "read_json", path: filePath, data };
+      return { success: true, operation: "read_json", path: filePath, data, message: "JSON leído correctamente" };
     } catch (error) {
-      return { success: false, operation: "read_json", path: filePath, error: `Error parsing JSON: ${error}` };
+      return { success: false, operation: "read_json", path: filePath, error: `Error parsing JSON: ${error}`, message: `Error parsing JSON: ${error}` };
     }
   }
 
@@ -382,7 +386,7 @@ export class FileManager {
       const content = JSON.stringify(data, null, indent);
       return await this.write(filePath, content);
     } catch (error) {
-      return { success: false, operation: "write_json", path: filePath, error: `Error serializando JSON: ${error}` };
+      return { success: false, operation: "write_json", path: filePath, error: `Error serializando JSON: ${error}`, message: `Error serializando JSON: ${error}` };
     }
   }
 
@@ -394,7 +398,7 @@ export class FileManager {
   ): Promise<FileOperationResult> {
     const validation = this.validatePath(dirPath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "search", path: dirPath, error: validation.reason };
+      return { success: false, operation: "search", path: dirPath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -428,16 +432,17 @@ export class FileManager {
         operation: "search",
         path: validation.resolvedPath,
         data: { results, count: results.length, pattern },
+        message: `Búsqueda completada: ${results.length} resultados`,
       };
     } catch (error) {
-      return { success: false, operation: "search", path: dirPath, error: String(error) };
+      return { success: false, operation: "search", path: dirPath, error: String(error), message: String(error) };
     }
   }
 
   async getDiskUsage(dirPath: string = "."): Promise<FileOperationResult> {
     const validation = this.validatePath(dirPath);
     if (!validation.isAllowed) {
-      return { success: false, operation: "get_disk_usage", path: dirPath, error: validation.reason };
+      return { success: false, operation: "get_disk_usage", path: dirPath, error: validation.reason, message: validation.reason };
     }
 
     try {
@@ -472,9 +477,10 @@ export class FileManager {
           fileCount,
           dirCount,
         },
+        message: `Uso de disco: ${this.humanSize(totalSize)}`,
       };
     } catch (error) {
-      return { success: false, operation: "get_disk_usage", path: dirPath, error: String(error) };
+      return { success: false, operation: "get_disk_usage", path: dirPath, error: String(error), message: String(error) };
     }
   }
 

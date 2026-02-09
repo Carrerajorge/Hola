@@ -22,7 +22,7 @@ export function VisualizationSurface({ config, className, onReady, onExport }: V
   const capabilities = useMemo(() => detectCapabilities(), []);
   
   const actualMode = useMemo(() => {
-    if (config.mode === 'auto') {
+    if ((config.mode as string) === 'auto') {
       return resolveRenderMode('auto', capabilities);
     }
     return resolveRenderMode(config.mode, capabilities);

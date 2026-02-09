@@ -821,7 +821,6 @@ export const PREDEFINED_RESPONSES: Record<string, string> = {
 };
 
 export {
-  DegradationManager,
   LEVEL_CONFIGS,
   LEVEL_PRIORITY,
   metricsRegistry as degradationMetricsRegistry,

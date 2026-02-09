@@ -252,13 +252,19 @@ function MonacoEditorInner({
 }
 
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+  const TypedEditorErrorBoundary = EditorErrorBoundary as React.ComponentType<{
+    children: React.ReactNode;
+    editorType: 'monaco' | 'codemirror' | 'ppt' | 'spreadsheet' | 'document';
+    fallbackContent?: string;
+  }>;
+
   return (
     <div className={cn("rounded-lg overflow-hidden border border-zinc-800", props.className)}>
-      <EditorErrorBoundary editorType="monaco" fallbackContent={props.code}>
+      <TypedEditorErrorBoundary editorType="monaco" fallbackContent={props.code}>
         <Suspense fallback={<EditorSkeleton height={props.height || "400px"} />}>
           <MonacoEditorInner {...props} />
         </Suspense>
-      </EditorErrorBoundary>
+      </TypedEditorErrorBoundary>
     </div>
   );
 }

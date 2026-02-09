@@ -73,7 +73,7 @@ const consumeLimiter = (limiter: RateLimiterRedis | RateLimiterMemory, req: Requ
             res.status(429).json({
                 status: "error",
                 message: "Too Many Requests",
-                retryAfter: Math.round(limiter.msBeforeNext / 1000) || 60
+                retryAfter: Math.round((limiter as any).msBeforeNext / 1000) || 60
             });
         });
 };

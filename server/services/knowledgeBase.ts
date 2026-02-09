@@ -235,7 +235,7 @@ class KnowledgeBaseService {
         }
     }
 
-    async createNode(userId: string, payload: InsertKnowledgeNode): Promise<KnowledgeNode> {
+    async createNode(userId: string, payload: Omit<InsertKnowledgeNode, 'userId'> & { userId?: string }): Promise<KnowledgeNode> {
         await this.initialize();
         const now = new Date();
         const normalizedSourceId = this.normalizeSourceId(payload.sourceId);

@@ -36,7 +36,7 @@ const MARKDOWN_PATTERNS = {
 };
 
 export function checkConsistency(response: string): QACheck {
-  const numbers = response.match(NUMBER_PATTERN) || [];
+  const numbers = response.match(NUMBER_PATTERN) || ([] as string[]);
   const dates = response.match(DATE_PATTERN) || [];
   const names = response.match(NAME_PATTERN) || [];
 

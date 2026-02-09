@@ -93,7 +93,7 @@ async function reconcileChat(chatId: string): Promise<ReconciliationResult> {
             const chatUpdateTime = new Date(chat.updatedAt || chat.createdAt).getTime();
 
             if (lastMsgTime > chatUpdateTime) {
-                await storage.updateChat(chatId, { updatedAt: new Date().toISOString() });
+                await storage.updateChat(chatId, { updatedAt: new Date() });
                 result.fixedCount++;
                 result.status = 'fixed';
             }

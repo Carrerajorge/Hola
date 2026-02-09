@@ -1332,7 +1332,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     });
 
     if (!gateResult.passed) {
-      this.emitThought(`Falló verificación de calidad. Motivo principal: ${gateResult.blockers[0]?.reason || "Requisitos no cumplidos"}.`);
+      this.emitThought(`Falló verificación de calidad. Motivo principal: ${(gateResult.blockers[0] as any)?.reason || "Requisitos no cumplidos"}.`);
 
       const retryDecision = shouldRetry(gateResult, this.state);
 

@@ -49,7 +49,7 @@ export interface GoogleUserInfo {
 }
 
 export function createOAuth2Client(redirectUri?: string): OAuth2Client {
-  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, redirectUri);
+  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, redirectUri) as any as OAuth2Client;
 }
 
 export function getRedirectUri(host: string): string {
@@ -101,7 +101,7 @@ export async function getUserInfo(accessToken: string): Promise<GoogleUserInfo> 
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({ access_token: accessToken });
   
-  const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+  const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client } as any);
   const { data } = await oauth2.userinfo.get();
   
   return {
@@ -289,7 +289,7 @@ export async function createGoogleForm(
   const oauth2Client = createOAuth2Client();
   oauth2Client.setCredentials({ access_token: accessToken });
   
-  const forms = google.forms({ version: "v1", auth: oauth2Client });
+  const forms = google.forms({ version: "v1", auth: oauth2Client } as any);
   
   const createResponse = await forms.forms.create({
     requestBody: {

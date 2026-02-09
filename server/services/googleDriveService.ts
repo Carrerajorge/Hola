@@ -102,9 +102,9 @@ export function isConnected(userId: number): boolean {
 /**
  * Get Drive client for user
  */
-function getDriveClient(userId: number): drive_v3.Drive {
+function getDriveClient(userId: number): any {
     const auth = getOAuth2Client(userId);
-    return google.drive({ version: 'v3', auth });
+    return google.drive({ version: 'v3', auth } as any);
 }
 
 /**
@@ -231,7 +231,7 @@ export async function listFiles(
     });
 
     return {
-        files: (response.data.files || []).map(file => ({
+        files: (response.data.files || []).map((file: any) => ({
             id: file.id || '',
             name: file.name || '',
             mimeType: file.mimeType || '',

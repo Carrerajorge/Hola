@@ -131,7 +131,7 @@ async function executeTask(task: ParserTask): Promise<ParserTaskResult> {
     const memoryUsedMB = getMemoryUsageMB() - initialMemory;
     const errorMessage = error instanceof Error ? error.message : String(error);
     
-    let errorCode = WorkerErrorCode.PARSE_ERROR;
+    let errorCode: WorkerErrorCode = WorkerErrorCode.PARSE_ERROR;
     if (errorMessage.includes('timeout')) {
       errorCode = WorkerErrorCode.TIMEOUT;
     } else if (errorMessage.includes('memory')) {

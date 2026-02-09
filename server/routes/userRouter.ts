@@ -122,7 +122,7 @@ export function createUserRouter() {
         const orgId = (dbUser as any)?.orgId || "default";
         const { setOrgNetworkAccessEnabled } = await import("../services/networkAccessPolicyService");
         const row = await setOrgNetworkAccessEnabled(orgId, req.body.enabled);
-        res.json({ success: true, orgId, ...row });
+        res.json({ success: true, ...row, orgId });
       } catch (error: any) {
         console.error("Error setting org network-access:", error);
         res.status(500).json({ error: "Failed to update org network-access" });
@@ -1259,7 +1259,7 @@ export function createUserRouter() {
       if (chatHistoryEnabled !== undefined) privacySettingsUpdates.chatHistoryEnabled = chatHistoryEnabled;
 
       const settings = await storage.upsertUserSettings(id, {
-        privacySettings: privacySettingsUpdates
+        privacySettings: privacySettingsUpdates as any
       });
 
       invalidateUserPrivacySettingsCache(id);
@@ -1556,10 +1556,9 @@ export function createUserRouter() {
 
       const knowledge = await storage.createCompanyKnowledge({
         userId: id,
-        title,
+        name: title,
         content,
-        category: category || "general",
-        isActive: "true"
+        source: category || "general",
       });
       res.json(knowledge);
     } catch (error: any) {

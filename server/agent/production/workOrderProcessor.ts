@@ -16,8 +16,14 @@ import {
     type Tone,
     type CitationStyle,
     type SourcePolicy,
-    type RouterResult
 } from './types';
+
+interface RouterResult {
+    intent: string;
+    confidence: number;
+    deliverables: Deliverable[];
+    constraints: Record<string, any>;
+}
 
 const xaiClient = new OpenAI({
     baseURL: 'https://api.x.ai/v1',
@@ -129,8 +135,8 @@ export interface CreateWorkOrderInput {
 export async function createWorkOrder(input: CreateWorkOrderInput): Promise<WorkOrder> {
     const { routerResult, message, userId, chatId, overrides } = input;
 
-    const intent = routerResult.intent || 'report';
-    const defaults = INTENT_DEFAULTS[intent];
+    const intent = (routerResult.intent || 'report') as keyof typeof INTENT_DEFAULTS;
+    const defaults = INTENT_DEFAULTS[intent] || INTENT_DEFAULTS['report'];
 
     // Merge router-detected deliverables with defaults
     const deliverables = routerResult.deliverables?.length
@@ -145,7 +151,7 @@ export async function createWorkOrder(input: CreateWorkOrderInput): Promise<Work
         chatId,
 
         intent,
-        topic: routerResult.topic || extractTopicFromMessage(message),
+        topic: (routerResult as any).topic || extractTopicFromMessage(message),
         description: message,
 
         audience: overrides?.audience || defaults.audience,

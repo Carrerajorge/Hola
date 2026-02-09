@@ -11,6 +11,7 @@ import { useChatFolders } from "@/hooks/use-chat-folders";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import type { AiState } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -302,8 +303,8 @@ function WorkspaceContent() {
               setMessages={setDisplayMessages}
               onSendMessage={handleSendMessage}
               chatId={activeChat?.id || pendingChatIdRef.current}
-              aiState={aiState}
-              setAiState={setAiState}
+              aiState={aiState as AiState}
+              setAiState={setAiState as React.Dispatch<React.SetStateAction<AiState>>}
               aiProcessSteps={aiProcessSteps}
               setAiProcessSteps={setAiProcessSteps}
             />
@@ -385,8 +386,8 @@ function WorkspaceContent() {
                   setMessages={setDisplayMessages}
                   onSendMessage={handleSendMessage}
                   chatId={activeChat?.id || pendingChatIdRef.current}
-                  aiState={aiState}
-                  setAiState={setAiState}
+                  aiState={aiState as AiState}
+                  setAiState={setAiState as React.Dispatch<React.SetStateAction<AiState>>}
                   aiProcessSteps={aiProcessSteps}
                   setAiProcessSteps={setAiProcessSteps}
                 />

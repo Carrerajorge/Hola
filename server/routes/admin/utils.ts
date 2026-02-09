@@ -16,8 +16,8 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         const session = req.session as any;
         
         // Get user info from multiple possible sources
-        const userEmail = userReq.user?.claims?.email || 
-                         userReq.user?.email ||
+        const userEmail = userReq.user?.claims?.email ||
+                         (userReq.user as any)?.email ||
                          session?.passport?.user?.claims?.email || 
                          session?.passport?.user?.email ||
                          (req as any).user?.profile?.emails?.[0]?.value;

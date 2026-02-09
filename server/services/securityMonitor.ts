@@ -135,7 +135,7 @@ class SecurityMonitor extends EventEmitter {
       AND created_at > NOW() - INTERVAL '15 minutes'
     `);
 
-    const count = parseInt(result.rows?.[0]?.count || "0");
+    const count = parseInt(String(result.rows?.[0]?.count ?? "0"));
     
     if (count >= 5) {
       await this.logEvent(

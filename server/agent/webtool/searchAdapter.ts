@@ -17,11 +17,11 @@ export class DuckDuckGoSearchAdapter implements ISearchAdapter {
   }
   
   async search(query: string, maxResults?: number): Promise<WebSearchResult[]> {
-    const request: WebSearchRequest = validateOrThrow(
+    const request = validateOrThrow(
       WebSearchRequestSchema,
       { query, maxResults: maxResults ?? this.defaultMaxResults },
       "SearchAdapter.search"
-    );
+    ) as WebSearchRequest;
     
     try {
       const response = await searchWeb(request.query, request.maxResults);
@@ -61,18 +61,18 @@ export class DuckDuckGoSearchAdapter implements ISearchAdapter {
   }
   
   async searchScholar(query: string, maxResults?: number): Promise<WebSearchResult[]> {
-    const request: WebSearchRequest = validateOrThrow(
+    const request = validateOrThrow(
       WebSearchRequestSchema,
       { query, maxResults: maxResults ?? this.defaultMaxResults, includeScholar: true },
       "SearchAdapter.searchScholar"
-    );
+    ) as WebSearchRequest;
     
     try {
       const response = await searchScholar(request.query, request.maxResults);
-      
+
       const results: WebSearchResult[] = [];
-      
-      for (const result of response.results) {
+      const responseItems = Array.isArray(response) ? response : (response as any).results || [];
+      for (const result of responseItems) {
         try {
           const canonicalUrl = canonicalizeUrl(result.url);
           

@@ -400,7 +400,7 @@ conversationsRouter.delete("/:id", async (req, res) => {
             .returning();
 
         await auditLog(req, {
-            action: AuditActions.CONVERSATION_DELETED,
+            action: AuditActions.CHAT_DELETED,
             resource: "chats",
             resourceId: req.params.id,
             details: {

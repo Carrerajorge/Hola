@@ -14,10 +14,10 @@ import {
 } from "@shared/richTextTypes";
 import {
   defaultFontRegistry,
-  FontRegistry,
   getDocxFontOptions,
   getCssFontStyle,
 } from "./fontRegistry";
+import type { FontRegistry } from "@shared/richTextTypes";
 import {
   Document,
   Packer,
@@ -106,8 +106,8 @@ export function renderRunToDocx(
   };
 
   if (style.code) {
-    textRunOptions.font = opts.fontRegistry?.monoFamily || "Courier New";
-    textRunOptions.shading = { fill: "F0F0F0", type: ShadingType.CLEAR, color: "auto" };
+    (textRunOptions as any).font = opts.fontRegistry?.monoFamily || "Courier New";
+    (textRunOptions as any).shading = { fill: "F0F0F0", type: ShadingType.CLEAR, color: "auto" };
   }
 
   if (style.link) {
@@ -346,11 +346,13 @@ function renderTableToDocx(
   });
 }
 
+type AlignmentTypeValue = (typeof AlignmentType)[keyof typeof AlignmentType];
+
 function getDocxAlignment(
   alignment?: "left" | "center" | "right" | "justify"
-): AlignmentType | undefined {
+): AlignmentTypeValue | undefined {
   if (!alignment) return undefined;
-  const map: Record<string, AlignmentType> = {
+  const map: Record<string, AlignmentTypeValue> = {
     left: AlignmentType.LEFT,
     center: AlignmentType.CENTER,
     right: AlignmentType.RIGHT,

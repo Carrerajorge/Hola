@@ -1371,8 +1371,8 @@ export function scopusArticlesToSourceSignals(articles: ScopusArticle[]): Source
     score: Math.min(1, article.relevanceScore ?? (0.5 + (article.citationCount / 100))),
     fetched: true,
     content: article.abstract,
-    claims: [],
-    scopusData: article,
+    claims: [] as string[],
+    scopusData: article as unknown as Record<string, any>,
   }));
 }
 

@@ -9,7 +9,7 @@ import { consistencyCriticStage } from "./stages/consistencyCritic";
 import { wordAssemblerStage } from "./stages/wordAssembler";
 import { PipelineEvent, PipelineState, PIPELINE_VERSION, SupportedLocale } from "./contracts";
 
-export function createWordPipeline(config?: Parameters<typeof WordAgentOrchestrator.prototype.constructor>[0]): WordAgentOrchestrator {
+export function createWordPipeline(config?: Partial<Record<string, any>>): WordAgentOrchestrator {
   const orchestrator = new WordAgentOrchestrator(config);
   
   orchestrator.registerStage("planner", documentPlannerStage);

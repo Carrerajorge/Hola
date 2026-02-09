@@ -368,7 +368,7 @@ function getRelevantNotes(evidence: EvidencePack, section: OutlineSection): Evid
 
     return evidence.notes.filter(note => {
         const noteTopic = note.topic.toLowerCase();
-        return sectionKeywords.some(kw => kw.length > 3 && noteTopic.includes(kw));
+        return sectionKeywords.some((kw: string) => kw.length > 3 && noteTopic.includes(kw));
     });
 }
 

@@ -271,7 +271,7 @@ export class ActivityStreamPublisher extends EventEmitter {
           passed: false,
           checkName: e.metadata?.checkName || "QA Check",
           message: e.error?.message || "Verification failed",
-          details: e.error?.details,
+          details: (e.error as any)?.details,
         }),
       },
       {

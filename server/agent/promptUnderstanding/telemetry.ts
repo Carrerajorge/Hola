@@ -163,7 +163,7 @@ class TelemetryCollector {
             results = results.filter(e => e.type === filter.type);
         }
         if (filter?.since) {
-            results = results.filter(e => e.timestamp >= filter.since);
+            results = results.filter(e => e.timestamp >= filter.since!);
         }
         if (filter?.limit) {
             results = results.slice(-filter.limit);

@@ -116,7 +116,7 @@ export async function sendMessageWithFallback(
 
   return executeWithFallback(
     async (currentModel) => {
-      const response = await llmGateway.sendMessage({
+      const response = await (llmGateway as any).sendMessage({
         messages,
         model: currentModel,
         ...restOptions,

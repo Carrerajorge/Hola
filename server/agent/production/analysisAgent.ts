@@ -302,7 +302,7 @@ function identifyGaps(evidence: EvidencePack, outline: OutlineSpec): Gap[] {
 
     for (const section of sectionsNeedingResearch) {
         const sectionKeywords = section.title.toLowerCase().split(' ');
-        const hasCoverage = sectionKeywords.some(kw =>
+        const hasCoverage = sectionKeywords.some((kw: string) =>
             Array.from(coveredTopics).some(topic => topic.includes(kw))
         );
 

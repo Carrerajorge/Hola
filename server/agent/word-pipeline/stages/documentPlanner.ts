@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   Stage, StageContext, QualityGateResult, DocumentPlan, DocumentPlanSchema,
-  SectionSpec, SectionSpecSchema, SectionTypeSchema, AudienceType, DocumentGoal,
+  SectionSpec, SectionSpecSchema, SectionTypeSchema, SectionType, AudienceType, DocumentGoal,
   SupportedLocale
 } from "../contracts";
 import { openai } from "../../../lib/openai";
@@ -15,7 +15,7 @@ interface PlannerOutput {
   plan: DocumentPlan;
 }
 
-const SECTION_TEMPLATES: Record<DocumentGoal, SectionTypeSchema["_type"][]> = {
+const SECTION_TEMPLATES: Record<DocumentGoal, SectionType[]> = {
   analyze: ["executive_summary", "introduction", "methodology", "analysis", "results", "conclusions", "recommendations"],
   report: ["executive_summary", "introduction", "analysis", "results", "conclusions"],
   recommend: ["executive_summary", "introduction", "analysis", "recommendations", "conclusions"],
@@ -155,10 +155,10 @@ export class DocumentPlannerStage implements Stage<PlannerInput, PlannerOutput> 
 
   async fallback(input: PlannerInput, _context: StageContext): Promise<PlannerOutput> {
     const sections: SectionSpec[] = [
-      { id: uuidv4(), title: "Resumen Ejecutivo", type: "executive_summary", level: 1, goals: ["Summarize key points"], audience: "general", style: { tone: "formal", detailLevel: "brief", includeCitations: false }, order: 0 },
-      { id: uuidv4(), title: "Introducción", type: "introduction", level: 1, goals: ["Introduce topic"], audience: "general", style: { tone: "formal", detailLevel: "standard", includeCitations: true }, order: 1 },
-      { id: uuidv4(), title: "Análisis", type: "analysis", level: 1, goals: ["Analyze main points"], audience: "general", style: { tone: "formal", detailLevel: "detailed", includeCitations: true }, order: 2 },
-      { id: uuidv4(), title: "Conclusiones", type: "conclusions", level: 1, goals: ["Summarize findings"], audience: "general", style: { tone: "formal", detailLevel: "standard", includeCitations: true }, order: 3 },
+      { id: uuidv4(), title: "Resumen Ejecutivo", type: "executive_summary", level: 1, goals: ["Summarize key points"], audience: "general", style: { tone: "formal", detailLevel: "brief", includeCitations: false, useFirstPerson: false }, order: 0 },
+      { id: uuidv4(), title: "Introducción", type: "introduction", level: 1, goals: ["Introduce topic"], audience: "general", style: { tone: "formal", detailLevel: "standard", includeCitations: true, useFirstPerson: false }, order: 1 },
+      { id: uuidv4(), title: "Análisis", type: "analysis", level: 1, goals: ["Analyze main points"], audience: "general", style: { tone: "formal", detailLevel: "detailed", includeCitations: true, useFirstPerson: false }, order: 2 },
+      { id: uuidv4(), title: "Conclusiones", type: "conclusions", level: 1, goals: ["Summarize findings"], audience: "general", style: { tone: "formal", detailLevel: "standard", includeCitations: true, useFirstPerson: false }, order: 3 },
     ];
 
     return {

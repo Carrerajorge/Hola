@@ -192,7 +192,7 @@ self.addEventListener("push", (event) => {
 
     const data = event.data.json();
 
-    const options: NotificationOptions = {
+    const options = {
         body: data.body || "New notification",
         icon: "/icons/icon-192x192.png",
         badge: "/icons/badge-72x72.png",
@@ -210,7 +210,7 @@ self.addEventListener("push", (event) => {
                 title: "Dismiss",
             },
         ],
-    };
+    } as NotificationOptions;
 
     event.waitUntil(
         self.registration.showNotification(data.title || "ILIAGPT", options)
@@ -242,9 +242,10 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 // Background sync for failed requests
-self.addEventListener("sync", (event) => {
-    if (event.tag === "sync-messages") {
-        event.waitUntil(syncPendingMessages());
+self.addEventListener("sync", (event: Event) => {
+    const syncEvent = event as Event & { tag: string; waitUntil: (promise: Promise<any>) => void };
+    if (syncEvent.tag === "sync-messages") {
+        syncEvent.waitUntil(syncPendingMessages());
     }
 });
 

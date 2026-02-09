@@ -3,7 +3,7 @@
  * Tasks 511-520: Distributed storage where every shard contains imperfect info of whole
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import * as crypto from 'crypto';
 
 // ============================================================================

@@ -129,6 +129,8 @@ export const AuditActions = {
   USER_ROLE_CHANGED: "user.role_changed",
   USER_PLAN_CHANGED: "user.plan_changed",
   USER_STATUS_CHANGED: "user.status_changed",
+  USER_BLOCKED: "user.blocked",
+  USER_UNBLOCKED: "user.unblocked",
   
   // Admin Actions
   ADMIN_ACCESS: "admin.access",
@@ -138,9 +140,15 @@ export const AuditActions = {
   ADMIN_IMPORT_DATA: "admin.import_data",
   
   // AI Models
+  MODEL_CREATED: "model.created",
+  MODEL_UPDATED: "model.updated",
+  MODEL_DELETED: "model.deleted",
   MODEL_ENABLED: "model.enabled",
   MODEL_DISABLED: "model.disabled",
   MODEL_CONFIG_CHANGED: "model.config_changed",
+  MODEL_TESTED: "model.tested",
+  MODELS_SYNC: "models.sync",
+  MODELS_SYNC_ALL: "models.sync_all",
   
   // Conversations
   CHAT_CREATED: "chat.created",

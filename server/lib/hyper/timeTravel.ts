@@ -4,7 +4,7 @@
  */
 
 import { Logger } from '../logger';
-import { snapshotStore } from '../eventSourcingCQRS'; // Re-use ES snapshots
+import { createSnapshotStore as snapshotStore } from '../eventSourcingCQRS'; // Re-use ES snapshots
 
 // ============================================================================
 // Task 481: Universal State Recorder

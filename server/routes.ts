@@ -1352,7 +1352,7 @@ export async function registerRoutes(
       const user = (req as AuthenticatedRequest).user;
 
       // Check admin role
-      if (!user?.roles?.includes("admin")) {
+      if (!(user as any)?.roles?.includes("admin")) {
         return res.status(403).json({
           success: false,
           error: "Admin access required",

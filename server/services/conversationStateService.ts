@@ -336,8 +336,8 @@ class ConversationStateService {
   async analyzeIntent(chatId: string, message: string): Promise<DetectedIntent> {
     const state = await this.hydrateState(chatId);
     const intentState: IntentState = {
-      artifacts: state?.artifacts || [],
-      images: state?.images || []
+      artifacts: (state?.artifacts || []).map((a: any) => ({ artifactId: a.id || a.artifactId, ...a })),
+      images: (state?.images || []).map((i: any) => ({ imageId: i.id || i.imageId, ...i }))
     };
     return IntentRouter.detectIntent(message, intentState);
   }

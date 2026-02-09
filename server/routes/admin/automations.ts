@@ -114,7 +114,7 @@ automationsRouter.post("/", async (req, res) => {
     await auditLog(req, {
       action: "automation.created",
       resource: "automation_rules",
-      resourceId: result.rows?.[0]?.id,
+      resourceId: result.rows?.[0]?.id as string | undefined,
       details: { name, triggerType, actionType },
       category: "admin",
       severity: "info"
@@ -191,7 +191,7 @@ automationsRouter.post("/:id/test", async (req, res) => {
       return res.status(404).json({ error: "Rule not found" });
     }
     
-    const rule = ruleResult.rows[0];
+    const rule = ruleResult.rows[0] as unknown as AutomationRule;
     const result = await executeAction(rule, testData || {}, true);
     
     res.json({ 
@@ -316,7 +316,7 @@ class AutomationEngine extends EventEmitter {
         }
 
         if (shouldExecute) {
-          executeAction(rule as AutomationRule, data).catch(console.error);
+          executeAction(rule as unknown as AutomationRule, data).catch(console.error);
         }
       }
     } catch (error) {

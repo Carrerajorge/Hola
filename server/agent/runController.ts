@@ -948,7 +948,7 @@ export class RunController extends EventEmitter {
         userId: dbRun.userId || "",
         status: this.mapDbStatus(dbRun.status),
         plan: plan || undefined,
-        steps,
+        steps: steps as any,
         artifacts,
         correlationId: randomUUID(),
         currentStepIndex: dbRun.currentStepIndex || 0,

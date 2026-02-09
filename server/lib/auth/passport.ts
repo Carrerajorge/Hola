@@ -53,8 +53,8 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                 accessType: "offline",
                 prompt: "consent",
                 passReqToCallback: true,
-            },
-            async (req, accessToken, refreshToken, profile, done) => {
+            } as any,
+            async (req: any, accessToken: any, refreshToken: any, profile: any, done: any) => {
                 try {
                     const email = profile.emails?.[0]?.value;
                     if (!email) {

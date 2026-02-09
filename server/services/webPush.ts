@@ -38,9 +38,9 @@ function getVapidKeys(): { keys: VapidKeys; isEphemeral: boolean } | null {
   if (!webPush) return null;
 
   if (!runtimeKeys) {
-    runtimeKeys = webPush.generateVAPIDKeys();
+    runtimeKeys = webPush.generateVAPIDKeys() as VapidKeys;
   }
-  return { keys: runtimeKeys, isEphemeral: true };
+  return { keys: runtimeKeys!, isEphemeral: true };
 }
 
 function ensureWebPushConfigured(): { publicKey: string; isEphemeral: boolean } | null {

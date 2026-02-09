@@ -16,6 +16,9 @@ export * from './cognitive';
 export * from './metaAgent';
 export * from './learning';
 
+// Resolve ambiguous TaskStatus export (exists in both cognitive/PlanningEngine and metaAgent/TaskOrchestrator)
+export { type TaskStatus } from './cognitive';
+
 // Import initialization functions
 import { initializeAuditSystem } from './audit';
 import { initializeUnderstandingSystem } from './understanding';
@@ -298,12 +301,12 @@ export async function processWithIntelligence(
 
   // Detect intent
   if (options.detectIntent !== false) {
-    result.intent = await intentDetector.detectIntent(query, { userId });
+    result.intent = await intentDetector.analyze(query, userId);
   }
 
   // Detect emotion
   if (options.detectEmotion !== false) {
-    result.emotion = await emotionDetector.analyzeEmotion(query);
+    result.emotion = emotionDetector.analyze(query);
   }
 
   // Process through cognitive system

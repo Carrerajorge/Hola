@@ -152,7 +152,7 @@ export async function renderPresentation(
     // Set presentation metadata
     pptx.title = spec.title;
     if (spec.author) pptx.author = spec.author;
-    if (spec.metadata?.language) pptx.lang = spec.metadata.language;
+    if (spec.metadata?.language) (pptx as any).lang = spec.metadata.language;
 
     // Process each slide
     for (const slideSpec of spec.slides) {
@@ -224,7 +224,7 @@ export async function renderPresentation(
           cover: "cover",
           uncover: "cover",
         };
-        slide.transition = {
+        (slide as any).transition = {
           type: transitionMap[slideSpec.transition.type] || "fade",
           speed: slideSpec.transition.duration < 500 ? "fast" : slideSpec.transition.duration > 1000 ? "slow" : "med",
         };
@@ -590,7 +590,7 @@ function createDocxTable(table: DocTable): Table {
       children: table.headers.map(
         (header, idx) =>
           new TableCell({
-            children: [new DocxParagraph({ text: header, bold: true })],
+            children: [new DocxParagraph({ text: header, style: "Strong" })],
             width: table.columnWidths?.[idx]
               ? { size: table.columnWidths[idx] * 100, type: WidthType.DXA }
               : { size: 100 / table.headers.length, type: WidthType.PERCENTAGE },
@@ -904,17 +904,17 @@ function applyCellSpec(cell: ExcelJS.Cell, spec: CellSpec): void {
 }
 
 function convertBorderStyle(border: { width?: number; color?: string; style?: string }): ExcelJS.Border {
-  const styleMap: Record<string, ExcelJS.BorderStyle> = {
+  const styleMap: Record<string, string> = {
     solid: "thin",
     dashed: "dashed",
     dotted: "dotted",
     double: "double",
-    none: "none",
+    none: "thin",
   };
 
   return {
-    style: styleMap[border.style || "solid"] || "thin",
-    color: border.color ? { argb: "FF" + border.color.replace("#", "") } : undefined,
+    style: (styleMap[border.style || "solid"] || "thin") as ExcelJS.BorderStyle,
+    color: border.color ? { argb: "FF" + border.color.replace("#", "") } as Partial<ExcelJS.Color> : undefined as any,
   };
 }
 
@@ -960,10 +960,9 @@ export async function renderArtifact(
   const validation = validateForRendering(artifact);
   
   if (!validation.valid) {
-    await agentEventBus.emit(effectiveRunId, "artifact_validation_failed", {
-      errors: validation.errors,
-      warnings: validation.warnings,
-      metadata: { artifactType: artifact.type },
+    await agentEventBus.emit(effectiveRunId, "error", {
+      error: { message: `Artifact validation failed: ${validation.errors.join("; ")}` },
+      metadata: { artifactType: artifact.type, errors: validation.errors, warnings: validation.warnings },
     });
     throw new ArtifactValidationError(
       `Artifact validation failed: ${validation.errors.join("; ")}`,
@@ -973,7 +972,7 @@ export async function renderArtifact(
   }
 
   try {
-    await agentEventBus.emit(effectiveRunId, "tool_start", {
+    await agentEventBus.emit(effectiveRunId, "tool_call_started", {
       tool_name: "artifact_renderer",
       command: `Rendering ${artifact.type} artifact`,
       metadata: { artifactType: artifact.type },
@@ -1017,7 +1016,7 @@ export async function renderArtifact(
     await agentEventBus.emit(effectiveRunId, "artifact_ready", {
       artifact: {
         type: artifact.type,
-        path: result.filename,
+        name: result.filename,
         data: result.filename,
       },
       metadata: {
@@ -1028,7 +1027,7 @@ export async function renderArtifact(
     });
 
     // Emit completion event
-    await agentEventBus.emit(effectiveRunId, "tool_end", {
+    await agentEventBus.emit(effectiveRunId, "tool_call_succeeded", {
       tool_name: "artifact_renderer",
       output_snippet: `Successfully rendered ${artifact.type}: ${result.filename} (${formatBytes(result.buffer.length)})`,
       metadata: {
@@ -1047,7 +1046,7 @@ export async function renderArtifact(
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     await agentEventBus.emit(effectiveRunId, "error", {
-      error: errorMessage,
+      error: { message: errorMessage },
       metadata: { artifactType: artifact.type },
     });
 

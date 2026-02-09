@@ -59,11 +59,11 @@ export class HttpFetchAdapter implements IFetchAdapter {
   ): Promise<FetchResult> {
     const validatedUrl = validateOrThrow(UrlInputSchema, url, "FetchAdapter.fetch.url");
     
-    const request: FetchRequest = validateOrThrow(
+    const request = validateOrThrow(
       FetchRequestSchema,
       { url: validatedUrl, options },
       "FetchAdapter.fetch"
-    );
+    ) as FetchRequest;
     
     const mergedOptions: FetchOptions = {
       ...DEFAULT_FETCH_OPTIONS,

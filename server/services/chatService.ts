@@ -393,6 +393,8 @@ interface ChatResponse {
     totalTokens: number;
   };
   retrievalSteps?: { id: string; label: string; status: "pending" | "active" | "complete" | "error"; detail?: string }[];
+  cached?: boolean;
+  [key: string]: any;
 }
 
 function broadcastAgentUpdate(runId: string, update: any) {
@@ -451,7 +453,11 @@ export async function handleChatRequest(
         content: cachedResponse.content,
         role: "assistant",
         sources: [],
-        usage: cachedResponse.usage,
+        usage: {
+          promptTokens: cachedResponse.usage.promptTokens,
+          completionTokens: cachedResponse.usage.completionTokens,
+          totalTokens: cachedResponse.usage.promptTokens + cachedResponse.usage.completionTokens,
+        },
         cached: true
       };
     }
@@ -874,7 +880,7 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
                 sizeBytes: result.artifact.sizeBytes,
               },
               pipelineTraceability: {
-                stages: stagesSummary,
+                stages: result.traceability.stages as any[],
                 reproducible: result.traceability.reproducible,
                 totalDurationMs: result.traceability.totalDurationMs,
               }
@@ -1218,7 +1224,7 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
 
       try {
         // Check cache first for ultra-fast response
-        const cached = getCachedSearch(lastUserMessage.content);
+        const cached = await getCachedSearch(lastUserMessage.content);
         let webSources: WebSource[] = [];
 
         if (cached) {
@@ -1949,7 +1955,7 @@ Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO com
 
   // Build company knowledge context if available
   const companyKnowledgeSection = companyKnowledge && companyKnowledge.length > 0
-    ? `\n\n**CONOCIMIENTOS DE LA EMPRESA (usa esta información para responder):**\n${companyKnowledge.map(k => `### ${k.title} [${k.category}]\n${k.content}`).join('\n\n')
+    ? `\n\n**CONOCIMIENTOS DE LA EMPRESA (usa esta información para responder):**\n${companyKnowledge.map((k: any) => `### ${k.title || k.name} [${k.category || 'general'}]\n${k.content}`).join('\n\n')
     }`
     : '';
 

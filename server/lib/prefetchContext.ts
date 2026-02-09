@@ -73,11 +73,11 @@ async function fetchChatHistory(
       .where(eq(chats.id, chatId))
       .limit(1);
 
-    if (!chat || !chat.messages) {
+    if (!chat || !(chat as any).messages) {
       return [];
     }
 
-    const messages = chat.messages as Array<{ role: string; content: string }>;
+    const messages = (chat as any).messages as Array<{ role: string; content: string }>;
     return messages.slice(-limit);
   } catch (error) {
     console.error("[PrefetchContext] Error fetching chat history:", error);

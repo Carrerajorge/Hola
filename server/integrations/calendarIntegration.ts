@@ -115,7 +115,7 @@ export class CalendarIntegration {
         });
 
         const events = (response.items || []).map(this.mapEvent);
-        events.forEach(e => this.events.set(e.id, e));
+        events.forEach((e: any) => this.events.set(e.id, e));
         return events;
     }
 

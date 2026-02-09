@@ -133,7 +133,8 @@ export class ClarificationPolicy {
       clarification: {
         type: "context_unclear",
         question: "No entend\u00ed tu mensaje. \u00bfPuedes reformularlo de otra manera?",
-        priority: "high"
+        priority: "high",
+        maxAttempts: 3
       },
       fallbackMessage: "Lo siento, no pude entender tu solicitud. Por favor, intenta expresarla de forma diferente.",
       confidence: topIntent.confidence
@@ -161,7 +162,8 @@ export class ClarificationPolicy {
         type: "intent_ambiguous",
         question,
         options: [optionA, optionB],
-        priority: "medium"
+        priority: "medium",
+        maxAttempts: 3
       },
       confidence: context.detectedIntents[0]?.confidence || 0
     };
@@ -183,7 +185,8 @@ export class ClarificationPolicy {
         type: "entity_missing",
         question,
         context: `Necesito: ${entityType}`,
-        priority: "medium"
+        priority: "medium",
+        maxAttempts: 3
       },
       confidence: context.detectedIntents[0]?.confidence || 0
     };
@@ -207,7 +210,8 @@ export class ClarificationPolicy {
         type: "entity_ambiguous",
         question,
         options: ambiguousTerms.slice(0, 4),
-        priority: "medium"
+        priority: "medium",
+        maxAttempts: 3
       },
       confidence: context.detectedIntents[0]?.confidence || 0
     };
@@ -222,7 +226,8 @@ export class ClarificationPolicy {
       clarification: {
         type: "context_unclear",
         question,
-        priority: "high"
+        priority: "high",
+        maxAttempts: 3
       },
       fallbackMessage: "Podr\u00edas intentar ser m\u00e1s espec\u00edfico sobre lo que necesitas.",
       confidence: context.detectedIntents[0]?.confidence || 0
@@ -286,7 +291,8 @@ export class ClarificationPolicy {
           clarification: {
             type: "context_unclear",
             question,
-            priority: "medium"
+            priority: "medium",
+            maxAttempts: 3
           },
           confidence: context.detectedIntents[0]?.confidence || 0
         };

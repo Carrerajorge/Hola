@@ -348,4 +348,4 @@ export function validateMultiIntentPlan(
 }
 
 export { getStepDependencies, createExecutionPlan, validatePlanConstraints };
-export type { ExecutionPlan, IntentInput, EnhancedMultiIntentPlan };
+export type { ExecutionPlan, IntentInput };

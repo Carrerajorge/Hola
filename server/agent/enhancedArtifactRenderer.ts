@@ -12,11 +12,11 @@ import PptxGenJS from "pptxgenjs";
 import {
     PROFESSIONAL_THEMES,
     SMART_LAYOUTS,
-    getTheme,
     applyThemeToSlide,
     generateImagePrompt,
-    formatBulletsWithIcons,
-    type ProfessionalTheme
+    formatBulletPoints,
+    type ProfessionalTheme,
+    type SlideLayoutConfig
 } from "../services/pptTemplateEngine";
 import {
     formatAPA7Reference,
@@ -26,6 +26,18 @@ import {
     type APACitation
 } from "../services/apaCitationFormatter";
 import type { PresentationSpec, SlideSpec, DocSpec, SheetSpec } from "./builderSpec";
+
+// Helper to get a theme by name (not exported from pptTemplateEngine individually)
+function getTheme(name: string): ProfessionalTheme {
+    return PROFESSIONAL_THEMES[name] || PROFESSIONAL_THEMES["corporate"] || Object.values(PROFESSIONAL_THEMES)[0];
+}
+
+// Helper to get layout area position by name
+function getLayoutArea(layout: SlideLayoutConfig | undefined, areaName: string): { x: number; y: number; w: number; h: number } | undefined {
+    if (!layout) return undefined;
+    const area = layout.contentAreas.find(a => a.name === areaName);
+    return area?.position;
+}
 
 // ============================================
 // Enhanced PPT Renderer
@@ -52,7 +64,7 @@ export async function renderEnhancedPresentation(
     // Set presentation metadata
     pptx.title = spec.title;
     if (spec.author) pptx.author = spec.author;
-    if (spec.metadata?.language) pptx.lang = spec.metadata.language;
+    if (spec.metadata?.language) (pptx as any).lang = spec.metadata.language;
 
     // Set aspect ratio
     if (options.aspectRatio === "4:3") {
@@ -77,7 +89,7 @@ export async function renderEnhancedPresentation(
 
         // Add title with theme styling
         if (slideSpec.title) {
-            const titleStyle = layout?.title || { x: 0.5, y: 0.3, w: 9, h: 1 };
+            const titleStyle = getLayoutArea(layout, "title") || { x: 0.5, y: 0.3, w: 9, h: 1 };
             slide.addText(slideSpec.title, {
                 x: titleStyle.x,
                 y: titleStyle.y,
@@ -86,7 +98,7 @@ export async function renderEnhancedPresentation(
                 fontSize: layoutType === "title" ? 44 : 32,
                 fontFace: theme.fonts.title,
                 bold: true,
-                color: theme.colors.title.replace("#", ""),
+                color: (theme.colors as any).title?.replace("#", "") || "000000",
                 align: layoutType === "title" ? "center" : "left"
             });
         }
@@ -100,7 +112,7 @@ export async function renderEnhancedPresentation(
                 h: 0.75,
                 fontSize: 20,
                 fontFace: theme.fonts.body,
-                color: theme.colors.subtitle.replace("#", ""),
+                color: (theme.colors as any).subtitle?.replace("#", "") || "666666",
                 align: "center"
             });
         }
@@ -116,9 +128,9 @@ export async function renderEnhancedPresentation(
 
                 if (isBulletList) {
                     // Format bullets with icons
-                    const bullets = formatBulletsWithIcons(
-                        textContent.split("\n").filter(l => l.trim()),
-                        slideSpec.title || "General"
+                    const bullets = formatBulletPoints(
+                        textContent.split("\n").filter((l: string) => l.trim()),
+                        theme
                     );
 
                     for (const bullet of bullets) {
@@ -126,9 +138,9 @@ export async function renderEnhancedPresentation(
                             { text: bullet.icon + " ", options: { fontSize: 16 } },
                             { text: bullet.text, options: { fontSize: 16, fontFace: theme.fonts.body } }
                         ], {
-                            x: layout?.content?.x || 0.5,
+                            x: getLayoutArea(layout, "body")?.x || 0.5,
                             y: currentY,
-                            w: layout?.content?.w || 9,
+                            w: getLayoutArea(layout, "body")?.w || 9,
                             h: 0.4,
                             color: theme.colors.text.replace("#", "")
                         });
@@ -136,9 +148,9 @@ export async function renderEnhancedPresentation(
                     }
                 } else {
                     slide.addText(textContent, {
-                        x: layout?.content?.x || 0.5,
+                        x: getLayoutArea(layout, "body")?.x || 0.5,
                         y: currentY,
-                        w: layout?.content?.w || 9,
+                        w: getLayoutArea(layout, "body")?.w || 9,
                         h: 1,
                         fontSize: 18,
                         fontFace: theme.fonts.body,
@@ -173,7 +185,7 @@ export async function renderEnhancedPresentation(
                 const chartData = element.content as any;
                 try {
                     slide.addChart(chartData.type || "bar", chartData.data, {
-                        x: layout?.content?.x || 1,
+                        x: getLayoutArea(layout, "body")?.x || 1,
                         y: currentY,
                         w: 8,
                         h: 3,
@@ -190,7 +202,7 @@ export async function renderEnhancedPresentation(
 
             if (element.type === "table" && element.content) {
                 const tableData = element.content as string[][];
-                const tableRows: PptxGenJS.TableRow[] = tableData.map((row, rowIdx) =>
+                const tableRows = tableData.map((row, rowIdx) =>
                     row.map(cell => ({
                         text: cell,
                         options: {
@@ -200,12 +212,12 @@ export async function renderEnhancedPresentation(
                             fontSize: 12
                         }
                     }))
-                );
+                ) as any;
 
                 slide.addTable(tableRows, {
-                    x: layout?.content?.x || 0.5,
+                    x: getLayoutArea(layout, "body")?.x || 0.5,
                     y: currentY,
-                    w: layout?.content?.w || 9,
+                    w: getLayoutArea(layout, "body")?.w || 9,
                     border: { pt: 0.5, color: "CCCCCC" }
                 });
                 currentY += tableData.length * 0.4 + 0.5;
@@ -216,7 +228,7 @@ export async function renderEnhancedPresentation(
         if (options.generateImages && options.imageGenerator) {
             const hasImage = slideSpec.elements?.some(e => e.type === "image");
             if (!hasImage && layoutType !== "title" && i > 0) {
-                const prompt = generateImagePrompt(slideSpec.title || "slide", "illustration");
+                const prompt = generateImagePrompt(slideSpec.title || "slide", ["illustration"]);
                 try {
                     const imageUrl = await options.imageGenerator(prompt);
                     if (imageUrl) {
@@ -247,13 +259,13 @@ export async function renderEnhancedPresentation(
                 w: 0.5,
                 h: 0.3,
                 fontSize: 10,
-                color: theme.colors.subtitle.replace("#", ""),
+                color: (theme.colors as any).subtitle?.replace("#", "") || "666666",
                 align: "right"
             });
         }
 
         // Add footer line
-        if (i > 0 && theme.slideStyles.footer) {
+        if (i > 0 && (theme.slideStyles as any).footer) {
             slide.addShape("rect", {
                 x: 0,
                 y: 5.4,
@@ -292,15 +304,16 @@ function applyThemeBackground(
     theme: ProfessionalTheme,
     layoutType: string
 ): void {
-    const bg = theme.slideStyles.background;
+    const slideStyle = layoutType === "title" ? theme.slideStyles.titleSlide : theme.slideStyles.contentSlide;
+    const bg = slideStyle.background;
 
     if (layoutType === "title") {
         // Gradient for title slides
         slide.background = { color: theme.colors.primary.replace("#", "") };
-    } else if (bg.gradient) {
-        slide.background = { color: bg.gradient.colors[0].replace("#", "") };
-    } else if (bg.color) {
-        slide.background = { color: bg.color.replace("#", "") };
+    } else if (typeof bg === "object" && bg.gradient) {
+        slide.background = { color: bg.gradient[0].replace("#", "") };
+    } else if (typeof bg === "string") {
+        slide.background = { color: bg.replace("#", "") };
     }
 }
 
@@ -320,7 +333,7 @@ export function generateAPABibliography(citations: APACitation[]): string {
 }
 
 export function formatAPACitation(citation: APACitation, format: "parenthetical" | "narrative" = "parenthetical"): string {
-    return formatInTextCitation(citation, format);
+    return formatInTextCitation({ ...citation, format } as any);
 }
 
 export function convertCrossRefToAPA(crossRefData: any): APACitation {

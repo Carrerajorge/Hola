@@ -3,7 +3,7 @@
  * Tasks 541-550: Self-rewriting code, recursive improvement, Singularity logic
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import { autoCoder } from '../ai/autonomousCoding';
 import { promptOptimizer } from '../ai/evolutionEngine';
 

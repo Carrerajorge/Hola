@@ -926,7 +926,7 @@ export function createFilesRouter() {
         const putRes = await fetch(uploadURL, {
           method: "PUT",
           headers: { "Content-Type": mimeType },
-          body: download.buffer,
+          body: download.buffer as unknown as BodyInit,
         });
         if (!putRes.ok) {
           throw new Error(`Upload failed with status ${putRes.status}`);

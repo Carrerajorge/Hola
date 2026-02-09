@@ -82,6 +82,9 @@ const ENTITY_TO_TOOLS: Record<EntityType, string[]> = {
   programming_language: ["code_generate", "code_execute", "code_review", "code_analyze"],
   action_verb: [],
   domain_term: ["search_web", "web_search", "research_deep", "search_semantic"],
+  library: ["code_generate", "code_execute", "search_web", "web_search"],
+  project_name: ["file_read", "file_manage", "search_web", "web_search"],
+  technology: ["code_generate", "code_execute", "search_web", "web_search", "research_deep"],
 };
 
 const CATEGORY_TO_INTENTS: Record<ToolCategory, IntentCategory[]> = {
@@ -271,7 +274,7 @@ export class ToolRouter {
     }
 
     try {
-      const { generateEmbedding } = await import("../../lib/embeddings");
+      const { generateEmbedding } = await import("../../embeddingService");
       const promptEmbedding = await generateEmbedding(prompt);
 
       for (const [toolName, toolEmbedding] of this.toolEmbeddings) {

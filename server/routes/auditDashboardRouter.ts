@@ -295,8 +295,8 @@ router.get('/recommendations', async (req: Request, res: Response) => {
 
     const latencyReport = latencyAnalyzer.generateReport();
 
-    const allRecommendations = [
-      ...perfReport.recommendations.map(r => ({ ...r, source: 'performance' })),
+    const allRecommendations: Array<Record<string, any>> = [
+      ...perfReport.recommendations.map(r => ({ ...r, source: 'performance', priority: r.severity })),
       ...latencyReport.recommendations.map(r => ({ ...r, source: 'latency' })),
       ...tokenReport.recommendations.map(r => ({ ...r, source: 'tokens' })),
       ...dbReport.recommendations.map(r => ({ ...r, source: 'database' })),

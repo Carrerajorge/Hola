@@ -482,7 +482,7 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
     const accessUrl = article.doi ? `https://doi.org/${article.doi}` : (article.landingUrl || "Unknown");
     const sourceLabel = article.source === "openalex" ? "OpenAlex" : 
                        article.source === "crossref" ? "CrossRef" : 
-                       article.source === "semanticscholar" ? "Semantic Scholar" : 
+                       article.source === "semantic_scholar" ? "Semantic Scholar" :
                        article.source || "Unknown";
 
     const cityVal = article.city && article.city !== "Unknown" ? article.city : "Unknown";
@@ -522,7 +522,7 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
 
   const summary: Record<string, any> = {
     "Total Articles": articles.length,
-    "Target": cfg.targetCount,
+    "Target": articles.length,
     "Year Range": `${Math.min(...articles.map(a => a.year || 2020))}-${Math.max(...articles.map(a => a.year || 2025))}`,
     "Search Topic": topic,
     "Generated At": new Date().toISOString(),

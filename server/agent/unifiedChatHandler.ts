@@ -214,7 +214,7 @@ export async function hydrateSessionState(chatId: string, userId: string): Promi
     return {
       conversationId: chatId,
       turnNumber: allMessages.length,
-      previousIntents,
+      previousIntents: previousIntents as any,
       previousDeliverables,
       workingContext,
       memoryKeys,
@@ -492,6 +492,9 @@ export async function executeUnifiedChat(
     });
   }
 
+  // Hoisted before try so the catch block can destroy it on error
+  let activeWriter: SseBufferedWriter | null = null;
+
   try {
     const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
 
@@ -508,8 +511,6 @@ export async function executeUnifiedChat(
 
     let fullResponse = '';
     let chunkCount = 0;
-    // Hoisted so the catch block can destroy it on error
-    let activeWriter: SseBufferedWriter | null = null;
 
     if (isAgenticMode) {
       await executeAgentLoop(formattedMessages, res, {
@@ -548,14 +549,15 @@ export async function executeUnifiedChat(
       });
 
       for await (const chunk of streamGenerator) {
-        if (chunk.type === 'delta' && chunk.content) {
-          fullResponse += chunk.content;
+        const c = chunk as any;
+        if (c.type === 'delta' && c.content) {
+          fullResponse += c.content;
           chunkCount++;
 
-          writer.pushDelta(chunk.content);
+          writer.pushDelta(c.content);
 
           if (options.onChunk) {
-            options.onChunk(chunk.content);
+            options.onChunk(c.content);
           }
 
           if (chunkCount % 50 === 0) {
@@ -567,10 +569,10 @@ export async function executeUnifiedChat(
               }
             });
           }
-        } else if (chunk.type === 'done') {
+        } else if (c.type === 'done') {
           break;
-        } else if (chunk.type === 'error') {
-          throw new Error(chunk.error || 'Stream error');
+        } else if (c.type === 'error') {
+          throw new Error(c.error || 'Stream error');
         }
       }
 

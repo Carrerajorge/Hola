@@ -454,7 +454,7 @@ export async function* streamResults<T>(
   // Start initial batch
   for (let i = 0; i < Math.min(maxConcurrent, iterators.length); i++) {
     active.push(
-      iterators[i].next().then(result => ({ ...result, index: i }))
+      iterators[i].next().then(result => ({ ...result, index: i }) as { value?: T; done: boolean; index: number })
     );
   }
   
@@ -477,7 +477,7 @@ export async function* streamResults<T>(
       } else if (value !== undefined) {
         yield value;
         // Queue next from same iterator
-        active[index] = iterators[index].next().then(result => ({ ...result, index }));
+        active[index] = iterators[index].next().then(result => ({ ...result, index }) as { value?: T; done: boolean; index: number });
       }
     } catch {
       break;

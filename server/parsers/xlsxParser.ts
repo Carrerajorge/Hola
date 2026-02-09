@@ -30,7 +30,7 @@ export class XlsxParser implements FileParser {
 
       const metadata = this.extractWorkbookMetadata(workbook);
       
-      workbook.eachSheet((worksheet) => {
+      workbook.eachSheet((worksheet: any) => {
         const sheetResult = this.parseSheet(worksheet);
         sheetData.push(sheetResult);
       });
@@ -63,7 +63,7 @@ export class XlsxParser implements FileParser {
     }
   }
 
-  private extractWorkbookMetadata(workbook: ExcelJS.Workbook): Record<string, any> {
+  private extractWorkbookMetadata(workbook: any): Record<string, any> {
     const metadata: Record<string, any> = {
       sheetCount: 0,
     };
@@ -80,7 +80,7 @@ export class XlsxParser implements FileParser {
     return metadata;
   }
 
-  private parseSheet(worksheet: ExcelJS.Worksheet): {
+  private parseSheet(worksheet: any): {
     name: string;
     rowCount: number;
     columnCount: number;
@@ -93,7 +93,7 @@ export class XlsxParser implements FileParser {
     let totalRows = 0;
     let truncated = false;
 
-    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    worksheet.eachRow({ includeEmpty: false }, (row: any, rowNumber: number) => {
       totalRows = rowNumber;
       
       if (rows.length >= this.MAX_ROWS_PREVIEW) {
@@ -104,7 +104,7 @@ export class XlsxParser implements FileParser {
       const values: string[] = [];
       let colIndex = 0;
       
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
         if (colNumber > this.MAX_COLS_PREVIEW) {
           truncated = true;
           return;
@@ -139,7 +139,7 @@ export class XlsxParser implements FileParser {
     };
   }
 
-  private getCellValue(cell: ExcelJS.Cell): string {
+  private getCellValue(cell: any): string {
     if (cell.value === null || cell.value === undefined) {
       return '';
     }

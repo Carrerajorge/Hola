@@ -17,13 +17,7 @@ import { taskOrchestrator } from './TaskOrchestrator';
 import { conflictResolver } from './ConflictResolver';
 import { metaSupervisor } from './MetaSupervisor';
 
-// Export singleton instances
-export {
-  agentRegistry,
-  taskOrchestrator,
-  conflictResolver,
-  metaSupervisor
-};
+// Singleton instances are already exported via export * above
 
 /**
  * Initialize the complete meta-agent system

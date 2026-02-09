@@ -537,12 +537,7 @@ export class FastFirstPipeline extends EventEmitter {
       latencyMs: result.metrics.totalDurationMs,
       success: result.success,
       timestamp: new Date(),
-      metadata: {
-        sourcesCount: result.metrics.sourcesCount,
-        cacheHitRate: result.metrics.cacheHitRate,
-        avgRelevance: result.metrics.averageRelevanceScore,
-      },
-    });
+    } as any);
   }
 }
 

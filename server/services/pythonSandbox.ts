@@ -302,7 +302,7 @@ export function validateCode(code: string): { valid: boolean; issues: string[] }
   const issues: string[] = [];
 
   // Check for blocked imports
-  for (const module of BLOCKED_MODULES) {
+  for (const module of BASE_BLOCKED_MODULES) {
     const importRegex = new RegExp(`import\\s+${module}|from\\s+${module}`, "g");
     if (importRegex.test(code)) {
       issues.push(`Blocked module: ${module}`);

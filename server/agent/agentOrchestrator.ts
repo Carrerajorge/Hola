@@ -1123,9 +1123,8 @@ Respond with ONLY valid JSON in this exact format:
               stepIndex,
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
-              stream: evt.stream,
               output_snippet: evt.chunk.substring(0, 2000),
-              is_final_chunk: false,
+              metadata: { stream: evt.stream, is_final_chunk: false },
             });
 
             // New event (preferred): shell_chunk with ordering metadata.
@@ -1142,10 +1141,8 @@ Respond with ONLY valid JSON in this exact format:
               stepIndex,
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
-              stream: evt.stream,
               chunk_sequence: next,
-              chunk: chunk.length > maxChunk ? chunk.slice(0, maxChunk) : chunk,
-              is_truncated: chunk.length > maxChunk,
+              metadata: { stream: evt.stream, chunk: chunk.length > maxChunk ? chunk.slice(0, maxChunk) : chunk, is_truncated: chunk.length > maxChunk },
             });
           } catch {
             // ignore streaming errors
@@ -1158,11 +1155,8 @@ Respond with ONLY valid JSON in this exact format:
               stepIndex,
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
-              stream: "exit",
               command: typeof step.input?.command === "string" ? step.input.command : "",
-              exit_code: evt.exitCode,
-              signal: evt.signal,
-              is_final_chunk: true,
+              metadata: { stream: "exit", exit_code: evt.exitCode, signal: evt.signal, is_final_chunk: true },
             });
 
             // New final marker
@@ -1171,11 +1165,7 @@ Respond with ONLY valid JSON in this exact format:
               stepId: `step-${stepIndex}`,
               tool_name: step.toolName,
               command: typeof step.input?.command === "string" ? step.input.command : "",
-              exit_code: evt.exitCode,
-              signal: evt.signal,
-              wasKilled: evt.wasKilled,
-              durationMs: evt.durationMs,
-              is_final_chunk: true,
+              metadata: { durationMs: evt.durationMs, exit_code: evt.exitCode, signal: evt.signal, wasKilled: evt.wasKilled, is_final_chunk: true },
             });
           } catch {
             // ignore

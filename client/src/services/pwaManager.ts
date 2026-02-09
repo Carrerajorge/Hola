@@ -231,13 +231,13 @@ export class PWAManager {
      * Register background sync
      */
     async registerSync(tag: string): Promise<boolean> {
-        if (!this.swRegistration?.sync) {
+        if (!(this.swRegistration as any)?.sync) {
             console.warn("[PWA] Background sync not supported");
             return false;
         }
 
         try {
-            await this.swRegistration.sync.register(tag);
+            await (this.swRegistration as any).sync.register(tag);
             console.log(`[PWA] Registered sync: ${tag}`);
             return true;
         } catch (error) {

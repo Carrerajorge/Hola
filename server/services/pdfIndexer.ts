@@ -84,8 +84,9 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<{
 }> {
     try {
         // Dynamic import to handle missing dependency gracefully
-        const pdfParse = await import("pdf-parse");
-        const data = await pdfParse.default(buffer);
+        const pdfParseMod = await import("pdf-parse");
+        const pdfParse = (pdfParseMod as any).default || pdfParseMod;
+        const data = await pdfParse(buffer);
 
         return {
             text: data.text,

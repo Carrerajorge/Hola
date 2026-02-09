@@ -30,11 +30,12 @@ function toPdfText(value: unknown): string {
 
 async function generateSimplePdfReport(title: string, rows: Array<Record<string, unknown>>): Promise<Buffer> {
     // Lazy import to avoid hard startup dependency for servers that don't use PDF export.
+    // @ts-ignore - pdfkit has no type declarations
     const { default: PDFDocument } = await import("pdfkit");
     const doc = new PDFDocument({ size: "A4", margin: 50 });
     const chunks: Buffer[] = [];
 
-    doc.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    doc.on("data", (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
 
     const done = new Promise<Buffer>((resolve, reject) => {
         doc.on("end", () => resolve(Buffer.concat(chunks)));

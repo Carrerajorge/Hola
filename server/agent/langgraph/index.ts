@@ -103,7 +103,7 @@ export const AgentStateAnnotation = Annotation.Root({
 export type AgentState = typeof AgentStateAnnotation.State;
 
 function createAgentGraph(config: AgentConfig = {}) {
-  const graph = new StateGraph(AgentStateAnnotation);
+  const graph = new StateGraph(AgentStateAnnotation) as any;
 
   graph.addNode("planner", plannerNode);
   graph.addNode("executor", executorNode);
@@ -350,7 +350,7 @@ export class LangGraphAgent {
 
   async clearConversation(threadId: string): Promise<void> {
     await memoryStore.delete(threadId);
-    await checkpointer.delete({ configurable: { thread_id: threadId } });
+    await (checkpointer as any).delete?.({ configurable: { thread_id: threadId } });
   }
 
   async resumeWithApproval(

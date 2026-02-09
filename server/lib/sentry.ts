@@ -68,6 +68,7 @@ export async function initSentry(customConfig: Partial<SentryConfig> = {}): Prom
 
     try {
         // Dynamic import to avoid issues if Sentry not installed
+        // @ts-ignore - @sentry/node may not be installed
         const Sentry = await import("@sentry/node");
 
         Sentry.init({
@@ -81,7 +82,7 @@ export async function initSentry(customConfig: Partial<SentryConfig> = {}): Prom
             integrations: [
                 // Add default integrations
             ],
-            beforeSend(event) {
+            beforeSend(event: any) {
                 // Scrub sensitive data
                 if (event.request?.headers) {
                     delete event.request.headers.authorization;

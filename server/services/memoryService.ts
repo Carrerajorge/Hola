@@ -85,7 +85,7 @@ export class MemoryService {
           access_count = access_count + 1
         WHERE id = ${existing.rows[0].id}
       `);
-      return existing.rows[0].id;
+      return (existing.rows[0] as any).id;
     }
     
     const result = await db.execute(sql`
@@ -94,7 +94,7 @@ export class MemoryService {
       RETURNING id
     `);
     
-    return result.rows?.[0]?.id;
+    return (result.rows?.[0] as any)?.id;
   }
 
   /**
@@ -142,7 +142,7 @@ export class MemoryService {
       `);
     }
     
-    return (result.rows || []) as MemoryEntry[];
+    return (result.rows || []) as unknown as MemoryEntry[];
   }
 
   /**

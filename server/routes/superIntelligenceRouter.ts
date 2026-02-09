@@ -123,12 +123,9 @@ export function createSuperIntelligenceRouter(): Router {
     try {
       const { type, premises, goal, context } = req.body;
 
-      const result = await superIntelligence.cognitive.reasoning.reason({
-        type: type || 'deductive',
-        premises: premises || [],
-        goal: goal || 'Solve the problem',
-        context
-      });
+      const result = await superIntelligence.cognitive.reasoning.reason(
+        JSON.stringify({ type: type || 'deductive', premises: premises || [], goal: goal || 'Solve the problem', context })
+      );
 
       res.json({
         success: true,
@@ -157,11 +154,11 @@ export function createSuperIntelligenceRouter(): Router {
         });
       }
 
-      const result = await superIntelligence.cognitive.planning.createPlan({
+      const result = await superIntelligence.cognitive.planning.createPlan(
         goal,
         context,
         constraints
-      });
+      );
 
       res.json({
         success: true,
@@ -192,7 +189,7 @@ export function createSuperIntelligenceRouter(): Router {
         });
       }
 
-      const result = await superIntelligence.understanding.intent.detectIntent(text, context);
+      const result = await superIntelligence.understanding.intent.analyze(text, undefined, context);
 
       res.json({
         success: true,
@@ -221,7 +218,7 @@ export function createSuperIntelligenceRouter(): Router {
         });
       }
 
-      const result = await superIntelligence.understanding.emotion.analyzeEmotion(text, context);
+      const result = superIntelligence.understanding.emotion.analyze(text, context);
 
       res.json({
         success: true,
@@ -243,7 +240,7 @@ export function createSuperIntelligenceRouter(): Router {
     try {
       const { userId } = req.params;
 
-      const profile = await superIntelligence.understanding.profile.getProfile(userId);
+      const profile = await superIntelligence.understanding.profile.getOrCreateProfile(userId);
 
       if (!profile) {
         return res.status(404).json({
@@ -646,7 +643,13 @@ export function createSuperIntelligenceRouter(): Router {
         });
       }
 
-      const memoryId = await superIntelligence.cognitive.memory.store(userId, item);
+      const memoryResult = superIntelligence.cognitive.memory.store(
+        typeof item === 'string' ? item : JSON.stringify(item),
+        'working' as any,
+        'conversation' as any,
+        { userId }
+      );
+      const memoryId = memoryResult.id;
 
       res.json({
         success: true,
@@ -675,7 +678,7 @@ export function createSuperIntelligenceRouter(): Router {
         });
       }
 
-      const results = await superIntelligence.cognitive.memory.search(userId, query, options);
+      const results = superIntelligence.cognitive.memory.search({ query, ...options });
 
       res.json({
         success: true,

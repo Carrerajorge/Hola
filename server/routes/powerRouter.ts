@@ -148,9 +148,9 @@ powerRouter.get('/stats', async (req: Request, res: Response) => {
   try {
     // Get system-wide stats
     const [userCount, modelCount, conversationCount] = await Promise.all([
-      storage.getUserCount?.() || 0,
-      storage.getModelCount?.() || 0,
-      storage.getConversationCount?.() || 0
+      (storage as any).getUserCount?.() || 0,
+      (storage as any).getModelCount?.() || 0,
+      (storage as any).getGptConversationCount?.() || 0
     ]);
     
     const uptime = process.uptime();
@@ -206,7 +206,7 @@ async function getAvailableTools(): Promise<string[]> {
 
 async function getAvailableModels(): Promise<any[]> {
   try {
-    const models = await storage.getEnabledModels?.();
+    const models = await (storage as any).getEnabledModels?.();
     return models || [];
   } catch {
     return [];

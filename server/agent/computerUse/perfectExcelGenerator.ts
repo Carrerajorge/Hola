@@ -257,7 +257,7 @@ export class PerfectExcelGenerator {
     const fileName = `spreadsheet-${id.slice(0, 8)}.xlsx`;
     const filePath = path.join(this.outputDir, fileName);
 
-    const buffer = await workbook.xlsx.writeBuffer() as Buffer;
+    const buffer = await workbook.xlsx.writeBuffer() as unknown as Buffer;
     await fs.writeFile(filePath, buffer);
 
     return {

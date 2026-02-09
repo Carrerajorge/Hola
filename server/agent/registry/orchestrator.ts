@@ -280,6 +280,9 @@ class Orchestrator {
             type: step.name,
             description: step.input.description || "",
             input: step.input,
+            priority: "medium",
+            retries: 0,
+            maxRetries: 3,
           };
           const result = await agentRegistry.execute(step.name, task);
           step.result = result;
@@ -356,6 +359,9 @@ class Orchestrator {
       type: intent.intent,
       description: query,
       input: { query, tools },
+      priority: "medium",
+      retries: 0,
+      maxRetries: 3,
     };
 
     const agentResult = await agentRegistry.execute(agentName, task);

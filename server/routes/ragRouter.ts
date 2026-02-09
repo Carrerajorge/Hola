@@ -7,7 +7,7 @@ import { ragFeedback } from '../services/ragFeedback';
 import { db } from '../db';
 import { files, fileChunks } from '@shared/schema';
 import { eq, inArray } from 'drizzle-orm';
-import { streamChat } from '../services/chatService';
+// streamChat removed - not exported from chatService
 
 const router = Router();
 const upload = multer({ 

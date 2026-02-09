@@ -664,15 +664,15 @@ export class AcademicResearchEngine {
   
   async search(options: SearchOptions): Promise<SearchResult> {
     const startTime = Date.now();
-    const sources = options.sources || this.defaultSources;
-    const maxPerSource = Math.ceil((options.maxResults || 100) / sources.length);
-    
-    console.log(`[AcademicEngine] Starting search: "${options.query}" (max: ${options.maxResults}, sources: ${sources.join(", ")})`);
-    
+    const sources = options.sources || this.defaultSources!;
+    const maxPerSource = Math.ceil((options.maxResults || 100) / sources!.length);
+
+    console.log(`[AcademicEngine] Starting search: "${options.query}" (max: ${options.maxResults}, sources: ${sources!.join(", ")})`);
+
     // Search all sources in parallel
     const searchPromises: Promise<{ source: string; papers: AcademicPaper[]; error?: string }>[] = [];
-    
-    for (const source of sources) {
+
+    for (const source of sources!) {
       switch (source) {
         case "scielo":
           searchPromises.push(

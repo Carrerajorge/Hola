@@ -109,6 +109,8 @@ function mapS2ToCandidate(paper: S2Paper): AcademicCandidate {
     country: "Unknown",
     landingUrl: paper.openAccessPdf?.url || "",
     doiUrl: doi ? `https://doi.org/${doi}` : "",
+    publicationDate: paper.year ? `${paper.year}-01-01` : "",
+    institutionCountryCodes: [],
     verified: false,
     relevanceScore: 0,
     verificationStatus: "pending" as const,

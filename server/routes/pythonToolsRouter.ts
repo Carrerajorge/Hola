@@ -94,8 +94,8 @@ export function createPythonToolsRouter(): Router {
       const result = await pythonToolsClient.executeTool(name, input);
       
       res.json({
+        ...result,
         success: true,
-        ...result
       });
     } catch (error) {
       console.error(`[PythonToolsRouter] Execute tool '${req.params.name}' failed:`, error);

@@ -322,5 +322,5 @@ phoneAuthRouter.post("/resend", async (req, res) => {
   
   // Forward to send-code
   req.body.phone = normalizedPhone;
-  return phoneAuthRouter.handle(req, res, () => {});
+  return (phoneAuthRouter as any).handle(req, res, () => {});
 });

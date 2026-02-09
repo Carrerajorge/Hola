@@ -1391,11 +1391,11 @@ export class ExcelAssembler {
       if (sheetPlan.conditionalFormatting) {
         for (const cf of sheetPlan.conditionalFormatting) {
           try {
-            sheet.addConditionalFormatting({
+            (sheet as any).addConditionalFormatting({
               ref: cf.range,
               rules: [{
-                type: "containsText",
-                operator: "containsText",
+                type: (cf as any).type || "containsText",
+                operator: (cf as any).operator || "containsText",
                 text: cf.rule.replace("contains '", "").replace("'", ""),
                 style: {
                   fill: {

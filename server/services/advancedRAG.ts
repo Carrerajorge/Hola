@@ -127,7 +127,7 @@ async function computeSentenceEmbeddings(sentences: string[]): Promise<number[][
             return embedding;
           }
 
-          const result = await genAI.models.embedContent({
+          const result = await genAI!.models.embedContent({
             model: EMBEDDING_MODEL,
             contents: [{ role: 'user', parts: [{ text: sentence }] }],
           });
@@ -363,8 +363,8 @@ JSON:`;
     const hypothetical = hydeResult.text || '';
     const subQueries = (subQueryResult.text || '')
       .split('\n')
-      .map(s => s.replace(/^\d+\.\s*|-\s*/, '').trim())
-      .filter(s => s.length > 10);
+      .map((s: any) => s.replace(/^\d+\.\s*|-\s*/, '').trim())
+      .filter((s: any) => s.length > 10);
     
     let filters: MetadataFilters = {};
     try {
@@ -520,7 +520,7 @@ export async function hybridRetrieveAdvanced(
       fileId: chunk.fileId,
       content: chunk.content,
       pageNumber: chunk.pageNumber || undefined,
-      sectionTitle: chunk.sectionTitle || undefined,
+      sectionTitle: (chunk as any).sectionTitle || undefined,
       metadata,
       score: combinedScore,
       bm25Score: normalizedBM25,
@@ -556,7 +556,7 @@ async function generateQueryEmbedding(query: string): Promise<number[]> {
   if (cached) return cached;
   
   try {
-    const result = await genAI.models.embedContent({
+    const result = await genAI!.models.embedContent({
       model: EMBEDDING_MODEL,
       contents: [{ role: 'user', parts: [{ text: query }] }],
     });
@@ -680,7 +680,7 @@ Para cada pasaje, devuelve SOLO las oraciones relevantes (mantén numeración):`
     });
     
     const compressedText = result.text || '';
-    const sections = compressedText.split(/\[Pasaje \d+\]/i).filter(s => s.trim());
+    const sections = compressedText.split(/\[Pasaje \d+\]/i).filter((s: string) => s.trim());
     
     return chunks.map((chunk, i) => ({
       ...chunk,
@@ -869,7 +869,7 @@ ${query}
     const citationRefs = answer.match(/\[(?:Fuente|Source)\s*\d+(?:,\s*p\.\s*\d+)?\]/gi) || [];
     const citations: Citation[] = [];
     
-    for (const ref of new Set(citationRefs)) {
+    for (const ref of new Set(citationRefs as string[])) {
       const numMatch = ref.match(/\d+/);
       if (numMatch) {
         const idx = parseInt(numMatch[0]) - 1;
@@ -928,8 +928,8 @@ Genera 3 preguntas de seguimiento cortas y específicas (una por línea):`;
     
     return (result.text || '')
       .split('\n')
-      .map(q => q.replace(/^\d+\.\s*|-\s*/, '').trim())
-      .filter(q => q.length > 10)
+      .map((q: string) => q.replace(/^\d+\.\s*|-\s*/, '').trim())
+      .filter((q: string) => q.length > 10)
       .slice(0, 3);
   } catch {
     return [];

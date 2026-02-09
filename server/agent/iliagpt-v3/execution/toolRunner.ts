@@ -80,7 +80,7 @@ export class EnterpriseToolRunner {
       // Validation errors are caller errors — don't count against circuit breaker
       throw new IliagptError(
         "E_BAD_PARAMS",
-        `Invalid parameters for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+        `Invalid parameters for ${toolName}: ${parsed.error.issues.map((i: any) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
         { tool: toolName, issues: parsed.error.issues }
       );
     }

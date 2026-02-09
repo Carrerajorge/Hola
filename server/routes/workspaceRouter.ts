@@ -454,8 +454,8 @@ export function createWorkspaceRouter() {
 
         const results: Array<Record<string, any>> = [];
         const now = new Date();
-        const normalizedEmails = Array.from(
-          new Set((req.body.emails || []).map((emailRaw) => normalizeEmail(emailRaw)).filter(Boolean))
+        const normalizedEmails: string[] = Array.from(
+          new Set((req.body.emails || []).map((emailRaw: any) => normalizeEmail(emailRaw)).filter(Boolean))
         );
 
         for (const email of normalizedEmails) {

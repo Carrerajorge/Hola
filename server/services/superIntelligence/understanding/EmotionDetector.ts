@@ -116,7 +116,6 @@ const EMOTION_LEXICON: Record<string, { emotion: PrimaryEmotion; intensity: numb
   'miedo': [{ emotion: 'fear', intensity: 0.8 }],
   'asustado': [{ emotion: 'fear', intensity: 0.8 }],
   'preocupado': [{ emotion: 'fear', intensity: 0.6 }],
-  'ansioso': [{ emotion: 'fear', intensity: 0.7 }],
   'nervioso': [{ emotion: 'fear', intensity: 0.6 }],
   'aterrorizado': [{ emotion: 'fear', intensity: 0.95 }],
 
@@ -192,7 +191,6 @@ const EMOTION_LEXICON: Record<string, { emotion: PrimaryEmotion; intensity: numb
 
   // English - Disgust
   'disgusted': [{ emotion: 'disgust', intensity: 0.9 }],
-  'horrible': [{ emotion: 'disgust', intensity: 0.8 }],
   'awful': [{ emotion: 'disgust', intensity: 0.75 }],
   'gross': [{ emotion: 'disgust', intensity: 0.7 }],
 

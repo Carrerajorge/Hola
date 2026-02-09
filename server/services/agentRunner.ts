@@ -383,7 +383,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: prompt }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 300, temperature: 0.2 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 300, temperature: 0.2 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(decideNextAction)"
@@ -613,7 +613,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
   private async toolWebSearch(query: string): Promise<ToolResult> {
     try {
       const { searchAdapter } = await import("../agent/webtool/searchAdapter");
-      const results = await searchAdapter.search(query, { maxResults: 5 });
+      const results = await searchAdapter.search(query, 5);
       
       return {
         success: true,
@@ -637,13 +637,14 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
         return { success: false, error: result.error || "Failed to fetch URL" };
       }
 
-      const content = result.html?.slice(0, 10000) || result.text?.slice(0, 10000) || "";
-      
+      const r = result as any;
+      const content = r.html?.slice(0, 10000) || r.text?.slice(0, 10000) || result.content?.slice(0, 10000) || "";
+
       return {
         success: true,
         data: {
           url,
-          title: result.title,
+          title: r.title || "",
           content: content,
         },
       };
@@ -684,7 +685,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: `Genera un plan de 3-5 pasos para: "${objective}". Responde SOLO con JSON: {"steps":["paso1","paso2"]}` }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 150, temperature: 0.3 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 150, temperature: 0.3 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(generatePlan)"
@@ -752,7 +753,7 @@ Si ya tienes suficiente información para responder, usa final_answer.`;
       const result = await withTimeout(
         geminiChat(
           [{ role: "user", parts: [{ text: `Objetivo: ${this.state!.objective}\n\nInformación recopilada:\n${observations}\n\nGenera una respuesta coherente y útil basada en esta información.` }] }],
-          { model: "gemini-2.0-flash", maxOutputTokens: 1000, temperature: 0.3 }
+          { model: "gemini-2.5-flash", maxOutputTokens: 1000, temperature: 0.3 }
         ),
         DEFAULT_LLM_TIMEOUT_MS,
         "geminiChat(generateSummary)"

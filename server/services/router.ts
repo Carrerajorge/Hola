@@ -210,7 +210,7 @@ Responde SOLO con JSON válido (sin markdown ni código):
     try {
       const result = await geminiChat(
         [{ role: "user", parts: [{ text: prompt }] }],
-        { model: "gemini-2.0-flash", maxOutputTokens: 200, temperature: 0.1 }
+        { model: "gemini-2.5-flash", maxOutputTokens: 200, temperature: 0.1 }
       );
 
       const responseText = result.content?.trim() || "";
