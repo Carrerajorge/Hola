@@ -226,11 +226,15 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       // userId already extracted above
 
       if (userId) {
+        // Anonymous users (anon_*) won't have a `users` row yet. Ensure one exists so
+        // quota checks and FK-backed features work instead of hard-failing.
+        await ensureUserRowExists(userId);
+
         // 1. Token Quota Check (Read-only)
-	        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
-	        if (!hasTokenQuota) {
-	          return res.status(402).json({
-	            error: "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.",
+		        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
+		        if (!hasTokenQuota) {
+		          return res.status(402).json({
+		            error: "Has excedido tu límite de tokens. Actualiza tu plan o agrega créditos para continuar.",
 	            code: "TOKEN_QUOTA_EXCEEDED"
 	          });
 	        }
