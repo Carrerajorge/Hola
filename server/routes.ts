@@ -65,6 +65,7 @@ import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
+import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
@@ -580,6 +581,7 @@ export async function registerRoutes(
   app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
+  app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
