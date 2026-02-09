@@ -170,10 +170,16 @@ export function showErrorToast(
   maybeBindNetworkListeners();
 
   const toastMessage = getReadableErrorMessage(message);
-  const isOffline = toastMessage === "No internet connection";
 
-  // Use stable ids so Sonner replaces instead of stacking.
-  const toastId = isOffline ? OFFLINE_TOAST_ID : `${toastMessage}:${options?.description ?? ""}`;
+  // Use stable ids so Sonner replaces instead of stacking (especially important for 429 spam).
+  const toastId = (() => {
+    if (toastMessage === "No internet connection") return OFFLINE_TOAST_ID;
+    if (toastMessage === "Too many requests, please wait") return "rate-limit";
+    if (toastMessage === "Server temporarily unavailable") return "server-unavailable";
+    if (toastMessage === "Request timed out") return "request-timeout";
+    if (toastMessage === "Network error occurred") return "network-error";
+    return "global-error";
+  })();
 
   const now = Date.now();
   const lastAt = lastToastAtByKey.get(toastId);
