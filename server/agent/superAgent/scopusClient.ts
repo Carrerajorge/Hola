@@ -819,11 +819,18 @@ function quoteIfNeeded(term: string): string {
 
 function sanitizeQueryInput(query: string): string {
   if (!query || typeof query !== "string") return "";
-  return query
-    .replace(/[\x00-\x1f\x7f]/g, "")  // Remove control characters
-    .replace(/\s+/g, " ")
-    .trim()
-    .substring(0, 2000);  // Hard limit on input length
+  let q = query;
+  // Strip HTML/script tags to prevent injection
+  q = q.replace(/<[^>]*>/g, "");
+  // Remove null bytes and control characters
+  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Normalize unicode (NFC for consistent matching across databases)
+  q = q.normalize("NFC");
+  // Collapse whitespace
+  q = q.replace(/\s+/g, " ").trim();
+  // Hard limit on input length (Scopus accepts longer queries)
+  if (q.length > 2000) q = q.substring(0, 2000).trim();
+  return q;
 }
 
 function detectLanguageName(text: string): string {

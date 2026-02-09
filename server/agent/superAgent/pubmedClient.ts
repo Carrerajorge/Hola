@@ -37,6 +37,42 @@ const PUBMED_EFETCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi
 // Rate limiting: NCBI requires email and allows 3 requests/second without API key
 // With API key: 10 requests/second
 const REQUEST_DELAY_MS = 350;
+const REQUEST_TIMEOUT_MS = 15000;
+
+/**
+ * Sanitize and harden PubMed search query input
+ */
+function sanitizePubMedQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    // Strip HTML/script tags
+    q = q.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Normalize unicode
+    q = q.normalize("NFC");
+    // Remove characters that break PubMed queries (keep alphanumeric, spaces, hyphens, parentheses, brackets, quotes, colons)
+    q = q.replace(/[^\w\s\-()[\]"':,.áéíóúüñàèìòùâêîôûãõç]/gi, " ");
+    // Collapse whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    // Limit length
+    if (q.length > 500) q = q.substring(0, 500).trim();
+    return q;
+}
+
+/**
+ * Fetch with timeout for PubMed API calls
+ */
+async function fetchWithTimeout(url: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, { signal: controller.signal });
+        return response;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 /**
  * Search PubMed for articles
@@ -50,10 +86,18 @@ export async function searchPubMed(
     } = {}
 ): Promise<PubMedSearchResult> {
     const { maxResults = 25, startYear, endYear } = options;
+    const clampedMax = Math.max(1, Math.min(100, maxResults));
     const startTime = Date.now();
 
+    // Sanitize query input
+    const sanitized = sanitizePubMedQuery(query);
+    if (!sanitized) {
+        console.warn("[PubMed] Empty query after sanitization");
+        return { articles: [], totalResults: 0, query, searchTime: Date.now() - startTime };
+    }
+
     // Build search query with date filters
-    let searchQuery = query;
+    let searchQuery = sanitized;
     if (startYear && endYear) {
         searchQuery += ` AND ${startYear}:${endYear}[dp]`;
     }
@@ -65,7 +109,7 @@ export async function searchPubMed(
         const searchParams = new URLSearchParams({
             db: "pubmed",
             term: searchQuery,
-            retmax: maxResults.toString(),
+            retmax: clampedMax.toString(),
             retmode: "json",
             sort: "relevance",
             email: process.env.PUBMED_EMAIL || "user@example.com",
@@ -75,7 +119,7 @@ export async function searchPubMed(
             searchParams.set("api_key", process.env.PUBMED_API_KEY);
         }
 
-        const searchResponse = await fetch(`${PUBMED_ESEARCH}?${searchParams}`);
+        const searchResponse = await fetchWithTimeout(`${PUBMED_ESEARCH}?${searchParams}`);
 
         if (!searchResponse.ok) {
             throw new Error(`PubMed ESearch failed: ${searchResponse.status}`);
@@ -114,7 +158,7 @@ export async function searchPubMed(
             fetchParams.set("api_key", process.env.PUBMED_API_KEY);
         }
 
-        const fetchResponse = await fetch(`${PUBMED_EFETCH}?${fetchParams}`);
+        const fetchResponse = await fetchWithTimeout(`${PUBMED_EFETCH}?${fetchParams}`);
 
         if (!fetchResponse.ok) {
             throw new Error(`PubMed EFetch failed: ${fetchResponse.status}`);

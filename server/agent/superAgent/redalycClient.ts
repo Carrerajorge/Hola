@@ -37,9 +37,45 @@ const REDALYC_API_BASE = "https://www.redalyc.org/api/search/";
 const REDALYC_OAI = "https://www.redalyc.org/exportarcita";
 const REDALYC_SERVICE_BASE = "https://www.redalyc.org/service/r2020/getArticles";
 
-// Rate limiting
+// Rate limiting & timeouts
 const REQUEST_DELAY_MS = 400;
+const REQUEST_TIMEOUT_MS = 15000;
 const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; IliaGPT/1.0)").trim();
+
+/**
+ * Sanitize and harden Redalyc search query input
+ */
+function sanitizeRedalycQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    // Strip HTML/script tags
+    q = q.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Normalize unicode
+    q = q.normalize("NFC");
+    // Remove dangerous chars (keep letters, digits, spaces, common punctuation, accented chars)
+    q = q.replace(/[^\w\s\-.,()'"áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
+    // Collapse whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    // Limit length
+    if (q.length > 500) q = q.substring(0, 500).trim();
+    return q;
+}
+
+/**
+ * Fetch with timeout for Redalyc API calls
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        return response;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 const DOI_REGEX = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
 
@@ -172,16 +208,23 @@ export async function searchRedalyc(
     const { maxResults = 25, startYear, endYear, country } = options;
     const startTime = Date.now();
 
-    console.log(`[Redalyc] Searching: "${query}"`);
+    // Sanitize query input
+    const sanitized = sanitizeRedalycQuery(query);
+    if (!sanitized) {
+        console.warn("[Redalyc] Empty query after sanitization");
+        return { articles: [], totalResults: 0, query, searchTime: Date.now() - startTime };
+    }
+
+    console.log(`[Redalyc] Searching: "${sanitized}"`);
 
     const token = process.env.REDALYC_API_TOKEN;
 
     if (token) {
-        return searchRedalycWithToken(query, token, options);
+        return searchRedalycWithToken(sanitized, token, options);
     }
 
     // Fallback: Use web search interface
-    return searchRedalycWeb(query, options);
+    return searchRedalycWeb(sanitized, options);
 }
 
 /**
@@ -215,7 +258,7 @@ async function searchRedalycWithToken(
             params.set("country", country);
         }
 
-        const response = await fetch(`${REDALYC_API_BASE}?${params}`, {
+        const response = await fetchWithTimeout(`${REDALYC_API_BASE}?${params}`, {
             headers: {
                 "Authorization": `Bearer ${token}`,
                 "Accept": "application/json",
@@ -308,7 +351,7 @@ async function searchRedalycWeb(
 
         for (let page = 1; articles.length < maxResults; page++) {
             const url = `${REDALYC_SERVICE_BASE}/${encodeURIComponent(segment)}/${page}/${pageSize}/1/default/`;
-            const response = await fetch(url, {
+            const response = await fetchWithTimeout(url, {
                 headers: {
                     // Do NOT send "Accept: application/json" (Redalyc returns 406 in some cases).
                     "User-Agent": USER_AGENT,

@@ -8,6 +8,25 @@ const RATE_LIMIT_MS = 200;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
 
+/**
+ * Sanitize and harden CrossRef search query input
+ */
+function sanitizeCrossRefQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    // Strip HTML/script tags
+    q = q.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Normalize unicode
+    q = q.normalize("NFC");
+    // Collapse whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    // Limit length
+    if (q.length > 500) q = q.substring(0, 500).trim();
+    return q;
+}
+
 let lastRequestTime = 0;
 
 async function rateLimit(): Promise<void> {
@@ -323,14 +342,25 @@ export async function searchCrossRef(
     maxResults?: number;
   } = {}
 ): Promise<AcademicCandidate[]> {
-  const { yearStart = 2020, yearEnd = 2025, maxResults = 100 } = options;
-  
+  const currentYear = new Date().getFullYear();
+  const { yearStart = 2020, yearEnd = currentYear, maxResults = 100 } = options;
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+  const clampedYearStart = Math.max(1900, Math.min(currentYear + 1, yearStart));
+  const clampedYearEnd = Math.max(clampedYearStart, Math.min(currentYear + 1, yearEnd));
+
+  // Sanitize query input
+  const sanitized = sanitizeCrossRefQuery(query);
+  if (!sanitized) {
+    console.warn("[CrossRef] Empty query after sanitization");
+    return [];
+  }
+
   await rateLimit();
 
   const params = new URLSearchParams({
-    query,
-    rows: String(Math.min(maxResults, 100)),
-    filter: `from-pub-date:${yearStart}-01-01,until-pub-date:${yearEnd}-12-31`,
+    query: sanitized,
+    rows: String(clampedMax),
+    filter: `from-pub-date:${clampedYearStart}-01-01,until-pub-date:${clampedYearEnd}-12-31`,
     sort: "relevance",
   });
   if (CROSSREF_MAILTO) params.set("mailto", CROSSREF_MAILTO);

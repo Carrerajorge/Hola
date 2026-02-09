@@ -38,9 +38,45 @@ export interface SciELOSearchResult {
 const SCIELO_ARTICLEMETA = "https://articlemeta.scielo.org/api/v1";
 const SCIELO_SEARCH = "https://search.scielo.org/api/v2/search";
 
-// Rate limiting
+// Rate limiting & timeouts
 const REQUEST_DELAY_MS = 300;
+const REQUEST_TIMEOUT_MS = 15000;
 const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; IliaGPT/1.0)").trim();
+
+/**
+ * Sanitize and harden SciELO search query input
+ */
+function sanitizeSciELOQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    // Strip HTML/script tags
+    q = q.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Normalize unicode (NFC for consistent matching)
+    q = q.normalize("NFC");
+    // Remove dangerous special characters (keep letters, digits, spaces, common punctuation, accented chars)
+    q = q.replace(/[^\w\s\-.,()'"áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
+    // Collapse whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    // Limit length
+    if (q.length > 500) q = q.substring(0, 500).trim();
+    return q;
+}
+
+/**
+ * Fetch with timeout for SciELO API calls
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        return response;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 const DEFAULT_COLLECTIONS = [
     // LatAm (SciELO Network)
@@ -228,15 +264,23 @@ export async function searchSciELO(
     } = {}
 ): Promise<SciELOSearchResult> {
     const { maxResults = 25, startYear, endYear, collection } = options;
+    const clampedMax = Math.max(1, Math.min(100, maxResults));
     const startTime = Date.now();
 
-    console.log(`[SciELO] Searching: "${query}"`);
+    // Sanitize query input
+    const sanitized = sanitizeSciELOQuery(query);
+    if (!sanitized) {
+        console.warn("[SciELO] Empty query after sanitization");
+        return { articles: [], totalResults: 0, query, searchTime: Date.now() - startTime };
+    }
+
+    console.log(`[SciELO] Searching: "${sanitized}"`);
 
     try {
         // Use the SciELO search API
         const params = new URLSearchParams({
-            q: query,
-            count: maxResults.toString(),
+            q: sanitized,
+            count: clampedMax.toString(),
             from: "0",
             output: "json",
             lang: "es", // Spanish language results
@@ -253,7 +297,7 @@ export async function searchSciELO(
             params.set("in", collection);
         }
 
-        const response = await fetch(`${SCIELO_SEARCH}?${params}`, {
+        const response = await fetchWithTimeout(`${SCIELO_SEARCH}?${params}`, {
             headers: {
                 "Accept": "application/json",
                 "User-Agent": USER_AGENT,

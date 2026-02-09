@@ -665,8 +665,8 @@ export async function searchAllSources(
 
     await Promise.all(searchPromises);
 
-    // Combine and deduplicate by DOI/title (with fuzzy matching)
-    const allArticles = [
+    // Combine all results and sanitize article data from all sources
+    const allArticlesRaw = [
         ...results.scopus,
         ...results.wos,
         ...results.openalex,
@@ -675,6 +675,9 @@ export async function searchAllSources(
         ...results.scielo,
         ...results.redalyc
     ];
+
+    // Sanitize all article fields to prevent XSS and ensure clean data
+    const allArticles = allArticlesRaw.map(sanitizeUnifiedArticle);
 
     const deduplicated = deduplicateArticles(allArticles);
 
@@ -702,6 +705,64 @@ export async function searchAllSources(
         query,
         searchTime: Date.now() - startTime,
         errors
+    };
+}
+
+// =============================================================================
+// Result Sanitization
+// =============================================================================
+
+/**
+ * Sanitize article text fields to prevent XSS and ensure clean data.
+ * Applied to all articles from all sources before they reach the user.
+ */
+function sanitizeArticleText(text: string | undefined | null): string {
+    if (!text || typeof text !== "string") return "";
+    let clean = text;
+    // Strip any HTML tags that might have slipped through API responses
+    clean = clean.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Decode common HTML entities
+    clean = clean.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    // Re-strip any tags that appeared after entity decoding
+    clean = clean.replace(/<[^>]*>/g, "");
+    // Normalize whitespace
+    clean = clean.replace(/\s+/g, " ").trim();
+    return clean;
+}
+
+/**
+ * Sanitize a URL string to prevent injection
+ */
+function sanitizeUrl(url: string | undefined | null): string {
+    if (!url || typeof url !== "string") return "";
+    const trimmed = url.trim();
+    // Only allow http(s) and doi.org URLs
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (/^\/\//i.test(trimmed)) return `https:${trimmed}`;
+    return "";
+}
+
+/**
+ * Sanitize a full UnifiedArticle after conversion
+ */
+function sanitizeUnifiedArticle(article: UnifiedArticle): UnifiedArticle {
+    return {
+        ...article,
+        title: sanitizeArticleText(article.title) || "Untitled",
+        authors: (article.authors || []).map(a => sanitizeArticleText(a)).filter(Boolean),
+        year: (article.year || "").replace(/[^0-9n.d.]/g, "").substring(0, 10),
+        journal: sanitizeArticleText(article.journal),
+        abstract: sanitizeArticleText(article.abstract),
+        keywords: (article.keywords || []).map(k => sanitizeArticleText(k)).filter(Boolean),
+        doi: (article.doi || "").replace(/<[^>]*>/g, "").trim(),
+        url: sanitizeUrl(article.url),
+        language: sanitizeArticleText(article.language),
+        documentType: sanitizeArticleText(article.documentType),
+        country: sanitizeArticleText(article.country),
+        city: sanitizeArticleText(article.city),
     };
 }
 

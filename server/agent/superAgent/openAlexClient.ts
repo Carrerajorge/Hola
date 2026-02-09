@@ -67,6 +67,25 @@ const RATE_LIMIT_MS = 100;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 500;
 
+/**
+ * Sanitize and harden OpenAlex search query input
+ */
+function sanitizeOpenAlexQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    // Strip HTML/script tags
+    q = q.replace(/<[^>]*>/g, "");
+    // Remove null bytes and control characters
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    // Normalize unicode
+    q = q.normalize("NFC");
+    // Collapse whitespace
+    q = q.replace(/\s+/g, " ").trim();
+    // Limit length
+    if (q.length > 500) q = q.substring(0, 500).trim();
+    return q;
+}
+
 let lastRequestTime = 0;
 
 async function rateLimit(): Promise<void> {
@@ -327,11 +346,22 @@ export async function searchOpenAlex(
     countryCodes?: string[];
   } = {}
 ): Promise<AcademicCandidate[]> {
-  const { yearStart = 2020, yearEnd = 2025, maxResults = 100, countryCodes } = options;
+  const currentYear = new Date().getFullYear();
+  const { yearStart = 2020, yearEnd = currentYear, maxResults = 100, countryCodes } = options;
+  const clampedMax = Math.max(1, Math.min(500, maxResults));
+  const clampedYearStart = Math.max(1900, Math.min(currentYear + 1, yearStart));
+  const clampedYearEnd = Math.max(clampedYearStart, Math.min(currentYear + 1, yearEnd));
+
+  // Sanitize query input
+  const sanitized = sanitizeOpenAlexQuery(query);
+  if (!sanitized) {
+    console.warn("[OpenAlex] Empty query after sanitization");
+    return [];
+  }
 
   // Avoid ambiguous alternation that can cause excessive backtracking on crafted input.
   // Treat AND as just another separator and then split on whitespace.
-  const normalized = query.replace(/\s+AND\s+/gi, " ").trim();
+  const normalized = sanitized.replace(/\s+AND\s+/gi, " ").trim();
   const searchTerms = normalized.split(/\s+/).filter(t => t.length > 2);
   const searchQuery = searchTerms.join(" ");
 
@@ -339,12 +369,12 @@ export async function searchOpenAlex(
     const candidates: AcademicCandidate[] = [];
     let cursor = "*";
 
-    while (candidates.length < maxResults && cursor) {
-      const remaining = maxResults - candidates.length;
+    while (candidates.length < clampedMax && cursor) {
+      const remaining = clampedMax - candidates.length;
 
       const filters: string[] = [
-        `from_publication_date:${yearStart}-01-01`,
-        `to_publication_date:${yearEnd}-12-31`,
+        `from_publication_date:${clampedYearStart}-01-01`,
+        `to_publication_date:${clampedYearEnd}-12-31`,
       ];
 
       const codes = (countryCodes || []).map(c => c.trim().toUpperCase()).filter(Boolean);
@@ -396,7 +426,7 @@ export async function searchOpenAlex(
 
       for (const work of results as OpenAlexWork[]) {
         candidates.push(mapWorkToCandidate(work));
-        if (candidates.length >= maxResults) break;
+        if (candidates.length >= clampedMax) break;
       }
 
       cursor = data.meta?.next_cursor || "";

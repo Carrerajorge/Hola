@@ -1584,36 +1584,80 @@ export function exportToCSV(papers: AcademicPaper[]): string {
 
 export class AcademicResearchEngineV3 {
   private defaultSources: SourceType[] = ["openalex", "semantic_scholar", "crossref", "doaj"];
-  
+
+  /**
+   * Sanitize and harden search query input
+   */
+  private hardenQuery(raw: string): string {
+    if (!raw || typeof raw !== "string") return "";
+    let q = raw;
+    q = q.replace(/<[^>]*>/g, ""); // Strip HTML/script tags
+    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); // Remove control chars
+    q = q.normalize("NFC"); // Normalize unicode
+    q = q.replace(/\s+/g, " ").trim(); // Collapse whitespace
+    if (q.length > 500) q = q.substring(0, 500).trim(); // Limit length
+    return q;
+  }
+
+  /**
+   * Sanitize paper text fields to prevent XSS
+   */
+  private sanitizePaper(paper: AcademicPaper): AcademicPaper {
+    const cleanText = (t: string | undefined) => {
+      if (!t) return t;
+      return t.replace(/<[^>]*>/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+    };
+    return {
+      ...paper,
+      title: cleanText(paper.title) || "Untitled",
+      abstract: cleanText(paper.abstract),
+      journal: cleanText(paper.journal),
+    };
+  }
+
   async search(options: SearchOptions): Promise<SearchResult> {
     const startTime = Date.now();
     const sources = options.sources || this.defaultSources;
+
+    // Harden query input
+    const sanitizedQuery = this.hardenQuery(options.query);
+    if (!sanitizedQuery) {
+      return {
+        papers: [],
+        total: 0,
+        query: options.query,
+        sources: [],
+        timing: 0,
+        deduplicatedCount: 0,
+      };
+    }
+
     const maxPerSource = Math.ceil((options.maxResults || 100) / sources.length * 1.5); // Over-fetch for dedup
-    
-    console.log(`[AcademicEngineV3] Starting search: "${options.query.substring(0, 50)}..." (max: ${options.maxResults}, sources: ${sources.join(", ")})`);
-    
+
+    console.log(`[AcademicEngineV3] Starting search: "${sanitizedQuery.substring(0, 50)}..." (max: ${options.maxResults}, sources: ${sources.join(", ")})`);
+
     // Search all sources in parallel
     const searchPromises: Promise<{ source: SourceType; result: { papers: AcademicPaper[]; time: number; error?: string } }>[] = [];
-    
+
     for (const source of sources) {
       const promise = (async () => {
         switch (source) {
           case "scielo":
-            return { source, result: await searchSciELO(options.query, maxPerSource) };
+            return { source, result: await searchSciELO(sanitizedQuery, maxPerSource) };
           case "openalex":
-            return { source, result: await searchOpenAlex(options.query, maxPerSource, options.yearFrom, options.yearTo, options.countries) };
+            return { source, result: await searchOpenAlex(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo, options.countries) };
           case "semantic_scholar":
-            return { source, result: await searchSemanticScholar(options.query, maxPerSource, options.yearFrom, options.yearTo) };
+            return { source, result: await searchSemanticScholar(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo) };
           case "crossref":
-            return { source, result: await searchCrossRef(options.query, maxPerSource, options.yearFrom, options.yearTo) };
+            return { source, result: await searchCrossRef(sanitizedQuery, maxPerSource, options.yearFrom, options.yearTo) };
           case "core":
-            return { source, result: await searchCORE(options.query, maxPerSource) };
+            return { source, result: await searchCORE(sanitizedQuery, maxPerSource) };
           case "pubmed":
-            return { source, result: await searchPubMed(options.query, maxPerSource) };
+            return { source, result: await searchPubMed(sanitizedQuery, maxPerSource) };
           case "arxiv":
-            return { source, result: await searchArXiv(options.query, maxPerSource) };
+            return { source, result: await searchArXiv(sanitizedQuery, maxPerSource) };
           case "doaj":
-            return { source, result: await searchDOAJ(options.query, maxPerSource) };
+            return { source, result: await searchDOAJ(sanitizedQuery, maxPerSource) };
           default:
             return { source, result: { papers: [], time: 0, error: "Unknown source" } };
         }
@@ -1623,12 +1667,13 @@ export class AcademicResearchEngineV3 {
     
     const results = await Promise.all(searchPromises);
     
-    // Aggregate papers
+    // Aggregate papers and sanitize results
     let allPapers: AcademicPaper[] = [];
     const sourceStats: SourceStats[] = [];
-    
+
     for (const { source, result } of results) {
-      allPapers.push(...result.papers);
+      // Sanitize all paper fields from each source
+      allPapers.push(...result.papers.map(p => this.sanitizePaper(p)));
       sourceStats.push({
         name: source,
         count: result.papers.length,
