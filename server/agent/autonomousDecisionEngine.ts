@@ -185,6 +185,23 @@ const INTENT_PATTERNS: Record<string, { patterns: RegExp[]; taskType: TaskType; 
         ],
         taskType: "automation",
         capabilities: ["schedule_cron", "trigger_event", "workflow"]
+    },
+    computer_use: {
+        patterns: [
+            /computer\s+use/i,
+            /control\s+(del\s+)?(computador|ordenador|laptop|pc)/i,
+            /agentic\s+brows/i,
+            /autónom(o|a|amente)\s+(navega|busca|control)/i,
+            /autonomous(ly)?\s+(browse|navigate|search|control)/i,
+            /control\s+(de\s+)?pantalla/i,
+            /screen\s+(control|interact)/i,
+            /terminal\s+control/i,
+            /browser\s+control/i,
+            /iniciativa\s+propia/i,
+            /self.initiative/i
+        ],
+        taskType: "mixed",
+        capabilities: ["computer_use_session", "computer_use_navigate", "computer_use_interact", "computer_use_agentic", "terminal_execute", "vision_analyze"]
     }
 };
 
@@ -203,6 +220,11 @@ const OUTPUT_FORMAT_PATTERNS: Record<string, RegExp[]> = {
 // ============================================
 
 const AGENT_CAPABILITIES: Record<string, { capabilities: string[]; specialties: string[]; priority: number }> = {
+    computer_use: {
+        capabilities: ["computer_use_session", "computer_use_navigate", "computer_use_interact", "computer_use_agentic", "computer_use_screenshot", "computer_use_extract", "generate_perfect_ppt", "generate_perfect_doc", "generate_perfect_excel", "terminal_execute", "terminal_system_info", "terminal_file_op", "vision_analyze"],
+        specialties: ["browser control", "screen interaction", "terminal", "autonomous navigation", "document generation", "computer control", "agentic browsing"],
+        priority: 0
+    },
     research: {
         capabilities: ["search_web", "research_deep", "verify", "summarize", "memory_store"],
         specialties: ["investigación", "research", "fact-checking", "analysis"],
@@ -516,15 +538,21 @@ export class AutonomousDecisionEngine extends EventEmitter {
             tools = tools.filter(t => !context.constraints.blockedTools!.includes(t));
         }
 
-        // Add essential tools based on output format
-        if (analysis.outputFormat === "pptx" && !tools.includes("slides_create")) {
-            tools.unshift("slides_create");
+        // Add essential tools based on output format - prefer perfect generators
+        if (analysis.outputFormat === "pptx") {
+            if (!tools.includes("generate_perfect_ppt")) {
+                tools.unshift("generate_perfect_ppt");
+            }
         }
-        if (analysis.outputFormat === "docx" && !tools.includes("doc_create")) {
-            tools.unshift("doc_create");
+        if (analysis.outputFormat === "docx") {
+            if (!tools.includes("generate_perfect_doc")) {
+                tools.unshift("generate_perfect_doc");
+            }
         }
-        if (analysis.outputFormat === "xlsx" && !tools.includes("spreadsheet_create")) {
-            tools.unshift("spreadsheet_create");
+        if (analysis.outputFormat === "xlsx") {
+            if (!tools.includes("generate_perfect_excel")) {
+                tools.unshift("generate_perfect_excel");
+            }
         }
 
         return tools.slice(0, 8);
