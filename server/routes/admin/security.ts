@@ -4,6 +4,38 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const securityRouter = Router();
 
+// ============================================
+// SECURITY HELPERS
+// ============================================
+
+/** Security: sanitize error message for client response - never leak internal details */
+function safeAdminError(error: unknown): string {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("not found")) return "Resource not found";
+    if (msg.includes("timeout")) return "Operation timed out";
+    if (msg.includes("permission") || msg.includes("denied")) return "Permission denied";
+  }
+  return "Internal server error";
+}
+
+/** Security: RFC 4180 compliant CSV field escaping to prevent formula injection */
+function escapeCsvField(value: unknown): string {
+  if (value === null || value === undefined) return '""';
+  let str = String(value);
+  // Security: strip formula injection prefixes (=, +, -, @, \t, \r)
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = "'" + str;
+  }
+  // RFC 4180: fields with commas, quotes, or newlines must be quoted
+  if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
+    str = '"' + str.replace(/"/g, '""') + '"';
+  } else {
+    str = '"' + str + '"';
+  }
+  return str;
+}
+
 securityRouter.get("/policies", async (req, res) => {
     try {
         const { type, appliedTo, isEnabled } = req.query;
@@ -21,7 +53,7 @@ securityRouter.get("/policies", async (req, res) => {
 
         res.json(policies);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -52,7 +84,7 @@ securityRouter.post("/policies", async (req, res) => {
 
         res.json(policy);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -83,7 +115,7 @@ securityRouter.put("/policies/:id", async (req, res) => {
 
         res.json(policy);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -113,7 +145,7 @@ securityRouter.delete("/policies/:id", async (req, res) => {
 
         res.json({ success: true });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -141,7 +173,7 @@ securityRouter.patch("/policies/:id/toggle", async (req, res) => {
 
         res.json(policy);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -252,7 +284,7 @@ securityRouter.get("/audit-logs", async (req, res) => {
             }
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -295,17 +327,18 @@ securityRouter.get("/stats", async (req, res) => {
             }, {})
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
 securityRouter.get("/logs", async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit as string) || 100;
+        // Security: cap limit to prevent excessive data retrieval
+        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 100, 1000));
         const logs = await storage.getAuditLogs(limit);
         res.json(logs);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -350,7 +383,7 @@ securityRouter.get("/config", async (req, res) => {
 
         res.json(config);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -400,7 +433,7 @@ securityRouter.get("/threats", async (req, res) => {
             period: "24h"
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -408,13 +441,19 @@ securityRouter.get("/threats", async (req, res) => {
 securityRouter.post("/ip/block", async (req, res) => {
     try {
         const { ip, reason, duration } = req.body;
-        if (!ip) {
+        if (!ip || typeof ip !== "string") {
             return res.status(400).json({ error: "IP address is required" });
+        }
+
+        // Security: validate IP format to prevent injection in policy names
+        const trimmedIp = ip.trim();
+        if (!/^[\d.:a-fA-F]{3,45}$/.test(trimmedIp)) {
+            return res.status(400).json({ error: "Invalid IP address format" });
         }
 
         // Create a security policy for the blocked IP
         const policy = await storage.createSecurityPolicy({
-            policyName: `Block IP: ${ip}`,
+            policyName: `Block IP: ${trimmedIp}`,
             policyType: "ip_block",
             rules: { ip, blockedAt: new Date().toISOString(), duration: duration || "permanent" },
             priority: 100,
@@ -430,7 +469,7 @@ securityRouter.post("/ip/block", async (req, res) => {
 
         res.json({ success: true, policy });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -458,7 +497,7 @@ securityRouter.delete("/ip/unblock/:ip", async (req, res) => {
 
         res.json({ success: true });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -501,27 +540,27 @@ securityRouter.get("/audit-logs/export", async (req, res) => {
             return res.json(logs);
         }
         
-        // Default: CSV
+        // Default: CSV with RFC 4180 compliant quoting + formula injection prevention
         const csvHeaders = ["id", "action", "resource", "resourceId", "userId", "ipAddress", "userAgent", "createdAt", "details"];
         const csvRows = logs.map(log => [
-            log.id,
-            log.action,
-            log.resource || "",
-            log.resourceId || "",
-            log.userId || "",
-            log.ipAddress || "",
-            (log.userAgent || "").replace(/,/g, ";").substring(0, 100),
-            log.createdAt ? new Date(log.createdAt).toISOString() : "",
-            JSON.stringify(log.details || {}).replace(/,/g, ";")
+            escapeCsvField(log.id),
+            escapeCsvField(log.action),
+            escapeCsvField(log.resource || ""),
+            escapeCsvField(log.resourceId || ""),
+            escapeCsvField(log.userId || ""),
+            escapeCsvField(log.ipAddress || ""),
+            escapeCsvField((log.userAgent || "").substring(0, 200)),
+            escapeCsvField(log.createdAt ? new Date(log.createdAt).toISOString() : ""),
+            escapeCsvField(JSON.stringify(log.details || {}).substring(0, 1000)),
         ]);
-        
+
         const csv = [csvHeaders.join(","), ...csvRows.map(row => row.join(","))].join("\n");
         
         res.setHeader("Content-Type", "text/csv");
         res.setHeader("Content-Disposition", `attachment; filename=audit_logs_${new Date().toISOString().split("T")[0]}.csv`);
         res.send(csv);
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -541,7 +580,7 @@ securityRouter.get("/alerts", async (req, res) => {
             stats: securityAlerts.getStats()
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -564,7 +603,7 @@ securityRouter.post("/alerts/:id/resolve", async (req, res) => {
         
         res.json({ success: true });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });
 
@@ -573,6 +612,6 @@ securityRouter.get("/alerts/stats", async (req, res) => {
     try {
         res.json(securityAlerts.getStats());
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeAdminError(error) });
     }
 });

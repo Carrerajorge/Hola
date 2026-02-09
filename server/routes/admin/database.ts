@@ -7,6 +7,41 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const databaseRouter = Router();
 
+// ============================================
+// SECURITY HELPERS
+// ============================================
+
+/** Maximum SQL query length */
+const MAX_QUERY_LENGTH = 10_000;
+
+/** SQL query execution timeout (30 seconds) */
+const QUERY_TIMEOUT_MS = 30_000;
+
+/** Tables allowed in backup operations */
+const BACKUP_ALLOWED_TABLES = new Set([
+    "users", "chats", "ai_models", "payments", "invoices", "settings_config",
+    "security_policies", "audit_logs", "sessions",
+]);
+
+/** Security: sanitize error message for client response */
+function safeDbError(error: unknown): string {
+    if (error instanceof Error) {
+        const msg = error.message.toLowerCase();
+        if (msg.includes("not found") || msg.includes("does not exist")) return "Resource not found";
+        if (msg.includes("timeout") || msg.includes("timed out")) return "Query timed out";
+        if (msg.includes("permission") || msg.includes("denied")) return "Permission denied";
+        if (msg.includes("syntax")) return "SQL syntax error";
+        if (msg.includes("relation")) return "Table not found";
+    }
+    return "Database operation failed";
+}
+
+/** Security: validate table name - only alphanumeric and underscore, max 64 chars */
+function isValidTableName(name: string): boolean {
+    if (!name || typeof name !== "string") return false;
+    return /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/.test(name);
+}
+
 databaseRouter.get("/info", async (req, res) => {
     try {
         const userStats = await storage.getUserStats();
@@ -25,7 +60,7 @@ databaseRouter.get("/info", async (req, res) => {
             lastBackup: new Date().toISOString()
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });
 
@@ -78,7 +113,7 @@ databaseRouter.get("/health", async (req, res) => {
     } catch (error: any) {
         res.status(500).json({
             status: "unhealthy",
-            error: error.message,
+            error: safeDbError(error),
             latencyMs: null
         });
     }
@@ -267,7 +302,7 @@ databaseRouter.get("/coverage", async (req, res) => {
             toolCalls,
         });
     } catch (error: any) {
-        res.status(500).json({ status: "error", error: error.message });
+        res.status(500).json({ status: "error", error: safeDbError(error) });
     }
 });
 
@@ -336,7 +371,7 @@ databaseRouter.get("/status", async (req, res) => {
         console.error("[AdminRouter] db-status error:", error.message);
         res.status(500).json({
             status: "error",
-            error: error.message,
+            error: safeDbError(error),
             database: null,
             host: null
         });
@@ -361,7 +396,7 @@ databaseRouter.get("/tables", async (req, res) => {
 
         res.json({ tables: tables.rows });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });
 
@@ -422,7 +457,7 @@ databaseRouter.get("/tables/:tableName", async (req, res) => {
             }
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });
 
@@ -451,21 +486,29 @@ databaseRouter.post("/query", async (req, res) => {
 
         // Block dangerous patterns - comprehensive list for SQL injection prevention
         const dangerousPatterns = [
+            /--/,  // Block SQL single-line comments (check early - bypass vector)
+            /\/\*/,  // Block block comments (check early - bypass vector)
             /;\s*(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)/i,
+            /^\s*(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)\b/im,  // Block DML/DDL at start of any line
             /INTO\s+OUTFILE/i,
             /LOAD_FILE/i,
             /pg_sleep/i,
             /pg_terminate/i,
-            /COPY\s+TO/i,
+            /pg_cancel_backend/i,
+            /COPY\s+(TO|FROM)/i,
             /pg_read_file/i,
+            /pg_read_binary_file/i,
+            /pg_ls_dir/i,
             /lo_import/i,
             /lo_export/i,
-            /--/,  // Block SQL comments
-            /\/\*/,  // Block block comments
+            /lo_get/i,
             /UNION\s+(ALL\s+)?SELECT/i,  // Block UNION injections
             /;.*SELECT/i,  // Block statement chaining
             /\bEXEC(UTE)?\b/i,  // Block EXECUTE
             /\bxp_/i,  // Block extended procedures
+            /\bSET\s+(ROLE|SESSION)/i,  // Block role escalation
+            /\bpg_shadow\b/i,  // Block access to password hashes
+            /\bpg_authid\b/i,  // Block access to auth data
         ];
         for (const pattern of dangerousPatterns) {
             if (pattern.test(query)) {
@@ -560,7 +603,12 @@ databaseRouter.post("/query", async (req, res) => {
         const startTime = Date.now();
         // SECURITY: Use prepared statement wrapper with query sanitization
         // Note: For admin query explorer, we use sql.raw() but with extensive validation above
-        const result = await db.execute(sql`${sql.raw(query)}`);
+        // Security: add query timeout to prevent long-running queries
+        const queryPromise = db.execute(sql`${sql.raw(query)}`);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("Query timed out")), QUERY_TIMEOUT_MS);
+        });
+        const result = await Promise.race([queryPromise, timeoutPromise]);
         const executionTime = Date.now() - startTime;
 
         await auditLog(req, {
@@ -584,11 +632,10 @@ databaseRouter.post("/query", async (req, res) => {
             columns: result.rows.length > 0 ? Object.keys(result.rows[0]) : []
         });
     } catch (error: any) {
-        // Don't expose internal error details in production
-        const isProduction = process.env.NODE_ENV === 'production';
+        // Security: never expose internal error details
         res.status(500).json({
             success: false,
-            error: isProduction ? "Query execution failed" : error.message,
+            error: safeDbError(error),
             hint: "Check your SQL syntax"
         });
     }
@@ -634,21 +681,35 @@ databaseRouter.get("/indexes", async (req, res) => {
       `);
         res.json({ indexes: indexes.rows });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });
 
 // POST /api/admin/database/backup - Initiate a database backup
 databaseRouter.post("/backup", asyncHandler(async (req, res) => {
     const { type = "full", tables } = req.body;
-    
+
     // For now, we'll export data as JSON since pg_dump requires shell access
     const backupData: Record<string, any[]> = {};
-    const tablesToBackup = tables || ["users", "chats", "ai_models", "payments", "invoices", "settings_config"];
-    
+    const defaultTables = ["users", "chats", "ai_models", "payments", "invoices", "settings_config"];
+
+    // Security: validate requested tables against allowlist
+    let tablesToBackup: string[];
+    if (Array.isArray(tables)) {
+        tablesToBackup = tables
+            .filter((t: unknown) => typeof t === "string" && isValidTableName(t) && BACKUP_ALLOWED_TABLES.has(t))
+            .slice(0, 20); // Cap number of tables
+        if (tablesToBackup.length === 0) {
+            tablesToBackup = defaultTables;
+        }
+    } else {
+        tablesToBackup = defaultTables;
+    }
+
     for (const tableName of tablesToBackup) {
         try {
             const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+            if (!safeTableName || safeTableName !== tableName) continue;
             const result = await db.execute(sql`SELECT * FROM ${sql.raw(safeTableName)}`);
             backupData[tableName] = result.rows as any[];
         } catch (err: any) {
@@ -702,16 +763,23 @@ databaseRouter.get("/backups", async (req, res) => {
             res.json({ backups: [], note: "No backups found" });
         }
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });
 
 // POST /api/admin/database/vacuum - Run VACUUM ANALYZE
 databaseRouter.post("/vacuum", asyncHandler(async (req, res) => {
     const { table } = req.body;
-    
+
     if (table) {
+        // Security: validate table name format
+        if (typeof table !== "string" || !isValidTableName(table)) {
+            return res.status(400).json({ error: "Invalid table name" });
+        }
         const safeTableName = table.replace(/[^a-zA-Z0-9_]/g, '');
+        if (safeTableName !== table) {
+            return res.status(400).json({ error: "Invalid table name" });
+        }
         await db.execute(sql`VACUUM ANALYZE ${sql.raw(safeTableName)}`);
     } else {
         await db.execute(sql`VACUUM ANALYZE`);
@@ -762,6 +830,6 @@ databaseRouter.get("/connections", async (req, res) => {
             maxConnections: await db.execute(sql`SHOW max_connections`).then(r => r.rows[0])
         });
     } catch (error: any) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: safeDbError(error) });
     }
 });

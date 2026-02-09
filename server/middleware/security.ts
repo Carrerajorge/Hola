@@ -1,6 +1,8 @@
 import helmet from "helmet";
 import { Express } from "express";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 export const setupSecurity = (app: Express) => {
   app.use(
     helmet({
@@ -9,17 +11,18 @@ export const setupSecurity = (app: Express) => {
           defaultSrc: ["'self'"],
           scriptSrc: [
             "'self'",
-            "'unsafe-inline'", // Necesario a veces para scripts de hidratación de React/Vite en dev
-            "'unsafe-eval'",   // A veces necesario para dev tools, intentar quitar en prod estricto
+            "'unsafe-inline'", // Required for React/Vite hydration
+            // Only allow unsafe-eval in development (needed for dev tools/HMR)
+            ...(isProduction ? [] : ["'unsafe-eval'"]),
             "https://js.stripe.com",
             "https://accounts.google.com",
             "https://apis.google.com",
             "https://replit.com",
-            "https://*.replit.com", // Para frames de Replit
+            "https://*.replit.com",
           ],
           styleSrc: [
             "'self'",
-            "'unsafe-inline'", // Estilos en línea de librerías UI
+            "'unsafe-inline'", // Required for UI libraries
             "https://fonts.googleapis.com",
           ],
           fontSrc: [
@@ -31,7 +34,7 @@ export const setupSecurity = (app: Express) => {
             "'self'",
             "data:",
             "blob:",
-            "https://lh3.googleusercontent.com", // Avatares de Google
+            "https://lh3.googleusercontent.com",
             "https://*.googleusercontent.com",
             "https://replit.com",
             "https://files.stripe.com",
@@ -41,20 +44,24 @@ export const setupSecurity = (app: Express) => {
             "wss:", // WebSockets
             "https://accounts.google.com",
             "https://api.stripe.com",
-            "https://*.googleapis.com", // APIs de Google
+            "https://*.googleapis.com",
           ],
           frameSrc: [
             "'self'",
             "https://js.stripe.com",
             "https://accounts.google.com",
-            "https://docs.google.com", // Embeds de Docs/Sheets
+            "https://docs.google.com",
           ],
           objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'", "https://accounts.google.com"],
+          frameAncestors: ["'self'"],
           upgradeInsecureRequests: [],
         },
       },
-      crossOriginEmbedderPolicy: false, // Puede romper carga de recursos cross-origin
+      crossOriginEmbedderPolicy: false, // Can break cross-origin resource loading
       crossOriginResourcePolicy: { policy: "cross-origin" },
+      crossOriginOpenerPolicy: { policy: "same-origin" },
     })
   );
 };
