@@ -67,6 +67,10 @@ import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
 import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
+import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
+import { createSuperIntelligenceRouter } from "./routes/superIntelligenceRouter";
+import { initializeAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
+import { initializeSuperIntelligence } from "./services/superIntelligence";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
@@ -583,6 +587,11 @@ export async function registerRoutes(
   app.use("/api/superintelligence", superintelligenceRouter);
   app.use("/api/understanding", requestUnderstandingRoutes); // Request Understanding Pipeline (gating agent, RAG, verification)
 
+  // SuperIntelligence System
+  app.use("/api/audit", createAuditDashboardRouter());
+  app.use("/api/super-intelligence", createSuperIntelligenceRouter());
+  app.use(auditMiddleware); // Capture metrics for all requests
+
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
 
@@ -598,6 +607,19 @@ export async function registerRoutes(
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
   }).catch(err => {
     console.error("[AgentSystem] Initialization failed:", err.message);
+  });
+
+  // Initialize SuperIntelligence System (includes all phases)
+  initializeSuperIntelligence().then((status) => {
+    console.log(`[SuperIntelligence] System initialized - Health: ${status.stats.healthScore.toFixed(1)}%`);
+  }).catch(err => {
+    console.error("[SuperIntelligence] System initialization failed:", err.message);
+    // Fall back to just audit system
+    initializeAuditSystem().then(() => {
+      console.log("[SuperIntelligence] Audit System initialized (fallback)");
+    }).catch(e => {
+      console.error("[SuperIntelligence] Audit System fallback failed:", e.message);
+    });
   });
 
   // ===== Simple Tools & Agents Endpoints =====
