@@ -1,5 +1,17 @@
 # Worklog
 
+## 2026-02-09
+- Resumen: Fix runtime/DB: forzar `search_path=public` en conexiones Postgres para evitar errores de “relation does not exist” (p.ej. `chat_schedules`). Ajuste adicional en build para robustez ESM/CJS.
+- Archivos tocados:
+  - server/db.ts
+  - script/build.ts
+- Comandos ejecutados:
+  - ./scripts/agent-verify.sh
+- Resultados:
+  - type-check + tests + build: OK (agent-verify exit 0)
+- PRs:
+  - https://github.com/Carrerajorge/Hola/pull/137
+
 ## 2026-02-08
 - Resumen: Actualizado el playbook del equipo con una guía corta para el “Primer PR de prueba”.
 - Archivos tocados:
