@@ -548,11 +548,11 @@ export function createChatsRouter() {
         );
 
         // Persist conversationDocuments for each attachment so files survive reload.
-        // Best-effort — failures here don't block message creation.
+        // Best-effort & non-blocking — runs in parallel without delaying the response.
         if (sanitizedAttachments && sanitizedAttachments.length > 0) {
-          for (const att of sanitizedAttachments) {
-            try {
-              await storage.createConversationDocument({
+          Promise.allSettled(
+            sanitizedAttachments.map((att: any) =>
+              storage.createConversationDocument({
                 chatId: req.params.id,
                 messageId: message.id,
                 fileName: att.name || 'document',
@@ -561,11 +561,14 @@ export function createChatsRouter() {
                 fileSize: att.size || null,
                 extractedText: null, // Text extraction happens in the streaming endpoint
                 metadata: { fileId: att.fileId || att.id },
-              });
-            } catch (docErr) {
-              console.warn(`[Messages] Failed to persist conversationDocument for ${att.name}:`, docErr);
+              })
+            )
+          ).then(results => {
+            const failures = results.filter(r => r.status === 'rejected');
+            if (failures.length > 0) {
+              console.warn(`[Messages] ${failures.length} conversationDocument(s) failed to persist`);
             }
-          }
+          });
         }
 
         if (chat.title === "New Chat") {

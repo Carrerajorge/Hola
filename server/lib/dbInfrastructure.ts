@@ -204,7 +204,7 @@ export async function processBatch<T, R>(
     const successful: R[] = [];
     const failed: { index: number; error: Error }[] = [];
 
-    const { batchSize, concurrency, onProgress, retryAttempts = 3, retryDelayMs = 1000 } = options;
+    const { batchSize, concurrency, onProgress, retryAttempts = 2, retryDelayMs = 300 } = options;
 
     // Create batches
     const batches: T[][] = [];
