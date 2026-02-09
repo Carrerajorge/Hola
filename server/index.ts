@@ -250,6 +250,14 @@ export function log(message: string, source = "express") {
       });
     }
 
+    // Register WhatsApp Web cleanup
+    registerCleanup(async () => {
+      log("Shutting down WhatsApp Web sessions...");
+      const { whatsappWebManager } = await import('./integrations/whatsappWeb');
+      await whatsappWebManager.shutdownAll();
+      log("WhatsApp Web cleanup complete");
+    });
+
     // Register OpenTelemetry tracing cleanup
     registerCleanup(async () => {
       log("Shutting down OpenTelemetry tracing...");

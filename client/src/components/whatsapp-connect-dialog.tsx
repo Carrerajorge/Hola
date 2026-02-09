@@ -6,6 +6,9 @@ import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/apiClient';
 import { whatsappWebEventStream, type WhatsAppWebStatus } from '@/lib/whatsapp-web-events';
 
+// Max time to wait before resetting busy state (safety net)
+const BUSY_TIMEOUT_MS = 20_000;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -16,6 +19,16 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(json?.error || `Error del servidor (${res.status})`);
   }
   return json as T;
+}
+
+// Validates E.164-like phone: country code + number, 8-15 digits
+function isValidPhone(countryCode: string, number: string): string | null {
+  const cc = countryCode.trim().replace(/[^0-9+]/g, '');
+  const num = number.trim().replace(/[^0-9]/g, '');
+  if (!cc || !cc.startsWith('+')) return 'El código de país debe empezar con +';
+  if (num.length < 6) return 'El número debe tener al menos 6 dígitos';
+  if (num.length > 15) return 'El número es demasiado largo';
+  return null;
 }
 
 export function WhatsAppConnectDialog({
@@ -31,7 +44,34 @@ export function WhatsAppConnectDialog({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [countryCode, setCountryCode] = useState('+51');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [autoReply, setAutoReply] = useState(true);
   const lastQrRef = useRef<string | null>(null);
+  const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Safety net: clear busy after BUSY_TIMEOUT_MS
+  const startBusy = useCallback(() => {
+    setBusy(true);
+    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+    busyTimerRef.current = setTimeout(() => {
+      setBusy(false);
+      setError('Tiempo de espera agotado. Intente de nuevo.');
+    }, BUSY_TIMEOUT_MS);
+  }, []);
+
+  const stopBusy = useCallback(() => {
+    setBusy(false);
+    if (busyTimerRef.current) {
+      clearTimeout(busyTimerRef.current);
+      busyTimerRef.current = null;
+    }
+  }, []);
+
+  // Cleanup busy timer on unmount
+  useEffect(() => {
+    return () => {
+      if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+    };
+  }, []);
 
   // Subscribe to SSE events for real-time status updates
   useEffect(() => {
@@ -40,16 +80,16 @@ export function WhatsAppConnectDialog({
     const unsub = whatsappWebEventStream.subscribe({
       onStatus: (s) => {
         setStatus(s);
-        setError(null);
-        // Clear busy when we get a real state
+        // Clear busy when we get a definitive state
         if (s.state === 'qr' || s.state === 'connected' || s.state === 'pairing_code') {
-          setBusy(false);
+          stopBusy();
+          setError(null);
         }
-        if (s.state === 'disconnected' && 'reason' in s && s.reason) {
-          setBusy(false);
+        if (s.state === 'disconnected') {
+          stopBusy();
         }
       },
-      onError: (msg) => {
+      onError: () => {
         // SSE stream error - not critical, it auto-reconnects
       },
     });
@@ -57,21 +97,22 @@ export function WhatsAppConnectDialog({
     // Also fetch status via HTTP as fallback
     void refreshStatus();
 
-    // Polling fallback every 2s in case SSE is delayed
+    // Polling fallback every 2.5s
     const t = setInterval(() => {
       void refreshStatus().catch(() => null);
-    }, 2000);
+    }, 2500);
 
     return () => {
       unsub();
       clearInterval(t);
     };
-  }, [open]);
+  }, [open, stopBusy]);
 
   const refreshStatus = useCallback(async () => {
     try {
-      const res = await api<{ success: true; status: WhatsAppWebStatus }>('/api/integrations/whatsapp/web/status');
+      const res = await api<{ success: true; status: WhatsAppWebStatus; autoReply?: boolean }>('/api/integrations/whatsapp/web/status');
       setStatus(res.status);
+      if (typeof res.autoReply === 'boolean') setAutoReply(res.autoReply);
     } catch {
       // ignore - SSE will provide updates
     }
@@ -93,11 +134,14 @@ export function WhatsAppConnectDialog({
 
     let cancelled = false;
     void QRCode.toDataURL(status.qr, { margin: 2, width: 280, errorCorrectionLevel: 'M' })
-      .then((url) => {
+      .then((url: string) => {
         if (!cancelled) setQrDataUrl(url);
       })
       .catch(() => {
-        if (!cancelled) setQrDataUrl(null);
+        if (!cancelled) {
+          setQrDataUrl(null);
+          setError('Error al generar imagen QR');
+        }
       });
 
     return () => {
@@ -106,7 +150,7 @@ export function WhatsAppConnectDialog({
   }, [status]);
 
   const start = async () => {
-    setBusy(true);
+    startBusy();
     setError(null);
     setQrDataUrl(null);
     lastQrRef.current = null;
@@ -116,20 +160,17 @@ export function WhatsAppConnectDialog({
         body: JSON.stringify({}),
       });
       setStatus(res.status);
-      // If the response already contains QR, busy will be cleared by SSE listener
-      if (res.status.state !== 'qr' && res.status.state !== 'connected') {
-        // Still waiting — keep busy, SSE will update
-      } else {
-        setBusy(false);
+      if (res.status.state === 'qr' || res.status.state === 'connected') {
+        stopBusy();
       }
     } catch (e: any) {
       setError(e?.message || 'No se pudo iniciar la conexión');
-      setBusy(false);
+      stopBusy();
     }
   };
 
   const restart = async () => {
-    setBusy(true);
+    startBusy();
     setError(null);
     setQrDataUrl(null);
     lastQrRef.current = null;
@@ -140,23 +181,26 @@ export function WhatsAppConnectDialog({
       });
       setStatus(res.status);
       if (res.status.state === 'qr' || res.status.state === 'connected') {
-        setBusy(false);
+        stopBusy();
       }
     } catch (e: any) {
       setError(e?.message || 'No se pudo reiniciar la conexión');
-      setBusy(false);
+      stopBusy();
     }
   };
 
   const generatePairingCode = async () => {
-    setBusy(true);
+    const validationErr = isValidPhone(countryCode, phoneNumber);
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
+
+    startBusy();
     setError(null);
     try {
       const cc = countryCode.trim().replace(/\s+/g, '');
       const num = phoneNumber.trim().replace(/\s+/g, '');
-      if (!num || num.length < 6) {
-        throw new Error('Ingrese un número de teléfono válido');
-      }
       const phone = `${cc}${num}`;
 
       const res = await api<{ success: true; status: WhatsAppWebStatus }>('/api/integrations/whatsapp/web/connect/pairing-code', {
@@ -167,12 +211,12 @@ export function WhatsAppConnectDialog({
     } catch (e: any) {
       setError(e?.message || 'No se pudo generar el código');
     } finally {
-      setBusy(false);
+      stopBusy();
     }
   };
 
   const disconnect = async () => {
-    setBusy(true);
+    startBusy();
     setError(null);
     try {
       await api<{ success: true }>('/api/integrations/whatsapp/web/connect/disconnect', {
@@ -185,7 +229,20 @@ export function WhatsAppConnectDialog({
     } catch (e: any) {
       setError(e?.message || 'No se pudo desconectar');
     } finally {
-      setBusy(false);
+      stopBusy();
+    }
+  };
+
+  const toggleAutoReply = async () => {
+    const newVal = !autoReply;
+    try {
+      await api<{ success: true; autoReply: boolean }>('/api/integrations/whatsapp/web/auto-reply', {
+        method: 'POST',
+        body: JSON.stringify({ enabled: newVal }),
+      });
+      setAutoReply(newVal);
+    } catch {
+      // ignore
     }
   };
 
@@ -238,11 +295,30 @@ export function WhatsAppConnectDialog({
 
           {/* Connected success */}
           {status.state === 'connected' && (
-            <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 p-4 text-center space-y-2">
-              <div className="text-green-700 dark:text-green-400 font-medium">WhatsApp conectado exitosamente</div>
-              <div className="text-xs text-muted-foreground">
+            <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800 p-4 space-y-3">
+              <div className="text-green-700 dark:text-green-400 font-medium text-center">
+                WhatsApp conectado exitosamente
+              </div>
+              <div className="text-xs text-muted-foreground text-center">
                 Los mensajes entrantes aparecerán en su bandeja automáticamente.
-                Las respuestas se envían de forma automática por IA.
+              </div>
+              {/* Auto-reply toggle */}
+              <div className="flex items-center justify-between pt-1 border-t">
+                <span className="text-sm">Respuesta automática (IA)</span>
+                <button
+                  onClick={toggleAutoReply}
+                  className={cn(
+                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                    autoReply ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-600',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                      autoReply ? 'translate-x-6' : 'translate-x-1',
+                    )}
+                  />
+                </button>
               </div>
             </div>
           )}
@@ -325,10 +401,11 @@ export function WhatsAppConnectDialog({
                 />
                 <input
                   value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  onChange={(e) => setPhoneNumber(e.target.value.replace(/[^0-9]/g, ''))}
                   placeholder="918714054"
                   className="h-9 flex-1 rounded-md border bg-background px-2 text-sm"
                   disabled={busy}
+                  inputMode="numeric"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !busy) {
                       void generatePairingCode();

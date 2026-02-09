@@ -8,6 +8,9 @@ import { getSecureUserId } from '../lib/anonUserHelper';
 import { storage } from '../storage';
 import { createUnifiedRun, executeUnifiedChat } from '../agent/unifiedChatHandler';
 
+// Auto-reply timeout: 60 seconds max
+const AUTO_REPLY_TIMEOUT_MS = 60_000;
+
 function requireUserId(req: AuthenticatedRequest): string {
   return getSecureUserId(req as any) || '';
 }
@@ -15,6 +18,20 @@ function requireUserId(req: AuthenticatedRequest): string {
 function safeChatId(userId: string, remoteJid: string): string {
   const raw = `wa_${userId}_${remoteJid}`;
   return raw.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 200);
+}
+
+/** Run a promise with a timeout. Rejects if the promise doesn't resolve in time. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timeout after ${ms}ms`));
+    }, ms);
+    timer.unref?.();
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 export function createWhatsAppWebRouter(): Router {
@@ -37,7 +54,8 @@ export function createWhatsAppWebRouter(): Router {
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
     const status = whatsappWebManager.getStatus(userId);
-    res.json({ success: true, status });
+    const autoReply = whatsappWebManager.isAutoReplyEnabled(userId);
+    res.json({ success: true, status, autoReply });
   });
 
   // Start connection — waits for QR to be ready before responding
@@ -95,6 +113,20 @@ export function createWhatsAppWebRouter(): Router {
     }
   });
 
+  // Toggle auto-reply on/off
+  router.post('/auto-reply', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    const { enabled } = (req.body || {}) as { enabled?: boolean };
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'enabled (boolean) is required' });
+    }
+
+    whatsappWebManager.setAutoReply(userId, enabled);
+    res.json({ success: true, autoReply: enabled });
+  });
+
   // Basic send endpoint (used for testing from the web UI)
   router.post('/send', async (req, res) => {
     const userId = requireUserId(req as any);
@@ -123,10 +155,11 @@ async function autoReplyFromWhatsApp(opts: {
 }): Promise<void> {
   const { userId, fromJid, chatId, chatTitle } = opts;
 
-  // Safety: default to not replying to groups automatically.
-  if (isGroupJid(fromJid)) {
-    return;
-  }
+  // Safety: don't reply to groups automatically.
+  if (isGroupJid(fromJid)) return;
+
+  // Check if auto-reply is enabled for this user
+  if (!whatsappWebManager.isAutoReplyEnabled(userId)) return;
 
   // Build message history from mirrored chat.
   const history = await storage.getChatMessages(chatId).then((msgs) => msgs.slice(-20));
@@ -142,12 +175,18 @@ async function autoReplyFromWhatsApp(opts: {
   });
 
   const memRes = new MemorySseResponse();
-  await executeUnifiedChat(unifiedContext, {
-    messages,
-    chatId,
-    userId,
-    messageId: `wa_msg_${Date.now()}`,
-  }, memRes as any as Response);
+
+  // Execute with timeout to prevent hanging
+  await withTimeout(
+    executeUnifiedChat(unifiedContext, {
+      messages,
+      chatId,
+      userId,
+      messageId: `wa_msg_${Date.now()}`,
+    }, memRes as any as Response),
+    AUTO_REPLY_TIMEOUT_MS,
+    'Auto-reply AI'
+  );
 
   const assistantText = memRes.chunks
     .filter(c => c.event === 'chunk' && typeof c.data?.content === 'string')
@@ -199,9 +238,14 @@ async function autoReplyFromWhatsApp(opts: {
   }
 }
 
-// Wire inbound WhatsApp messages into IliaGPT chats (in-app inbox) and auto-reply (AUTOMÁTICO).
+// Wire inbound WhatsApp messages into IliaGPT chats (in-app inbox) and auto-reply.
 whatsappWebManager.on('inbound_message', async (userId: string, msg: { from: string; text: string; messageId?: string; timestamp?: number }) => {
   try {
+    // Deduplicate: skip if already processed
+    if (msg.messageId && whatsappWebManager.markMessageProcessed(msg.messageId)) {
+      return;
+    }
+
     const chatId = safeChatId(userId, msg.from);
 
     let chat = await storage.getChat(chatId);

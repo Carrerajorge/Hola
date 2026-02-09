@@ -35,13 +35,29 @@ interface SocketRecord {
   sock: WASocket;
   auth: AuthenticationState;
   status: WhatsAppWebStatus;
-  qrCount: number;        // how many QR rotations so far
+  qrCount: number;
   reconnectTimer?: ReturnType<typeof setTimeout>;
+  autoReplyEnabled: boolean;
 }
 
 export class WhatsAppWebManager extends EventEmitter {
   private sockets = new Map<string, SocketRecord>();
   private reconnectAttempts = new Map<string, number>();
+  // Track processed message IDs to prevent duplicate auto-replies
+  private processedMessages = new Map<string, number>();
+  private processedMessagesCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    super();
+    // Cleanup old processed message IDs every 5 minutes
+    this.processedMessagesCleanupTimer = setInterval(() => {
+      const cutoff = Date.now() - 5 * 60_000;
+      for (const [key, ts] of this.processedMessages) {
+        if (ts < cutoff) this.processedMessages.delete(key);
+      }
+    }, 5 * 60_000);
+    this.processedMessagesCleanupTimer?.unref?.();
+  }
 
   private sessionDirForUser(userId: string): string {
     const base = path.join(process.cwd(), 'data', 'whatsapp-web');
@@ -65,9 +81,27 @@ export class WhatsAppWebManager extends EventEmitter {
     return this.sockets.get(userId)?.status || { state: 'disconnected' };
   }
 
+  isAutoReplyEnabled(userId: string): boolean {
+    return this.sockets.get(userId)?.autoReplyEnabled ?? true;
+  }
+
+  setAutoReply(userId: string, enabled: boolean): void {
+    const rec = this.sockets.get(userId);
+    if (rec) rec.autoReplyEnabled = enabled;
+  }
+
+  /**
+   * Check if a message ID has already been processed (prevents duplicate replies).
+   * Returns true if already processed.
+   */
+  markMessageProcessed(messageId: string): boolean {
+    if (this.processedMessages.has(messageId)) return true;
+    this.processedMessages.set(messageId, Date.now());
+    return false;
+  }
+
   /**
    * Start a WhatsApp session and wait for the first QR to be ready.
-   * Returns once QR is available, connection is open, or timeout (15s).
    */
   async start(userId: string): Promise<WhatsAppWebStatus> {
     return this.startWithOptions(userId);
@@ -90,13 +124,11 @@ export class WhatsAppWebManager extends EventEmitter {
   async startWithOptions(userId: string, opts?: { phone?: string }): Promise<WhatsAppWebStatus> {
     const existing = this.sockets.get(userId);
     if (existing) {
-      // If already connected or QR/pairing visible, return immediately
       if (existing.status.state === 'connected' ||
           existing.status.state === 'qr' ||
           existing.status.state === 'pairing_code') {
         return existing.status;
       }
-      // If stuck in "connecting", kill and restart
       await this.forceCleanup(userId);
     }
 
@@ -109,7 +141,6 @@ export class WhatsAppWebManager extends EventEmitter {
       state = authResult.state;
       saveCreds = authResult.saveCreds;
     } catch (e) {
-      // Corrupted session — wipe and retry
       console.warn('[WhatsApp] Corrupted session, clearing...', userId);
       this.cleanSessionDir(userId);
       const authResult = await useMultiFileAuthState(this.sessionDirForUser(userId));
@@ -124,7 +155,7 @@ export class WhatsAppWebManager extends EventEmitter {
       version = vResult.version;
     } catch {
       console.warn('[WhatsApp] Could not fetch latest version, using default');
-      version = undefined; // Baileys will use built-in default
+      version = undefined;
     }
 
     const sockOpts: any = {
@@ -149,56 +180,45 @@ export class WhatsAppWebManager extends EventEmitter {
       auth: state,
       status: { state: 'connecting' },
       qrCount: 0,
+      autoReplyEnabled: true,
     };
     this.sockets.set(userId, record);
     this.reconnectAttempts.set(userId, 0);
     this.emit('status', userId, record.status);
 
-    // Create a promise that resolves when QR is ready, connected, or on timeout
+    // Promise that resolves when QR is ready, connected, or on timeout
     const qrReady = new Promise<WhatsAppWebStatus>((resolve) => {
       let resolved = false;
       const done = (s: WhatsAppWebStatus) => {
         if (resolved) return;
         resolved = true;
+        // Clean up the listener to prevent memory leak
+        sock.ev.off('connection.update', onUpdate);
+        if (pairingInterval) clearInterval(pairingInterval);
+        clearTimeout(timeout);
         resolve(s);
       };
 
-      // Timeout — resolve with current status after 15s
       const timeout = setTimeout(() => {
         done(record.status);
       }, 15_000);
+      timeout.unref?.();
 
-      // Listen for QR or connection
       const onUpdate = (update: any) => {
-        if (update.qr) {
-          clearTimeout(timeout);
-          done(record.status); // record.status is already updated by the handler below
-        }
-        if (update.connection === 'open') {
-          clearTimeout(timeout);
-          done(record.status);
-        }
-        if (update.connection === 'close') {
-          clearTimeout(timeout);
+        if (update.qr || update.connection === 'open' || update.connection === 'close') {
           done(record.status);
         }
       };
-
       sock.ev.on('connection.update', onUpdate);
 
-      // Also resolve for pairing codes
+      // For pairing codes, poll until status changes
+      let pairingInterval: ReturnType<typeof setInterval> | null = null;
       if (opts?.phone) {
-        // Pairing code flow will resolve via the async handler below
-        const checkPairing = setInterval(() => {
+        pairingInterval = setInterval(() => {
           if (record.status.state === 'pairing_code' || record.status.state === 'disconnected') {
-            clearInterval(checkPairing);
-            clearTimeout(timeout);
             done(record.status);
           }
         }, 200);
-
-        // Clear interval on timeout
-        setTimeout(() => clearInterval(checkPairing), 15_000);
       }
     });
 
@@ -213,14 +233,13 @@ export class WhatsAppWebManager extends EventEmitter {
         throw new Error('Número de teléfono inválido (mínimo 8 dígitos)');
       }
 
-      // Wait a bit for socket to be ready, then request pairing code
       void (async () => {
         try {
-          // Baileys needs the connection to initialize before requesting a code
+          // Baileys needs socket to initialize before requesting a code
           await new Promise(r => setTimeout(r, 3000));
           const anySock = sock as any;
           if (typeof anySock.requestPairingCode !== 'function') {
-            throw new Error('Función de código de vinculación no disponible');
+            throw new Error('Función de código de vinculación no disponible en esta versión');
           }
           const code = await anySock.requestPairingCode(digitsOnly);
           record.status = { state: 'pairing_code', phone: digitsOnly, code: String(code) };
@@ -238,8 +257,8 @@ export class WhatsAppWebManager extends EventEmitter {
     sock.ev.on('creds.update', async () => {
       try {
         await saveCreds();
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[WhatsApp] Failed to save credentials:', (e as any)?.message);
       }
     });
 
@@ -252,7 +271,6 @@ export class WhatsAppWebManager extends EventEmitter {
         record.status = { state: 'qr', qr };
         this.emit('status', userId, record.status);
 
-        // Baileys rotates QR ~5 times before giving up
         if (record.qrCount > 6) {
           console.warn('[WhatsApp] Too many QR rotations, stopping', userId);
           void this.forceCleanup(userId);
@@ -285,25 +303,23 @@ export class WhatsAppWebManager extends EventEmitter {
         if (shouldReconnect) {
           const attempts = (this.reconnectAttempts.get(userId) || 0) + 1;
           this.reconnectAttempts.set(userId, attempts);
-
-          // Exponential backoff: 2s, 4s, 8s, 16s, max 30s
           const delay = Math.min(2000 * Math.pow(2, attempts - 1), 30_000);
 
           if (attempts <= 5) {
             console.info(`[WhatsApp] Reconnecting in ${delay}ms (attempt ${attempts})`, userId);
             const timer = setTimeout(() => {
               void this.startWithOptions(userId).catch((e) => {
-                console.error('[WhatsApp] Reconnect failed:', e?.message);
+                console.error('[WhatsApp] Reconnect failed:', (e as any)?.message);
               });
             }, delay);
-            // Don't block process exit
             timer.unref?.();
           } else {
             console.warn('[WhatsApp] Max reconnect attempts reached', userId);
+            record.status = { state: 'disconnected', reason: 'No se pudo reconectar tras varios intentos' };
+            this.emit('status', userId, record.status);
             this.reconnectAttempts.delete(userId);
           }
         } else {
-          // Logged out — clean session
           this.cleanSessionDir(userId);
           this.reconnectAttempts.delete(userId);
         }
@@ -317,6 +333,7 @@ export class WhatsAppWebManager extends EventEmitter {
         for (const msg of m.messages) {
           if (msg.key.fromMe) continue;
           const from = msg.key.remoteJid || 'unknown';
+          if (from === 'unknown' || from === 'status@broadcast') continue;
 
           const text =
             (msg.message as any)?.conversation ||
@@ -324,6 +341,8 @@ export class WhatsAppWebManager extends EventEmitter {
             (msg.message as any)?.imageMessage?.caption ||
             (msg.message as any)?.videoMessage?.caption ||
             (msg.message as any)?.documentMessage?.caption ||
+            (msg.message as any)?.buttonsResponseMessage?.selectedDisplayText ||
+            (msg.message as any)?.listResponseMessage?.title ||
             '';
 
           if (!text) continue;
@@ -340,7 +359,6 @@ export class WhatsAppWebManager extends EventEmitter {
       }
     });
 
-    // Wait for QR/connection before returning
     return qrReady;
   }
 
@@ -388,6 +406,31 @@ export class WhatsAppWebManager extends EventEmitter {
     this.cleanSessionDir(userId);
     this.reconnectAttempts.delete(userId);
     this.emit('status', userId, { state: 'disconnected', reason: 'Desconectado por el usuario' } as WhatsAppWebStatus);
+  }
+
+  /**
+   * Graceful shutdown: disconnect all active sessions.
+   */
+  async shutdownAll(): Promise<void> {
+    console.info('[WhatsApp] Shutting down all sessions...');
+    if (this.processedMessagesCleanupTimer) {
+      clearInterval(this.processedMessagesCleanupTimer);
+    }
+    const userIds = [...this.sockets.keys()];
+    for (const userId of userIds) {
+      try {
+        const rec = this.sockets.get(userId);
+        if (rec) {
+          try { rec.sock.end(new Error('Server shutdown')); } catch { /* ignore */ }
+          this.sockets.delete(userId);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    this.reconnectAttempts.clear();
+    this.processedMessages.clear();
+    console.info('[WhatsApp] All sessions closed');
   }
 
   async sendText(userId: string, toJid: string, text: string): Promise<void> {
