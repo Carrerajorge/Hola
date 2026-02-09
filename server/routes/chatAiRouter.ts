@@ -690,7 +690,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
 
       // DEBUG: Log all incoming request parameters for docTool verification
-      console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}, forceWebSearch: ${forceWebSearch}`);
+      // Avoid externally-controlled format strings: don't interpolate user-controlled values into
+      // the first console argument (console uses util.format semantics).
+      console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -725,7 +727,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }
-          console.log(`[SSE] Connection closed (early handler): ${requestId}`);
+          console.log("[SSE] Connection closed (early handler)", { requestId });
         });
       }
 
@@ -760,7 +762,10 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           const doWeb = requestedWebSearch ? !doAcademic : needsWebSearch(userQuery);
 
           if (doAcademic) {
-            console.log(`[Stream] 🎓 Academic search ${requestedWebSearch ? "requested" : "auto"} for: "${userQuery.slice(0, 60)}..."`);
+            console.log("[Stream] Academic search", {
+              mode: requestedWebSearch ? "requested" : "auto",
+              queryPreview: userQuery.slice(0, 60),
+            });
             try {
               const engineResult = await academicEngineV3.search({
                 query: userQuery,
@@ -791,13 +796,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   publishedDate: paper.year ? `${paper.year}` : null
                 }));
 
-                console.log(`[Stream] 🎓 Academic search found ${engineResult.papers.length} papers`);
+                console.log("[Stream] Academic search complete", { papers: engineResult.papers.length });
               }
             } catch (academicError) {
               console.error('[Stream] Academic search error:', academicError);
             }
           } else if (doWeb) {
-            console.log(`[Stream] 🌐 Web search ${requestedWebSearch ? "requested" : "auto"} for: "${userQuery.slice(0, 60)}..."`);
+            console.log("[Stream] Web search", {
+              mode: requestedWebSearch ? "requested" : "auto",
+              queryPreview: userQuery.slice(0, 60),
+            });
             try {
               const searchResults = await searchWeb(userQuery, requestedWebSearch ? 10 : 10);
 
@@ -822,7 +830,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   publishedDate: r.publishedDate || null
                 }));
 
-                console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
+                console.log("[Stream] Web search complete", { results: searchResults.results.length });
               }
             } catch (webError) {
               console.error('[Stream] Web search error:', webError);
@@ -1515,9 +1523,17 @@ ${attachmentContext}`;
                     extractedText,
                     metadata: { fileId: att.fileId || att.id },
                   });
-                  console.log(`[Stream] Persisted conversationDocument: ${att.name} → chat ${effectiveChatIdForPersistence}, message ${userMsg.id}`);
+                  console.log("[Stream] Persisted conversationDocument", {
+                    fileName: att.name,
+                    chatId: effectiveChatIdForPersistence,
+                    messageId: userMsg.id,
+                  });
                 } catch (docError) {
-                  console.error(`[Stream] Failed to persist conversationDocument for ${att.name}:`, docError);
+                  console.error("[Stream] Failed to persist conversationDocument", {
+                    fileName: att.name,
+                    chatId: effectiveChatIdForPersistence,
+                    docError,
+                  });
                 }
               }
             }
@@ -1569,9 +1585,16 @@ ${attachmentContext}`;
               extractedText,
               metadata: { fileId: att.fileId || att.id },
             });
-            console.log(`[Stream] Persisted conversationDocument (run): ${att.name} → chat ${effectiveChatIdForPersistence}`);
+            console.log("[Stream] Persisted conversationDocument (run)", {
+              fileName: att.name,
+              chatId: effectiveChatIdForPersistence,
+            });
           } catch (docError) {
-            console.error(`[Stream] Failed to persist conversationDocument for ${att.name} (run):`, docError);
+            console.error("[Stream] Failed to persist conversationDocument (run)", {
+              fileName: att.name,
+              chatId: effectiveChatIdForPersistence,
+              docError,
+            });
           }
         }
       }

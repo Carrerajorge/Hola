@@ -269,7 +269,9 @@ export async function getConversationContext(
         return enforceTokenBudget(deduped, opts);
 
     } catch (error) {
-        console.error(`[ConversationMemory] Error fetching history for ${chatId}:`, error);
+        // Avoid externally-controlled format string: do not interpolate user-controlled values
+        // into the first console argument (console uses util.format semantics).
+        console.error("[ConversationMemory] Error fetching history", { chatId, error });
         // Fallback to client messages only
         return enforceTokenBudget(clientMessages, opts);
     }

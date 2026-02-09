@@ -522,10 +522,10 @@ export class SemanticMemoryStore {
 
             // Extract explicit facts
             const factPatterns = [
-                /(?:me llamo|my name is|soy)\s+(\w+)/i,
-                /(?:trabajo en|i work at)\s+(.+?)(?:\.|,|$)/i,
-                /(?:vivo en|i live in)\s+(.+?)(?:\.|,|$)/i,
-                /(?:mi email es|my email is)\s+([\w@.]+)/i
+                /(?:me llamo|my name is|soy)\s+([^\n\r\t.,]{1,40})/i,
+                /(?:trabajo en|i work at)\s+([^\n\r\t.,]{1,120})/i,
+                /(?:vivo en|i live in)\s+([^\n\r\t.,]{1,120})/i,
+                /(?:mi email es|my email is)\s+([\w@.]{3,200})/i
             ];
 
             for (const pattern of factPatterns) {
@@ -541,9 +541,9 @@ export class SemanticMemoryStore {
 
             // Extract preferences
             const prefPatterns = [
-                /(?:prefiero|i prefer|me gusta)\s+(.+?)(?:\.|,|$)/i,
-                /(?:siempre quiero|always want)\s+(.+?)(?:\.|,|$)/i,
-                /(?:no me gusta|i don't like)\s+(.+?)(?:\.|,|$)/i
+                /(?:prefiero|i prefer|me gusta)\s+([^\n\r\t.,]{1,160})/i,
+                /(?:siempre quiero|always want)\s+([^\n\r\t.,]{1,160})/i,
+                /(?:no me gusta|i don't like)\s+([^\n\r\t.,]{1,160})/i
             ];
 
             for (const pattern of prefPatterns) {
@@ -559,9 +559,9 @@ export class SemanticMemoryStore {
 
             // Extract instructions
             const instrPatterns = [
-                /(?:recuerda que|remember that)\s+(.+?)(?:\.|$)/i,
-                /(?:siempre|always)\s+(.+?)(?:\.|$)/i,
-                /(?:nunca|never)\s+(.+?)(?:\.|$)/i
+                /(?:recuerda que|remember that)\s+([^\n\r\t.]{1,240})/i,
+                /(?:siempre|always)\s+([^\n\r\t.]{1,240})/i,
+                /(?:nunca|never)\s+([^\n\r\t.]{1,240})/i
             ];
 
             for (const pattern of instrPatterns) {
