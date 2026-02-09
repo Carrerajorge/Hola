@@ -47,6 +47,10 @@ type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'au
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
+    // Guard: don't write to a destroyed or finished response
+    const r = res as any;
+    if (r.writableEnded || r.destroyed) return false;
+
     const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     res.write(chunk);
     if (typeof (res as unknown as { flush: Function }).flush === 'function') {
@@ -713,6 +717,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           latencyMode,
           timestamp: Date.now(),
         });
+
+        // Register connection-close handler as early as possible so every
+        // subsequent writeSse can be guarded by isConnectionClosed.
+        req.on("close", () => {
+          isConnectionClosed = true;
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
+          console.log(`[SSE] Connection closed (early handler): ${requestId}`);
+        });
       }
 
       // Web/Academic search is gated by user settings (webSearchAuto) unless explicitly requested.
@@ -728,14 +742,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         ? !!forceWebSearch
         : (requestedWebSearch || allowAutoSearch);
 
-      if (shouldSearch && userQuery) {
+      if (shouldSearch && userQuery && !isConnectionClosed) {
         // Emit thinking event so the user sees progress while search runs
-        writeSse(res, 'thinking', {
-          step: 'searching',
-          message: 'Buscando fuentes relevantes...',
-          requestId,
-          timestamp: Date.now(),
-        });
+        if (!isConnectionClosed) {
+          writeSse(res, 'thinking', {
+            step: 'searching',
+            message: 'Buscando fuentes relevantes...',
+            requestId,
+            timestamp: Date.now(),
+          });
+        }
         try {
           const { needsAcademicSearch, needsWebSearch, searchWeb } = await import('../services/webSearch');
           const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
@@ -1144,13 +1160,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      req.on("close", () => {
-        isConnectionClosed = true;
-        if (heartbeatInterval) {
-          clearInterval(heartbeatInterval);
-        }
-        console.log(`[SSE] Connection closed: ${requestId}`);
-      });
+      // Idempotent close handler: the early SSE handler above may already
+      // have registered one; this ensures coverage for the non-early path.
+      if (!res.headersSent) {
+        req.on("close", () => {
+          isConnectionClosed = true;
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
+          console.log(`[SSE] Connection closed (late handler): ${requestId}`);
+        });
+      }
 
       heartbeatInterval = setInterval(() => {
         if (!isConnectionClosed) {
@@ -1657,17 +1677,22 @@ ${attachmentContext}`;
       //  fast → hard cap to keep response short & snappy
       //  deep → use the question-classification-derived limit
       const resolvedLane = unifiedContext?.resolvedLane || 'fast';
+      const safeMaxTokens = Number.isFinite(effectiveMaxTokens) && effectiveMaxTokens > 0
+        ? effectiveMaxTokens
+        : 1000; // safety floor
       const laneMaxTokens = resolvedLane === 'fast'
-        ? Math.min(effectiveMaxTokens, 400)
-        : effectiveMaxTokens;
+        ? Math.min(safeMaxTokens, 400)
+        : safeMaxTokens;
 
       // Emit thinking event so user sees we're about to generate
-      writeSse(res, 'thinking', {
-        step: 'generating',
-        message: resolvedLane === 'fast' ? 'Generando respuesta...' : 'Generando respuesta detallada...',
-        requestId,
-        timestamp: Date.now(),
-      });
+      if (!isConnectionClosed) {
+        writeSse(res, 'thinking', {
+          step: 'generating',
+          message: resolvedLane === 'fast' ? 'Generando respuesta...' : 'Generando respuesta detallada...',
+          requestId,
+          timestamp: Date.now(),
+        });
+      }
 
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
@@ -1687,6 +1712,10 @@ ${attachmentContext}`;
       // overhead. The frontend already does RAF throttling, so this
       // matches perfectly.
       const writer = new SseBufferedWriter(res, effectiveRunId, 30, 512);
+
+      // Cleanup writer timer if the client disconnects mid-stream
+      const onClose = () => writer.destroy();
+      req.once("close", onClose);
 
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
@@ -1720,8 +1749,9 @@ ${attachmentContext}`;
         }
       }
 
-      // Ensure buffer is fully flushed after loop
+      // Ensure buffer is fully flushed after loop and clean up listener
       writer.finalize();
+      req.removeListener("close", onClose);
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.

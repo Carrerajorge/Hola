@@ -57,9 +57,18 @@ export class SseBufferedWriter {
     private maxBufferBytes = 512,
   ) {}
 
+  /** True when the underlying response can no longer accept writes. */
+  private get isWritable(): boolean {
+    if (this.closed) return false;
+    // Express/Node responses expose `writableEnded` or `destroyed`
+    const r = this.res as any;
+    if (r.writableEnded || r.destroyed || r.closed) return false;
+    return true;
+  }
+
   /** Write a chunk delta. Batched and flushed on interval or size threshold. */
   pushDelta(content: string): void {
-    if (this.closed) return;
+    if (!this.isWritable) return;
     this.buffer += content;
 
     // Approximate byte length (UTF-8: most chars are 1 byte, some up to 4)
@@ -78,17 +87,15 @@ export class SseBufferedWriter {
 
   /** Force-flush any buffered content immediately. */
   flush(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
-    if (this.buffer.length === 0 || this.closed) return;
+    this.clearTimer();
+    if (this.buffer.length === 0 || !this.isWritable) return;
 
     this.seq++;
     writeSse(this.res, 'chunk', {
       content: this.buffer,
       sequence: this.seq,
       runId: this.runId,
+      timestamp: Date.now(),
     });
     this.buffer = '';
   }
@@ -97,7 +104,22 @@ export class SseBufferedWriter {
   finalize(): number {
     this.flush();
     this.closed = true;
+    this.clearTimer(); // safety: ensure no dangling timer
     return this.seq;
+  }
+
+  /** Cancel any pending flush timer (idempotent). */
+  destroy(): void {
+    this.closed = true;
+    this.clearTimer();
+    this.buffer = '';
+  }
+
+  private clearTimer(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
   }
 
   get sequenceCount(): number {
@@ -129,10 +151,14 @@ export function resolveLatencyLane(
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
+    // Guard: don't write to a destroyed or finished response
+    const r = res as any;
+    if (r.writableEnded || r.destroyed) return false;
+
     const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     res.write(chunk);
-    if (typeof (res as any).flush === 'function') {
-      (res as any).flush();
+    if (typeof (r).flush === 'function') {
+      (r).flush();
     }
     return true;
   } catch (err) {
@@ -370,16 +396,20 @@ export async function executeUnifiedChat(
 ): Promise<void> {
   const { requestSpec, runId, isAgenticMode, resolvedLane } = context;
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Transfer-Encoding", "chunked");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.setHeader("X-Run-Id", runId);
-  res.setHeader("X-Intent", requestSpec.intent);
-  res.setHeader("X-Agentic-Mode", String(isAgenticMode));
-  res.setHeader("X-Latency-Lane", resolvedLane);
-  res.flushHeaders();
+  // Guard: chatAiRouter already opens SSE early for low-TTFT.
+  // Only set headers if they haven't been sent yet.
+  if (!res.headersSent) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Transfer-Encoding", "chunked");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("X-Run-Id", runId);
+    res.setHeader("X-Intent", requestSpec.intent);
+    res.setHeader("X-Agentic-Mode", String(isAgenticMode));
+    res.setHeader("X-Latency-Lane", resolvedLane);
+    res.flushHeaders();
+  }
 
   // Handle WhatsApp-style confirmations: user replies with CONFIRM or CANCEL
   const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
@@ -602,7 +632,10 @@ export async function executeUnifiedChat(
     ]).catch(() => { });
   }
 
-  res.end();
+  // Guard: don't call end() if the response is already finished
+  if (!(res as any).writableEnded) {
+    res.end();
+  }
 }
 
 function buildSystemPrompt(requestSpec: RequestSpec): string {

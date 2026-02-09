@@ -300,20 +300,25 @@ export function useStreamChat(deps: StreamChatDeps) {
                 }
               }
 
-              // Handle AI state changes from events
-              if (currentEventType === "thinking") {
+              // Handle AI state changes from events.
+              // Guard: skip state updates if the stream was aborted or chat switched
+              // to avoid setting stale states on a dead stream.
+              const isStale = combinedSignal.aborted ||
+                (chatId && activeChatIdRef.current !== chatId);
+
+              if (!isStale && currentEventType === "thinking") {
                 // Server is doing heavy I/O (search, context load) — keep thinking state
                 setAiState("thinking");
                 onAiStateChange?.("thinking");
               }
 
-              if (currentEventType === "context") {
+              if (!isStale && currentEventType === "context") {
                 // Enriched metadata arrived — switch to responding
                 setAiState("responding");
                 onAiStateChange?.("responding");
               }
 
-              if (currentEventType === "production_start") {
+              if (!isStale && currentEventType === "production_start") {
                 setAiState("agent_working");
                 onAiStateChange?.("agent_working");
               }

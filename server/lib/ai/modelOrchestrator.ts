@@ -146,7 +146,7 @@ class ModelRouter extends EventEmitter {
         if (lane === 'deep') {
             const proOrUltra = candidates
                 .filter(m => m.tier === 'ultra' || m.tier === 'pro')
-                .sort((a, b) => a.reliabilityScore > b.reliabilityScore ? -1 : 1);
+                .sort((a, b) => (b.reliabilityScore ?? 0) - (a.reliabilityScore ?? 0));
             if (proOrUltra.length > 0) return proOrUltra[0];
         }
 
@@ -174,24 +174,26 @@ class ModelRouter extends EventEmitter {
     }
 
     private meetsRequirements(model: ModelConfig, requirements: PromptRequest['requirements']): boolean {
-        if (requirements.minContext && model.contextWindow < requirements.minContext) return false;
-        if (requirements.maxLatency && model.latencyScore > requirements.maxLatency) return false;
+        if (!model || !requirements) return false;
+        if (requirements.minContext && (model.contextWindow ?? 0) < requirements.minContext) return false;
+        if (requirements.maxLatency && (model.latencyScore ?? Infinity) > requirements.maxLatency) return false;
         if (requirements.features) {
             for (const feature of requirements.features) {
-                if (!model.capabilities[feature]) return false;
+                if (!model.capabilities?.[feature]) return false;
             }
         }
         return true;
     }
 
     private analyzeComplexity(messages: any[]): 'low' | 'medium' | 'high' {
+        if (!messages || messages.length === 0) return 'low';
         const totalLength = JSON.stringify(messages).length;
 
         // Heuristic 1: Length
         if (totalLength > 10000) return 'high';
 
         // Heuristic 2: Keywords
-        const text = messages.map(m => m.content).join(' ').toLowerCase();
+        const text = messages.map(m => m.content || '').join(' ').toLowerCase();
         const complexKeywords = ['analyze', 'synthesize', 'compare', 'code', 'refactor', 'architect'];
         const hits = complexKeywords.filter(k => text.includes(k)).length;
 
