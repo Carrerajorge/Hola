@@ -93,14 +93,12 @@ export class EnhancedPolicyEngine implements PolicyEngine {
   }
 
   canUseTool(args: PolicyCheckArgs): PolicyDecision {
-    for (const rule of this.rules) {
-      try {
-        if (rule.condition(args)) {
-          return rule.decision;
-        }
-      } catch {
-        continue;
-      }
+    // HARD deny checks first — these cannot be overridden by custom rules
+    if (args.agent.denyTools?.includes(args.toolName)) {
+      return {
+        allow: false,
+        reason: `Tool explicitly denied for agent: ${args.toolName} (agent: ${args.agent.id})`,
+      };
     }
 
     if (!args.agent.allowTools.includes(args.toolName) && !args.agent.allowTools.includes("*")) {
@@ -110,45 +108,7 @@ export class EnhancedPolicyEngine implements PolicyEngine {
       };
     }
 
-    if (args.agent.denyTools?.includes(args.toolName)) {
-      return {
-        allow: false,
-        reason: `Tool explicitly denied for agent: ${args.toolName} (agent: ${args.agent.id})`,
-      };
-    }
-
-    const requiredCaps = args.agent.requiredCapabilities ?? [];
-    if (requiredCaps.length > 0) {
-      const userCaps = new Set([
-        ...(args.user?.capabilities ?? []),
-        ...(args.user?.roles ?? []),
-      ]);
-
-      for (const cap of requiredCaps) {
-        if (!userCaps.has(cap) && !userCaps.has("all")) {
-          return {
-            allow: false,
-            reason: `Missing required capability: ${cap}`,
-          };
-        }
-      }
-    }
-
-    const toolTags = new Set(args.tool?.tags ?? []);
-    for (const [tag, requiredRoles] of Array.from(this.toolTagRequirements.entries())) {
-      if (toolTags.has(tag)) {
-        const userRoles = new Set(args.user?.roles ?? []);
-        const hasRequiredRole = requiredRoles.some((r) => userRoles.has(r));
-        
-        if (!hasRequiredRole) {
-          return {
-            allow: false,
-            reason: `Tool with tag "${tag}" requires one of roles: ${requiredRoles.join(", ")}`,
-          };
-        }
-      }
-    }
-
+    // Plan-based denials (also hard denials)
     if (args.user?.plan) {
       const planRole = this.roles.get(args.user.plan);
       if (planRole) {
@@ -163,6 +123,48 @@ export class EnhancedPolicyEngine implements PolicyEngine {
           return {
             allow: false,
             reason: `Tool not allowed for plan "${args.user.plan}": ${args.toolName}`,
+          };
+        }
+      }
+    }
+
+    // Custom rules (can only further restrict, not override hard denials above)
+    for (const rule of this.rules) {
+      try {
+        if (rule.condition(args)) {
+          return rule.decision;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    // Capability checks using resolved capabilities from roles
+    const userCaps = args.user ? this.getUserCapabilities(args.user) : new Set<string>();
+
+    const requiredCaps = args.agent.requiredCapabilities ?? [];
+    if (requiredCaps.length > 0) {
+      for (const cap of requiredCaps) {
+        if (!userCaps.has(cap) && !userCaps.has("all")) {
+          return {
+            allow: false,
+            reason: `Missing required capability: ${cap}`,
+          };
+        }
+      }
+    }
+
+    // Tool tag requirements
+    const toolTags = new Set(args.tool?.tags ?? []);
+    for (const [tag, requiredRoles] of Array.from(this.toolTagRequirements.entries())) {
+      if (toolTags.has(tag)) {
+        const userRoles = new Set(args.user?.roles ?? []);
+        const hasRequiredRole = requiredRoles.some((r) => userRoles.has(r));
+
+        if (!hasRequiredRole) {
+          return {
+            allow: false,
+            reason: `Tool with tag "${tag}" requires one of roles: ${requiredRoles.join(", ")}`,
           };
         }
       }

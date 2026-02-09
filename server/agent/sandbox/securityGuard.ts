@@ -1,4 +1,5 @@
 import * as path from "path";
+import * as fs from "fs";
 import * as crypto from "crypto";
 import { SecurityAnalysis, SecurityAction, ThreatLevel, PathSecurityResult, SecurityStats } from "./types";
 
@@ -77,7 +78,7 @@ export class SecurityGuard {
     "mkdir", "touch", "cp", "mv", "file", "stat",
     "tar", "gzip", "gunzip", "zip", "unzip", "bzip2",
     "python", "python3", "pip", "pip3", "node", "npm", "npx",
-    "git", "curl", "wget", "ssh", "scp", "rsync",
+    "git",
     "vim", "nano", "code", "clear", "history", "alias",
     "export", "env", "printenv", "source", "man", "help",
   ]);
@@ -203,6 +204,27 @@ export class SecurityGuard {
         resolvedPath = path.resolve(this.sandboxRoot, filePath);
       }
 
+      // Resolve symlinks to prevent sandbox escape via symbolic links
+      try {
+        const realSandboxRoot = fs.realpathSync(this.sandboxRoot);
+        if (fs.existsSync(resolvedPath)) {
+          resolvedPath = fs.realpathSync(resolvedPath);
+        }
+        // Re-check containment after symlink resolution
+        const isWithinAfterResolve = resolvedPath.startsWith(realSandboxRoot + "/") || resolvedPath === realSandboxRoot;
+        if (!isWithinAfterResolve) {
+          return {
+            path: filePath,
+            isAllowed: false,
+            isWithinSandbox: false,
+            resolvedPath,
+            reason: "Ruta resuelve fuera del sandbox (posible symlink)",
+          };
+        }
+      } catch {
+        // If realpath fails (e.g., file doesn't exist yet), continue with lexical check
+      }
+
       for (const protected_ of SecurityGuard.PROTECTED_DIRECTORIES) {
         if (
           resolvedPath === protected_ ||
@@ -254,6 +276,8 @@ export class SecurityGuard {
     return { safe: true, reason: "" };
   }
 
+  private static readonly MAX_BLOCKED_HISTORY = 1000;
+
   private logBlocked(command: string, reason: string): void {
     const entry: BlockedEntry = {
       command,
@@ -262,6 +286,9 @@ export class SecurityGuard {
       commandHash: crypto.createHash("sha256").update(command).digest("hex").substring(0, 16),
     };
     this.blockedHistory.push(entry);
+    if (this.blockedHistory.length > SecurityGuard.MAX_BLOCKED_HISTORY) {
+      this.blockedHistory.shift();
+    }
     console.warn(`[SecurityGuard] Comando bloqueado:`, entry);
   }
 
@@ -320,9 +347,11 @@ export class SecurityGuard {
 
   private containsShellMetacharacters(command: string): boolean {
     const DANGEROUS_CHARS = /[;&|`$(){}[\]<>\\]/;
-    const inQuotes = (text: string): string => {
-      return text.replace(/'[^']*'|"[^"]*"/g, "");
+    // Only strip single-quoted strings (no shell expansion inside single quotes).
+    // Double-quoted strings still allow $() and `` expansion, so they must NOT be stripped.
+    const stripSafeQuotes = (text: string): string => {
+      return text.replace(/'[^']*'/g, "");
     };
-    return DANGEROUS_CHARS.test(inQuotes(command));
+    return DANGEROUS_CHARS.test(stripSafeQuotes(command));
   }
 }

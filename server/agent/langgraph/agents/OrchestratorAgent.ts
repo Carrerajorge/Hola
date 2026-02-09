@@ -134,14 +134,29 @@ Return a JSON plan with:
   private async executePlan(plan: ExecutionPlan): Promise<StepResult[]> {
     const results: StepResult[] = [];
     const completedSteps = new Set<string>();
+    const failedSteps = new Set<string>();
 
     for (const group of plan.parallelGroups) {
       const groupSteps = plan.steps.filter(s => group.includes(s.id));
 
       const groupPromises = groupSteps.map(async (step) => {
-        const canExecute = step.dependencies.every(d => completedSteps.has(d));
-        if (!canExecute) {
-          return { stepId: step.id, success: false, error: "Dependencies not met" };
+        // Check that all dependencies completed successfully (not just completed)
+        const unmetDeps = step.dependencies.filter(d => !completedSteps.has(d));
+        const failedDeps = step.dependencies.filter(d => failedSteps.has(d));
+        if (unmetDeps.length > 0 || failedDeps.length > 0) {
+          failedSteps.add(step.id);
+          return { stepId: step.id, success: false, error: failedDeps.length > 0 ? "Upstream dependency failed" : "Dependencies not met" };
+        }
+
+        // Prevent infinite recursion: never delegate to OrchestratorAgent itself
+        if (step.agent === "OrchestratorAgent") {
+          const directResult = await this.executeDirectly(step);
+          if (directResult.success) {
+            completedSteps.add(step.id);
+          } else {
+            failedSteps.add(step.id);
+          }
+          return directResult;
         }
 
         const agent = AGENT_REGISTRY.get(step.agent);
@@ -155,12 +170,21 @@ Return a JSON plan with:
             retries: 0,
             maxRetries: 3,
           });
-          completedSteps.add(step.id);
+          // Only mark as completed if actually successful
+          if (result.success) {
+            completedSteps.add(step.id);
+          } else {
+            failedSteps.add(step.id);
+          }
           return { stepId: step.id, success: result.success, output: result.output, error: result.error };
         }
 
         const directResult = await this.executeDirectly(step);
-        completedSteps.add(step.id);
+        if (directResult.success) {
+          completedSteps.add(step.id);
+        } else {
+          failedSteps.add(step.id);
+        }
         return directResult;
       });
 

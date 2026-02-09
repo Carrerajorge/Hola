@@ -131,7 +131,17 @@ function extractKeyTerms(topic: string): string[] {
   return terms;
 }
 
+const DOI_CACHE_MAX_SIZE = 5000;
 export const doiCache = new Map<string, boolean>();
+
+function doiCacheSet(doi: string, valid: boolean): void {
+  if (doiCache.size >= DOI_CACHE_MAX_SIZE) {
+    // Evict oldest entry (first key in Map insertion order)
+    const firstKey = doiCache.keys().next().value;
+    if (firstKey !== undefined) doiCache.delete(firstKey);
+  }
+  doiCache.set(doi, valid);
+}
 
 export async function runAcademicPipeline(
   topic: string,
@@ -512,7 +522,7 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
 
   const summary: Record<string, any> = {
     "Total Articles": articles.length,
-    "Target": 50,
+    "Target": cfg.targetCount,
     "Year Range": `${Math.min(...articles.map(a => a.year || 2020))}-${Math.max(...articles.map(a => a.year || 2025))}`,
     "Search Topic": topic,
     "Generated At": new Date().toISOString(),

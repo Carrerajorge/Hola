@@ -61,12 +61,15 @@ export class WorkflowEngine {
 
     const remaining = new Map(steps.map((s) => [s.id, s]));
     const done = new Set<string>();
+    const failed = new Set<string>();
     const results: Record<string, unknown> = {};
     const errors: Record<string, string> = {};
     const currentlyRunning = new Set<string>();
 
     const semaphore = new Semaphore(this.concurrency);
-    const canRun = (s: WorkflowStep) => (s.dependsOn ?? []).every((d) => done.has(d));
+    // A step can run only if all its dependencies completed WITHOUT failure
+    const canRun = (s: WorkflowStep) =>
+      (s.dependsOn ?? []).every((d) => done.has(d) && !failed.has(d));
 
     const emitProgress = () => {
       const progress: WorkflowProgress = {
@@ -130,6 +133,7 @@ export class WorkflowEngine {
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
             errors[step.id] = errMsg;
+            failed.add(step.id);
 
             ctx.events.emit("workflow.step.failed", {
               workflowId,
@@ -139,6 +143,16 @@ export class WorkflowEngine {
               traceId: ctx.traceId,
               requestId: ctx.requestId,
             });
+
+            // Skip all downstream steps that depend on this failed step
+            for (const [remainingId, remainingStep] of Array.from(remaining.entries())) {
+              if (remainingStep.dependsOn?.includes(step.id)) {
+                remaining.delete(remainingId);
+                done.add(remainingId);
+                failed.add(remainingId);
+                errors[remainingId] = `Skipped: upstream dependency "${step.id}" failed`;
+              }
+            }
           } finally {
             done.add(step.id);
             currentlyRunning.delete(step.id);
