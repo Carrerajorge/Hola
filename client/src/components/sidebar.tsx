@@ -658,7 +658,7 @@ export function Sidebar({
             className={cn(
               "h-2.5 w-2.5 rounded-full",
               waStatus.state === 'connected' && 'bg-green-500',
-              (waStatus.state === 'connecting' || waStatus.state === 'qr') && 'bg-amber-500',
+              (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500',
               waStatus.state === 'disconnected' && 'bg-red-500'
             )}
             title={`WhatsApp: ${waStatus.state}`}

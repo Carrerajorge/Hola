@@ -40,12 +40,31 @@ export function createWhatsAppWebRouter(): Router {
     res.json({ success: true, status });
   });
 
+  // Start connection — waits for QR to be ready before responding
   router.post('/connect/start', async (req, res) => {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    const status = await whatsappWebManager.startWithOptions(userId);
-    res.json({ success: true, status });
+    try {
+      const status = await whatsappWebManager.startWithOptions(userId);
+      res.json({ success: true, status });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || 'Error al iniciar conexión' });
+    }
+  });
+
+  // Force restart — kills existing connection and starts fresh
+  router.post('/connect/restart', async (req, res) => {
+    const userId = requireUserId(req as any);
+    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+
+    try {
+      const { phone } = (req.body || {}) as { phone?: string };
+      const status = await whatsappWebManager.restart(userId, phone ? { phone: String(phone) } : undefined);
+      res.json({ success: true, status });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || 'Error al reiniciar conexión' });
+    }
   });
 
   // Generate pairing code (link by phone number)
@@ -54,13 +73,13 @@ export function createWhatsAppWebRouter(): Router {
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
     const { phone } = (req.body || {}) as { phone?: string };
-    if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+    if (!phone) return res.status(400).json({ success: false, error: 'Se requiere número de teléfono' });
 
     try {
-      const status = await whatsappWebManager.startWithOptions(userId, { phone: String(phone) });
+      const status = await whatsappWebManager.restart(userId, { phone: String(phone) });
       res.json({ success: true, status });
     } catch (e: any) {
-      res.status(400).json({ success: false, error: e?.message || 'Failed to generate pairing code' });
+      res.status(400).json({ success: false, error: e?.message || 'No se pudo generar el código de vinculación' });
     }
   });
 
@@ -68,8 +87,12 @@ export function createWhatsAppWebRouter(): Router {
     const userId = requireUserId(req as any);
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
-    await whatsappWebManager.disconnect(userId);
-    res.json({ success: true });
+    try {
+      await whatsappWebManager.disconnect(userId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || 'Error al desconectar' });
+    }
   });
 
   // Basic send endpoint (used for testing from the web UI)
@@ -78,10 +101,14 @@ export function createWhatsAppWebRouter(): Router {
     if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
 
     const { to, text } = req.body || {};
-    if (!to || !text) return res.status(400).json({ success: false, error: 'to and text are required' });
+    if (!to || !text) return res.status(400).json({ success: false, error: 'Se requiere destinatario y texto' });
 
-    await whatsappWebManager.sendText(userId, String(to), String(text));
-    res.json({ success: true });
+    try {
+      await whatsappWebManager.sendText(userId, String(to), String(text));
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || 'Error al enviar mensaje' });
+    }
   });
 
   return router;

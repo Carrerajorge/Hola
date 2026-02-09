@@ -1,7 +1,8 @@
 export type WhatsAppWebStatus =
-  | { state: 'disconnected' }
+  | { state: 'disconnected'; reason?: string }
   | { state: 'connecting' }
   | { state: 'qr'; qr: string }
+  | { state: 'pairing_code'; phone: string; code: string }
   | { state: 'connected'; me?: { id?: string; name?: string } };
 
 export type WhatsAppWebMirroredChat = {
@@ -109,7 +110,7 @@ class WhatsAppWebEventStream {
     this.es.addEventListener('error', () => {
       // EventSource errors are intentionally opaque; it will retry automatically.
       if (this.lastError) return;
-      this.lastError = 'WhatsApp stream connection lost. Reconnecting...';
+      this.lastError = 'Conexión al stream perdida. Reconectando...';
       for (const l of this.listeners) l.onError?.(this.lastError);
     });
   }
