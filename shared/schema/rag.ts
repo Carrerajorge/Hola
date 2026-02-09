@@ -4,7 +4,7 @@ import {
     index, uniqueIndex, boolean, real, customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { users } from "./auth";
 import { chats } from "./chat";
 import { vector } from "./common";
