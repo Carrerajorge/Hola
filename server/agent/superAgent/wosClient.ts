@@ -24,10 +24,44 @@ export interface WosSearchResult {
 }
 
 const WOS_STARTER_API_BASE = "https://api.clarivate.com/apis/wos-starter/v1";
+const REQUEST_TIMEOUT_MS = 20000;
 
 export function isWosConfigured(): boolean {
   const key = process.env.WOS_API_KEY;
   return typeof key === "string" && key.trim().length > 0;
+}
+
+/**
+ * Sanitize and harden WoS search query input
+ */
+function sanitizeWosQuery(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let q = raw;
+  // Strip HTML/script tags
+  q = q.replace(/<[^>]*>/g, "");
+  // Remove null bytes and control characters
+  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Normalize unicode
+  q = q.normalize("NFC");
+  // Collapse whitespace
+  q = q.replace(/\s+/g, " ").trim();
+  // Limit length
+  if (q.length > 500) q = q.substring(0, 500).trim();
+  return q;
+}
+
+/**
+ * Fetch with timeout for WoS API calls
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function searchWos(
@@ -45,22 +79,33 @@ export async function searchWos(
   }
 
   const { maxResults = 25, startYear, endYear, documentType } = options;
+  const clampedMax = Math.max(1, Math.min(50, maxResults));
   const startTime = Date.now();
 
-  const translatedQuery = translateToEnglish(query);
-  console.log(`[WoS] Original query: "${query}"`);
+  // Sanitize query input
+  const sanitized = sanitizeWosQuery(query);
+  if (!sanitized) {
+    return { articles: [], totalResults: 0, query, searchTime: 0 };
+  }
+
+  const translatedQuery = translateToEnglish(sanitized);
+  console.log(`[WoS] Original query: "${sanitized}"`);
   console.log(`[WoS] Translated query: "${translatedQuery}"`);
 
   let searchQuery = `TS=(${translatedQuery})`;
-  
+
+  // Validate year range
+  const currentYear = new Date().getFullYear();
   if (startYear && endYear) {
-    searchQuery += ` AND PY=(${startYear}-${endYear})`;
+    const clampedStart = Math.max(1900, Math.min(currentYear + 1, startYear));
+    const clampedEnd = Math.max(clampedStart, Math.min(currentYear + 1, endYear));
+    searchQuery += ` AND PY=(${clampedStart}-${clampedEnd})`;
   }
 
   const params = new URLSearchParams({
     db: "WOS",
     q: searchQuery,
-    limit: String(Math.min(maxResults, 50)),
+    limit: String(clampedMax),
     page: "1",
   });
 
@@ -68,7 +113,7 @@ export async function searchWos(
   console.log(`[WoS] Search URL: ${searchUrl}`);
 
   try {
-    const response = await fetch(searchUrl, {
+    const response = await fetchWithTimeout(searchUrl, {
       headers: {
         "X-ApiKey": apiKey,
         "Accept": "application/json",

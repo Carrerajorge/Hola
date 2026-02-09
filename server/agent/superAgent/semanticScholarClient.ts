@@ -5,6 +5,25 @@ const RATE_LIMIT_MS = 1000;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
 
+/**
+ * Sanitize and harden Semantic Scholar search query input
+ */
+function sanitizeS2Query(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let q = raw;
+  // Strip HTML/script tags
+  q = q.replace(/<[^>]*>/g, "");
+  // Remove null bytes and control characters
+  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Normalize unicode
+  q = q.normalize("NFC");
+  // Collapse whitespace
+  q = q.replace(/\s+/g, " ").trim();
+  // Limit length
+  if (q.length > 500) q = q.substring(0, 500).trim();
+  return q;
+}
+
 let lastRequestTime = 0;
 
 async function rateLimit(): Promise<void> {
@@ -123,15 +142,26 @@ export async function searchSemanticScholar(
     maxResults?: number;
   } = {}
 ): Promise<AcademicCandidate[]> {
-  const { yearStart = 2020, yearEnd = 2025, maxResults = 100 } = options;
+  const currentYear = new Date().getFullYear();
+  const { yearStart = 2020, yearEnd = currentYear, maxResults = 100 } = options;
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+  const clampedYearStart = Math.max(1900, Math.min(currentYear + 1, yearStart));
+  const clampedYearEnd = Math.max(clampedYearStart, Math.min(currentYear + 1, yearEnd));
+
+  // Sanitize query input
+  const sanitized = sanitizeS2Query(query);
+  if (!sanitized) {
+    console.warn("[SemanticScholar] Empty query after sanitization");
+    return [];
+  }
 
   const fields = "paperId,externalIds,title,abstract,year,venue,authors,citationCount,fieldsOfStudy,publicationTypes,openAccessPdf";
-  
+
   const params = new URLSearchParams({
-    query,
+    query: sanitized,
     fields,
-    limit: String(Math.min(maxResults, 100)),
-    year: `${yearStart}-${yearEnd}`,
+    limit: String(clampedMax),
+    year: `${clampedYearStart}-${clampedYearEnd}`,
   });
 
   const url = `${S2_API_BASE}/paper/search?${params}`;

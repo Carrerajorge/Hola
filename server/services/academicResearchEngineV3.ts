@@ -300,10 +300,16 @@ function calculateQualityScore(paper: AcademicPaper): number {
 async function searchSciELO(query: string, maxResults: number = 100): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(200, maxResults));
+
   try {
     // SciELO search API
-    const searchUrl = `https://search.scielo.org/api/v1/search?q=${encodeURIComponent(query)}&count=${maxResults}&output=json&lang=en`;
+    const searchUrl = `https://search.scielo.org/api/v1/search?q=${encodeURIComponent(query)}&count=${clampedMax}&output=json&lang=en`;
     
     const response = await fetchWithRetry(searchUrl);
     
@@ -316,7 +322,7 @@ async function searchSciELO(query: string, maxResults: number = 100): Promise<{ 
     const data = await response.json();
     
     if (data.response?.docs) {
-      for (const doc of data.response.docs.slice(0, maxResults)) {
+      for (const doc of data.response.docs.slice(0, clampedMax)) {
         const authors: Author[] = (doc.au || []).map((name: string) => {
           const { firstName, lastName } = parseAuthorName(name);
           return { name, firstName, lastName, affiliation: doc.aff?.[0] || "" };
@@ -363,23 +369,30 @@ async function searchSciELO(query: string, maxResults: number = 100): Promise<{ 
  * OpenAlex API - 250M+ works with comprehensive metadata
  */
 async function searchOpenAlex(
-  query: string, 
-  maxResults: number = 100, 
-  yearFrom?: number, 
+  query: string,
+  maxResults: number = 100,
+  yearFrom?: number,
   yearTo?: number,
   countries?: string[]
 ): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(200, maxResults));
+  const currentYear = new Date().getFullYear();
+
   try {
-    let searchUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per_page=${Math.min(maxResults, 200)}`;
-    
+    let searchUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per_page=${clampedMax}`;
+
     // Add filters
     const filters: string[] = [];
     if (yearFrom || yearTo) {
-      const from = yearFrom || 1900;
-      const to = yearTo || new Date().getFullYear();
+      const from = Math.max(1900, Math.min(currentYear + 1, yearFrom || 1900));
+      const to = Math.max(from, Math.min(currentYear + 1, yearTo || currentYear));
       filters.push(`publication_year:${from}-${to}`);
     }
     
@@ -486,21 +499,30 @@ async function searchOpenAlex(
  * Semantic Scholar API - 200M papers with semantic search
  */
 async function searchSemanticScholar(
-  query: string, 
-  maxResults: number = 100, 
-  yearFrom?: number, 
+  query: string,
+  maxResults: number = 100,
+  yearFrom?: number,
   yearTo?: number
 ): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+  const currentYear = new Date().getFullYear();
+
   try {
-    let searchUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${Math.min(maxResults, 100)}`;
+    let searchUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${clampedMax}`;
     searchUrl += "&fields=paperId,title,authors,year,venue,abstract,citationCount,referenceCount,externalIds,publicationTypes,s2FieldsOfStudy,isOpenAccess,openAccessPdf,publicationVenue";
-    
-    // Add year filter
+
+    // Add year filter with clamping
     if (yearFrom || yearTo) {
-      searchUrl += `&year=${yearFrom || ""}-${yearTo || ""}`;
+      const from = yearFrom ? Math.max(1900, Math.min(currentYear + 1, yearFrom)) : "";
+      const to = yearTo ? Math.max(1900, Math.min(currentYear + 1, yearTo)) : "";
+      searchUrl += `&year=${from}-${to}`;
     }
     
     const response = await fetchWithRetry(searchUrl);
@@ -555,21 +577,28 @@ async function searchSemanticScholar(
  * CrossRef API - 140M+ DOIs with official metadata
  */
 async function searchCrossRef(
-  query: string, 
-  maxResults: number = 100, 
-  yearFrom?: number, 
+  query: string,
+  maxResults: number = 100,
+  yearFrom?: number,
   yearTo?: number
 ): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+  const currentYear = new Date().getFullYear();
+
   try {
-    let searchUrl = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${Math.min(maxResults, 100)}`;
-    
-    // Add year filter
+    let searchUrl = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${clampedMax}`;
+
+    // Add year filter with clamping
     if (yearFrom || yearTo) {
-      const from = yearFrom || 1900;
-      const to = yearTo || new Date().getFullYear();
+      const from = Math.max(1900, Math.min(currentYear + 1, yearFrom || 1900));
+      const to = Math.max(from, Math.min(currentYear + 1, yearTo || currentYear));
       searchUrl += `&filter=from-pub-date:${from},until-pub-date:${to}`;
     }
     
@@ -640,10 +669,16 @@ async function searchCrossRef(
 async function searchCORE(query: string, maxResults: number = 100): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   try {
     // CORE requires API key, but has a free tier
-    const searchUrl = `https://api.core.ac.uk/v3/search/works?q=${encodeURIComponent(query)}&limit=${Math.min(maxResults, 100)}`;
+    const searchUrl = `https://api.core.ac.uk/v3/search/works?q=${encodeURIComponent(query)}&limit=${clampedMax}`;
     
     const response = await fetchWithRetry(searchUrl, {
       headers: {
@@ -699,10 +734,16 @@ async function searchCORE(query: string, maxResults: number = 100): Promise<{ pa
 async function searchPubMed(query: string, maxResults: number = 100): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(200, maxResults));
+
   try {
     // Step 1: Search for IDs
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`;
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${clampedMax}&retmode=json`;
     
     const searchResponse = await fetchWithRetry(searchUrl);
     
@@ -779,9 +820,16 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
 async function searchArXiv(query: string, maxResults: number = 100): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(200, maxResults));
+
   try {
-    const searchUrl = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${maxResults}`;
+    // Use HTTPS instead of HTTP for security
+    const searchUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${clampedMax}`;
     
     const response = await fetchWithRetry(searchUrl);
     
@@ -846,9 +894,15 @@ async function searchArXiv(query: string, maxResults: number = 100): Promise<{ p
 async function searchDOAJ(query: string, maxResults: number = 100): Promise<{ papers: AcademicPaper[]; time: number; error?: string }> {
   const startTime = Date.now();
   const papers: AcademicPaper[] = [];
-  
+
+  // Input guards
+  if (!query || typeof query !== "string" || query.trim().length < 2) {
+    return { papers: [], time: 0, error: "Invalid or empty query" };
+  }
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   try {
-    const searchUrl = `https://doaj.org/api/search/articles/${encodeURIComponent(query)}?pageSize=${Math.min(maxResults, 100)}`;
+    const searchUrl = `https://doaj.org/api/search/articles/${encodeURIComponent(query)}?pageSize=${clampedMax}`;
     
     const response = await fetchWithRetry(searchUrl);
     
@@ -1605,13 +1659,34 @@ export class AcademicResearchEngineV3 {
   private sanitizePaper(paper: AcademicPaper): AcademicPaper {
     const cleanText = (t: string | undefined) => {
       if (!t) return t;
-      return t.replace(/<[^>]*>/g, "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+      // Decode HTML entities, strip tags, remove control chars
+      let s = t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+      s = s.replace(/<[^>]*>/g, "");
+      s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+      return s.trim();
+    };
+    const cleanUrl = (u: string | undefined) => {
+      if (!u) return u;
+      const cleaned = (u || "").replace(/<[^>]*>/g, "").trim();
+      if (/^https?:\/\//i.test(cleaned)) return cleaned;
+      if (/^\/\//i.test(cleaned)) return `https:${cleaned}`;
+      return "";
     };
     return {
       ...paper,
       title: cleanText(paper.title) || "Untitled",
       abstract: cleanText(paper.abstract),
       journal: cleanText(paper.journal),
+      doi: cleanText(paper.doi),
+      url: cleanUrl(paper.url),
+      pdfUrl: cleanUrl(paper.pdfUrl),
+      publisher: cleanText(paper.publisher),
+      authors: paper.authors.map(a => ({
+        ...a,
+        name: cleanText(a.name) || "Unknown",
+        affiliation: cleanText(a.affiliation),
+      })),
+      keywords: (paper.keywords || []).map(k => cleanText(k) || "").filter(Boolean),
     };
   }
 

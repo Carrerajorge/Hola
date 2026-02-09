@@ -226,13 +226,28 @@ function buildAffilCountries(region: AcademicRegion): string[] | undefined {
   return unique.length > 0 ? unique : undefined;
 }
 
+/**
+ * Sanitize export prompt to prevent injection
+ */
+function sanitizeExportPrompt(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let p = raw;
+  p = p.replace(/<[^>]*>/g, ""); // Strip HTML/script tags
+  p = p.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); // Remove control chars
+  p = p.normalize("NFC"); // Unicode normalization
+  p = p.replace(/\s+/g, " ").trim(); // Collapse whitespace
+  if (p.length > 2000) p = p.substring(0, 2000).trim(); // Length limit
+  return p;
+}
+
 export function planAcademicArticlesExport(prompt: string): AcademicArticlesExportPlan {
-  const region = detectRegion(prompt);
-  const geo = detectGeoStrict(prompt);
-  const requestedCount = extractCount(prompt);
-  const { yearFrom, yearTo } = extractYearRange(prompt);
-  const topicQuery = extractTopicQuery(prompt);
-  const flags = detectSourceFlags(prompt);
+  const sanitizedPrompt = sanitizeExportPrompt(prompt);
+  const region = detectRegion(sanitizedPrompt);
+  const geo = detectGeoStrict(sanitizedPrompt);
+  const requestedCount = extractCount(sanitizedPrompt);
+  const { yearFrom, yearTo } = extractYearRange(sanitizedPrompt);
+  const topicQuery = extractTopicQuery(sanitizedPrompt);
+  const flags = detectSourceFlags(sanitizedPrompt);
 
   // For region-restricted requests, avoid PubMed because we can't reliably enforce affiliation country.
   let sources: AcademicArticlesExportPlan["sources"] =
@@ -403,7 +418,7 @@ function buildApaCitationRuns(article: UnifiedArticle): TextRun[] {
   ];
 
   if (!journal) {
-    if (linkUrl) runs.push(new TextRun({ text: linkUrl, font: APA_FONT, size: APA_SIZE }));
+    if (linkUrl) runs.push(new TextRun({ text: `🔗 ${linkUrl}`, font: APA_FONT, size: APA_SIZE }));
     return runs;
   }
 
@@ -423,7 +438,7 @@ function buildApaCitationRuns(article: UnifiedArticle): TextRun[] {
     runs.push(new TextRun({ text: ".", font: APA_FONT, size: APA_SIZE }));
   }
 
-  if (linkUrl) runs.push(new TextRun({ text: ` ${linkUrl}`, font: APA_FONT, size: APA_SIZE }));
+  if (linkUrl) runs.push(new TextRun({ text: ` 🔗 ${linkUrl}`, font: APA_FONT, size: APA_SIZE }));
 
   return runs;
 }
@@ -567,7 +582,7 @@ async function generateAcademicArticlesExcel(
       keywords: (a.keywords || []).join(", ") || "n.d.",
       language: normalizeLanguageLabel(a.language),
       documentType: a.documentType || "Article",
-      doi: a.doi || "",
+      doi: a.doi ? `🔗 https://doi.org/${a.doi}` : "",
       city: a.city || "n.d.",
       country: a.country || "n.d.",
       scopus: a.source === "scopus" ? "Yes" : "No",
