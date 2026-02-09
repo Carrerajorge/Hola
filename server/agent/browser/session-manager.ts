@@ -598,6 +598,11 @@ class BrowserSessionManager {
     };
   }
 
+  getPage(sessionId: string): Page | null {
+    const session = this.sessions.get(sessionId);
+    return session?.page ?? null;
+  }
+
   addGlobalEventListener(callback: SessionEventCallback): void {
     this.globalCallbacks.add(callback);
   }

@@ -11,6 +11,26 @@ import { eq } from "drizzle-orm";
 import { getUserSettingsCached } from "../services/userSettingsCache";
 import { policyEngine } from "./policyEngine";
 
+// Agentic orchestrator bridge
+import {
+  createGraphForRun,
+  getActiveGraph,
+  convertPlanToSpec,
+  recordToolResult,
+  transitionToPlanning,
+  transitionToExecuting,
+  transitionToVerifying,
+  transitionToDone,
+  transitionToFailed,
+  transitionToCancelled,
+  transitionToRetry,
+  transitionToEscalate,
+  shouldEscalateAction,
+  isBudgetExceeded,
+  cleanupGraph,
+  getGraphStatus,
+} from "./orchestrator/orchestratorBridge";
+
 export interface PlanStep {
   index: number;
   toolName: string;
@@ -162,12 +182,12 @@ function userExplicitlyRequestsWebSearch(text: string): boolean {
 
     // "Simple search" intents commonly used by users as direct web requests
     /[uú]ltimas?\s+noticias/i,
-    /dame\s+\\d*\\s*noticias/i,
-    /noticias\\s+(de|sobre|del)/i,
-    /precio\\s+(de|del|actual)/i,
-    /clima\\s+(en|de)/i,
-    /investiga\\s+(sobre|acerca|de)/i,
-    /informaci[oó]n\\s+(sobre|de|del|acerca)/i,
+    /dame\s+\d*\s*noticias/i,
+    /noticias\s+(de|sobre|del)/i,
+    /precio\s+(de|del|actual)/i,
+    /clima\s+(en|de)/i,
+    /investiga\s+(sobre|acerca|de)/i,
+    /informaci[oó]n\s+(sobre|de|del|acerca)/i,
   ];
 
   return patterns.some((p) => p.test(t));
@@ -1341,6 +1361,20 @@ Respond with ONLY valid JSON in this exact format:
         throw new Error("No plan available. Call generatePlan first.");
       }
 
+      // Initialize state graph for this run
+      if (!isResume) {
+        try {
+          createGraphForRun(this.runId, this.plan.objective, this.userId, {
+            chatId: this.chatId,
+            userPlan: this.userPlan as "free" | "pro" | "admin" | undefined,
+            tools: this.plan.steps.map(s => s.toolName),
+          });
+          transitionToPlanning(this.runId);
+        } catch (graphErr) {
+          console.warn(`[AgentOrchestrator] State graph init failed (non-critical):`, graphErr);
+        }
+      }
+
       if (!isResume) {
         await this.emitTraceEvent('task_start', {
           phase: 'planning',
@@ -1356,6 +1390,18 @@ Respond with ONLY valid JSON in this exact format:
             estimatedTime: this.plan.estimatedTime,
           },
         });
+
+        // Feed plan into state graph and transition to ACT
+        try {
+          const planSpec = convertPlanToSpec(this.plan);
+          const graph = getActiveGraph(this.runId);
+          if (graph) {
+            graph.setPlan(planSpec);
+          }
+          transitionToExecuting(this.runId);
+        } catch (graphErr) {
+          console.warn(`[AgentOrchestrator] State graph plan transition failed (non-critical):`, graphErr);
+        }
 
         this.status = "running";
         if (this.todoList.length === 0) {
@@ -1406,12 +1452,42 @@ Respond with ONLY valid JSON in this exact format:
 
         this.updateTodoList(i, 'in_progress');
 
+        // Check state graph budget before executing
+        try {
+          if (isBudgetExceeded(this.runId)) {
+            console.warn(`[AgentOrchestrator] Budget exceeded at step ${i}, stopping`);
+            transitionToFailed(this.runId, "budget_exceeded");
+            break;
+          }
+        } catch { /* non-critical */ }
+
+        // Check escalation for risky tools
+        try {
+          const step = this.plan.steps[i];
+          if (shouldEscalateAction(this.runId, step.toolName)) {
+            console.log(`[AgentOrchestrator] Escalation needed for ${step.toolName}`);
+            transitionToEscalate(this.runId);
+          }
+        } catch { /* non-critical */ }
+
         const isConfirmed = this.confirmedStepIndices.has(i);
+        const stepStartTime = Date.now();
         const result = await this.executeStep(i, { isConfirmed });
+        const stepDuration = Date.now() - stepStartTime;
         if (isConfirmed) {
           // one-shot confirmation
           this.confirmedStepIndices.delete(i);
         }
+
+        // Record step result into state graph
+        try {
+          recordToolResult(this.runId, i, this.plan.steps[i].toolName, {
+            success: result.success,
+            output: result.output,
+            error: typeof result.error === 'string' ? result.error : result.error?.message,
+            artifacts: result.artifacts?.map(a => ({ type: a.type, name: a.name, url: a.url, data: a.data })),
+          }, stepDuration);
+        } catch { /* non-critical */ }
 
         // If tool requires explicit user confirmation, pause the run and persist pending action
         if (!result.success && result.error?.code === 'REQUIRES_CONFIRMATION') {
@@ -1468,6 +1544,9 @@ Respond with ONLY valid JSON in this exact format:
               reason: verification.feedback,
             }, i);
 
+            // Track retry in state graph
+            try { transitionToRetry(this.runId); } catch { /* non-critical */ }
+
             await this.emitTraceEvent('step_retried', {
               stepIndex: i,
               stepId: `step-${i}`,
@@ -1501,6 +1580,12 @@ Respond with ONLY valid JSON in this exact format:
         i++;
       }
 
+      // Transition state graph to VERIFY → DONE
+      try {
+        transitionToVerifying(this.runId);
+        transitionToDone(this.runId);
+      } catch { /* non-critical */ }
+
       this.status = "completed";
       this.logEvent('observation', {
         type: 'run_completed',
@@ -1521,6 +1606,7 @@ Respond with ONLY valid JSON in this exact format:
           successfulSteps: this.stepResults.filter(r => r.success).length,
           failedSteps: this.stepResults.filter(r => !r.success).length,
           artifactCount: this.artifacts.length,
+          graphStatus: getGraphStatus(this.runId),
         },
       });
 
@@ -1528,6 +1614,9 @@ Respond with ONLY valid JSON in this exact format:
 
       console.log(`[AgentOrchestrator] Run ${this.runId} completed successfully`);
     } catch (error: any) {
+      // Transition state graph to FAILED
+      try { transitionToFailed(this.runId, error.message); } catch { /* non-critical */ }
+
       this.status = "failed";
       this.logEvent('error', {
         type: 'run_failed',
@@ -1545,6 +1634,9 @@ Respond with ONLY valid JSON in this exact format:
       this.emitProgress();
       console.error(`[AgentOrchestrator] Run ${this.runId} failed:`, error.message);
       throw error;
+    } finally {
+      // Cleanup state graph resources
+      try { await cleanupGraph(this.runId); } catch { /* non-critical */ }
     }
   }
 
@@ -1553,6 +1645,12 @@ Respond with ONLY valid JSON in this exact format:
     this.status = "cancelled";
     this.abortController.abort();
     this.logEvent('action', { type: 'cancel_requested' });
+
+    // Transition state graph to CANCELLED and cleanup
+    try {
+      transitionToCancelled(this.runId);
+      await cleanupGraph(this.runId);
+    } catch { /* non-critical */ }
 
     // Emit cancelled trace event immediately via SSE so client is notified right away
     await this.emitTraceEvent('cancelled', {
