@@ -157,7 +157,7 @@ export const DEFAULT_CONTRACT: ContractRequirements = {
     "Access_URL",
     "Source",
   ],
-  year_range: { start: new Date().getFullYear() - 5, end: new Date().getFullYear() },
+  year_range: { start: 2020, end: 2025 },
   must_have_doi: true,
   must_have_access_url: true,
 };

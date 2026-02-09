@@ -33,7 +33,7 @@ modelsRouter.post("/", async (req, res) => {
         const model = await storage.createAiModel({
             name, provider, modelId, costPer1k, description, status
         });
-
+        
         await auditLog(req, {
             action: AuditActions.MODEL_CREATED,
             resource: "ai_models",
@@ -42,7 +42,7 @@ modelsRouter.post("/", async (req, res) => {
             category: "admin",
             severity: "info"
         });
-
+        
         res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -65,8 +65,8 @@ modelsRouter.get("/filtered", async (req, res) => {
 
         const scopeProviders =
             scope === "supported" ? getSupportedModelProviderIds() :
-                scope === "integrated" ? getIntegratedModelProviderIds() :
-                    undefined;
+            scope === "integrated" ? getIntegratedModelProviderIds() :
+            undefined;
 
         const result = await storage.getAiModelsFiltered({
             provider: provider as string,
@@ -104,8 +104,8 @@ modelsRouter.get("/stats", async (req, res) => {
         const allModelsRaw = await storage.getAiModels();
         const allModels =
             scope === "supported" ? allModelsRaw.filter((m) => isModelProviderSupported(m.provider)) :
-                scope === "integrated" ? allModelsRaw.filter((m) => isModelProviderIntegrated(m.provider)) :
-                    allModelsRaw;
+            scope === "integrated" ? allModelsRaw.filter((m) => isModelProviderIntegrated(m.provider)) :
+            allModelsRaw;
         const knownStats = getModelStats();
 
         const byProvider: Record<string, number> = {};
@@ -295,8 +295,8 @@ modelsRouter.post("/sync", async (req, res) => {
         const allProviders = getAvailableProviders();
         const providersToSync =
             scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
-                scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
-                    allProviders;
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
 
         const results: Record<string, { added: number; updated: number; errors: string[] }> = {};
         for (const provider of providersToSync) {
@@ -336,8 +336,8 @@ modelsRouter.get("/providers/list", async (req, res) => { // Renamed from /provi
         const allProviders = getAvailableProviders();
         const providersToList =
             scope === "supported" ? allProviders.filter((p) => isModelProviderSupported(p)) :
-                scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
-                    allProviders;
+            scope === "integrated" ? allProviders.filter((p) => isModelProviderIntegrated(p)) :
+            allProviders;
 
         const allModels = await storage.getAiModels();
 
@@ -376,7 +376,7 @@ modelsRouter.get("/health", async (req, res) => {
     try {
         const { llmGateway } = await import("../../lib/llmGateway");
         const healthStatus = await llmGateway.healthCheck();
-
+        
         const providers = {
             xai: {
                 name: "xAI (Grok)",
@@ -397,16 +397,6 @@ modelsRouter.get("/health", async (req, res) => {
                 isSupported: isModelProviderSupported("google"),
                 isIntegrated: isModelProviderIntegrated("google"),
                 runtimeProvider: "gemini",
-            },
-            openai: {
-                name: "OpenAI",
-                available: healthStatus?.openai?.available ?? false,
-                latencyMs: healthStatus?.openai?.latencyMs ?? null,
-                error: healthStatus?.openai?.error ?? null,
-                hasApiKey: checkApiKeyExists("openai"),
-                isSupported: isModelProviderSupported("openai"),
-                isIntegrated: isModelProviderIntegrated("openai"),
-                runtimeProvider: "openai",
             }
         };
 
@@ -421,7 +411,7 @@ modelsRouter.get("/health", async (req, res) => {
             checkedAt: new Date().toISOString()
         });
     } catch (error: any) {
-        res.status(500).json({
+        res.status(500).json({ 
             status: "error",
             error: error.message,
             checkedAt: new Date().toISOString()
@@ -450,12 +440,12 @@ modelsRouter.post("/:id/test", async (req, res) => {
 
         const { llmGateway } = await import("../../lib/llmGateway");
         const testPrompt = "Say 'OK' if you can read this.";
-
+        
         const startTime = Date.now();
         try {
             const response = await llmGateway.chat(
                 [{ role: "user", content: testPrompt }],
-                {
+                { 
                     model: model.modelId,
                     provider: runtimeProvider,
                     enableFallback: false,
@@ -484,7 +474,7 @@ modelsRouter.post("/:id/test", async (req, res) => {
             });
         } catch (testError: any) {
             const latency = Date.now() - startTime;
-
+            
             await auditLog(req, {
                 action: AuditActions.MODEL_TESTED,
                 resource: "ai_models",
@@ -516,13 +506,13 @@ modelsRouter.get("/usage", async (req, res) => {
             "7d": 7 * 24 * 60 * 60 * 1000,
             "30d": 30 * 24 * 60 * 60 * 1000
         }[period as string] || 7 * 24 * 60 * 60 * 1000;
-
+        
         const startDate = new Date(Date.now() - periodMs);
         const metrics = await storage.getProviderMetrics(undefined, startDate, new Date());
-
+        
         // Aggregate by model
         const byModel: Record<string, { requests: number; tokens: number; errors: number; avgLatency: number }> = {};
-
+        
         metrics.forEach(m => {
             const key = m.provider;
             if (!byModel[key]) {
@@ -533,7 +523,7 @@ modelsRouter.get("/usage", async (req, res) => {
             byModel[key].errors += m.errorCount || 0;
             byModel[key].avgLatency = m.avgLatency || byModel[key].avgLatency;
         });
-
+        
         res.json({
             period,
             startDate,

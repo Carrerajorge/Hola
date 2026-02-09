@@ -668,23 +668,32 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const {
-        messages: clientMessages,
-        conversationId,
-        runId,
-        chatId,
-        attachments,
-        gptId,
-        model,
-        provider: rawProvider,
-        session_id,
-        docTool,
-        forceWebSearch,
-        webSearchAuto,
-        latencyMode: rawLatencyMode
-      } = req.body;
-      let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto, latencyMode: rawLatencyMode } = req.body;
+      const latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+
+      let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+      try {
+        userSettings = await storage.getUserSettings(effectiveUserId);
+      } catch (e) {
+        console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
+      }
+
+      const featureFlags = {
+        memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
+        recordingHistoryEnabled: userSettings?.featureFlags?.recordingHistoryEnabled ?? false,
+        webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true,
+        codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
+        canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
+        voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
+        voiceAdvanced: userSettings?.featureFlags?.voiceAdvanced ?? false,
+        connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
+      };
+
+      const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
+      const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
+      const userProfile = userSettings?.userProfile || null;
+      const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
 
       // DEBUG: Log all incoming request parameters for docTool verification
       // Avoid externally-controlled format strings: don't interpolate user-controlled values into
@@ -693,36 +702,6 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
-      }
-
-      const provider = (
-        rawProvider && ['xai', 'gemini', 'openai', 'anthropic', 'deepseek', 'auto'].includes(rawProvider)
-          ? rawProvider
-          : undefined
-      ) as any;
-
-      const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
-      const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
-      const userQuery = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : String(lastUserMsg?.content || '');
-      const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
-
-      // Auto: decide based on complexity signals (simple vs complex).
-      if (latencyMode === 'auto') {
-        if (
-          earlyQuestionClassification.type === 'greeting' ||
-          earlyQuestionClassification.type === 'factual_simple' ||
-          earlyQuestionClassification.type === 'yes_no'
-        ) {
-          latencyMode = 'fast';
-        } else if (
-          earlyQuestionClassification.type === 'analysis' ||
-          earlyQuestionClassification.type === 'summary' ||
-          earlyQuestionClassification.type === 'comparison' ||
-          earlyQuestionClassification.type === 'extraction' ||
-          earlyQuestionClassification.type === 'action'
-        ) {
-          latencyMode = 'deep';
-        }
       }
 
       // ── EARLY SSE SETUP ────────────────────────────────────────────
@@ -758,118 +737,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         });
       }
 
-      // Ultra-fast path for greetings: avoid expensive intent routing, context hydration,
-      // and LLM calls entirely.
-      if (
-        earlyQuestionClassification.type === 'greeting' &&
-        !hasAnyAttachments &&
-        !docTool &&
-        !forceWebSearch &&
-        !webSearchAuto &&
-        !isConnectionClosed
-      ) {
-        const isThanks = /\b(gracias|muchas\s+gracias|te\s+agradezco)\b/i.test(userQuery);
-        const content = isThanks
-          ? "De nada. ¿Necesitas algo más?"
-          : "Hola. ¿En qué puedo ayudarte?";
-
-        writeSse(res, 'chunk', {
-          content,
-          sequence: 1,
-          runId: runId || requestId,
-          timestamp: Date.now(),
-        });
-        writeSse(res, 'done', {
-          sequenceId: 1,
-          requestId,
-          runId: runId || requestId,
-          latencyMode,
-          timestamp: Date.now(),
-        });
-        return res.end();
-      }
-
-      // Simple QA fast-path: avoid heavy intent routing/history hydration for single-turn
-      // factual/yes-no questions. Use a short timeout + provider fallback so users don't
-      // wait ~30s for trivial prompts.
-      if (
-        latencyMode === 'fast' &&
-        (earlyQuestionClassification.type === 'factual_simple' || earlyQuestionClassification.type === 'yes_no') &&
-        !hasAnyAttachments &&
-        !docTool &&
-        !forceWebSearch &&
-        !webSearchAuto &&
-        !runId &&
-        !gptId &&
-        !session_id &&
-        clientMessages.length <= 2 &&
-        !isConnectionClosed
-      ) {
-        try {
-          const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(userQuery, false);
-          const llmMessages = [
-            { role: "system" as const, content: answerFirstPrompt.fullPrompt },
-            ...clientMessages.map((m: any) => ({
-              role: m.role as "user" | "assistant" | "system",
-              content: String(m.content ?? "")
-            }))
-          ];
-
-          const quick = await llmGateway.chat(llmMessages as any, {
-            userId: effectiveUserId || conversationId || "anonymous",
-            requestId,
-            model: model || DEFAULT_MODEL,
-            provider,
-            maxTokens: Math.min(answerFirstPrompt.maxTokens || 120, 200),
-            temperature: 0.2,
-            timeout: 12000,
-            enableFallback: true,
-          });
-
-          writeSse(res, 'chunk', {
-            content: quick.content || "",
-            sequence: 1,
-            runId: runId || requestId,
-            timestamp: Date.now(),
-            provider: quick.provider,
-          });
-          writeSse(res, 'done', {
-            sequenceId: 1,
-            requestId,
-            runId: runId || requestId,
-            latencyMode,
-            timestamp: Date.now(),
-            provider: quick.provider,
-            model: quick.model,
-          });
-          return res.end();
-        } catch (e: any) {
-          console.warn("[Stream] Simple fast-path failed, falling back to full pipeline:", e?.message || e);
-        }
-      }
-
-      // Load user settings after the stream is already open to reduce perceived latency.
-      let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
-      try {
-        userSettings = await storage.getUserSettings(effectiveUserId);
-      } catch (e) {
-        console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
-      }
-
-      const featureFlags = {
-        memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
-        recordingHistoryEnabled: userSettings?.featureFlags?.recordingHistoryEnabled ?? false,
-        webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true,
-        codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
-        canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
-        voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
-        voiceAdvanced: userSettings?.featureFlags?.voiceAdvanced ?? false,
-        connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
-      };
-
-      const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
-      const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
-      const userProfile = userSettings?.userProfile || null;
+      // Web/Academic search is gated by user settings (webSearchAuto) unless explicitly requested.
+      const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
+      const userQuery = lastUserMsg?.content || '';
 
       let detectedWebSources: any[] = [];
 
@@ -1450,8 +1320,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
 
-      // Classify the question to set token limits (simple vs complex).
-      const questionClassification = questionClassifier.classifyQuestion(userMessageText || "");
+      // Default question classification for token limits
+      const questionClassification = {
+        type: 'general',
+        maxTokens: 1000
+      } as Partial<QuestionClassification>;
 
 
 
@@ -1868,8 +1741,6 @@ ${attachmentContext}`;
           requestId,
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
-          model: effectiveModel,
-          provider,
         }
       );
 

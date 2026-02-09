@@ -1,7 +1,6 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { HTTP_HEADERS, TIMEOUTS, LIMITS } from "../lib/constants";
-import { sanitizePlainText, sanitizeSearchQuery } from "../lib/textSanitizers";
 
 export interface SearchOptions {
   maxResults?: number;
@@ -402,27 +401,7 @@ export class SearchOrchestrator {
   private cache: Map<string, CacheEntry<EnhancedSearchResult[]>> = new Map();
   private deepCache: Map<string, CacheEntry<DeepSearchResult[]>> = new Map();
   private cacheTTL: number;
-
-  /**
-   * Sanitize and harden web search query input
-   */
-  private sanitizeQuery(raw: string): string {
-    return sanitizeSearchQuery(raw, 500);
-  }
-
-  /**
-   * Sanitize a search result to prevent XSS in downstream rendering
-   */
-  private sanitizeResult(result: EnhancedSearchResult): EnhancedSearchResult {
-    return {
-      ...result,
-      title: sanitizePlainText(result.title || "", { maxLen: 500 }),
-      snippet: sanitizePlainText(result.snippet || "", { maxLen: 2000 }),
-      url: result.url || "",
-      source: sanitizePlainText(result.source || "", { maxLen: 100 }),
-    };
-  }
-
+  
   constructor(cacheTTLMs: number = 5 * 60 * 1000) {
     this.cacheTTL = cacheTTLMs;
     this.adapters = [
@@ -501,38 +480,31 @@ export class SearchOrchestrator {
   
   async search(query: string, options?: SearchOptions): Promise<EnhancedSearchResult[]> {
     const startTime = Date.now();
-    const maxResults = Math.max(1, Math.min(100, options?.maxResults || LIMITS.MAX_SEARCH_RESULTS));
-    const timeout = Math.max(1000, Math.min(30000, options?.timeout || 15000));
-
-    // Sanitize query input
-    const sanitizedQuery = this.sanitizeQuery(query);
-    if (!sanitizedQuery) {
-      log("warn", "Empty query after sanitization");
-      return [];
-    }
-
-    const cacheKey = this.getCacheKey(sanitizedQuery, options);
+    const maxResults = options?.maxResults || LIMITS.MAX_SEARCH_RESULTS;
+    const timeout = options?.timeout || 15000;
+    
+    const cacheKey = this.getCacheKey(query, options);
     const cached = this.getFromCache(this.cache, cacheKey);
     if (cached) {
       return cached;
     }
-
+    
     const adapters = this.getAvailableAdapters(options?.sources);
-
+    
     if (adapters.length === 0) {
       log("error", "No search adapters available", { requestedSources: options?.sources });
       return [];
     }
-
-    log("info", "Starting search", { query: sanitizedQuery, maxResults, adapters: adapters.map(a => a.name) });
-
+    
+    log("info", "Starting search", { query, maxResults, adapters: adapters.map(a => a.name) });
+    
     let results: EnhancedSearchResult[] = [];
     let lastError: Error | null = null;
-
+    
     for (const adapter of adapters) {
       try {
         results = await withRetry(
-          () => adapter.search(sanitizedQuery, maxResults, timeout),
+          () => adapter.search(query, maxResults, timeout),
           2,
           500
         );
@@ -555,12 +527,10 @@ export class SearchOrchestrator {
       log("error", "All search adapters failed", { error: lastError.message });
     }
     
-    // Sanitize all results to prevent XSS
-    results = results.map(r => this.sanitizeResult(r));
     results = this.deduplicateByUrl(results);
     results.sort((a, b) => (b.score || 0) - (a.score || 0));
     results = results.slice(0, maxResults);
-
+    
     this.setCache(this.cache, cacheKey, results);
     
     if (this.cache.size > 100) {
@@ -572,9 +542,9 @@ export class SearchOrchestrator {
   
   async deepSearch(query: string, options?: DeepSearchOptions): Promise<DeepSearchResult[]> {
     const startTime = Date.now();
-    const maxResults = Math.max(1, Math.min(50, options?.maxResults || LIMITS.MAX_SEARCH_RESULTS));
-    const maxContentLength = Math.max(1000, Math.min(50000, options?.maxContentLength || 10000));
-    const concurrencyLimit = Math.max(1, Math.min(10, options?.concurrencyLimit || 3));
+    const maxResults = options?.maxResults || LIMITS.MAX_SEARCH_RESULTS;
+    const maxContentLength = options?.maxContentLength || 10000;
+    const concurrencyLimit = options?.concurrencyLimit || 3;
     const extractContent = options?.extractContent !== false;
     
     const cacheKey = `deep:${this.getCacheKey(query, options)}`;

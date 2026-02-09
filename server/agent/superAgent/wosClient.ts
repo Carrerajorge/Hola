@@ -1,5 +1,4 @@
 import { translateToEnglish } from "./scopusClient";
-import { sanitizeSearchQuery } from "../../lib/textSanitizers";
 
 export interface WosArticle {
   id: string;
@@ -25,32 +24,10 @@ export interface WosSearchResult {
 }
 
 const WOS_STARTER_API_BASE = "https://api.clarivate.com/apis/wos-starter/v1";
-const REQUEST_TIMEOUT_MS = 20000;
 
 export function isWosConfigured(): boolean {
   const key = process.env.WOS_API_KEY;
   return typeof key === "string" && key.trim().length > 0;
-}
-
-/**
- * Sanitize and harden WoS search query input
- */
-function sanitizeWosQuery(raw: string): string {
-  return sanitizeSearchQuery(raw, 500);
-}
-
-/**
- * Fetch with timeout for WoS API calls
- */
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    return response;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function searchWos(
@@ -68,33 +45,22 @@ export async function searchWos(
   }
 
   const { maxResults = 25, startYear, endYear, documentType } = options;
-  const clampedMax = Math.max(1, Math.min(50, maxResults));
   const startTime = Date.now();
 
-  // Sanitize query input
-  const sanitized = sanitizeWosQuery(query);
-  if (!sanitized) {
-    return { articles: [], totalResults: 0, query, searchTime: 0 };
-  }
-
-  const translatedQuery = translateToEnglish(sanitized);
-  console.log(`[WoS] Original query: "${sanitized}"`);
+  const translatedQuery = translateToEnglish(query);
+  console.log(`[WoS] Original query: "${query}"`);
   console.log(`[WoS] Translated query: "${translatedQuery}"`);
 
   let searchQuery = `TS=(${translatedQuery})`;
-
-  // Validate year range
-  const currentYear = new Date().getFullYear();
+  
   if (startYear && endYear) {
-    const clampedStart = Math.max(1900, Math.min(currentYear + 1, startYear));
-    const clampedEnd = Math.max(clampedStart, Math.min(currentYear + 1, endYear));
-    searchQuery += ` AND PY=(${clampedStart}-${clampedEnd})`;
+    searchQuery += ` AND PY=(${startYear}-${endYear})`;
   }
 
   const params = new URLSearchParams({
     db: "WOS",
     q: searchQuery,
-    limit: String(clampedMax),
+    limit: String(Math.min(maxResults, 50)),
     page: "1",
   });
 
@@ -102,7 +68,7 @@ export async function searchWos(
   console.log(`[WoS] Search URL: ${searchUrl}`);
 
   try {
-    const response = await fetchWithTimeout(searchUrl, {
+    const response = await fetch(searchUrl, {
       headers: {
         "X-ApiKey": apiKey,
         "Accept": "application/json",

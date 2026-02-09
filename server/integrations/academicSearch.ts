@@ -19,21 +19,8 @@ type AcademicSource = {
   source: 'semantic_scholar' | 'crossref';
 };
 
-const FETCH_TIMEOUT_MS = 15000;
-
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
-}
-
-function sanitizeAcademicQuery(raw: string): string {
-  if (!raw || typeof raw !== "string") return "";
-  let q = raw;
-  q = q.replace(/<[^>]*>/g, "");
-  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  q = q.normalize("NFC");
-  q = q.replace(/\s+/g, " ").trim();
-  if (q.length > 500) q = q.substring(0, 500).trim();
-  return q;
 }
 
 function pickExcerpt(text: string, maxLen = 360) {
@@ -51,33 +38,22 @@ function normalizeDoi(raw?: string | null) {
 }
 
 async function fetchJson(url: string, init?: RequestInit) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-      headers: {
-        'accept': 'application/json',
-        ...(init?.headers || {}),
-      },
-    });
-    clearTimeout(timer);
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} from ${url}: ${body.slice(0, 200)}`);
-    }
-    return await res.json();
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'accept': 'application/json',
+      ...(init?.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status} from ${url}: ${body.slice(0, 200)}`);
   }
+  return await res.json();
 }
 
 async function semanticScholarSearch(query: string, limit: number): Promise<AcademicSource[]> {
-  const sanitized = sanitizeAcademicQuery(query);
-  if (!sanitized) return [];
-  const q = encodeURIComponent(sanitized);
+  const q = encodeURIComponent(query);
   const l = clamp(limit, 1, 100);
   const fields = encodeURIComponent('title,url,year,venue,authors,externalIds,abstract');
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${q}&limit=${l}&fields=${fields}`;
@@ -101,9 +77,7 @@ async function semanticScholarSearch(query: string, limit: number): Promise<Acad
 }
 
 async function crossrefSearch(query: string, limit: number): Promise<AcademicSource[]> {
-  const sanitized = sanitizeAcademicQuery(query);
-  if (!sanitized) return [];
-  const q = encodeURIComponent(sanitized);
+  const q = encodeURIComponent(query);
   const rows = clamp(limit, 1, 100);
   const url = `https://api.crossref.org/works?query.title=${q}&rows=${rows}&select=DOI,title,URL,author,issued,container-title,abstract`;
 

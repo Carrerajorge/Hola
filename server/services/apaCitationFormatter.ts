@@ -198,7 +198,7 @@ function formatJournalArticle(citation: APACitation, authors: string, year: stri
     if (citation.doi) {
         ref += formatDOI(citation.doi);
     } else if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -220,7 +220,7 @@ function formatBook(citation: APACitation, authors: string, year: string): strin
     if (citation.doi) {
         ref += formatDOI(citation.doi);
     } else if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -267,7 +267,7 @@ function formatWebsite(citation: APACitation, authors: string, year: string): st
     }
 
     if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -287,7 +287,7 @@ function formatConferencePaper(citation: APACitation, authors: string, year: str
     if (citation.doi) {
         ref += formatDOI(citation.doi);
     } else if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -298,7 +298,7 @@ function formatThesis(citation: APACitation, authors: string, year: string): str
     ref += `[Doctoral dissertation${citation.publisher ? `, ${citation.publisher}` : ''}]. `;
 
     if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -314,7 +314,7 @@ function formatReport(citation: APACitation, authors: string, year: string): str
     if (citation.doi) {
         ref += formatDOI(citation.doi);
     } else if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -326,7 +326,7 @@ function formatGeneric(citation: APACitation, authors: string, year: string): st
     if (citation.doi) {
         ref += formatDOI(citation.doi);
     } else if (citation.url) {
-        ref += `🔗 ${citation.url}`;
+        ref += citation.url;
     }
 
     return ref.trim();
@@ -355,11 +355,11 @@ function formatSingleEditor(editor: string): string {
 }
 
 function formatDOI(doi: string): string {
-    // Ensure DOI is in URL format with 🔗 emoji
+    // Ensure DOI is in URL format
     if (doi.startsWith("http")) {
-        return `🔗 ${doi}`;
+        return doi;
     }
-    return `🔗 https://doi.org/${doi.replace(/^doi:\s*/i, "")}`;
+    return `https://doi.org/${doi.replace(/^doi:\s*/i, "")}`;
 }
 
 /**

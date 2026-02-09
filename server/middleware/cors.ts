@@ -21,32 +21,19 @@ const DEVELOPMENT_ORIGINS = [
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-/** Security: validate Replit domain format to prevent injection */
-function isValidReplitDomain(domain: string): boolean {
-    if (!domain || typeof domain !== 'string') return false;
-    const trimmed = domain.trim().toLowerCase();
-    // Replit domains should match *.replit.dev, *.repl.co, or *.replit.app
-    return /^[a-z0-9][a-z0-9\-]*\.(replit\.dev|repl\.co|replit\.app)$/.test(trimmed);
-}
-
 // Build the allowed origins list based on environment
 const getAllowedOrigins = (): string[] | '*' => {
     if (!isProduction) {
-        // In development, allow localhost + validated Replit domains
-        const replitOrigins = (process.env.REPLIT_DOMAINS?.split(',') || [])
-            .filter(isValidReplitDomain)
-            .map(d => `https://${d.trim()}`);
-        return [...DEVELOPMENT_ORIGINS, ...replitOrigins];
+        // In development, allow all localhost origins
+        return [...DEVELOPMENT_ORIGINS, ...(process.env.REPLIT_DOMAINS?.split(',').map(d => `https://${d}`) || [])];
     }
 
     // In production, only allow specific origins
-    const productionDomains = process.env.ALLOWED_ORIGINS?.split(',').map(d => d.trim()).filter(Boolean) || PRODUCTION_ORIGINS;
+    const productionDomains = process.env.ALLOWED_ORIGINS?.split(',') || PRODUCTION_ORIGINS;
 
-    // Also allow validated Replit domains in production deployments
+    // Also allow Replit domains in production deployments
     if (process.env.REPLIT_DOMAINS) {
-        const replitDomains = process.env.REPLIT_DOMAINS.split(',')
-            .filter(isValidReplitDomain)
-            .map(d => `https://${d.trim()}`);
+        const replitDomains = process.env.REPLIT_DOMAINS.split(',').map(d => `https://${d}`);
         return [...productionDomains, ...replitDomains];
     }
 
@@ -57,30 +44,15 @@ export const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
         const allowedOrigins = getAllowedOrigins();
 
-        // In production, block requests with no origin (prevents CSRF from non-browser sources)
-        // Exception: allow same-origin API calls which have no Origin header
+        // Allow requests with no origin (mobile apps, Postman, server-to-server)
         if (!origin) {
-            if (isProduction) {
-                // Still allow no-origin for server-to-server/same-origin requests,
-                // but log it for monitoring
-                callback(null, true);
-            } else {
-                callback(null, true);
-            }
+            callback(null, true);
             return;
         }
 
-        // In development, allow localhost origins and validated Replit domains
+        // In development, be more permissive
         if (!isProduction) {
-            // Still check against development allowlist rather than blindly allowing all
-            if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) {
-                callback(null, true);
-            } else if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-                // Allow any localhost port in development
-                callback(null, true);
-            } else {
-                callback(null, true); // Permissive in development
-            }
+            callback(null, true);
             return;
         }
 
@@ -88,7 +60,7 @@ export const corsOptions: cors.CorsOptions = {
         if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            console.warn(`[CORS] Blocked request from origin: ${String(origin).substring(0, 200)}`);
+            console.warn(`[CORS] Blocked request from origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
     },

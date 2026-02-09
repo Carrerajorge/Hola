@@ -6,7 +6,6 @@ import type {
   Section,
   SourceReference,
 } from "../../../shared/schemas/documentSemanticModel";
-import { sanitizePlainText } from "../../lib/textSanitizers";
 
 const DOCX_MAGIC_BYTES = [0x50, 0x4b, 0x03, 0x04];
 
@@ -25,14 +24,26 @@ function generateId(): string {
 }
 
 function countWords(text: string): number {
-  const cleaned = sanitizePlainText(text, { maxLen: 5_000_000, collapseWs: true });
-  if (!cleaned) return 0;
-  // `sanitizePlainText` collapses whitespace to single spaces when enabled.
-  return cleaned.split(" ").filter((word) => word.length > 0).length;
+  return text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0).length;
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
 }
 
 function extractTextContent(html: string): string {
-  return sanitizePlainText(html, { maxLen: 5_000_000, collapseWs: true });
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
 }
 
 interface ParsedElement {

@@ -4,7 +4,6 @@ import * as XLSX from "xlsx";
 import * as pdfParse from "pdf-parse";
 import officeParser from "officeparser";
 import { ocrService } from "./services/ocrService";
-import { sanitizePlainText } from "./lib/textSanitizers";
 
 const pdf = (pdfParse as any).default || pdfParse;
 
@@ -107,7 +106,7 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
 
   if (mimeType === "text/html") {
     const html = content.toString("utf-8");
-    return sanitizePlainText(html, { maxLen: 5_000_000, collapseWs: true });
+    return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   }
 
   if (mimeType === "application/rtf" || mimeType === "text/rtf") {

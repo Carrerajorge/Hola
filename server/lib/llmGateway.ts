@@ -113,11 +113,6 @@ const RETRY_CONFIG = {
 };
 
 const DEFAULT_TIMEOUT_MS = 60000;
-// Streaming can hang indefinitely if a provider never yields tokens. We enforce:
-// - total timeout: cap overall request time
-// - idle timeout: cap time with no tokens (covers TTFT and stalled streams)
-const DEFAULT_STREAM_TIMEOUT_MS = 300000; // 5 minutes
-const STREAM_IDLE_TIMEOUT_MS = 30000; // 30 seconds
 const MAX_CONTEXT_TOKENS = 8000;
 const CACHE_TTL_MS = 300000; // 5 minutes
 const IN_FLIGHT_TIMEOUT_MS = 120000; // 2 minutes
@@ -1398,65 +1393,26 @@ class LLMGateway {
     }
 
     const client = this.getOpenAICompatibleClient(provider);
-    const controller = new AbortController();
-    const totalTimeoutMs = options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS;
-    let abortedReason: "timeout" | "idle" | null = null;
-    const totalTimeoutId = setTimeout(() => {
-      abortedReason = "timeout";
-      controller.abort();
-    }, totalTimeoutMs);
-
-    let idleTimeoutId: NodeJS.Timeout | null = setTimeout(() => {
-      abortedReason = "idle";
-      controller.abort();
-    }, STREAM_IDLE_TIMEOUT_MS);
-
-    const resetIdle = () => {
-      if (idleTimeoutId) clearTimeout(idleTimeoutId);
-      idleTimeoutId = setTimeout(() => {
-        abortedReason = "idle";
-        controller.abort();
-      }, STREAM_IDLE_TIMEOUT_MS);
-    };
-
-    const stream = await client.chat.completions.create(
-      {
-        model,
-        messages,
-        temperature: options.temperature ?? 0.7,
-        top_p: options.topP ?? 1,
-        max_tokens: options.maxTokens,
-        stream: true,
-      },
-      { signal: controller.signal }
-    );
+    const stream = await client.chat.completions.create({
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 1,
+      max_tokens: options.maxTokens,
+      stream: true,
+    });
 
     let buffer = "";
     const flushThreshold = 50;
 
-    try {
-      for await (const chunk of stream) {
-        resetIdle();
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      buffer += content;
 
-        const content = chunk.choices[0]?.delta?.content || "";
-        buffer += content;
-
-        if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
-          yield { content: buffer, done: false };
-          buffer = "";
-        }
+      if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
+        yield { content: buffer, done: false };
+        buffer = "";
       }
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
-        if (abortedReason === "idle") {
-          throw new Error(`Stream idle timeout after ${STREAM_IDLE_TIMEOUT_MS}ms`);
-        }
-        throw new Error(`Stream timeout after ${totalTimeoutMs}ms`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(totalTimeoutId);
-      if (idleTimeoutId) clearTimeout(idleTimeoutId);
     }
 
     if (buffer) {
@@ -1482,67 +1438,28 @@ class LLMGateway {
     }
 
     const client = this.getAnthropicClient();
-    const controller = new AbortController();
-    const totalTimeoutMs = options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS;
-    let abortedReason: "timeout" | "idle" | null = null;
-    const totalTimeoutId = setTimeout(() => {
-      abortedReason = "timeout";
-      controller.abort();
-    }, totalTimeoutMs);
-
-    let idleTimeoutId: NodeJS.Timeout | null = setTimeout(() => {
-      abortedReason = "idle";
-      controller.abort();
-    }, STREAM_IDLE_TIMEOUT_MS);
-
-    const resetIdle = () => {
-      if (idleTimeoutId) clearTimeout(idleTimeoutId);
-      idleTimeoutId = setTimeout(() => {
-        abortedReason = "idle";
-        controller.abort();
-      }, STREAM_IDLE_TIMEOUT_MS);
-    };
-
-    const stream = await client.messages.create(
-      {
-        model,
-        system,
-        messages: anthropicMessages,
-        max_tokens: options.maxTokens ?? 1024,
-        temperature: options.temperature ?? 0.7,
-        top_p: options.topP ?? 1,
-        stream: true,
-      } as any,
-      { signal: controller.signal as any },
-    );
+    const stream = await client.messages.create({
+      model,
+      system,
+      messages: anthropicMessages,
+      max_tokens: options.maxTokens ?? 1024,
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 1,
+      stream: true,
+    } as any);
 
     let buffer = "";
     const flushThreshold = 50;
 
-    try {
-      for await (const event of stream as any) {
-        resetIdle();
-
-        if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta") {
-          const text = String(event.delta.text || "");
-          buffer += text;
-          if (buffer.length >= flushThreshold || text.includes("\n") || text.includes(".")) {
-            yield { content: buffer, done: false };
-            buffer = "";
-          }
+    for await (const event of stream as any) {
+      if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta") {
+        const text = String(event.delta.text || "");
+        buffer += text;
+        if (buffer.length >= flushThreshold || text.includes("\n") || text.includes(".")) {
+          yield { content: buffer, done: false };
+          buffer = "";
         }
       }
-    } catch (error: any) {
-      if (error?.name === "AbortError") {
-        if (abortedReason === "idle") {
-          throw new Error(`Stream idle timeout after ${STREAM_IDLE_TIMEOUT_MS}ms`);
-        }
-        throw new Error(`Stream timeout after ${totalTimeoutMs}ms`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(totalTimeoutId);
-      if (idleTimeoutId) clearTimeout(idleTimeoutId);
     }
 
     if (buffer) {
@@ -1570,61 +1487,8 @@ class LLMGateway {
       responseModalities: options.disableImageGeneration ? ["text"] : undefined,
     });
 
-    const iterator = stream[Symbol.asyncIterator]();
-    const totalTimeoutMs = options.timeout ?? DEFAULT_STREAM_TIMEOUT_MS;
-    const totalDeadline = Date.now() + totalTimeoutMs;
-
-    let idleTimeoutId: NodeJS.Timeout | null = null;
-    const makeIdlePromise = () =>
-      new Promise<never>((_, reject) => {
-        idleTimeoutId = setTimeout(() => reject(new Error("__STREAM_IDLE_TIMEOUT__")), STREAM_IDLE_TIMEOUT_MS);
-      });
-
-    let idlePromise = makeIdlePromise();
-
-    try {
-      while (true) {
-        const now = Date.now();
-        const totalLeft = totalDeadline - now;
-        if (totalLeft <= 0) {
-          throw new Error(`Stream timeout after ${totalTimeoutMs}ms`);
-        }
-
-        let totalTimeoutId: NodeJS.Timeout | null = null;
-        const totalPromise = new Promise<never>((_, reject) => {
-          totalTimeoutId = setTimeout(() => reject(new Error("__STREAM_TOTAL_TIMEOUT__")), totalLeft);
-        });
-
-        let result: IteratorResult<{ content: string; done: boolean }>;
-        try {
-          result = await Promise.race([iterator.next(), idlePromise, totalPromise]);
-        } finally {
-          if (totalTimeoutId) clearTimeout(totalTimeoutId);
-        }
-
-        if (idleTimeoutId) clearTimeout(idleTimeoutId);
-        idlePromise = makeIdlePromise();
-
-        if (result.done) break;
-
-        const chunk = result.value;
-        yield chunk;
-
-        if (chunk.done) break;
-      }
-    } catch (error: any) {
-      const msg = String(error?.message || error);
-      if (msg === "__STREAM_IDLE_TIMEOUT__") {
-        throw new Error(`Stream idle timeout after ${STREAM_IDLE_TIMEOUT_MS}ms`);
-      }
-      if (msg === "__STREAM_TOTAL_TIMEOUT__") {
-        throw new Error(`Stream timeout after ${totalTimeoutMs}ms`);
-      }
-      throw error;
-    } finally {
-      if (idleTimeoutId) clearTimeout(idleTimeoutId);
-      // Best-effort: close underlying iterator to free resources.
-      await iterator.return?.();
+    for await (const chunk of stream) {
+      yield chunk;
     }
   }
 

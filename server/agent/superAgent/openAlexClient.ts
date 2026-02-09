@@ -1,5 +1,4 @@
 import { persistentJsonCacheGet, persistentJsonCacheSet } from "../../lib/persistentJsonCache";
-import { sanitizeSearchQuery } from "../../lib/textSanitizers";
 
 export interface OpenAlexWork {
   id: string;
@@ -67,13 +66,6 @@ const BASE_USER_AGENT = (process.env.HTTP_USER_AGENT || "IliaGPT/1.0").trim();
 const RATE_LIMIT_MS = 100;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 500;
-
-/**
- * Sanitize and harden OpenAlex search query input
- */
-function sanitizeOpenAlexQuery(raw: string): string {
-    return sanitizeSearchQuery(raw, 500);
-}
 
 let lastRequestTime = 0;
 
@@ -335,22 +327,11 @@ export async function searchOpenAlex(
     countryCodes?: string[];
   } = {}
 ): Promise<AcademicCandidate[]> {
-  const currentYear = new Date().getFullYear();
-  const { yearStart = 2020, yearEnd = currentYear, maxResults = 100, countryCodes } = options;
-  const clampedMax = Math.max(1, Math.min(500, maxResults));
-  const clampedYearStart = Math.max(1900, Math.min(currentYear + 1, yearStart));
-  const clampedYearEnd = Math.max(clampedYearStart, Math.min(currentYear + 1, yearEnd));
-
-  // Sanitize query input
-  const sanitized = sanitizeOpenAlexQuery(query);
-  if (!sanitized) {
-    console.warn("[OpenAlex] Empty query after sanitization");
-    return [];
-  }
+  const { yearStart = 2020, yearEnd = 2025, maxResults = 100, countryCodes } = options;
 
   // Avoid ambiguous alternation that can cause excessive backtracking on crafted input.
   // Treat AND as just another separator and then split on whitespace.
-  const normalized = sanitized.replace(/\s+AND\s+/gi, " ").trim();
+  const normalized = query.replace(/\s+AND\s+/gi, " ").trim();
   const searchTerms = normalized.split(/\s+/).filter(t => t.length > 2);
   const searchQuery = searchTerms.join(" ");
 
@@ -358,12 +339,12 @@ export async function searchOpenAlex(
     const candidates: AcademicCandidate[] = [];
     let cursor = "*";
 
-    while (candidates.length < clampedMax && cursor) {
-      const remaining = clampedMax - candidates.length;
+    while (candidates.length < maxResults && cursor) {
+      const remaining = maxResults - candidates.length;
 
       const filters: string[] = [
-        `from_publication_date:${clampedYearStart}-01-01`,
-        `to_publication_date:${clampedYearEnd}-12-31`,
+        `from_publication_date:${yearStart}-01-01`,
+        `to_publication_date:${yearEnd}-12-31`,
       ];
 
       const codes = (countryCodes || []).map(c => c.trim().toUpperCase()).filter(Boolean);
@@ -415,7 +396,7 @@ export async function searchOpenAlex(
 
       for (const work of results as OpenAlexWork[]) {
         candidates.push(mapWorkToCandidate(work));
-        if (candidates.length >= clampedMax) break;
+        if (candidates.length >= maxResults) break;
       }
 
       cursor = data.meta?.next_cursor || "";

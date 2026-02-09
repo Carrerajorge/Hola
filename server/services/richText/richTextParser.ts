@@ -14,48 +14,6 @@ import {
   normalizeRuns,
 } from "@shared/richTextTypes";
 
-// ============================================
-// SECURITY LIMITS
-// ============================================
-
-/** Maximum input length for markdown/HTML parsing (1MB) */
-const MAX_INPUT_LENGTH = 1_000_000;
-
-/** Maximum number of blocks per document */
-const MAX_BLOCKS = 10_000;
-
-/** Maximum list items per list */
-const MAX_LIST_ITEMS = 5_000;
-
-/** Maximum table rows */
-const MAX_TABLE_ROWS = 5_000;
-
-/** Maximum iterations for regex parsing loops (prevents infinite loops) */
-const MAX_PARSE_ITERATIONS = 100_000;
-
-/** Allowed URL protocols for links */
-const ALLOWED_LINK_PROTOCOLS = ["http:", "https:", "mailto:"];
-
-/** Validate URL protocol to prevent javascript:, data:, file:// injection */
-function isAllowedUrl(url: string): boolean {
-  if (!url || typeof url !== "string") return false;
-  const trimmed = url.trim().toLowerCase();
-  return ALLOWED_LINK_PROTOCOLS.some(proto => trimmed.startsWith(proto));
-}
-
-/** Validate CSS color values to prevent CSS injection */
-function isValidCssColor(value: string): boolean {
-  if (!value || typeof value !== "string") return false;
-  const trimmed = value.trim();
-  return /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,30}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*[\d.]+\s*)?\))$/.test(trimmed);
-}
-
-/** Truncate input to security limit */
-function safeInput(text: string): string {
-  if (!text || typeof text !== "string") return "";
-  return text.length > MAX_INPUT_LENGTH ? text.substring(0, MAX_INPUT_LENGTH) : text;
-}
-
 interface MarkdownNode {
   type: string;
   children?: MarkdownNode[];
@@ -70,13 +28,11 @@ interface MarkdownNode {
 }
 
 export function parseMarkdownToDocument(markdown: string): RichTextDocument {
-  // Security: truncate input
-  const safeMarkdown = safeInput(markdown);
   const blocks: RichTextBlock[] = [];
-  const lines = safeMarkdown.split("\n");
+  const lines = markdown.split("\n");
   let i = 0;
 
-  while (i < lines.length && blocks.length < MAX_BLOCKS) {
+  while (i < lines.length) {
     const line = lines[i];
 
     if (line.trim() === "") {
@@ -117,13 +73,11 @@ export function parseMarkdownToDocument(markdown: string): RichTextDocument {
 
     if (line.match(/^[-*]\s+/)) {
       const items: ListItem[] = [];
-      while (i < lines.length && lines[i].match(/^[-*]\s+/) && items.length < MAX_LIST_ITEMS) {
+      while (i < lines.length && lines[i].match(/^[-*]\s+/)) {
         const itemContent = lines[i].replace(/^[-*]\s+/, "");
         items.push({ runs: parseInlineMarkdown(itemContent) });
         i++;
       }
-      // Skip remaining items if limit reached
-      while (i < lines.length && lines[i].match(/^[-*]\s+/)) i++;
       blocks.push({ type: "bullet-list", items });
       continue;
     }
@@ -132,13 +86,11 @@ export function parseMarkdownToDocument(markdown: string): RichTextDocument {
       const items: ListItem[] = [];
       const startMatch = line.match(/^(\d+)\./);
       const start = startMatch ? parseInt(startMatch[1], 10) : 1;
-      while (i < lines.length && lines[i].match(/^\d+\.\s+/) && items.length < MAX_LIST_ITEMS) {
+      while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
         const itemContent = lines[i].replace(/^\d+\.\s+/, "");
         items.push({ runs: parseInlineMarkdown(itemContent) });
         i++;
       }
-      // Skip remaining items if limit reached
-      while (i < lines.length && lines[i].match(/^\d+\.\s+/)) i++;
       blocks.push({ type: "ordered-list", items, start });
       continue;
     }
@@ -225,7 +177,7 @@ function parseMarkdownTable(
   ];
 
   let i = startIndex + 2;
-  while (i < lines.length && lines[i].includes("|") && rows.length < MAX_TABLE_ROWS) {
+  while (i < lines.length && lines[i].includes("|")) {
     const cells = parseRow(lines[i]);
     rows.push({
       cells: cells.map((cell) => ({
@@ -234,8 +186,6 @@ function parseMarkdownTable(
     });
     i++;
   }
-  // Skip remaining rows if limit reached
-  while (i < lines.length && lines[i].includes("|")) i++;
 
   return {
     block: { type: "table", rows, hasHeader: true },
@@ -335,8 +285,7 @@ export function parseInlineMarkdown(text: string): TextRun[] {
     {
       regex: /<span\s+style=["']color:\s*([^"']+)["']>(.+?)<\/span>/i,
       handler: (m) => ({
-        // Security: validate CSS color to prevent injection
-        run: { text: m[2], style: { color: isValidCssColor(m[1]) ? m[1] : undefined } },
+        run: { text: m[2], style: { color: m[1] } },
         consumed: m[0].length,
       }),
     },
@@ -350,10 +299,7 @@ export function parseInlineMarkdown(text: string): TextRun[] {
     {
       regex: /\[([^\]]+)\]\(([^)]+)\)/,
       handler: (m) => ({
-        // Security: validate URL protocol for links
-        run: isAllowedUrl(m[2])
-          ? { text: m[1], style: { link: m[2], underline: true, color: "#0066cc" } }
-          : { text: m[1] },
+        run: { text: m[1], style: { link: m[2], underline: true, color: "#0066cc" } },
         consumed: m[0].length,
       }),
     },
@@ -387,10 +333,7 @@ export function parseInlineMarkdown(text: string): TextRun[] {
     },
   ];
 
-  // Security: iteration safety limit
-  let iterations = 0;
-  while (remaining.length > 0 && iterations < MAX_PARSE_ITERATIONS) {
-    iterations++;
+  while (remaining.length > 0) {
     let earliestMatch: {
       index: number;
       pattern: (typeof patterns)[0];
@@ -425,24 +368,17 @@ export function parseInlineMarkdown(text: string): TextRun[] {
 }
 
 export function parseHtmlToDocument(html: string): RichTextDocument {
-  // Security: truncate input
-  const safeHtml = safeInput(html);
   const blocks: RichTextBlock[] = [];
 
-  const cleanHtml = safeHtml
+  const cleanHtml = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<object[^>]*>[\s\S]*?<\/object>/gi, "")
-    .replace(/<embed[^>]*>/gi, "")
-    .replace(/<form[^>]*>[\s\S]*?<\/form>/gi, "")
-    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, "");
+    .replace(/<!--[\s\S]*?-->/g, "");
 
   const blockRegex = /<(h[1-6]|p|ul|ol|blockquote|pre|table|hr)[^>]*>([\s\S]*?)<\/\1>|<hr\s*\/?>/gi;
   let match;
 
-  while ((match = blockRegex.exec(cleanHtml)) !== null && blocks.length < MAX_BLOCKS) {
+  while ((match = blockRegex.exec(cleanHtml)) !== null) {
     const tagName = match[1]?.toLowerCase();
     const content = match[2] || "";
 
@@ -496,8 +432,7 @@ function parseHtmlListItems(html: string): ListItem[] {
   const liRegex = /<li[^>]*>([\s\S]*?)<\/li>/gi;
   let match;
 
-  // Security: limit list items
-  while ((match = liRegex.exec(html)) !== null && items.length < MAX_LIST_ITEMS) {
+  while ((match = liRegex.exec(html)) !== null) {
     items.push({ runs: parseHtmlInline(match[1]) });
   }
 
@@ -549,24 +484,20 @@ function parseHtmlInline(html: string): TextRun[] {
     },
     {
       regex: /<a\s+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i,
-      // Security: validate URL protocol for links
-      handler: (m) => isAllowedUrl(m[1])
-        ? ({ text: stripTags(m[2]), style: { link: m[1], underline: true, color: "#0066cc" } })
-        : ({ text: stripTags(m[2]) }),
+      handler: (m) => ({
+        text: stripTags(m[2]),
+        style: { link: m[1], underline: true, color: "#0066cc" },
+      }),
     },
     {
       regex: /<span[^>]*style=["'][^"']*color:\s*([^;"']+)[^"']*["'][^>]*>([\s\S]*?)<\/span>/i,
-      // Security: validate CSS color value
-      handler: (m) => ({ text: stripTags(m[2]), style: { color: isValidCssColor(m[1].trim()) ? m[1].trim() : undefined } }),
+      handler: (m) => ({ text: stripTags(m[2]), style: { color: m[1].trim() } }),
     },
   ];
 
   let remaining = html;
 
-  // Security: iteration safety limit
-  let iterations = 0;
-  while (remaining.length > 0 && iterations < MAX_PARSE_ITERATIONS) {
-    iterations++;
+  while (remaining.length > 0) {
     let earliestMatch: {
       index: number;
       pattern: (typeof patterns)[0];

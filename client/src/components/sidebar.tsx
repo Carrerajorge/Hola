@@ -36,8 +36,7 @@ import {
   Pin,
   Download,
   MoveRight,
-  Brain,
-  Terminal
+  Brain
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -674,15 +673,6 @@ export function Sidebar({
         >
           <Code className="h-4 w-4" />
           Codex
-        </Button>
-        <Button
-          variant="ghost"
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50/50"
-          onClick={() => setLocation("/computer-use")}
-          data-testid="button-computer-use"
-        >
-          <Terminal className="h-4 w-4" />
-          Computer Use
         </Button>
       </div>
 

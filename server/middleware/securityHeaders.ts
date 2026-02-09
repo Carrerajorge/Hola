@@ -18,21 +18,14 @@ export interface SecurityHeadersConfig {
   customHeaders?: Record<string, string>;
 }
 
-const isProductionEnv = process.env.NODE_ENV === "production";
-
 const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
-  // Allow inline scripts (required for React hydration and PWA); unsafe-eval only in development
-  "script-src": [
-    "'self'", "'unsafe-inline'",
-    ...(isProductionEnv ? [] : ["'unsafe-eval'"]),
-    "https://cdn.jsdelivr.net", "https://accounts.google.com",
-  ],
+  // Allow inline scripts in production via unsafe-inline (required for React hydration and PWA)
+  "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
   "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
   "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
-  // Security: removed blanket "https:" - only allow specific trusted image sources
-  "img-src": ["'self'", "data:", "blob:", "https://lh3.googleusercontent.com", "https://*.googleusercontent.com", "https://replit.com", "https://files.stripe.com"],
-  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", ...(isProductionEnv ? [] : ["ws:"])],
+  "img-src": ["'self'", "data:", "blob:", "https:"],
+  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", "ws:"],
   "frame-src": ["'self'", "https://accounts.google.com"],
   "frame-ancestors": ["'self'"],
   "base-uri": ["'self'"],
@@ -153,9 +146,6 @@ export function securityHeaders(config: SecurityHeadersConfig = {}) {
       );
       res.setHeader("Permissions-Policy", permissionsPolicy);
     }
-
-    // Security: Cross-Origin-Opener-Policy prevents window.opener attacks
-    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 
     res.removeHeader("X-Powered-By");
 

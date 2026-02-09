@@ -654,7 +654,7 @@ export function Composer({
                   type="file"
                   className="hidden"
                   multiple
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp"
                   onChange={handleFileUpload}
                 />
                 <Button variant="ghost" className="w-full justify-start gap-2 text-sm h-9 glass-menu-item" asChild>
@@ -1061,7 +1061,7 @@ export function Composer({
         onChange={handleFileUpload}
         className="hidden"
         multiple
-        accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.html,.htm,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tif,.tiff"
+        accept="*/*"
         data-testid="input-file-upload"
         aria-label="Subir archivos"
       />

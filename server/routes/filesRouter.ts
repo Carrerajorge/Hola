@@ -24,44 +24,7 @@ interface MultipartUploadSession {
   createdAt: Date;
 }
 
-// ============================================
-// SECURITY: Multipart session limits & cleanup
-// ============================================
-
-/** Maximum concurrent multipart upload sessions */
-const MAX_MULTIPART_SESSIONS = 100;
-
-/** Maximum session age before auto-cleanup (30 minutes) */
-const SESSION_TTL_MS = 30 * 60 * 1000;
-
-/** Cleanup interval (every 5 minutes) */
-const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-
 const multipartSessions: Map<string, MultipartUploadSession> = new Map();
-
-// Periodic cleanup of stale multipart sessions to prevent memory leaks
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, session] of multipartSessions) {
-    if (now - session.createdAt.getTime() > SESSION_TTL_MS) {
-      multipartSessions.delete(id);
-      console.log(`[FilesRouter] Expired multipart session: ${id}`);
-    }
-  }
-}, SESSION_CLEANUP_INTERVAL_MS).unref();
-
-/** Security: validate objectId to prevent path traversal */
-function isValidObjectId(objectId: string): boolean {
-  if (!objectId || typeof objectId !== "string") return false;
-  if (objectId.length > 512) return false;
-  // Block path traversal sequences
-  if (objectId.includes("..") || objectId.includes("//")) return false;
-  if (objectId.includes("\0") || objectId.includes("%00")) return false;
-  if (objectId.includes("%2e%2e") || objectId.includes("%2E%2E")) return false;
-  // Only allow safe characters: alphanumeric, dash, underscore, dot, forward slash
-  if (!/^[a-zA-Z0-9._\-\/]+$/.test(objectId)) return false;
-  return true;
-}
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
@@ -411,8 +374,8 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     // 1. Try local paths first (with waiting for file to be fully written)
     for (const localFilePath of localCandidates) {
       // Ensure path doesn't escape uploads directory
-      const safePrefix = uploadsDir + pathMod.default.sep;
-      if (!localFilePath.startsWith(safePrefix) && localFilePath !== uploadsDir) {
+      const safePrefx = uploadsDir + pathMod.default.sep;
+      if (!localFilePath.startsWith(safePrefx) && localFilePath !== uploadsDir) {
         continue;
       }
 
@@ -574,11 +537,6 @@ export function createFilesRouter() {
 
       if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
         return res.status(400).json({ error: `File size exceeds maximum limit of ${LIMITS.MAX_FILE_SIZE_MB}MB` });
-      }
-
-      // Security: limit concurrent sessions to prevent memory exhaustion
-      if (multipartSessions.size >= MAX_MULTIPART_SESSIONS) {
-        return res.status(429).json({ error: "Too many concurrent upload sessions. Please try again later." });
       }
 
       const uploadId = `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
@@ -1038,44 +996,10 @@ export function createFilesRouter() {
 
   router.post("/api/files/quick", async (req, res) => {
     try {
-      // Legacy endpoint (images only). Keep for backwards-compat, but validate strictly.
-      const rawName = req.body?.name;
-      const rawType = req.body?.type;
-      const rawSize = req.body?.size;
-      const rawStoragePath = req.body?.storagePath;
+      const { name, type, size, storagePath } = req.body;
 
-      if (typeof rawName !== "string" || rawName.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: name" });
-      }
-      if (typeof rawType !== "string" || rawType.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: type" });
-      }
-      if (rawSize === undefined || rawSize === null) {
-        return res.status(400).json({ error: "Missing required field: size" });
-      }
-      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: storagePath" });
-      }
-
-      const name = sanitizeFilename(rawName.trim());
-      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
-      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
-      const storagePath = rawStoragePath.trim();
-
-      if (!name) return res.status(400).json({ error: "Invalid file name" });
-      if (!type) return res.status(400).json({ error: "Invalid file type" });
-      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
-      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
-
-      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
-        return res.status(400).json({ error: "Invalid storagePath" });
-      }
-
-      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
-        return res.status(400).json({ error: `Unsupported file type: ${type}` });
-      }
-      if (!type.startsWith("image/")) {
-        return res.status(400).json({ error: "Quick upload only supports images" });
+      if (!name || !type || !size || !storagePath) {
+        return res.status(400).json({ error: "Missing required fields" });
       }
 
       const file = await storage.createFile({
@@ -1096,38 +1020,13 @@ export function createFilesRouter() {
 
   router.post("/api/files", async (req, res) => {
     try {
-      const rawName = req.body?.name;
-      const rawType = req.body?.type;
-      const rawSize = req.body?.size;
-      const rawStoragePath = req.body?.storagePath;
+      const { name, type, size, storagePath } = req.body;
 
-      if (typeof rawName !== "string" || rawName.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: name" });
-      }
-      if (typeof rawType !== "string" || rawType.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: type" });
-      }
-      if (rawSize === undefined || rawSize === null) {
-        return res.status(400).json({ error: "Missing required field: size" });
-      }
-      if (typeof rawStoragePath !== "string" || rawStoragePath.trim().length === 0) {
-        return res.status(400).json({ error: "Missing required field: storagePath" });
+      if (!name || !type || !size || !storagePath) {
+        return res.status(400).json({ error: "Missing required fields" });
       }
 
-      const name = sanitizeFilename(rawName.trim());
-      const type = stripContentType(rawType) || rawType.trim().toLowerCase();
-      const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
-      const storagePath = rawStoragePath.trim();
-
-      if (!name) return res.status(400).json({ error: "Invalid file name" });
-      if (!type) return res.status(400).json({ error: "Invalid file type" });
-      if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
-      if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
-      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
-        return res.status(400).json({ error: "Invalid storagePath" });
-      }
-
-      if (!ALLOWED_MIME_TYPES.includes(type as any)) {
+      if (!ALLOWED_MIME_TYPES.includes(type)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });
       }
 
@@ -1202,17 +1101,11 @@ export function createFilesRouter() {
       // Serve those files directly from disk so the client can preview attachments.
       if (req.path.startsWith("/objects/uploads/")) {
         const fs = await import("fs");
-        const pathMod = await import("path");
+        const path = await import("path");
         const objectId = req.path.replace("/objects/uploads/", "");
-
-        // Security: validate objectId to prevent path traversal
-        if (!isValidObjectId(objectId)) {
-          return res.sendStatus(404);
-        }
-
-        const localUploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
-        const localFilePath = pathMod.default.resolve(localUploadsDir, objectId);
-        const safePrefix = localUploadsDir + pathMod.default.sep;
+        const uploadsDir = path.default.resolve(process.cwd(), "uploads");
+        const localFilePath = path.default.resolve(uploadsDir, objectId);
+        const safePrefix = uploadsDir + path.default.sep;
 
         // Prevent path traversal outside uploads/.
         if (!localFilePath.startsWith(safePrefix)) {
@@ -1223,8 +1116,6 @@ export function createFilesRouter() {
           return res.sendStatus(404);
         }
 
-        // Security: set nosniff to prevent MIME confusion attacks
-        res.setHeader("X-Content-Type-Options", "nosniff");
         return res.sendFile(localFilePath);
       }
 
@@ -1243,12 +1134,6 @@ export function createFilesRouter() {
   router.put("/api/local-upload/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
-
-      // Security: validate objectId to prevent path traversal
-      if (!isValidObjectId(objectId)) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
-
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
@@ -1257,13 +1142,8 @@ export function createFilesRouter() {
         fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
 
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+      const filePath = pathMod.default.join(UPLOADS_DIR, objectId);
 
-      // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix) && filePath !== UPLOADS_DIR) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
 
       const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
 
@@ -1281,15 +1161,15 @@ export function createFilesRouter() {
         receivedBytes += chunk.length;
         if (receivedBytes > MAX_SIZE) {
           writeStream.destroy();
-          try { fsSync.default.unlinkSync(filePath); } catch { /* cleanup best-effort */ }
+          fsSync.default.unlinkSync(filePath); // Cleanup
+          // We can't easily send a response if we're pipe-ing, but we can try destroying request
           req.destroy(new Error("File limit exceeded"));
         }
       });
 
       writeStream.on("finish", async () => {
-        console.log(`[LocalStorage] File uploaded: ${objectId} (${receivedBytes} bytes)`);
-        // Security: don't leak filesystem paths in response
-        res.status(200).json({ success: true, size: receivedBytes });
+        console.log(`[LocalStorage] File streamed to disk: ${filePath} (${receivedBytes} bytes)`);
+        res.status(200).json({ success: true, path: filePath, size: receivedBytes });
       });
 
       writeStream.on("error", (error: Error) => {
@@ -1306,23 +1186,10 @@ export function createFilesRouter() {
   router.get("/api/local-files/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
-
-      // Security: validate objectId to prevent path traversal
-      if (!isValidObjectId(objectId)) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
-
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
-      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
-
-      // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix)) {
-        return res.status(404).json({ error: "File not found" });
-      }
+      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
 
       if (!fsSync.default.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found" });
@@ -1333,11 +1200,6 @@ export function createFilesRouter() {
       const contentType = file?.type || "application/octet-stream";
 
       res.setHeader("Content-Type", contentType);
-      // Security: force download for non-image types to prevent XSS via stored files
-      if (!contentType.startsWith("image/")) {
-        res.setHeader("Content-Disposition", "attachment");
-      }
-      res.setHeader("X-Content-Type-Options", "nosniff");
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);
     } catch (error: any) {
@@ -1350,23 +1212,10 @@ export function createFilesRouter() {
   router.get("/objects/uploads/:objectId", async (req, res) => {
     try {
       const { objectId } = req.params;
-
-      // Security: validate objectId to prevent path traversal
-      if (!isValidObjectId(objectId)) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
-
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
-      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
-
-      // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix)) {
-        return res.status(404).json({ error: "File not found" });
-      }
+      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
 
       if (!fsSync.default.existsSync(filePath)) {
         return res.status(404).json({ error: "File not found" });
@@ -1378,11 +1227,6 @@ export function createFilesRouter() {
 
       res.setHeader("Content-Type", contentType);
       res.setHeader("Cache-Control", "private, max-age=3600");
-      // Security: force download for non-image types to prevent XSS via stored files
-      if (!contentType.startsWith("image/")) {
-        res.setHeader("Content-Disposition", "attachment");
-      }
-      res.setHeader("X-Content-Type-Options", "nosniff");
 
       const content = await fsSync.promises.readFile(filePath);
       res.send(content);

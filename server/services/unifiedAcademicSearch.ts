@@ -19,7 +19,6 @@
 import { JSDOM } from "jsdom";
 import { createClient, RedisClientType } from "redis";
 import crypto from "crypto";
-import { sanitizeSearchQuery } from "../lib/textSanitizers";
 
 // ============================================
 // TYPES
@@ -453,35 +452,32 @@ export function formatCitation(result: AcademicResult, style: CitationStyle = "a
   const authorsFormatted = formatAuthorsAPA(authors);
   const doiUrl = doi ? `https://doi.org/${doi}` : url;
   
-  const linkUrl = doi ? `https://doi.org/${doi}` : (url || "");
-  const linkEmoji = linkUrl ? ` 🔗 ${linkUrl}` : "";
-
   switch (style) {
     case "apa": // 76
-      return `${authorsFormatted} (${year || "n.d."}). ${title}. ${journal || ""}.${linkEmoji}`;
-
+      return `${authorsFormatted} (${year || "n.d."}). ${title}. ${journal || ""}.${doi ? ` https://doi.org/${doi}` : ""}`;
+    
     case "mla": // 77
-      return `${authors}. "${title}." ${journal || ""}, ${year || "n.d."}.${linkEmoji}`;
-
+      return `${authors}. "${title}." ${journal || ""}, ${year || "n.d."}.${doi ? ` doi:${doi}` : ""}`;
+    
     case "chicago": // 78
-      return `${authors}. "${title}." ${journal || ""} (${year || "n.d."}).${linkEmoji}`;
-
+      return `${authors}. "${title}." ${journal || ""} (${year || "n.d."}).${doi ? ` https://doi.org/${doi}` : ""}`;
+    
     case "ieee": // 79
-      return `${authorsFormatted}, "${title}," ${journal || ""}, ${year || "n.d."}.${linkEmoji}`;
-
+      return `${authorsFormatted}, "${title}," ${journal || ""}, ${year || "n.d."}.${doi ? ` doi: ${doi}` : ""}`;
+    
     case "vancouver": // 80
-      return `${authorsFormatted}. ${title}. ${journal || ""}. ${year || ""}.${linkEmoji}`;
-
+      return `${authorsFormatted}. ${title}. ${journal || ""}. ${year || ""}.${doi ? ` doi:${doi}` : ""}`;
+    
     case "harvard": // 81
-      return `${authorsFormatted} (${year || "n.d."}) '${title}', ${journal || ""}.${linkEmoji}`;
-
+      return `${authorsFormatted} (${year || "n.d."}) '${title}', ${journal || ""}.${doi ? ` doi:${doi}` : ""}`;
+    
     case "bibtex": // 82
       const key = `${(authors.split(/[,\s]/)[0] || "unknown").toLowerCase()}${year || "nd"}`;
       return `@article{${key},\n  title={${title}},\n  author={${authors}},\n  journal={${journal || ""}},\n  year={${year || ""}},\n  doi={${doi || ""}}\n}`;
-
+    
     case "ris": // 83
       return `TY  - JOUR\nTI  - ${title}\nAU  - ${authors}\nPY  - ${year || ""}\nJO  - ${journal || ""}\nDO  - ${doi || ""}\nER  - `;
-
+    
     default:
       return formatCitation(result, "apa");
   }
@@ -496,20 +492,17 @@ const SCOPUS_API_KEY = process.env.SCOPUS_API_KEY || "";
 export async function searchScopus(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scopus";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(25, maxResults));
-
+  
   if (!SCOPUS_API_KEY || isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const params = new URLSearchParams({
-      query: sanitized,
-      count: clampedMax.toString(),
+      query: query,
+      count: Math.min(maxResults, 25).toString(),
       sort: options.sortBy === "date" ? "-coverDate" : "-citedby-count",
       field: "dc:title,dc:creator,prism:publicationName,prism:coverDate,prism:doi,citedby-count,dc:description,openaccessFlag"
     });
@@ -559,18 +552,15 @@ export async function searchScopus(query: string, options: SearchOptions = {}): 
 export async function searchPubMed(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "pubmed";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(100, maxResults));
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(sanitized)}&retmax=${clampedMax}&retmode=json&sort=relevance`;
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json&sort=relevance`;
     const searchRes = await fetchWithRetry(searchUrl, {}, timeout);
     
     if (!searchRes.ok) {
@@ -627,18 +617,15 @@ export async function searchPubMed(query: string, options: SearchOptions = {}): 
 export async function searchScielo(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scielo";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(100, maxResults));
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://search.scielo.org/?q=${encodeURIComponent(sanitized)}&lang=es&count=${clampedMax}&output=site&sort=CITED_DESC`;
+    const searchUrl = `https://search.scielo.org/?q=${encodeURIComponent(query)}&lang=es&count=${maxResults}&output=site&sort=CITED_DESC`;
     const response = await fetchWithRetry(searchUrl, { headers: HEADERS }, timeout);
     
     if (!response.ok) {
@@ -688,18 +675,15 @@ export async function searchScielo(query: string, options: SearchOptions = {}): 
 export async function searchScholar(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scholar";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(20, maxResults));
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(sanitized)}&hl=es&num=${clampedMax}`;
+    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es&num=${Math.min(maxResults, 20)}`;
     const response = await fetchWithRetry(searchUrl, { headers: HEADERS }, timeout);
 
     if (!response.ok) {
@@ -751,18 +735,16 @@ export async function searchScholar(query: string, options: SearchOptions = {}):
 export async function searchDuckDuckGo(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "duckduckgo";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const ddg = await import("duck-duck-scrape");
-    const academicQuery = `${sanitized} site:scholar.google.com OR site:researchgate.net OR site:academia.edu OR filetype:pdf`;
+    const academicQuery = `${query} site:scholar.google.com OR site:researchgate.net OR site:academia.edu OR filetype:pdf`;
     
     const searchResults = await ddg.search(academicQuery, { safeSearch: ddg.SafeSearchType.OFF });
     recordSuccess(source);
@@ -798,19 +780,16 @@ export async function searchDuckDuckGo(query: string, options: SearchOptions = {
 export async function searchSemanticScholar(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "semantic";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(100, maxResults));
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const fields = "title,authors,year,venue,citationCount,abstract,openAccessPdf,externalIds";
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(sanitized)}&limit=${clampedMax}&fields=${fields}`;
+    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${maxResults}&fields=${fields}`;
     
     const response = await fetchWithRetry(url, { headers: { "Accept": "application/json" } }, timeout);
     
@@ -854,18 +833,15 @@ export async function searchSemanticScholar(query: string, options: SearchOption
 export async function searchCrossRef(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "crossref";
-  const sanitized = hardenQuery(query);
-  if (!sanitized) return [];
-  const clampedMax = Math.max(1, Math.min(100, maxResults));
-
+  
   if (isCircuitOpen(source)) return [];
-
-  const cacheKey = getCacheKey(source, sanitized, options);
+  
+  const cacheKey = getCacheKey(source, query, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const url = `https://api.crossref.org/works?query=${encodeURIComponent(sanitized)}&rows=${clampedMax}&sort=relevance&order=desc`;
+    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${maxResults}&sort=relevance&order=desc`;
     
     const response = await fetchWithRetry(url, { headers: { "Accept": "application/json" } }, timeout);
     
@@ -912,13 +888,6 @@ export interface UnifiedSearchOptions extends SearchOptions {
   sources?: Array<"scopus" | "scielo" | "pubmed" | "scholar" | "duckduckgo" | "semantic" | "crossref">;
 }
 
-/**
- * Sanitize and harden raw search query input
- */
-function hardenQuery(raw: string): string {
-  return sanitizeSearchQuery(raw, 500);
-}
-
 export async function searchAllSources(query: string, options: UnifiedSearchOptions = {}): Promise<{
   query: string;
   originalQuery: string;
@@ -930,30 +899,15 @@ export async function searchAllSources(query: string, options: UnifiedSearchOpti
   metrics: SearchMetrics;
 }> {
   const startTime = Date.now();
-  const {
-    maxResults = 15,
+  const { 
+    maxResults = 15, 
     sources = ["scopus", "pubmed", "scholar", "scielo", "semantic", "crossref"],
     timeout = 10000,
     sortBy = "relevance"
   } = options;
-
-  // Harden query input before processing
-  const hardenedQuery = hardenQuery(query);
-  if (!hardenedQuery) {
-    return {
-      query: "",
-      originalQuery: query,
-      expandedQueries: [],
-      totalResults: 0,
-      sources: {},
-      results: [],
-      timing: 0,
-      metrics: { query: "", totalTime: 0, cacheHit: false, sourceTimes: {}, resultCount: 0, deduplicatedCount: 0 },
-    };
-  }
-
+  
   // Query processing
-  const normalizedQuery = normalizeQuery(hardenedQuery);
+  const normalizedQuery = normalizeQuery(query);
   const expandedQueries = expandQuery(normalizedQuery);
   const perSource = Math.ceil(maxResults / sources.length) + 3;
   

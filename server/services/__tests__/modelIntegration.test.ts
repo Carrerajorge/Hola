@@ -1,13 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-const ENV_KEYS = [
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "XAI_API_KEY",
-  "GROK_API_KEY",
-  "ILIAGPT_API_KEY",
-  "OPENAI_API_KEY",
-] as const;
+const ENV_KEYS = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY", "GROK_API_KEY", "ILIAGPT_API_KEY"] as const;
 
 describe("modelIntegration", () => {
   const originalEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -31,7 +24,7 @@ describe("modelIntegration", () => {
     expect(normalizeModelProviderToRuntime("gemini")).toBe("gemini");
     expect(normalizeModelProviderToRuntime("xai")).toBe("xai");
     expect(normalizeModelProviderToRuntime("grok")).toBe("xai");
-    expect(normalizeModelProviderToRuntime("openai")).toBe("openai");
+    expect(normalizeModelProviderToRuntime("openai")).toBe(null);
   });
 
   it("treats GOOGLE_API_KEY as Gemini integration key", async () => {
@@ -53,7 +46,7 @@ describe("modelIntegration", () => {
     expect(isModelChatCapable({ provider: "google", modelId: "gemini-2.0-flash", modelType: "TEXT" })).toBe(true);
     expect(isModelChatCapable({ provider: "google", modelId: "imagen-4", modelType: "IMAGE" })).toBe(false);
     expect(isModelChatCapable({ provider: "xai", modelId: "grok-4-fast", modelType: "TEXT" })).toBe(true);
-    expect(isModelChatCapable({ provider: "openai", modelId: "gpt-5", modelType: "TEXT" })).toBe(true);
+    expect(isModelChatCapable({ provider: "openai", modelId: "gpt-5", modelType: "TEXT" })).toBe(false);
   });
 
   it("only exposes enabled+active+integrated+chat-capable models publicly", async () => {
@@ -66,3 +59,4 @@ describe("modelIntegration", () => {
     expect(isModelEligibleForPublic({ provider: "google", modelId: "gemini-2.0-flash", modelType: "TEXT", status: "active", isEnabled: "false" })).toBe(false);
   });
 });
+

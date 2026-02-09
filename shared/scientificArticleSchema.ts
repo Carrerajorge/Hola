@@ -165,9 +165,9 @@ export function generateAPA7Citation(article: ScientificArticle): string {
   }
   
   if (doi) {
-    citation += ` 🔗 ${doi}`;
+    citation += ` ${doi}`;
   }
-
+  
   return citation;
 }
 
@@ -227,7 +227,7 @@ export function formatArticleForDisplay(article: ScientificArticle): {
     year: article.year?.toString() || "N/A",
     citationCount: article.citationCount?.toString() || "N/A",
     doi: article.doi || "N/A",
-    url: article.url ? `🔗 ${article.url}` : (article.doi ? `🔗 https://doi.org/${article.doi}` : "N/A"),
+    url: article.url || (article.doi ? `https://doi.org/${article.doi}` : "N/A"),
     abstract: article.abstract || "No disponible",
     keywords: article.keywords?.join(", ") || "N/A",
     source: article.source,

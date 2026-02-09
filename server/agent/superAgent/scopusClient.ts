@@ -1,6 +1,5 @@
 import { SourceSignal } from "./contracts";
 import { franc } from "franc";
-import { sanitizePlainText } from "../../lib/textSanitizers";
 
 // =============================================================================
 // Types
@@ -819,7 +818,12 @@ function quoteIfNeeded(term: string): string {
 }
 
 function sanitizeQueryInput(query: string): string {
-  return sanitizePlainText(query, { maxLen: 2000, collapseWs: true });
+  if (!query || typeof query !== "string") return "";
+  return query
+    .replace(/[\x00-\x1f\x7f]/g, "")  // Remove control characters
+    .replace(/\s+/g, " ")
+    .trim()
+    .substring(0, 2000);  // Hard limit on input length
 }
 
 function detectLanguageName(text: string): string {

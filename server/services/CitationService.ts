@@ -29,7 +29,7 @@ export class CitationService {
         const yearText = year ? `(${year}).` : "(n.d.).";
         const titleText = title ? `*${title}*.` : "Untitled.";
         const publisherText = publisher ? `${publisher}.` : "";
-        const urlText = url ? `🔗 ${url}` : "";
+        const urlText = url ? url : "";
 
         // Join with spaces, ensuring no double spaces if parts are missing
         let citation = [authorText, yearText, titleText, publisherText, urlText]

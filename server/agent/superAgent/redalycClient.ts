@@ -7,8 +7,6 @@
  * API Docs: https://zenodo.org/record/7774744
  */
 
-import { sanitizePlainText, sanitizeSearchQuery } from "../../lib/textSanitizers";
-
 export interface RedalycArticle {
     redalyc_id: string;
     title: string;
@@ -39,37 +37,9 @@ const REDALYC_API_BASE = "https://www.redalyc.org/api/search/";
 const REDALYC_OAI = "https://www.redalyc.org/exportarcita";
 const REDALYC_SERVICE_BASE = "https://www.redalyc.org/service/r2020/getArticles";
 
-// Rate limiting & timeouts
+// Rate limiting
 const REQUEST_DELAY_MS = 400;
-const REQUEST_TIMEOUT_MS = 15000;
 const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; IliaGPT/1.0)").trim();
-
-/**
- * Sanitize and harden Redalyc search query input
- */
-function sanitizeRedalycQuery(raw: string): string {
-    let q = sanitizeSearchQuery(raw, 500);
-    if (!q) return "";
-    // Remove dangerous chars (keep letters, digits, spaces, common punctuation, accented chars)
-    q = q.replace(/[^\w\s\-.,()'"áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
-    // Collapse whitespace
-    q = q.replace(/\s+/g, " ").trim();
-    return q;
-}
-
-/**
- * Fetch with timeout for Redalyc API calls
- */
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        return response;
-    } finally {
-        clearTimeout(timeout);
-    }
-}
 
 const DOI_REGEX = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
 
@@ -78,7 +48,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function stripHtml(text: string): string {
-    return sanitizePlainText(text || "", { maxLen: 5000, collapseWs: true });
+    return (text || "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 function normalizeDoi(raw: string | undefined): string | undefined {
@@ -199,23 +172,16 @@ export async function searchRedalyc(
     const { maxResults = 25, startYear, endYear, country } = options;
     const startTime = Date.now();
 
-    // Sanitize query input
-    const sanitized = sanitizeRedalycQuery(query);
-    if (!sanitized) {
-        console.warn("[Redalyc] Empty query after sanitization");
-        return { articles: [], totalResults: 0, query, searchTime: Date.now() - startTime };
-    }
-
-    console.log(`[Redalyc] Searching: "${sanitized}"`);
+    console.log(`[Redalyc] Searching: "${query}"`);
 
     const token = process.env.REDALYC_API_TOKEN;
 
     if (token) {
-        return searchRedalycWithToken(sanitized, token, options);
+        return searchRedalycWithToken(query, token, options);
     }
 
     // Fallback: Use web search interface
-    return searchRedalycWeb(sanitized, options);
+    return searchRedalycWeb(query, options);
 }
 
 /**
@@ -249,7 +215,7 @@ async function searchRedalycWithToken(
             params.set("country", country);
         }
 
-        const response = await fetchWithTimeout(`${REDALYC_API_BASE}?${params}`, {
+        const response = await fetch(`${REDALYC_API_BASE}?${params}`, {
             headers: {
                 "Authorization": `Bearer ${token}`,
                 "Accept": "application/json",
@@ -342,7 +308,7 @@ async function searchRedalycWeb(
 
         for (let page = 1; articles.length < maxResults; page++) {
             const url = `${REDALYC_SERVICE_BASE}/${encodeURIComponent(segment)}/${page}/${pageSize}/1/default/`;
-            const response = await fetchWithTimeout(url, {
+            const response = await fetch(url, {
                 headers: {
                     // Do NOT send "Accept: application/json" (Redalyc returns 406 in some cases).
                     "User-Agent": USER_AGENT,
@@ -516,9 +482,9 @@ export function generateRedalycAPA7Citation(article: RedalycArticle): string {
 
     let urlPart = "";
     if (article.doi) {
-        urlPart = ` 🔗 https://doi.org/${article.doi}`;
+        urlPart = ` https://doi.org/${article.doi}`;
     } else if (article.url) {
-        urlPart = ` 🔗 ${article.url}`;
+        urlPart = ` ${article.url}`;
     }
 
     return `${authorsStr} ${year}. ${title} ${journalPart}.${urlPart}`.trim();

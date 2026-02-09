@@ -14,7 +14,6 @@
  */
 
 import ExcelJS from "exceljs";
-import { sanitizePlainText } from "../lib/textSanitizers";
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -366,17 +365,17 @@ async function searchCrossRef(query: string, maxResults: number = 50, yearFrom?:
           affiliation: a.affiliation?.[0]?.name || ""
         }));
         
-	        papers.push({
-	          id: item.DOI || `crossref_${Date.now()}`,
-	          title: item.title?.[0] || "",
-	          authors,
-	          year: item.published?.["date-parts"]?.[0]?.[0] || 0,
-	          journal: item["container-title"]?.[0] || "",
-	          abstract: sanitizePlainText(item.abstract, { maxLen: 12000, collapseWs: true }),
-	          keywords: item.subject || [],
-	          doi: item.DOI || "",
-	          url: item.URL || `https://doi.org/${item.DOI}`,
-	          language: item.language || "en",
+        papers.push({
+          id: item.DOI || `crossref_${Date.now()}`,
+          title: item.title?.[0] || "",
+          authors,
+          year: item.published?.["date-parts"]?.[0]?.[0] || 0,
+          journal: item["container-title"]?.[0] || "",
+          abstract: item.abstract?.replace(/<[^>]*>/g, "") || "",
+          keywords: item.subject || [],
+          doi: item.DOI || "",
+          url: item.URL || `https://doi.org/${item.DOI}`,
+          language: item.language || "en",
           documentType: item.type || "article",
           cityOfPublication: item.publisher_location || "",
           source: "crossref",
@@ -479,12 +478,12 @@ export function generateAPACitation(paper: AcademicPaper): string {
   const year = paper.year ? `(${paper.year})` : "(n.d.)";
   const title = paper.title;
   const journal = paper.journal ? `*${paper.journal}*` : "";
-  const doi = paper.doi ? `🔗 https://doi.org/${paper.doi}` : (paper.url ? `🔗 ${paper.url}` : "");
-
+  const doi = paper.doi ? `https://doi.org/${paper.doi}` : "";
+  
   let citation = `${authors} ${year}. ${title}.`;
   if (journal) citation += ` ${journal}.`;
   if (doi) citation += ` ${doi}`;
-
+  
   return citation.trim();
 }
 
@@ -539,8 +538,8 @@ export function generateChicagoCitation(paper: AcademicPaper): string {
   const year = paper.year || "n.d.";
   const title = `"${paper.title}."`;
   const journal = paper.journal ? `*${paper.journal}*` : "";
-  const doi = paper.doi ? `🔗 https://doi.org/${paper.doi}` : (paper.url ? `🔗 ${paper.url}` : "");
-
+  const doi = paper.doi ? `https://doi.org/${paper.doi}` : "";
+  
   return `${authors} ${year}. ${title} ${journal}. ${doi}`.replace(/\s+/g, " ").trim();
 }
 

@@ -1,5 +1,3 @@
-import { normalizeFileForUpload } from "@/lib/attachmentIngest";
-
 export interface ValidationResult {
   type: 'validation_result';
   valid: boolean;
@@ -215,7 +213,6 @@ export class ChunkedFileUploader {
     onProgress: (progress: UploadProgress) => void
   ): Promise<{ fileId: string; storagePath: string }> {
     this.abortController = new AbortController();
-    const normalizedFile = normalizeFileForUpload(file);
     const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
     try {
@@ -226,7 +223,7 @@ export class ChunkedFileUploader {
         processingProgress: 0,
       });
 
-      const validation = await this.validateFile(normalizedFile);
+      const validation = await this.validateFile(file);
       if (!validation.valid) {
         throw new Error(validation.errors.join('. '));
       }
@@ -239,13 +236,13 @@ export class ChunkedFileUploader {
       });
 
       const config = await this.fetchConfig();
-      const useChunked = normalizedFile.size > config.chunkSize;
+      const useChunked = file.size > config.chunkSize;
 
       let storagePath: string;
       let registeredFileId: string | undefined;
 
       if (useChunked) {
-        const result = await this.uploadChunked(normalizedFile, config, (percent) => {
+        const result = await this.uploadChunked(file, config, (percent) => {
           onProgress({
             fileId: registeredFileId || fileId,
             phase: 'uploading',
@@ -258,7 +255,7 @@ export class ChunkedFileUploader {
           registeredFileId = result.fileId;
         }
       } else {
-        const result = await this.uploadSingle(normalizedFile, (percent) => {
+        const result = await this.uploadSingle(file, (percent) => {
           onProgress({
             fileId: registeredFileId || fileId,
             phase: 'uploading',
@@ -271,16 +268,17 @@ export class ChunkedFileUploader {
 
       // Register the file in the database if not already done (chunked upload does it via /complete)
       if (!registeredFileId) {
-        const endpoint = '/api/files';
+        const isImage = file.type.startsWith('image/');
+        const endpoint = isImage ? '/api/files/quick' : '/api/files';
 
         const registerRes = await retryWithBackoff(async () => {
           const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              name: normalizedFile.name,
-              type: normalizedFile.type,
-              size: normalizedFile.size,
+              name: file.name,
+              type: file.type,
+              size: file.size,
               storagePath,
             }),
           });

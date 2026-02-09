@@ -2353,20 +2353,9 @@ export function ChatInterface({
         };
 
         try {
-          const safeJson = async (res: Response): Promise<any> => {
-            try {
-              return await res.json();
-            } catch {
-              return null;
-            }
-          };
-
           const urlRes = await retryFetch(() => fetch("/api/objects/upload", { method: "POST" }), 2);
-          const urlData = await safeJson(urlRes);
-          if (!urlRes.ok) {
-            throw new Error(urlData?.error || `Failed to get upload URL (status ${urlRes.status})`);
-          }
-          const { uploadURL, storagePath } = urlData || {};
+          if (!urlRes.ok) throw new Error(`Failed to get upload URL (status ${urlRes.status})`);
+          const { uploadURL, storagePath } = await urlRes.json();
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
           const uploadRes = await retryFetch(() => fetch(uploadURL, {
@@ -2389,10 +2378,7 @@ export function ChatInterface({
               });
 
               if (spreadsheetRes.ok) {
-                const spreadsheetResult = await safeJson(spreadsheetRes);
-                if (!spreadsheetResult) {
-                  throw new Error("Invalid spreadsheet response");
-                }
+                const spreadsheetResult = await spreadsheetRes.json();
                 const uploadId = spreadsheetResult.id;
                 const sheetDetails = spreadsheetResult.sheetDetails || [];
                 const sheets = sheetDetails.map((s: any) => ({
@@ -2425,18 +2411,13 @@ export function ChatInterface({
           }
 
           if (isImage) {
-            const registerRes = await fetch("/api/files", {
+            const registerRes = await fetch("/api/files/quick", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
             });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
 
             setUploadedFiles((prev: any[]) =>
               prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
@@ -2451,13 +2432,8 @@ export function ChatInterface({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
             });
-            const registeredFile = await safeJson(registerRes);
-            if (!registerRes.ok) {
-              throw new Error(registeredFile?.error || `File registration failed (status ${registerRes.status})`);
-            }
-            if (!registeredFile?.id) {
-              throw new Error("Server returned invalid file registration response");
-            }
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
 
             setUploadedFiles((prev: any[]) =>
               prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
@@ -2476,15 +2452,9 @@ export function ChatInterface({
             }
           }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
           console.error("File upload error:", error);
-          toast({
-            title: "Error al subir archivo",
-            description: `${file.name}: ${message}`,
-            variant: "destructive",
-          });
           setUploadedFiles((prev: any[]) =>
-            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error", error: message } : f))
+            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error" } : f))
           );
         }
       };

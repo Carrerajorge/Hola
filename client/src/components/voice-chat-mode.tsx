@@ -5,29 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/contexts/SettingsContext";
-import { normalizeFileForUpload } from "@/lib/attachmentIngest";
-
-const VOICE_UPLOAD_ALLOWED_TYPES = new Set([
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "text/html",
-  "application/json",
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-powerpoint",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/gif",
-  "image/bmp",
-  "image/webp",
-  "image/tiff",
-]);
 
 interface VoiceChatModeProps {
   open: boolean;
@@ -284,18 +261,11 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
     setInputMode("uploading");
     const file = files[0];
-    const normalizedFile = normalizeFileForUpload(file);
-    const normalizedType = (normalizedFile.type || "").trim().toLowerCase();
 
     // Validate file
     const maxSize = 50 * 1024 * 1024; // 50MB
-    if (normalizedFile.size > maxSize) {
+    if (file.size > maxSize) {
       setError("El archivo es demasiado grande (máximo 50MB)");
-      setInputMode("idle");
-      return;
-    }
-    if (!normalizedType || !VOICE_UPLOAD_ALLOWED_TYPES.has(normalizedType)) {
-      setError("Tipo de archivo no soportado");
       setInputMode("idle");
       return;
     }
@@ -316,8 +286,8 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       // Upload file directly to storage
       const putRes = await fetch(uploadURL, {
         method: "PUT",
-        headers: { "Content-Type": normalizedType },
-        body: normalizedFile,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
       });
 
       if (!putRes.ok) {
@@ -325,25 +295,22 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       }
 
       // Register file in database
-      const registerRes = await fetch("/api/files", {
+      const registerRes = await fetch("/api/files/quick", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: normalizedFile.name,
-          type: normalizedType,
-          size: normalizedFile.size,
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
           storagePath,
         }),
       });
 
       if (!registerRes.ok) {
-        const errorData = await registerRes.json().catch(() => ({ error: "Archivo subido pero no se pudo registrar" }));
-        throw new Error(errorData.error || "Archivo subido pero no se pudo registrar");
+        throw new Error("Archivo subido pero no se pudo registrar");
       }
 
-      const registerData = await registerRes.json().catch(() => ({} as any));
-      const statusLabel = registerData?.status === "ready" ? "Listo" : "Procesando";
-      setResponse(`Archivo subido: ${normalizedFile.name} (${(normalizedFile.size / 1024).toFixed(1)} KB) (${statusLabel})`);
+      setResponse(`Archivo subido: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
 
     } catch (err: any) {
       setError(err.message || "Error al subir el archivo");

@@ -47,7 +47,7 @@ export function extractAuditContext(req: Request): AuditContext {
     anyReq.session?.passport?.user?.claims?.role ||
     null;
 
-  const ipAddress =
+  const ipAddress = 
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
     (req.headers["x-real-ip"] as string) ||
     req.socket?.remoteAddress ||
@@ -121,7 +121,7 @@ export const AuditActions = {
   AUTH_PASSWORD_RESET: "auth.password_reset",
   AUTH_SESSION_CREATED: "auth.session_created",
   AUTH_SESSION_EXPIRED: "auth.session_expired",
-
+  
   // User Management
   USER_CREATED: "user.created",
   USER_UPDATED: "user.updated",
@@ -129,45 +129,39 @@ export const AuditActions = {
   USER_ROLE_CHANGED: "user.role_changed",
   USER_PLAN_CHANGED: "user.plan_changed",
   USER_STATUS_CHANGED: "user.status_changed",
-
+  
   // Admin Actions
   ADMIN_ACCESS: "admin.access",
   ADMIN_DENIED: "admin.access_denied",
   ADMIN_SETTINGS_CHANGED: "admin.settings_changed",
   ADMIN_EXPORT_DATA: "admin.export_data",
   ADMIN_IMPORT_DATA: "admin.import_data",
-
+  
   // AI Models
-  MODEL_CREATED: "model.created",
-  MODEL_UPDATED: "model.updated",
-  MODEL_DELETED: "model.deleted",
   MODEL_ENABLED: "model.enabled",
   MODEL_DISABLED: "model.disabled",
   MODEL_CONFIG_CHANGED: "model.config_changed",
-  MODEL_TESTED: "model.tested",
-  MODELS_SYNC: "models.sync",
-  MODELS_SYNC_ALL: "models.sync_all",
-
+  
   // Conversations
   CHAT_CREATED: "chat.created",
   CHAT_DELETED: "chat.deleted",
   CHAT_FLAGGED: "chat.flagged",
   CHAT_EXPORTED: "chat.exported",
   CHAT_STREAM: "chat.stream",
-
+  
   // Payments
   PAYMENT_RECEIVED: "payment.received",
   PAYMENT_FAILED: "payment.failed",
   PAYMENT_REFUNDED: "payment.refunded",
   PAYMENT_RECONCILED: "payment.reconciled",
   PAYMENT_DISPUTED: "payment.disputed",
-
+  
   // Invoices
   INVOICE_CREATED: "invoice.created",
   INVOICE_SENT: "invoice.sent",
   INVOICE_PAID: "invoice.paid",
   INVOICE_CANCELLED: "invoice.cancelled",
-
+  
   // Security
   SECURITY_POLICY_CREATED: "security.policy_created",
   SECURITY_POLICY_UPDATED: "security.policy_updated",
@@ -177,17 +171,17 @@ export const AuditActions = {
   SECURITY_ALERT: "security.alert",
   SECURITY_IP_BLOCKED: "security.ip_blocked",
   SECURITY_RATE_LIMITED: "security.rate_limited",
-
+  
   // Reports
   REPORT_GENERATED: "report.generated",
   REPORT_SCHEDULED: "report.scheduled",
   REPORT_EXPORTED: "report.exported",
-
+  
   // Database
   DB_QUERY_EXECUTED: "db.query_executed",
   DB_BACKUP_CREATED: "db.backup_created",
   DB_MIGRATION_RUN: "db.migration_run",
-
+  
   // System
   SYSTEM_CONFIG_CHANGED: "system.config_changed",
   SYSTEM_MAINTENANCE: "system.maintenance",
