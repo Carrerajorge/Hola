@@ -19,11 +19,14 @@ permissions:
   contents: read
 
 env:
-  VPS_HOST: 100.93.79.71
-  VPS_USER: root
-  VPS_PORT: "22"
-  DEPLOY_PATH: /opt/hola
-  COMPOSE_PROJECT: iliagpt
+  # Use GitHub Secrets so the deploy target can be changed without code changes.
+  # Defaults are set to the public SSH endpoint (port 2222) because GitHub runners
+  # cannot reach private Tailscale IPs without additional networking setup.
+  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+  VPS_PORT: ${{ secrets.VPS_PORT || '2222' }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+  COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
 
 jobs:
   # ── CI Gate ─────────────────────────────────────────────
@@ -52,7 +55,9 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          # Best-effort: StrictHostKeyChecking=no is used below, so failure to keyscan
+          # should not hard-fail the workflow.
+          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Deploy to VPS
         run: |
