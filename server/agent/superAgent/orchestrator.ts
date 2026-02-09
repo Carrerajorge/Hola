@@ -303,8 +303,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
         steps: contract.plan,
         requirements: contract.requirements,
         rules: {
-          yearStart: yearRange.start || 2020,
-          yearEnd: yearRange.end || 2025,
+          yearStart: yearRange.start || new Date().getFullYear() - 5,
+          yearEnd: yearRange.end || new Date().getFullYear(),
           output: contract.requirements?.must_create?.[0] || "xlsx",
         },
       });
@@ -553,8 +553,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
       pipelineResult = await runAcademicPipeline(searchTopic, pipelineEmitter, {
         targetCount: Math.min(targetCount, 50),
-        yearStart: yearRange.start || 2020,
-        yearEnd: yearRange.end || 2025,
+        yearStart: yearRange.start || new Date().getFullYear() - 5,
+        yearEnd: yearRange.end || new Date().getFullYear(),
         maxSearchIterations: 4,
         regionFilter: isLatamOnly ? "latam" : "global",
       });

@@ -478,12 +478,12 @@ export function generateAPACitation(paper: AcademicPaper): string {
   const year = paper.year ? `(${paper.year})` : "(n.d.)";
   const title = paper.title;
   const journal = paper.journal ? `*${paper.journal}*` : "";
-  const doi = paper.doi ? `https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? `🔗 https://doi.org/${paper.doi}` : (paper.url ? `🔗 ${paper.url}` : "");
+
   let citation = `${authors} ${year}. ${title}.`;
   if (journal) citation += ` ${journal}.`;
   if (doi) citation += ` ${doi}`;
-  
+
   return citation.trim();
 }
 
@@ -538,8 +538,8 @@ export function generateChicagoCitation(paper: AcademicPaper): string {
   const year = paper.year || "n.d.";
   const title = `"${paper.title}."`;
   const journal = paper.journal ? `*${paper.journal}*` : "";
-  const doi = paper.doi ? `https://doi.org/${paper.doi}` : "";
-  
+  const doi = paper.doi ? `🔗 https://doi.org/${paper.doi}` : (paper.url ? `🔗 ${paper.url}` : "");
+
   return `${authors} ${year}. ${title} ${journal}. ${doi}`.replace(/\s+/g, " ").trim();
 }
 

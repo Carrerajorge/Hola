@@ -4,6 +4,7 @@ const S2_API_BASE = "https://api.semanticscholar.org/graph/v1";
 const RATE_LIMIT_MS = 1000;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
+const FETCH_TIMEOUT_MS = 15000;
 
 /**
  * Sanitize and harden Semantic Scholar search query input
@@ -40,11 +41,15 @@ async function fetchWithRetry(url: string, retries: number = MAX_RETRIES): Promi
     try {
       await rateLimit();
       
+      const controller = new AbortController();
+      const fetchTimer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       const response = await fetch(url, {
         headers: {
           "Accept": "application/json",
         },
+        signal: controller.signal,
       });
+      clearTimeout(fetchTimer);
 
       if (response.ok) {
         return response;

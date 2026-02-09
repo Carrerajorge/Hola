@@ -495,17 +495,20 @@ const SCOPUS_API_KEY = process.env.SCOPUS_API_KEY || "";
 export async function searchScopus(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scopus";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(25, maxResults));
+
   if (!SCOPUS_API_KEY || isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const params = new URLSearchParams({
-      query: query,
-      count: Math.min(maxResults, 25).toString(),
+      query: sanitized,
+      count: clampedMax.toString(),
       sort: options.sortBy === "date" ? "-coverDate" : "-citedby-count",
       field: "dc:title,dc:creator,prism:publicationName,prism:coverDate,prism:doi,citedby-count,dc:description,openaccessFlag"
     });
@@ -555,15 +558,18 @@ export async function searchScopus(query: string, options: SearchOptions = {}): 
 export async function searchPubMed(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "pubmed";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json&sort=relevance`;
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(sanitized)}&retmax=${clampedMax}&retmode=json&sort=relevance`;
     const searchRes = await fetchWithRetry(searchUrl, {}, timeout);
     
     if (!searchRes.ok) {
@@ -620,15 +626,18 @@ export async function searchPubMed(query: string, options: SearchOptions = {}): 
 export async function searchScielo(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scielo";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://search.scielo.org/?q=${encodeURIComponent(query)}&lang=es&count=${maxResults}&output=site&sort=CITED_DESC`;
+    const searchUrl = `https://search.scielo.org/?q=${encodeURIComponent(sanitized)}&lang=es&count=${clampedMax}&output=site&sort=CITED_DESC`;
     const response = await fetchWithRetry(searchUrl, { headers: HEADERS }, timeout);
     
     if (!response.ok) {
@@ -678,15 +687,18 @@ export async function searchScielo(query: string, options: SearchOptions = {}): 
 export async function searchScholar(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "scholar";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(20, maxResults));
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es&num=${Math.min(maxResults, 20)}`;
+    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(sanitized)}&hl=es&num=${clampedMax}`;
     const response = await fetchWithRetry(searchUrl, { headers: HEADERS }, timeout);
 
     if (!response.ok) {
@@ -738,16 +750,18 @@ export async function searchScholar(query: string, options: SearchOptions = {}):
 export async function searchDuckDuckGo(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "duckduckgo";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const ddg = await import("duck-duck-scrape");
-    const academicQuery = `${query} site:scholar.google.com OR site:researchgate.net OR site:academia.edu OR filetype:pdf`;
+    const academicQuery = `${sanitized} site:scholar.google.com OR site:researchgate.net OR site:academia.edu OR filetype:pdf`;
     
     const searchResults = await ddg.search(academicQuery, { safeSearch: ddg.SafeSearchType.OFF });
     recordSuccess(source);
@@ -783,16 +797,19 @@ export async function searchDuckDuckGo(query: string, options: SearchOptions = {
 export async function searchSemanticScholar(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "semantic";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
     const fields = "title,authors,year,venue,citationCount,abstract,openAccessPdf,externalIds";
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${maxResults}&fields=${fields}`;
+    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(sanitized)}&limit=${clampedMax}&fields=${fields}`;
     
     const response = await fetchWithRetry(url, { headers: { "Accept": "application/json" } }, timeout);
     
@@ -836,15 +853,18 @@ export async function searchSemanticScholar(query: string, options: SearchOption
 export async function searchCrossRef(query: string, options: SearchOptions = {}): Promise<AcademicResult[]> {
   const { maxResults = 10, timeout = 8000 } = options;
   const source = "crossref";
-  
+  const sanitized = hardenQuery(query);
+  if (!sanitized) return [];
+  const clampedMax = Math.max(1, Math.min(100, maxResults));
+
   if (isCircuitOpen(source)) return [];
-  
-  const cacheKey = getCacheKey(source, query, options);
+
+  const cacheKey = getCacheKey(source, sanitized, options);
   const cached = await getCached<AcademicResult[]>(cacheKey);
   if (cached) return cached.data;
 
   try {
-    const url = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=${maxResults}&sort=relevance&order=desc`;
+    const url = `https://api.crossref.org/works?query=${encodeURIComponent(sanitized)}&rows=${clampedMax}&sort=relevance&order=desc`;
     
     const response = await fetchWithRetry(url, { headers: { "Accept": "application/json" } }, timeout);
     
