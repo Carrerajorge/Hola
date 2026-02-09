@@ -1,0 +1,50 @@
+/**
+ * Shared Redis client
+ *
+ * Several subsystems (metrics/audit, memory, rate limiting, etc.) want a direct
+ * Redis handle. Historically this codebase created multiple Redis clients in
+ * different modules; this file provides a single import path (`server/lib/redis`)
+ * so new modules can depend on it without breaking the build.
+ *
+ * Notes:
+ * - Uses ioredis because other parts of the server already depend on it.
+ * - Uses lazy connections to avoid blocking startup during builds/tests.
+ */
+
+import Redis from 'ioredis';
+import { createLogger } from './productionLogger';
+
+const logger = createLogger('RedisSingleton');
+
+function buildRedisClient(): Redis {
+  const redisUrl = process.env.REDIS_URL;
+  const host = process.env.REDIS_HOST;
+  const port = process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : undefined;
+
+  // Prefer REDIS_URL when available (docker-compose sets this in production).
+  const client = redisUrl
+    ? new Redis(redisUrl, {
+        // BullMQ and other libs rely on unlimited retries per request.
+        maxRetriesPerRequest: null,
+        lazyConnect: true,
+        enableReadyCheck: true,
+      })
+    : new Redis({
+        host: host || '127.0.0.1',
+        port: port || 6379,
+        password: process.env.REDIS_PASSWORD || undefined,
+        maxRetriesPerRequest: null,
+        lazyConnect: true,
+        enableReadyCheck: true,
+      });
+
+  client.on('error', (err) => {
+    // Keep logs terse; transient connection errors can happen during deploys.
+    logger.error('Redis error', { error: err?.message || String(err) });
+  });
+
+  return client;
+}
+
+export const redis = buildRedisClient();
+
