@@ -122,6 +122,20 @@ export async function getRealtimeMetrics(): Promise<RealtimeMetrics> {
 }
 
 /**
+ * Calculate a month-over-month trend as a formatted percentage string.
+ * Returns "+0%" when there is no previous data to compare against.
+ */
+function calculateTrend(current: number, previous: number): string {
+  if (previous === 0) {
+    return current > 0 ? "+100%" : "+0%";
+  }
+  const pctChange = ((current - previous) / previous) * 100;
+  const rounded = Math.round(pctChange);
+  const sign = rounded >= 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
+/**
  * Get extended dashboard statistics
  */
 export async function getExtendedDashboardStats() {
@@ -141,11 +155,13 @@ export async function getExtendedDashboardStats() {
     storage.getSettings()
   ]);
   
-  // Calculate trends (compare to yesterday)
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  
+  // Calculate month-over-month trends
+  const userTrend = calculateTrend(userStats.newThisMonth, userStats.newLastMonth);
+  const revenueTrend = calculateTrend(
+    parseFloat(paymentStats.thisMonth),
+    parseFloat(paymentStats.previousMonth)
+  );
+
   // Action breakdown
   const actionCounts = recentLogs.reduce((acc, log) => {
     acc[log.action] = (acc[log.action] || 0) + 1;
@@ -178,13 +194,13 @@ export async function getExtendedDashboardStats() {
       total: userStats.total,
       active: userStats.active,
       newThisMonth: userStats.newThisMonth,
-      trend: "+12%" // TODO: Calculate real trend
+      trend: userTrend
     },
     revenue: {
       total: paymentStats.total,
       thisMonth: paymentStats.thisMonth,
       transactions: paymentStats.count,
-      trend: "+8%"
+      trend: revenueTrend
     },
     models: {
       total: allModels.length,
