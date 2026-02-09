@@ -150,7 +150,7 @@ export const terminalPackageManageTool = tool(
 export const browserPdfGenerateTool = tool(
   async (input) => {
     try {
-      const page = (universalBrowserController as any).getActivePage(input.sessionId);
+      const page = universalBrowserController.getActivePage(input.sessionId);
       const { path: filePath } = await browserEngineExtensions.generatePdf(page, {
         format: input.format as any,
         landscape: input.landscape,
@@ -188,7 +188,7 @@ export const browserPdfGenerateTool = tool(
 export const browserAccessibilityTool = tool(
   async (input) => {
     try {
-      const page = (universalBrowserController as any).getActivePage(input.sessionId);
+      const page = universalBrowserController.getActivePage(input.sessionId);
 
       if (input.role) {
         const nodes = await browserEngineExtensions.getAccessibilityByRole(page, input.role);
@@ -246,7 +246,7 @@ export const browserAccessibilityTool = tool(
 export const browserPerformanceTool = tool(
   async (input) => {
     try {
-      const page = (universalBrowserController as any).getActivePage(input.sessionId);
+      const page = universalBrowserController.getActivePage(input.sessionId);
       const metrics = await browserEngineExtensions.getPerformanceMetrics(page);
 
       return JSON.stringify({
@@ -284,7 +284,7 @@ export const browserPerformanceTool = tool(
 export const browserElementPickerTool = tool(
   async (input) => {
     try {
-      const page = (universalBrowserController as any).getActivePage(input.sessionId);
+      const page = universalBrowserController.getActivePage(input.sessionId);
 
       if (input.action === "highlight") {
         const screenshot = await browserEngineExtensions.highlightElements(page, input.highlights || []);
@@ -334,7 +334,7 @@ export const browserConsoleTool = tool(
   async (input) => {
     try {
       if (input.action === "start") {
-        const page = (universalBrowserController as any).getActivePage(input.sessionId);
+        const page = universalBrowserController.getActivePage(input.sessionId);
         browserEngineExtensions.startConsoleCapture(input.sessionId, page);
         return JSON.stringify({ success: true, message: "Console capture started" });
       }
@@ -386,7 +386,7 @@ export const browserRecordingTool = tool(
     try {
       switch (input.action) {
         case "start": {
-          const page = (universalBrowserController as any).getActivePage(input.sessionId);
+          const page = universalBrowserController.getActivePage(input.sessionId);
           const recordingId = browserEngineExtensions.startRecording(
             input.sessionId,
             input.name || "Recording",
@@ -526,7 +526,7 @@ export const workflowExecuteTool = tool(
 export const scrapingPipelineTool = tool(
   async (input) => {
     try {
-      const page = (universalBrowserController as any).getActivePage(input.sessionId);
+      const page = universalBrowserController.getActivePage(input.sessionId);
       const result = await browserEngineExtensions.executeScraping(page, {
         id: input.pipelineId || "pipeline",
         name: input.name || "Scraping Pipeline",
@@ -580,6 +580,301 @@ export const scrapingPipelineTool = tool(
 );
 
 // ============================================
+// Browser: Network Throttling
+// ============================================
+
+export const browserNetworkThrottleTool = tool(
+  async (input) => {
+    try {
+      const context = universalBrowserController.getSessionContext(input.sessionId);
+
+      if (input.action === "set") {
+        await browserEngineExtensions.setNetworkThrottle(context, input.preset || "4g");
+        return JSON.stringify({
+          success: true,
+          preset: input.preset,
+          message: `Network throttled to ${input.preset}`,
+        });
+      }
+
+      if (input.action === "remove") {
+        await browserEngineExtensions.removeNetworkThrottle(context);
+        return JSON.stringify({ success: true, message: "Throttling removed" });
+      }
+
+      if (input.action === "list-presets") {
+        const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+        return JSON.stringify({
+          success: true,
+          presets: Object.entries(BrowserEngineExtensions.THROTTLE_PRESETS).map(([id, p]) => ({
+            id,
+            name: p.name,
+            downloadKbps: p.downloadKbps,
+            uploadKbps: p.uploadKbps,
+            latencyMs: p.latencyMs,
+          })),
+        });
+      }
+
+      return JSON.stringify({ success: false, error: "Invalid action" });
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+  {
+    name: "browser_network_throttle",
+    description: "Control network speed in browser sessions. Simulate 3G, 4G, WiFi, dial-up, or offline. Useful for testing app performance under poor network conditions.",
+    schema: z.object({
+      sessionId: z.string().describe("Browser session ID"),
+      action: z.enum(["set", "remove", "list-presets"]).describe("Throttle action"),
+      preset: z.enum(["3g", "3g-slow", "4g", "wifi", "dial-up", "offline"]).optional().describe("Network preset"),
+    }),
+  }
+);
+
+// ============================================
+// Browser: Geolocation Spoofing
+// ============================================
+
+export const browserGeolocationTool = tool(
+  async (input) => {
+    try {
+      const context = universalBrowserController.getSessionContext(input.sessionId);
+
+      if (input.action === "set") {
+        if (input.preset) {
+          const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+          const loc = BrowserEngineExtensions.LOCATION_PRESETS[input.preset];
+          if (!loc) return JSON.stringify({ success: false, error: "Unknown preset" });
+          await browserEngineExtensions.setGeolocation(context, loc.latitude, loc.longitude);
+          return JSON.stringify({ success: true, location: loc });
+        }
+        if (input.latitude !== undefined && input.longitude !== undefined) {
+          await browserEngineExtensions.setGeolocation(context, input.latitude, input.longitude);
+          return JSON.stringify({ success: true, location: { latitude: input.latitude, longitude: input.longitude } });
+        }
+        return JSON.stringify({ success: false, error: "Provide preset or coordinates" });
+      }
+
+      if (input.action === "list-presets") {
+        const { BrowserEngineExtensions } = await import("../computerUse/browserEngineExtensions");
+        return JSON.stringify({
+          success: true,
+          presets: Object.entries(BrowserEngineExtensions.LOCATION_PRESETS).map(([id, l]) => ({
+            id,
+            ...l,
+          })),
+        });
+      }
+
+      return JSON.stringify({ success: false, error: "Invalid action" });
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+  {
+    name: "browser_geolocation",
+    description: "Spoof browser geolocation to test location-dependent features. Use presets (new-york, london, tokyo, etc.) or custom coordinates.",
+    schema: z.object({
+      sessionId: z.string().describe("Browser session ID"),
+      action: z.enum(["set", "list-presets"]).describe("Geolocation action"),
+      preset: z.string().optional().describe("Location preset name"),
+      latitude: z.number().optional().describe("Custom latitude"),
+      longitude: z.number().optional().describe("Custom longitude"),
+    }),
+  }
+);
+
+// ============================================
+// Browser: HAR Export
+// ============================================
+
+export const browserHarTool = tool(
+  async (input) => {
+    try {
+      if (input.action === "start") {
+        const page = universalBrowserController.getActivePage(input.sessionId);
+        browserEngineExtensions.startHARCapture(input.sessionId, page);
+        return JSON.stringify({ success: true, message: "HAR capture started" });
+      }
+
+      if (input.action === "get") {
+        const har = browserEngineExtensions.getHAR(input.sessionId);
+        return JSON.stringify({
+          success: true,
+          entries: har.entries.length,
+          sample: har.entries.slice(-10).map((e) => ({
+            method: e.request.method,
+            url: e.request.url.slice(0, 100),
+            status: e.response.status,
+            time: e.time,
+          })),
+        });
+      }
+
+      if (input.action === "export") {
+        const result = await browserEngineExtensions.exportHAR(input.sessionId);
+        return JSON.stringify({ success: true, path: result.path });
+      }
+
+      if (input.action === "clear") {
+        browserEngineExtensions.clearHAR(input.sessionId);
+        return JSON.stringify({ success: true, message: "HAR cleared" });
+      }
+
+      return JSON.stringify({ success: false, error: "Invalid action" });
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+  {
+    name: "browser_har",
+    description: "Capture and export HTTP Archive (HAR) files. Start capturing all network requests/responses, retrieve captured data, or export to a .har file for analysis.",
+    schema: z.object({
+      sessionId: z.string().describe("Browser session ID"),
+      action: z.enum(["start", "get", "export", "clear"]).describe("HAR action"),
+    }),
+  }
+);
+
+// ============================================
+// Browser: Smart Form Fill
+// ============================================
+
+export const browserFormFillTool = tool(
+  async (input) => {
+    try {
+      const page = universalBrowserController.getActivePage(input.sessionId);
+
+      if (input.action === "detect") {
+        const fields = await browserEngineExtensions.detectFormFields(page);
+        return JSON.stringify({
+          success: true,
+          fields: fields.map((f) => ({
+            selector: f.selector,
+            type: f.type,
+            name: f.name,
+            label: f.label,
+            placeholder: f.placeholder,
+            required: f.required,
+          })),
+        });
+      }
+
+      if (input.action === "fill") {
+        if (!input.data) return JSON.stringify({ success: false, error: "data is required" });
+        const result = await browserEngineExtensions.smartFormFill(page, input.data);
+        return JSON.stringify({ success: true, ...result });
+      }
+
+      if (input.action === "auth") {
+        if (!input.username || !input.password) {
+          return JSON.stringify({ success: false, error: "username and password required" });
+        }
+        const result = await browserEngineExtensions.detectAndFillAuth(
+          page,
+          { username: input.username, password: input.password },
+          { submitAfterFill: true, waitForNavigation: true }
+        );
+        return JSON.stringify({ success: true, ...result });
+      }
+
+      return JSON.stringify({ success: false, error: "Invalid action" });
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+  {
+    name: "browser_form_fill",
+    description: "Intelligently detect and fill forms. Auto-matches data keys to form fields by name/label/placeholder. Can also detect and auto-fill login forms with credentials.",
+    schema: z.object({
+      sessionId: z.string().describe("Browser session ID"),
+      action: z.enum(["detect", "fill", "auth"]).describe("detect: find form fields; fill: smart-fill a form; auth: auto-fill login"),
+      data: z.record(z.string()).optional().describe("Key-value pairs to fill (keys matched to fields automatically)"),
+      username: z.string().optional().describe("Username/email for auth flow"),
+      password: z.string().optional().describe("Password for auth flow"),
+    }),
+  }
+);
+
+// ============================================
+// Terminal: Environment Management
+// ============================================
+
+export const terminalEnvManageTool = tool(
+  async (input) => {
+    try {
+      switch (input.action) {
+        case "get": {
+          const result = await terminalController.executeCommand("default", {
+            command: "env",
+            timeout: 5000,
+            shell: "bash",
+            stream: false,
+          });
+          const envVars: Record<string, string> = {};
+          if (result.stdout) {
+            for (const line of result.stdout.split("\n")) {
+              const eqIdx = line.indexOf("=");
+              if (eqIdx > 0) {
+                const key = line.slice(0, eqIdx);
+                if (input.filter ? key.toLowerCase().includes(input.filter.toLowerCase()) : true) {
+                  envVars[key] = line.slice(eqIdx + 1);
+                }
+              }
+            }
+          }
+          return JSON.stringify({ success: true, count: Object.keys(envVars).length, env: envVars });
+        }
+        case "set": {
+          if (!input.variables) return JSON.stringify({ success: false, error: "variables required" });
+          const exports = Object.entries(input.variables)
+            .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+            .join(" && ");
+          const result = await terminalController.executeCommand("default", {
+            command: exports,
+            timeout: 5000,
+            shell: "bash",
+            stream: false,
+          });
+          return JSON.stringify({ success: result.success, set: Object.keys(input.variables).length });
+        }
+        case "load-dotfile": {
+          if (!input.dotfilePath) return JSON.stringify({ success: false, error: "dotfilePath required" });
+          const cmd = input.dotfilePath.endsWith(".env")
+            ? `set -a && source ${JSON.stringify(input.dotfilePath)} && set +a && echo "OK"`
+            : `source ${JSON.stringify(input.dotfilePath)} && echo "OK"`;
+          const result = await terminalController.executeCommand("default", {
+            command: cmd,
+            timeout: 10000,
+            shell: "bash",
+            stream: false,
+          });
+          return JSON.stringify({
+            success: result.stdout?.includes("OK") || false,
+            path: input.dotfilePath,
+          });
+        }
+        default:
+          return JSON.stringify({ success: false, error: "Invalid action" });
+      }
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+  {
+    name: "terminal_env_manage",
+    description: "Manage terminal environment variables. Get current env vars (optionally filtered), set new ones, or load from .env/.bashrc files.",
+    schema: z.object({
+      action: z.enum(["get", "set", "load-dotfile"]).describe("Environment action"),
+      filter: z.string().optional().describe("Filter env vars by name substring"),
+      variables: z.record(z.string()).optional().describe("Variables to set"),
+      dotfilePath: z.string().optional().describe("Path to .env or shell config file"),
+    }),
+  }
+);
+
+// ============================================
 // Exports
 // ============================================
 
@@ -595,4 +890,9 @@ export const ADVANCED_COMPUTER_USE_TOOLS = [
   browserRecordingTool,
   workflowExecuteTool,
   scrapingPipelineTool,
+  browserNetworkThrottleTool,
+  browserGeolocationTool,
+  browserHarTool,
+  browserFormFillTool,
+  terminalEnvManageTool,
 ];

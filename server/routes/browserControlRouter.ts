@@ -25,7 +25,7 @@ import {
   AgenticTask,
   AgenticStep,
 } from "../agent/computerUse/universalBrowserController";
-import { browserEngineExtensions } from "../agent/computerUse/browserEngineExtensions";
+import { browserEngineExtensions, BrowserEngineExtensions } from "../agent/computerUse/browserEngineExtensions";
 
 const browserController = new UniversalBrowserController();
 
@@ -491,7 +491,7 @@ export function createBrowserControlRouter(): Router {
   /** Generate PDF from current page */
   router.post("/sessions/:sessionId/pdf", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const { format, landscape, printBackground, scale, margin } = req.body;
       const result = await browserEngineExtensions.generatePdf(page, {
         format, landscape, printBackground, scale, margin,
@@ -509,7 +509,7 @@ export function createBrowserControlRouter(): Router {
   /** Get accessibility tree */
   router.get("/sessions/:sessionId/accessibility", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const role = req.query.role as string | undefined;
       if (role) {
         const nodes = await browserEngineExtensions.getAccessibilityByRole(page, role);
@@ -530,7 +530,7 @@ export function createBrowserControlRouter(): Router {
   /** Get page performance metrics */
   router.get("/sessions/:sessionId/performance", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const metrics = await browserEngineExtensions.getPerformanceMetrics(page);
       res.json(metrics);
     } catch (error: any) {
@@ -545,7 +545,7 @@ export function createBrowserControlRouter(): Router {
   /** Get element at point (for visual picker) */
   router.post("/sessions/:sessionId/element-at-point", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const { x, y } = req.body;
       const element = await browserEngineExtensions.getElementAtPoint(page, x, y);
       res.json({ element });
@@ -557,7 +557,7 @@ export function createBrowserControlRouter(): Router {
   /** Highlight elements and return screenshot */
   router.post("/sessions/:sessionId/highlight", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const { highlights } = req.body;
       const screenshot = await browserEngineExtensions.highlightElements(page, highlights || []);
       res.json({ screenshot: `data:image/png;base64,${screenshot}` });
@@ -573,7 +573,7 @@ export function createBrowserControlRouter(): Router {
   /** Start capturing console logs */
   router.post("/sessions/:sessionId/console/start", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       browserEngineExtensions.startConsoleCapture(req.params.sessionId, page);
       browserEngineExtensions.setupDialogHandler(req.params.sessionId, page, true);
       res.json({ success: true });
@@ -614,7 +614,7 @@ export function createBrowserControlRouter(): Router {
   /** Start recording */
   router.post("/sessions/:sessionId/recording/start", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const { name } = req.body;
       const recordingId = browserEngineExtensions.startRecording(
         req.params.sessionId,
@@ -666,7 +666,7 @@ export function createBrowserControlRouter(): Router {
   /** Execute a scraping pipeline */
   router.post("/sessions/:sessionId/scrape", async (req: Request, res: Response) => {
     try {
-      const page = (browserController as any).getActivePage(req.params.sessionId);
+      const page = browserController.getActivePage(req.params.sessionId);
       const { pipeline } = req.body;
       if (!pipeline || !pipeline.startUrl || !pipeline.steps) {
         return res.status(400).json({ error: "pipeline with startUrl and steps is required" });
@@ -682,6 +682,262 @@ export function createBrowserControlRouter(): Router {
         variables: pipeline.variables || {},
       });
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Network Throttling
+  // ============================================
+
+  /** Set network throttling profile */
+  router.post("/sessions/:sessionId/throttle", async (req: Request, res: Response) => {
+    try {
+      const { preset, custom } = req.body;
+      const context = browserController.getSessionContext(req.params.sessionId);
+
+      if (custom) {
+        await browserEngineExtensions.setNetworkThrottle(context, custom);
+        res.json({ throttle: custom });
+      } else {
+        const profile = preset || "4g";
+        await browserEngineExtensions.setNetworkThrottle(context, profile);
+        res.json({ throttle: BrowserEngineExtensions.THROTTLE_PRESETS[profile] || profile });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Remove network throttling */
+  router.delete("/sessions/:sessionId/throttle", async (req: Request, res: Response) => {
+    try {
+      const context = browserController.getSessionContext(req.params.sessionId);
+      await browserEngineExtensions.removeNetworkThrottle(context);
+      res.json({ throttle: null });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** List available throttle presets */
+  router.get("/throttle-presets", (_req: Request, res: Response) => {
+    res.json({ presets: BrowserEngineExtensions.THROTTLE_PRESETS });
+  });
+
+  // ============================================
+  // Geolocation Spoofing
+  // ============================================
+
+  /** Set geolocation */
+  router.post("/sessions/:sessionId/geolocation", async (req: Request, res: Response) => {
+    try {
+      const { preset, latitude, longitude, accuracy } = req.body;
+      const context = browserController.getSessionContext(req.params.sessionId);
+
+      if (preset) {
+        const loc = BrowserEngineExtensions.LOCATION_PRESETS[preset];
+        if (!loc) return res.status(400).json({ error: "Unknown preset", available: Object.keys(BrowserEngineExtensions.LOCATION_PRESETS) });
+        await browserEngineExtensions.setGeolocation(context, loc.latitude, loc.longitude);
+        res.json({ geolocation: loc });
+      } else if (latitude !== undefined && longitude !== undefined) {
+        await browserEngineExtensions.setGeolocation(context, latitude, longitude, accuracy);
+        res.json({ geolocation: { latitude, longitude, accuracy } });
+      } else {
+        return res.status(400).json({ error: "Provide preset or latitude/longitude" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** List geolocation presets */
+  router.get("/geolocation-presets", (_req: Request, res: Response) => {
+    res.json({ presets: BrowserEngineExtensions.LOCATION_PRESETS });
+  });
+
+  // ============================================
+  // Device Emulation
+  // ============================================
+
+  /** List device presets */
+  router.get("/device-presets", (_req: Request, res: Response) => {
+    res.json({ presets: BrowserEngineExtensions.DEVICE_PRESETS });
+  });
+
+  // ============================================
+  // HAR Export
+  // ============================================
+
+  /** Start HAR capture */
+  router.post("/sessions/:sessionId/har/start", async (req: Request, res: Response) => {
+    try {
+      const page = browserController.getActivePage(req.params.sessionId);
+      browserEngineExtensions.startHARCapture(req.params.sessionId, page);
+      res.json({ capturing: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get captured HAR data */
+  router.get("/sessions/:sessionId/har", (_req: Request, res: Response) => {
+    try {
+      const har = browserEngineExtensions.getHAR(_req.params.sessionId);
+      res.json(har);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Export HAR to file */
+  router.post("/sessions/:sessionId/har/export", async (req: Request, res: Response) => {
+    try {
+      const { filePath } = req.body;
+      const result = await browserEngineExtensions.exportHAR(req.params.sessionId, filePath);
+      res.json({ path: result.path, entries: JSON.parse(result.json).log?.entries?.length || 0 });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Clear HAR data */
+  router.delete("/sessions/:sessionId/har", (req: Request, res: Response) => {
+    try {
+      browserEngineExtensions.clearHAR(req.params.sessionId);
+      res.json({ cleared: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Smart Form Filling
+  // ============================================
+
+  /** Detect form fields on page */
+  router.get("/sessions/:sessionId/form-fields", async (req: Request, res: Response) => {
+    try {
+      const page = browserController.getActivePage(req.params.sessionId);
+      const fields = await browserEngineExtensions.detectFormFields(page);
+      res.json({ fields, count: fields.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Smart fill a form */
+  router.post("/sessions/:sessionId/form-fill", async (req: Request, res: Response) => {
+    try {
+      const { data } = req.body;
+      if (!data || typeof data !== "object") {
+        return res.status(400).json({ error: "data object is required" });
+      }
+      const page = browserController.getActivePage(req.params.sessionId);
+      const result = await browserEngineExtensions.smartFormFill(page, data);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Auth Flow Automation
+  // ============================================
+
+  /** Detect and fill login form */
+  router.post("/sessions/:sessionId/auth-flow", async (req: Request, res: Response) => {
+    try {
+      const { username, password, submitAfterFill, waitForNavigation } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "username and password are required" });
+      }
+      const page = browserController.getActivePage(req.params.sessionId);
+      const result = await browserEngineExtensions.detectAndFillAuth(
+        page,
+        { username, password },
+        { submitAfterFill, waitForNavigation }
+      );
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Visual Diff
+  // ============================================
+
+  /** Compare two screenshots for visual differences */
+  router.post("/visual-diff", async (req: Request, res: Response) => {
+    try {
+      const { sessionIdA, sessionIdB, tabIdA, tabIdB } = req.body;
+
+      const pageA = browserController.getActivePage(sessionIdA, tabIdA);
+      const pageB = browserController.getActivePage(sessionIdB, tabIdB);
+
+      const bufferA = await pageA.screenshot({ type: "png" });
+      const bufferB = await pageB.screenshot({ type: "png" });
+
+      const diff = await browserEngineExtensions.visualDiff(bufferA, bufferB);
+      res.json(diff);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Parallel Execution
+  // ============================================
+
+  /** Execute same action across multiple sessions */
+  router.post("/parallel/navigate", async (req: Request, res: Response) => {
+    try {
+      const { sessionIds, url } = req.body;
+      if (!Array.isArray(sessionIds) || !url) {
+        return res.status(400).json({ error: "sessionIds array and url are required" });
+      }
+
+      const pages = sessionIds.map((sid: string) => ({
+        page: browserController.getActivePage(sid),
+        label: sid,
+      }));
+
+      const results = await browserEngineExtensions.executeParallel(pages, async (page) => {
+        const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        return {
+          url: page.url(),
+          title: await page.title(),
+          status: response?.status(),
+        };
+      });
+
+      res.json({ results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Take screenshots across multiple sessions */
+  router.post("/parallel/screenshot", async (req: Request, res: Response) => {
+    try {
+      const { sessionIds } = req.body;
+      if (!Array.isArray(sessionIds)) {
+        return res.status(400).json({ error: "sessionIds array is required" });
+      }
+
+      const pages = sessionIds.map((sid: string) => ({
+        page: browserController.getActivePage(sid),
+        label: sid,
+      }));
+
+      const results = await browserEngineExtensions.executeParallel(pages, async (page) => {
+        const buf = await page.screenshot({ type: "png" });
+        return buf.toString("base64");
+      });
+
+      res.json({ results });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

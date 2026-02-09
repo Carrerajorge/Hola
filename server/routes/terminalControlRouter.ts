@@ -315,6 +315,286 @@ export function createTerminalControlRouter(): Router {
     }
   });
 
+  // ============================================
+  // Environment Management
+  // ============================================
+
+  /** Get environment variables for a session */
+  router.get("/sessions/:sessionId/env", async (req: Request, res: Response) => {
+    try {
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: "env",
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+      const envVars: Record<string, string> = {};
+      if (result.stdout) {
+        for (const line of result.stdout.split("\n")) {
+          const eqIdx = line.indexOf("=");
+          if (eqIdx > 0) {
+            envVars[line.slice(0, eqIdx)] = line.slice(eqIdx + 1);
+          }
+        }
+      }
+      res.json({ env: envVars, count: Object.keys(envVars).length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Set environment variables for a session */
+  router.post("/sessions/:sessionId/env", async (req: Request, res: Response) => {
+    try {
+      const { variables } = req.body;
+      if (!variables || typeof variables !== "object") {
+        return res.status(400).json({ error: "variables object is required" });
+      }
+
+      const exports = Object.entries(variables)
+        .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+        .join(" && ");
+
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: exports,
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+
+      res.json({ set: Object.keys(variables).length, success: result.success });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Load dotfile (.bashrc, .env, etc.) */
+  router.post("/sessions/:sessionId/dotfile", async (req: Request, res: Response) => {
+    try {
+      const { path: dotfilePath, type } = req.body;
+      if (!dotfilePath) {
+        return res.status(400).json({ error: "path is required" });
+      }
+
+      let command: string;
+      if (type === "env" || dotfilePath.endsWith(".env")) {
+        // Parse .env file and export variables
+        command = `set -a && source ${JSON.stringify(dotfilePath)} && set +a && echo "LOADED"`;
+      } else {
+        // Source shell config
+        command = `source ${JSON.stringify(dotfilePath)} && echo "LOADED"`;
+      }
+
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command,
+        timeout: 10000,
+        shell: "bash",
+        stream: false,
+      });
+
+      res.json({
+        loaded: result.stdout?.includes("LOADED") || false,
+        path: dotfilePath,
+        output: result.stdout,
+        error: result.stderr || undefined,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get shell aliases */
+  router.get("/sessions/:sessionId/aliases", async (req: Request, res: Response) => {
+    try {
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: "alias",
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+
+      const aliases: Record<string, string> = {};
+      if (result.stdout) {
+        for (const line of result.stdout.split("\n")) {
+          const match = line.match(/^alias\s+(\S+?)='(.+)'$/);
+          if (match) {
+            aliases[match[1]] = match[2];
+          }
+        }
+      }
+
+      res.json({ aliases, count: Object.keys(aliases).length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Set shell aliases */
+  router.post("/sessions/:sessionId/aliases", async (req: Request, res: Response) => {
+    try {
+      const { aliases } = req.body;
+      if (!aliases || typeof aliases !== "object") {
+        return res.status(400).json({ error: "aliases object is required" });
+      }
+
+      const commands = Object.entries(aliases)
+        .map(([name, cmd]) => `alias ${name}=${JSON.stringify(cmd)}`)
+        .join(" && ");
+
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: commands,
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+
+      res.json({ set: Object.keys(aliases).length, success: result.success });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Working Directory Management
+  // ============================================
+
+  /** Change working directory */
+  router.post("/sessions/:sessionId/cd", async (req: Request, res: Response) => {
+    try {
+      const { path: targetPath } = req.body;
+      if (!targetPath) {
+        return res.status(400).json({ error: "path is required" });
+      }
+
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: `cd ${JSON.stringify(targetPath)} && pwd`,
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+
+      res.json({
+        cwd: result.stdout?.trim() || targetPath,
+        success: result.success,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** List directory contents with details */
+  router.get("/sessions/:sessionId/ls", async (req: Request, res: Response) => {
+    try {
+      const dirPath = (req.query.path as string) || ".";
+      const result = await terminalController.executeCommand(req.params.sessionId, {
+        command: `ls -la ${JSON.stringify(dirPath)}`,
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+
+      const entries: Array<{
+        permissions: string;
+        owner: string;
+        group: string;
+        size: string;
+        modified: string;
+        name: string;
+        type: string;
+      }> = [];
+
+      if (result.stdout) {
+        const lines = result.stdout.split("\n").filter((l) => l.trim() && !l.startsWith("total"));
+        for (const line of lines) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 9) {
+            entries.push({
+              permissions: parts[0],
+              owner: parts[2],
+              group: parts[3],
+              size: parts[4],
+              modified: `${parts[5]} ${parts[6]} ${parts[7]}`,
+              name: parts.slice(8).join(" "),
+              type: parts[0].startsWith("d") ? "directory" : parts[0].startsWith("l") ? "symlink" : "file",
+            });
+          }
+        }
+      }
+
+      res.json({ path: dirPath, entries, count: entries.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Disk & Resource Monitoring
+  // ============================================
+
+  /** Get disk usage */
+  router.get("/disk-usage", async (_req: Request, res: Response) => {
+    try {
+      const tempSession = terminalController.createSession();
+      const result = await terminalController.executeCommand(tempSession, {
+        command: "df -h --output=source,size,used,avail,pcent,target 2>/dev/null || df -h",
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+      terminalController.closeSession(tempSession);
+
+      const lines = result.stdout?.split("\n").filter((l) => l.trim()) || [];
+      const header = lines[0] || "";
+      const disks = lines.slice(1).map((line) => {
+        const parts = line.split(/\s+/);
+        return {
+          filesystem: parts[0],
+          size: parts[1],
+          used: parts[2],
+          available: parts[3],
+          usePercent: parts[4],
+          mountpoint: parts[5],
+        };
+      });
+
+      res.json({ disks });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /** Get resource usage (CPU, Memory top processes) */
+  router.get("/resource-usage", async (_req: Request, res: Response) => {
+    try {
+      const tempSession = terminalController.createSession();
+      const result = await terminalController.executeCommand(tempSession, {
+        command: 'ps aux --sort=-%mem | head -11',
+        timeout: 5000,
+        shell: "bash",
+        stream: false,
+      });
+      terminalController.closeSession(tempSession);
+
+      const lines = result.stdout?.split("\n").filter((l) => l.trim()) || [];
+      const processes = lines.slice(1).map((line) => {
+        const parts = line.split(/\s+/);
+        return {
+          user: parts[0],
+          pid: parts[1],
+          cpu: parts[2],
+          mem: parts[3],
+          vsz: parts[4],
+          rss: parts[5],
+          command: parts.slice(10).join(" "),
+        };
+      });
+
+      res.json({ topProcesses: processes });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 }
 

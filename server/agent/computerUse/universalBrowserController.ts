@@ -1206,10 +1206,20 @@ If the goal is accomplished, use action "done" with extractedData containing res
   }
 
   // ============================================
-  // Helper Methods
+  // Helper Methods (Public API for extensions)
   // ============================================
 
-  private getActivePage(sessionId: string, tabId?: string): Page {
+  getSession(sessionId: string): BrowserSession | null {
+    return this.sessions.get(sessionId) || null;
+  }
+
+  getSessionContext(sessionId: string): BrowserContext {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    return session.context;
+  }
+
+  getActivePage(sessionId: string, tabId?: string): Page {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
 
@@ -1222,7 +1232,7 @@ If the goal is accomplished, use action "done" with extractedData containing res
     return tab.page;
   }
 
-  private getActiveTab(sessionId: string, tabId?: string): Tab | null {
+  getActiveTab(sessionId: string, tabId?: string): Tab | null {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
 
