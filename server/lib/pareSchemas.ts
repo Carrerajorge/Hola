@@ -150,6 +150,8 @@ export function canonicalizeAttachment(attachment: Attachment): Attachment {
     type: attachment.type,
     content: attachment.content?.trim(),
     url: attachment.url?.trim(),
+    storagePath: attachment.storagePath?.trim(),
+    fileId: attachment.fileId?.trim(),
   };
 }
 
