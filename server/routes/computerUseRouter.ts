@@ -178,7 +178,7 @@ router.post("/browser/navigate", async (req: Request, res: Response) => {
   try {
     const { sessionId, url, waitUntil, timeout } = req.body;
     const result = await universalBrowserController.navigate(sessionId, url, { waitUntil, timeout });
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -188,7 +188,7 @@ router.post("/browser/click", async (req: Request, res: Response) => {
   try {
     const { sessionId, selector, button, clickCount, timeout, force } = req.body;
     const result = await universalBrowserController.click(sessionId, selector, { button, clickCount, timeout, force });
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -198,7 +198,7 @@ router.post("/browser/type", async (req: Request, res: Response) => {
   try {
     const { sessionId, selector, text, clear, delay, pressEnter } = req.body;
     const result = await universalBrowserController.type(sessionId, selector, text, { clear, delay, pressEnter });
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -238,7 +238,7 @@ router.post("/browser/agentic-navigate", async (req: Request, res: Response) => 
   try {
     const { sessionId, goal, maxSteps } = req.body;
     const result = await universalBrowserController.agenticNavigate(sessionId, goal, maxSteps);
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -248,7 +248,7 @@ router.post("/browser/execute-task", async (req: Request, res: Response) => {
   try {
     const { sessionId, task } = req.body;
     const result = await universalBrowserController.executeAgenticTask(sessionId, task);
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -319,7 +319,7 @@ router.post("/terminal/execute", async (req: Request, res: Response) => {
   try {
     const { sessionId, command, args, cwd, timeout, shell } = req.body;
     const result = await terminalController.executeCommand(sessionId, { command, args, cwd, timeout, shell });
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -329,7 +329,7 @@ router.post("/terminal/execute-script", async (req: Request, res: Response) => {
   try {
     const { sessionId, language, code, timeout, args } = req.body;
     const result = await terminalController.executeScript(sessionId, language, code, { timeout, args });
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -598,7 +598,7 @@ router.post("/agent/execute-goal", async (req: Request, res: Response) => {
     };
 
     const result = await autonomousAgentBrain.executeGoal(agentGoal, agentContext);
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }
@@ -649,7 +649,7 @@ router.post("/task/execute", async (req: Request, res: Response) => {
     };
 
     const result = await computerUseEngine.executeTask(sessionId, taskGoal);
-    res.json({ success: true, ...result });
+    res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
   }

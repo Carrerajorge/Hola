@@ -36,6 +36,7 @@ import { AUTOMATION_TOOLS } from "./automationTools";
 import { DATABASE_TOOLS } from "./databaseTools";
 import { MONITORING_TOOLS } from "./monitoringTools";
 import { UTILITY_TOOLS } from "./utilityTools";
+import { COMPUTER_USE_TOOLS } from "./computerUseTools";
 
 const sandboxTools = {
   document: new DocumentTool(),
@@ -368,6 +369,8 @@ export { MONITORING_TOOLS };
 
 export { UTILITY_TOOLS };
 
+export { COMPUTER_USE_TOOLS };
+
 export const ALL_TOOLS = [
   ...SAFE_TOOLS,
   ...SYSTEM_TOOLS,
@@ -390,6 +393,7 @@ export const ALL_TOOLS = [
   ...DATABASE_TOOLS,
   ...MONITORING_TOOLS,
   ...UTILITY_TOOLS,
+  ...COMPUTER_USE_TOOLS,
 ];
 
 export function getToolsByCategory(options: {
@@ -414,6 +418,7 @@ export function getToolsByCategory(options: {
   includeDatabase?: boolean;
   includeMonitoring?: boolean;
   includeUtility?: boolean;
+  includeComputerUse?: boolean;
 } = {}) {
   const {
     includeSafe = true,
@@ -437,6 +442,7 @@ export function getToolsByCategory(options: {
     includeDatabase = false,
     includeMonitoring = false,
     includeUtility = false,
+    includeComputerUse = false,
   } = options;
   
   const tools = [];
@@ -461,6 +467,7 @@ export function getToolsByCategory(options: {
   if (includeDatabase) tools.push(...DATABASE_TOOLS);
   if (includeMonitoring) tools.push(...MONITORING_TOOLS);
   if (includeUtility) tools.push(...UTILITY_TOOLS);
+  if (includeComputerUse) tools.push(...COMPUTER_USE_TOOLS);
   return tools;
 }
 

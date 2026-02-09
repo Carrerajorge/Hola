@@ -706,7 +706,6 @@ Respond with JSON array of slides ONLY:
         titleFontSize: 14,
         titleColor: t.colors.text,
         showValue: true,
-        valueFontSize: 10,
         chartColors,
         showLegend: true,
         legendPos: "b",
