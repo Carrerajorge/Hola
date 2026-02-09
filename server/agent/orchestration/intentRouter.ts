@@ -53,7 +53,8 @@ const AGENT_ROLE_TO_NAME: Record<SpecializedAgent, string> = {
   document: "DocumentAgent",
   qa: "QAAgent",
   security: "SecurityAgent",
-  computer_use: "ComputerUseAgent"
+  // Computer use is disabled; route to the safer BrowserAgent.
+  computer_use: "BrowserAgent"
 };
 
 const AGENT_TO_TOOLS: Record<SpecializedAgent, string[]> = {
@@ -67,7 +68,8 @@ const AGENT_TO_TOOLS: Record<SpecializedAgent, string[]> = {
   document: ["doc_create", "pdf_generate", "pdf_manipulate", "spreadsheet_create", "slides_create", "ocr_extract"],
   qa: ["code_test", "code_review", "verify", "health_check", "validate_output"],
   security: ["encrypt_data", "decrypt_data", "hash_data", "validate_input", "audit_log", "secrets_manage"],
-  computer_use: ["computer_use_session", "computer_use_navigate", "computer_use_interact", "computer_use_screenshot", "computer_use_extract", "computer_use_agentic", "generate_perfect_ppt", "generate_perfect_doc", "generate_perfect_excel", "terminal_execute", "terminal_system_info", "terminal_file_op", "vision_analyze"]
+  // Computer use is disabled; restrict to browser-safe tools.
+  computer_use: ["browser_navigate", "browser_interact", "browser_extract", "browser_session", "screenshot"]
 };
 
 const AGENT_CAPABILITIES: Record<SpecializedAgent, string[]> = {
@@ -81,7 +83,8 @@ const AGENT_CAPABILITIES: Record<SpecializedAgent, string[]> = {
   document: ["parse_document", "convert_document", "analyze_document", "create_document"],
   qa: ["generate_tests", "validate", "find_bugs", "quality_assurance"],
   security: ["vulnerability_scan", "security_audit", "compliance_check", "encryption"],
-  computer_use: ["agentic_browser_control", "screen_interaction", "terminal_control", "document_generation", "vision_analysis", "autonomous_navigation", "computer_control"]
+  // Computer use is disabled; keep capabilities aligned with BrowserAgent.
+  computer_use: ["navigate", "scrape", "automate", "extract_content"]
 };
 
 const COMPLEXITY_TO_STRATEGY: Record<ComplexityLevel, ExecutionStrategy> = {

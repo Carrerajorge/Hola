@@ -187,10 +187,10 @@ const AGENT_MAPPING: Record<IntentType, SpecializedAgent[]> = {
   document_generation: ["content", "document"],
   data_analysis: ["data", "code"],
   code_generation: ["code", "qa"],
-  web_automation: ["computer_use", "browser", "research"],
+  web_automation: ["browser", "research"],
   image_generation: ["content"],
-  presentation_creation: ["computer_use", "content", "document"],
-  spreadsheet_creation: ["computer_use", "data", "document"],
+  presentation_creation: ["content", "document"],
+  spreadsheet_creation: ["data", "document"],
   multi_step_task: ["orchestrator"],
   unknown: ["content"]
 };

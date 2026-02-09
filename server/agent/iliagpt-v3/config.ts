@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { ResolvedConfig } from "./types";
-import { DEFAULT_TEXT_MODEL } from "../../lib/modelRegistry";
+import { DEFAULT_XAI_TEXT_MODEL } from "../../lib/modelRegistry";
 
 const ConfigSchema = z.object({
-  MODEL: z.string().default(DEFAULT_TEXT_MODEL),
+  MODEL: z.string().default(DEFAULT_XAI_TEXT_MODEL),
   API_KEY: z.string().optional(),
   BASE_URL: z.string().default("https://api.x.ai/v1"),
   TEMPERATURE: z.number().min(0).max(2).default(0.7),

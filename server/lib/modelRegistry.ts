@@ -46,17 +46,35 @@ export const GEMINI_MODELS_REGISTRY = {
 // Defaults
 // ============================================================================
 
-/** Default model for general text completion (xAI). */
-export const DEFAULT_TEXT_MODEL = XAI_MODELS.GROK_4_1_FAST;
+/** Default xAI model for general text completion. */
+export const DEFAULT_XAI_TEXT_MODEL = XAI_MODELS.GROK_4_1_FAST;
 
-/** Default model for reasoning / planning tasks (xAI). */
-export const DEFAULT_REASONING_MODEL = XAI_MODELS.GROK_4_1_FAST_REASONING;
+/** Default xAI model for reasoning / planning tasks. */
+export const DEFAULT_XAI_REASONING_MODEL = XAI_MODELS.GROK_4_1_FAST_REASONING;
 
-/** Default model for vision tasks (xAI). */
-export const DEFAULT_VISION_MODEL = XAI_MODELS.GROK_2_VISION;
+/** Default xAI model for vision tasks. */
+export const DEFAULT_XAI_VISION_MODEL = XAI_MODELS.GROK_2_VISION;
 
-/** Default provider. */
-export const DEFAULT_PROVIDER = "xai" as const;
+/** Default Gemini model for general text completion. */
+export const DEFAULT_GEMINI_TEXT_MODEL = GEMINI_MODELS_REGISTRY.FLASH_25;
+
+/** Default Gemini model for reasoning / planning tasks. */
+export const DEFAULT_GEMINI_REASONING_MODEL = GEMINI_MODELS_REGISTRY.PRO_25;
+
+/** Default Gemini model for vision tasks. */
+export const DEFAULT_GEMINI_VISION_MODEL = GEMINI_MODELS_REGISTRY.FLASH_25;
+
+/** Default provider (app-level). */
+export const DEFAULT_PROVIDER = "gemini" as const;
+
+/** Default model for general text completion (app-level). */
+export const DEFAULT_TEXT_MODEL = DEFAULT_GEMINI_TEXT_MODEL;
+
+/** Default model for reasoning / planning tasks (app-level). */
+export const DEFAULT_REASONING_MODEL = DEFAULT_GEMINI_REASONING_MODEL;
+
+/** Default model for vision tasks (app-level). */
+export const DEFAULT_VISION_MODEL = DEFAULT_GEMINI_VISION_MODEL;
 
 // ============================================================================
 // Known Model Sets (for provider detection in llmGateway)

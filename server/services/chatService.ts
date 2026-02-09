@@ -20,6 +20,7 @@ import { getStorageService } from "./storage"; // NEW
 import { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } from "./intentGuard";
 import { DeterministicPipeline } from "../agent/pipelines/deterministicPipeline";
 import OpenAI from "openai";
+import { DEFAULT_PROVIDER as APP_DEFAULT_PROVIDER, DEFAULT_TEXT_MODEL as APP_DEFAULT_MODEL } from "../lib/modelRegistry";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -45,7 +46,7 @@ export const AVAILABLE_MODELS = {
   xai: {
     name: "xAI Grok",
     models: [
-      { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", description: "Respuestas rápidas con 2M de contexto", default: true },
+      { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", description: "Respuestas rápidas con 2M de contexto" },
       { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning", description: "Razonamiento avanzado con 2M de contexto" },
       { id: "grok-4-fast-non-reasoning", name: "Grok 4 Fast", description: "Modelo rápido y eficiente" },
       { id: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning", description: "Razonamiento paso a paso" },
@@ -58,15 +59,15 @@ export const AVAILABLE_MODELS = {
   gemini: {
     name: "Google Gemini",
     models: [
-      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "El más nuevo y rápido" },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente", default: true },
+      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "Preview (puede variar disponibilidad)" },
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "El más capaz" },
     ]
   }
 } as const;
 
-export const DEFAULT_PROVIDER = "xai";
-export const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
+export const DEFAULT_PROVIDER = APP_DEFAULT_PROVIDER;
+export const DEFAULT_MODEL = APP_DEFAULT_MODEL;
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";

@@ -6,7 +6,6 @@ import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } f
 import {
   KNOWN_XAI_MODEL_IDS,
   KNOWN_GEMINI_MODEL_IDS,
-  DEFAULT_TEXT_MODEL,
   XAI_MODELS,
 } from "./modelRegistry";
 import crypto from "crypto";
@@ -130,7 +129,7 @@ const PROVIDER_MODELS = {
     vision: MODELS.VISION,
   },
   gemini: {
-    default: GEMINI_MODELS.FLASH_PREVIEW,
+    default: GEMINI_MODELS.FLASH,
     pro: GEMINI_MODELS.PRO,
     flash: GEMINI_MODELS.FLASH,
   },
@@ -474,13 +473,21 @@ class LLMGateway {
   }
 
   private getConfiguredProvidersInOrder(): LLMProvider[] {
-    const order: LLMProvider[] = ["xai", "gemini", "openai", "anthropic", "deepseek"];
+    // Prefer Gemini by default for lower latency and broader availability on iliagpt.com.
+    const order: LLMProvider[] = ["gemini", "xai", "openai", "anthropic", "deepseek"];
     return order.filter((p) => this.isProviderConfigured(p));
   }
 
   private selectProvider(options: LLMRequestOptions): LLMProvider {
     if (options.provider && options.provider !== "auto") {
-      return options.provider;
+      // If a provider is explicitly requested but not configured (missing API key),
+      // treat it as "auto" so we can still respond instead of hard-failing.
+      if (this.isProviderConfigured(options.provider)) {
+        return options.provider;
+      }
+      console.warn("[LLMGateway] Requested provider is not configured; falling back to auto.", {
+        provider: options.provider,
+      });
     }
 
     // Auto-detect provider based on model name.
@@ -498,7 +505,7 @@ class LLMGateway {
     }
 
     // If all circuits are OPEN, fall back to the first configured provider (if any).
-    return this.getConfiguredProvidersInOrder()[0] || "xai";
+    return this.getConfiguredProvidersInOrder()[0] || "gemini";
   }
 
   // ===== Token Usage Tracking =====
@@ -685,7 +692,7 @@ class LLMGateway {
     if (provider === "xai") {
       model = modelProvider === "xai" ? options.model! : MODELS.TEXT;
     } else if (provider === "gemini") {
-      model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+      model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
     } else if (provider === "openai") {
       model = modelProvider === "openai" ? options.model! : (process.env.OPENAI_MODEL || "gpt-4o-mini");
     } else if (provider === "deepseek") {
@@ -1558,7 +1565,7 @@ class LLMGateway {
     requestId: string
   ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
     const modelProvider = detectProviderFromModel(options.model);
-    const model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+    const model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
     const stream = geminiStreamChat(geminiMessages, {

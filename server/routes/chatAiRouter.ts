@@ -209,6 +209,10 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      // `getUserId` returns an authenticated user (if present). For anonymous users,
+      // fall back to a stable, secure cookie-based ID so we can load settings and
+      // persist conversation state.
+      const effectiveUserId = getUserId(req) || getOrCreateSecureUserId(req);
       const userId = effectiveUserId;
 
       // CONTEXT FIX: Augment client messages with server-side history

@@ -119,7 +119,6 @@ import { compression } from "./middleware/compression";
 
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
-import computerUseRouter from "./routes/computerUseRouter";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
@@ -601,9 +600,6 @@ export async function registerRoutes(
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
   app.use(auditMiddleware); // Capture metrics for all requests
-
-  // ===== Computer Use / Agentic Control =====
-  app.use("/api/computer-use", computerUseRouter);
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());

@@ -6,7 +6,7 @@
 import { EventEmitter } from 'events';
 import { Logger } from '../logger';
 import { serviceRegistry } from '../serviceMesh';
-import { XAI_MODELS, DEFAULT_TEXT_MODEL } from '../modelRegistry';
+import { XAI_MODELS } from '../modelRegistry';
 
 // ============================================================================
 // Types & Interfaces

@@ -38,40 +38,12 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
   const startTime = Date.now();
   console.log(`[ImageGeneration] Generating: "${prompt.slice(0, 50)}..."`);
 
-  // Try xAI Grok Image first (more reliable for image generation)
-  const xaiClient = getXaiClient();
-  if (xaiClient) {
-    try {
-      console.log(`[ImageGeneration] Trying xAI Grok Image...`);
-      
-      const response = await xaiClient.images.generate({
-        model: "grok-2-image-1212",
-        prompt: prompt,
-        n: 1,
-        response_format: "b64_json",
-      });
-
-      if (response.data && response.data[0]?.b64_json) {
-        const durationMs = Date.now() - startTime;
-        console.log(`[ImageGeneration] Success with xAI Grok Image in ${durationMs}ms`);
-        return {
-          imageBase64: response.data[0].b64_json,
-          mimeType: "image/png",
-          prompt,
-          model: "grok-2-image-1212"
-        };
-      }
-    } catch (error: any) {
-      console.error(`[ImageGeneration] xAI Grok Image failed:`, error.message);
-    }
-  }
-
-  // Fallback to Gemini if available
+  // Prefer Gemini for image generation in iliagpt.com (user request).
   const ai = getGeminiClient();
   if (ai) {
     const GEMINI_IMAGE_MODELS = [
-      "gemini-2.0-flash-exp-image-generation",
       "imagen-3.0-generate-002",
+      "gemini-2.0-flash-exp-image-generation",
     ];
 
     for (const model of GEMINI_IMAGE_MODELS) {
@@ -110,6 +82,34 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
       } catch (error: any) {
         console.error(`[ImageGeneration] Gemini ${model} failed:`, error.message);
       }
+    }
+  }
+
+  // Fallback to xAI Grok Image if available
+  const xaiClient = getXaiClient();
+  if (xaiClient) {
+    try {
+      console.log(`[ImageGeneration] Trying xAI Grok Image...`);
+
+      const response = await xaiClient.images.generate({
+        model: "grok-2-image-1212",
+        prompt: prompt,
+        n: 1,
+        response_format: "b64_json",
+      });
+
+      if (response.data && response.data[0]?.b64_json) {
+        const durationMs = Date.now() - startTime;
+        console.log(`[ImageGeneration] Success with xAI Grok Image in ${durationMs}ms`);
+        return {
+          imageBase64: response.data[0].b64_json,
+          mimeType: "image/png",
+          prompt,
+          model: "grok-2-image-1212"
+        };
+      }
+    } catch (error: any) {
+      console.error(`[ImageGeneration] xAI Grok Image failed:`, error.message);
     }
   }
 

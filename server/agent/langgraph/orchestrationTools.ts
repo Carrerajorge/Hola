@@ -1,15 +1,15 @@
 import { tool, DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import OpenAI from "openai";
-import { DEFAULT_TEXT_MODEL, DEFAULT_REASONING_MODEL } from "../../lib/modelRegistry";
+import { DEFAULT_XAI_TEXT_MODEL, DEFAULT_XAI_REASONING_MODEL } from "../../lib/modelRegistry";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
   apiKey: process.env.XAI_API_KEY || "missing",
 });
 
-const DEFAULT_MODEL = DEFAULT_TEXT_MODEL;
-const REASONING_MODEL = DEFAULT_REASONING_MODEL;
+const DEFAULT_MODEL = DEFAULT_XAI_TEXT_MODEL;
+const REASONING_MODEL = DEFAULT_XAI_REASONING_MODEL;
 
 interface AgentConfig {
   description: string;

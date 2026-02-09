@@ -25,7 +25,7 @@ export const AVAILABLE_MODELS = {
     xai: {
         name: "xAI Grok",
         models: [
-            { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", description: "Respuestas rápidas con 2M de contexto", default: true },
+            { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", description: "Respuestas rápidas con 2M de contexto" },
             { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning", description: "Razonamiento avanzado con 2M de contexto" },
             { id: "grok-4-fast-non-reasoning", name: "Grok 4 Fast", description: "Modelo rápido y eficiente" },
             { id: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning", description: "Razonamiento paso a paso" },
@@ -38,8 +38,8 @@ export const AVAILABLE_MODELS = {
     gemini: {
         name: "Google Gemini",
         models: [
-            { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "El más nuevo y rápido" },
-            { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente" },
+            { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente", default: true },
+            { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "Preview (puede variar disponibilidad)" },
             { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "El más capaz" },
         ]
     }

@@ -58,7 +58,8 @@ export async function geminiChat(
   options: GeminiChatOptions = {}
 ): Promise<GeminiResponse> {
   const ai = getGeminiClientOrThrow();
-  const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+  // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
+  const model = options.model || GEMINI_MODELS.FLASH;
   
   const contents = messages.map(msg => ({
     role: msg.role,
@@ -95,7 +96,8 @@ export async function* geminiStreamChat(
   options: GeminiChatOptions = {}
 ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
   const ai = getGeminiClientOrThrow();
-  const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+  // Default to a stable, fast model. Preview models can be rate-limited or unavailable.
+  const model = options.model || GEMINI_MODELS.FLASH;
   
   const contents = messages.map(msg => ({
     role: msg.role,

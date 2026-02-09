@@ -49,7 +49,7 @@ export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId?: 
   if (runtime === "xai") return id.includes("grok");
   if (runtime === "openai") {
     // All OpenAI chat models: GPT, O-series, ChatGPT, Codex (text)
-    return /^(gpt|o\d|chatgpt|codex-mini|computer-use)/.test(id);
+    return /^(gpt|o\d|chatgpt|codex-mini)/.test(id);
   }
   return false;
 }
