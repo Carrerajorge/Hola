@@ -28,6 +28,61 @@ import path from "path";
 import fs from "fs/promises";
 
 // ============================================
+// SECURITY LIMITS
+// ============================================
+
+/** Allowed base directories for output (prevent path traversal) */
+const ALLOWED_OUTPUT_BASES = ["/tmp", "/var/tmp"];
+
+/** Maximum topic/title length */
+const MAX_TOPIC_LENGTH = 2000;
+
+/** Maximum custom instructions length */
+const MAX_INSTRUCTIONS_LENGTH = 10_000;
+
+/** Maximum word count request */
+const MAX_WORD_COUNT = 50_000;
+
+/** Maximum sections requested */
+const MAX_SECTIONS = 100;
+
+/** Maximum sections from AI response */
+const MAX_AI_SECTIONS = 500;
+
+/** LLM call timeout (ms) */
+const LLM_CALL_TIMEOUT_MS = 120_000;
+
+/** Maximum generated document size (50MB) */
+const MAX_DOCUMENT_SIZE = 50 * 1024 * 1024;
+
+/**
+ * Security: validate output directory path to prevent path traversal
+ */
+function validateOutputDir(dir: string): string {
+  const resolved = path.resolve(dir);
+  // Must be under an allowed base directory
+  const isAllowed = ALLOWED_OUTPUT_BASES.some(base => resolved.startsWith(base + "/") || resolved === base);
+  if (!isAllowed) {
+    console.warn(`[PerfectDocGen] Rejected output dir: ${resolved}, falling back to /tmp/doc-output`);
+    return "/tmp/doc-output";
+  }
+  // Prevent traversal patterns
+  if (resolved.includes("..") || resolved.includes("//")) {
+    return "/tmp/doc-output";
+  }
+  return resolved;
+}
+
+/**
+ * Security: sanitize text input (strip control characters)
+ */
+function sanitizeText(text: string, maxLength: number): string {
+  return String(text || "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .substring(0, maxLength);
+}
+
+// ============================================
 // Types
 // ============================================
 
@@ -158,10 +213,32 @@ export class PerfectDocumentGenerator {
       baseURL: options?.baseURL || (process.env.XAI_API_KEY ? "https://api.x.ai/v1" : "https://api.openai.com/v1"),
       apiKey: options?.apiKey || process.env.XAI_API_KEY || process.env.OPENAI_API_KEY || "missing",
     });
-    this.outputDir = options?.outputDir || "/tmp/doc-output";
+    // Security: validate output directory to prevent path traversal
+    this.outputDir = validateOutputDir(options?.outputDir || "/tmp/doc-output");
   }
 
   async generate(request: DocumentRequest): Promise<GeneratedDocument> {
+    // Security: validate and sanitize input
+    if (!request || !request.topic) {
+      throw new Error("Document request must include a topic");
+    }
+    request.topic = sanitizeText(request.topic, MAX_TOPIC_LENGTH);
+    if (request.customInstructions) {
+      request.customInstructions = sanitizeText(request.customInstructions, MAX_INSTRUCTIONS_LENGTH);
+    }
+    if (request.author) {
+      request.author = sanitizeText(request.author, 500);
+    }
+    if (request.organization) {
+      request.organization = sanitizeText(request.organization, 500);
+    }
+    if (request.wordCount) {
+      request.wordCount = Math.min(Math.max(1, request.wordCount), MAX_WORD_COUNT);
+    }
+    if (request.sections) {
+      request.sections = request.sections.slice(0, MAX_SECTIONS).map(s => sanitizeText(s, 500));
+    }
+
     await fs.mkdir(this.outputDir, { recursive: true });
 
     const template = request.template || DEFAULT_TEMPLATES[this.mapTypeToTemplate(request.type)] || DEFAULT_TEMPLATES.professional;
@@ -204,9 +281,9 @@ export class PerfectDocumentGenerator {
 
     // Build document
     const doc = new Document({
-      creator: request.author || "ILIAGPT",
-      title: request.topic,
-      description: `${request.type}: ${request.topic}`,
+      creator: sanitizeText(request.author || "Document Generator", 200),
+      title: sanitizeText(request.topic, MAX_TOPIC_LENGTH),
+      description: sanitizeText(`${request.type}: ${request.topic}`, 1000),
       styles: this.buildStyles(template),
       features: {
         updateFields: true,
@@ -263,6 +340,12 @@ export class PerfectDocumentGenerator {
     const filePath = path.join(this.outputDir, fileName);
 
     const buffer = await Packer.toBuffer(doc);
+
+    // Security: validate generated document size
+    if (buffer.length > MAX_DOCUMENT_SIZE) {
+      throw new Error(`Generated document exceeds maximum size of ${MAX_DOCUMENT_SIZE / (1024 * 1024)}MB`);
+    }
+
     await fs.writeFile(filePath, buffer);
 
     return {
@@ -330,22 +413,41 @@ Respond with a JSON array of sections:
   { "type": "references", "references": [{ "author": "", "year": "", "title": "", "source": "" }] }
 ]`;
 
-    const response = await this.llmClient.chat.completions.create({
-      model: "grok-4-1-fast-non-reasoning",
-      messages: [
-        { role: "system", content: "You are an expert document writer. Generate professional, well-structured document content. Respond only with a valid JSON array." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 8192,
-      temperature: 0.4,
+    // Security: wrap LLM call with timeout
+    let timeoutId: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`LLM call timed out after ${LLM_CALL_TIMEOUT_MS}ms`)), LLM_CALL_TIMEOUT_MS);
     });
+
+    let response: any;
+    try {
+      response = await Promise.race([
+        this.llmClient.chat.completions.create({
+          model: "grok-4-1-fast-non-reasoning",
+          messages: [
+            { role: "system", content: "You are an expert document writer. Generate professional, well-structured document content. Respond only with a valid JSON array." },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: 8192,
+          temperature: 0.4,
+        }),
+        timeoutPromise,
+      ]);
+    } catch (err) {
+      console.error("[PerfectDocGen] LLM call failed:", err);
+      return this.generateFallbackContent(request);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
 
     const text = response.choices[0]?.message?.content || "[]";
     const jsonMatch = text.match(/\[[\s\S]*\]/);
 
     try {
       const sections = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
-      return sections.length > 0 ? sections : this.generateFallbackContent(request);
+      // Security: limit section count from AI response
+      const safeSections = Array.isArray(sections) ? sections.slice(0, MAX_AI_SECTIONS) : [];
+      return safeSections.length > 0 ? safeSections : this.generateFallbackContent(request);
     } catch {
       return this.generateFallbackContent(request);
     }
