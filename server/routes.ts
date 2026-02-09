@@ -109,6 +109,7 @@ import { compression } from "./middleware/compression";
 
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
+import computerUseRouter from "./routes/computerUseRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -574,6 +575,9 @@ export async function registerRoutes(
   app.use(createSettingsRouter());
   app.use("/api", createRunController());
   app.use("/api/superintelligence", superintelligenceRouter);
+
+  // ===== Computer Use / Agentic Control =====
+  app.use("/api/computer-use", computerUseRouter);
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());
