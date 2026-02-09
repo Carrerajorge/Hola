@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { toolRegistry } from "../toolRegistry";
-import type { ToolDefinition, ToolContext, ToolResult, ToolArtifact } from "../toolRegistry";
+import type { ToolDefinition, ToolContext, ToolResult, ToolArtifact, ArtifactType } from "../toolRegistry";
 import { BrowserToolApi, BrowserActionSchema } from "../browser/browserToolApi";
 import { WebResearchEngine } from "../tools/webResearchTools";
 import {
@@ -58,7 +58,7 @@ function createError(code: string, message: string, retryable: boolean) {
 }
 
 function createArtifact(
-  type: "file" | "document" | "data",
+  type: ArtifactType,
   name: string,
   data: any,
   mimeType?: string
@@ -106,7 +106,7 @@ const browserNavigateTool: ToolDefinition = {
           screenshot: result.screenshot ? "[screenshot captured]" : undefined,
         },
         artifacts: result.screenshot
-          ? [createArtifact("image" as any, "screenshot.png", result.screenshot, "image/png")]
+          ? [createArtifact("image", "screenshot.png", result.screenshot, "image/png")]
           : [],
         previews: result.screenshot
           ? [{ type: "image", content: result.screenshot, title: "Browser Screenshot" }]
@@ -157,7 +157,7 @@ const browserClickTool: ToolDefinition = {
           url: result.data?.url,
         },
         artifacts: result.screenshot
-          ? [createArtifact("image" as any, "click-result.png", result.screenshot, "image/png")]
+          ? [createArtifact("image", "click-result.png", result.screenshot, "image/png")]
           : [],
         previews: [],
         logs: [],
@@ -302,7 +302,7 @@ const browserScreenshotTool: ToolDefinition = {
         success: result.success,
         output: { captured: !!result.screenshot },
         artifacts: result.screenshot
-          ? [createArtifact("image" as any, "screenshot.png", result.screenshot, "image/png")]
+          ? [createArtifact("image", "screenshot.png", result.screenshot, "image/png")]
           : [],
         previews: result.screenshot
           ? [{ type: "image", content: result.screenshot, title: "Screenshot" }]
@@ -358,7 +358,7 @@ const browserAssertTool: ToolDefinition = {
           details: result.assertion,
         },
         artifacts: result.assertion?.evidence?.screenshot
-          ? [createArtifact("image" as any, "assertion-evidence.png", result.assertion.evidence.screenshot, "image/png")]
+          ? [createArtifact("image", "assertion-evidence.png", result.assertion.evidence.screenshot, "image/png")]
           : [],
         previews: [
           {

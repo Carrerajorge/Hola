@@ -12,6 +12,16 @@
 - PRs:
   - https://github.com/Carrerajorge/Hola/pull/137
 
+- Resumen: Evitar spam de toasts de error global (offline/429/etc.) deduplicando por `id` y aplicando cooldown.
+- Archivos tocados:
+  - client/src/lib/queryClient.ts
+- Comandos ejecutados:
+  - ./scripts/agent-verify.sh
+- Resultados:
+  - type-check + tests + build: OK (agent-verify exit 0)
+- PRs:
+  - https://github.com/Carrerajorge/Hola/pull/150
+
 ## 2026-02-08
 - Resumen: Actualizado el playbook del equipo con una guía corta para el “Primer PR de prueba”.
 - Archivos tocados:

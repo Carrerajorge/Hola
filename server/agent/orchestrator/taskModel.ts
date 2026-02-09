@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { randomUUID } from "crypto";
 
 /* ------------------------------------------------------------------ */
 /*  Enums & Primitives                                                */
@@ -172,7 +173,6 @@ export function createTaskModel(
   params: Pick<TaskModel, "goal" | "context"> &
     Partial<Omit<TaskModel, "goal" | "context" | "id" | "createdAt">>
 ): TaskModel {
-  const { randomUUID } = require("crypto");
   return TaskModelSchema.parse({
     id: randomUUID(),
     definitionOfDone: {

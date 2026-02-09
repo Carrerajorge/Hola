@@ -168,6 +168,47 @@ describe("AgenticStateGraph", () => {
     expect(graph.getState()).toBe("ESCALATE");
   });
 
+  it("ESCALATE → ACT via human_approved", () => {
+    graph.transition("PLAN", "task_received");
+    graph.transition("ACT", "plan_complete");
+    graph.transition("ESCALATE", "escalation_needed");
+    expect(graph.getState()).toBe("ESCALATE");
+
+    graph.transition("ACT", "human_approved");
+    expect(graph.getState()).toBe("ACT");
+  });
+
+  it("ESCALATE → CANCELLED via human_rejected", () => {
+    graph.transition("PLAN", "task_received");
+    graph.transition("ACT", "plan_complete");
+    graph.transition("ESCALATE", "escalation_needed");
+    expect(graph.getState()).toBe("ESCALATE");
+
+    graph.transition("CANCELLED", "human_rejected");
+    expect(graph.getState()).toBe("CANCELLED");
+    expect(graph.isTerminal()).toBe(true);
+  });
+
+  it("RETRY → ESCALATE when retries exhausted", () => {
+    graph.transition("PLAN", "task_received");
+    graph.transition("ACT", "plan_complete");
+
+    // Exhaust all retries (default 3)
+    graph.consumeRetry();
+    graph.consumeRetry();
+    graph.consumeRetry();
+    expect(graph.consumeRetry()).toBe(false);
+
+    graph.transition("RETRY", "step_failed");
+    expect(graph.getState()).toBe("RETRY");
+
+    // Cannot transition to ACT with 0 retries remaining (guard blocks it)
+    expect(graph.canTransitionTo("ACT", "retry_requested")).toBe(false);
+    // Should escalate instead
+    graph.transition("ESCALATE", "retry_exhausted");
+    expect(graph.getState()).toBe("ESCALATE");
+  });
+
   it("throws on invalid transitions", () => {
     expect(() => graph.transition("ACT", "plan_complete")).toThrow();
     expect(() => graph.transition("DONE", "verification_passed")).toThrow();

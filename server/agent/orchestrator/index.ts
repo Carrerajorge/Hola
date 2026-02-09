@@ -353,18 +353,19 @@ export async function executeAgenticTask(
       evidence: finalCtx.evidence,
       citations: research.getCitations(),
       summary: `Executed ${finalCtx.task.metrics.stepsExecuted} steps, ${finalCtx.task.metrics.stepsSucceeded} succeeded, ${finalCtx.task.metrics.stepsFailed} failed. ${finalCtx.artifacts.length} artifacts produced.`,
-      metrics: { ...finalCtx.task.metrics } as any,
+      metrics: { ...finalCtx.task.metrics },
     };
   } catch (err: any) {
+    const errCtx = graph.getContext();
     return {
       success: false,
       state: graph.getState(),
-      steps: graph.getContext().stepResults,
-      artifacts: graph.getContext().artifacts,
-      evidence: graph.getContext().evidence,
+      steps: errCtx.stepResults,
+      artifacts: errCtx.artifacts,
+      evidence: errCtx.evidence,
       citations: research.getCitations(),
       summary: `Error: ${err.message}`,
-      metrics: { ...graph.getContext().task.metrics } as any,
+      metrics: { ...errCtx.task.metrics },
       error: err.message,
     };
   }

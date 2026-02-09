@@ -18,6 +18,7 @@ export function uniq<T>(items: T[]): T[] {
 const FILELIKE_EXTENSIONS = new Set([
   // documents
   "pdf",
+  "doc",
   "docx",
   "xlsx",
   "xls",
@@ -162,6 +163,7 @@ export function inferMimeTypeFromFilename(filename: string): string | null {
 
   const map: Record<string, string> = {
     pdf: "application/pdf",
+    doc: "application/msword",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     xls: "application/vnd.ms-excel",
