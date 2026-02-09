@@ -8,7 +8,9 @@ set -euo pipefail
 #   VPS_HOST, VPS_PORT, VPS_USER, DEPLOY_PATH, COMPOSE_PROJECT, COMPOSE_FILE
 
 VPS_HOST="${VPS_HOST:-100.93.79.71}"     # Tailscale IP (preferred)
-VPS_PORT="${VPS_PORT:-22}"
+# If `VPS_PORT` is unset, try 22 first, then `VPS_PORT_FALLBACK` (default: 2222).
+VPS_PORT="${VPS_PORT:-}"
+VPS_PORT_FALLBACK="${VPS_PORT_FALLBACK:-2222}"
 VPS_USER="${VPS_USER:-root}"
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-iliagpt}"
@@ -19,7 +21,30 @@ echo "  ILIAGPT Production Deploy"
 echo "  $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "═══════════════════════════════════════════"
 
-ssh -p "$VPS_PORT" "${VPS_USER}@${VPS_HOST}" <<'DEPLOY'
+PORTS=()
+if [ -n "${VPS_PORT}" ]; then
+  PORTS=("$VPS_PORT")
+else
+  PORTS=(22 "$VPS_PORT_FALLBACK")
+fi
+
+SELECTED_PORT=""
+for p in "${PORTS[@]}"; do
+  echo "▸ Probing SSH ${VPS_USER}@${VPS_HOST}:$p ..."
+  if ssh -p "$p" -o BatchMode=yes -o ConnectTimeout=5 "${VPS_USER}@${VPS_HOST}" "true" >/dev/null 2>&1; then
+    SELECTED_PORT="$p"
+    break
+  fi
+done
+
+if [ -z "$SELECTED_PORT" ]; then
+  echo "✗ Could not reach VPS via SSH on ports: ${PORTS[*]}"
+  exit 1
+fi
+
+echo "▸ Using SSH port: $SELECTED_PORT"
+
+ssh -p "$SELECTED_PORT" "${VPS_USER}@${VPS_HOST}" <<'DEPLOY'
 set -euo pipefail
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -85,4 +110,3 @@ echo "▸ Verifying public health..."
 curl -sS https://iliagpt.com/health || true
 echo ""
 echo "✓ Deploy finished"
-
