@@ -2,9 +2,9 @@ import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import { JSDOM } from "jsdom";
 import { generateWordFromMarkdown } from "./markdownToDocx";
-import { 
-  ExcelStyleConfig, 
-  ExcelDashboardBuilder, 
+import {
+  ExcelStyleConfig,
+  ExcelDashboardBuilder,
   type DashboardConfig
 } from "../lib/excelStyles";
 
@@ -21,6 +21,57 @@ export interface ProfessionalExcelOptions {
   alternateRows?: boolean;
   freezeHeader?: boolean;
   autoFilter?: boolean;
+}
+
+// ============================================
+// SECURITY CONSTANTS
+// ============================================
+
+/** Excel cell limits to prevent resource exhaustion */
+const EXCEL_MAX_ROWS = 1_048_576; // Excel's own limit
+const EXCEL_MAX_COLUMNS = 16_384; // Excel's own limit
+const EXCEL_MAX_CELL_LENGTH = 32_767; // Excel's own cell char limit
+const EXCEL_SAFE_MAX_ROWS = 100_000; // Practical generation limit
+const EXCEL_SAFE_MAX_COLUMNS = 500;
+
+/** Maximum content size for Word document generation (5MB) */
+const WORD_MAX_CONTENT_SIZE = 5 * 1024 * 1024;
+
+/**
+ * Excel formula injection prefixes.
+ * When spreadsheet applications encounter these at the start of a cell,
+ * they may interpret the value as a formula, enabling DDE attacks,
+ * data exfiltration via HYPERLINK(), or arbitrary command execution.
+ */
+const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
+
+/**
+ * Sanitize a cell value for safe inclusion in Excel documents.
+ * Prevents formula injection / DDE attacks by prefixing dangerous
+ * values with a single-quote character that Excel treats as text-prefix.
+ */
+function sanitizeExcelCell(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  if (value.length === 0) return value;
+  const trimmed = value.trimStart();
+  if (trimmed.length === 0) return value;
+  // Truncate to Excel's cell character limit
+  const bounded = value.length > EXCEL_MAX_CELL_LENGTH
+    ? value.substring(0, EXCEL_MAX_CELL_LENGTH)
+    : value;
+  if (EXCEL_FORMULA_PREFIXES.some(prefix => trimmed.startsWith(prefix))) {
+    return `'${bounded}`;
+  }
+  return bounded;
+}
+
+/**
+ * Sanitize all cells in a 2D data array for safe Excel generation.
+ */
+function sanitizeExcelData(data: any[][]): any[][] {
+  return data.map(row =>
+    row.map(cell => sanitizeExcelCell(cell))
+  );
 }
 
 function isHtmlContent(content: string): boolean {
@@ -142,40 +193,61 @@ function htmlToMarkdown(html: string): string {
 }
 
 export async function generateWordDocument(title: string, content: string): Promise<Buffer> {
+  // Security: enforce content size limit
+  if (content.length > WORD_MAX_CONTENT_SIZE) {
+    throw new Error(`Word document content exceeds maximum size of ${WORD_MAX_CONTENT_SIZE / (1024 * 1024)}MB`);
+  }
+
   let markdownContent = content;
-  
+
   if (isHtmlContent(content)) {
     markdownContent = htmlToMarkdown(content);
     console.log('[generateWordDocument] Converted HTML to Markdown for export');
   }
-  
+
   return generateWordFromMarkdown(title, markdownContent);
 }
 
 export async function generateExcelDocument(
-  title: string, 
-  data: any[][], 
+  title: string,
+  data: any[][],
   options: ProfessionalExcelOptions = {}
 ): Promise<Buffer> {
+  // Security: enforce row and column limits
+  if (data.length > EXCEL_SAFE_MAX_ROWS) {
+    throw new Error(`Excel data exceeds maximum row count of ${EXCEL_SAFE_MAX_ROWS}`);
+  }
+  const maxCols = data.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+  if (maxCols > EXCEL_SAFE_MAX_COLUMNS) {
+    throw new Error(`Excel data exceeds maximum column count of ${EXCEL_SAFE_MAX_COLUMNS}`);
+  }
+
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'IliaGPT';
   workbook.created = new Date();
-  
-  const safeData = data.length > 0 ? data : [["Contenido"], ["No hay datos disponibles"]];
+  // Security: strip potentially sensitive workbook metadata
+  workbook.lastModifiedBy = '';
+  workbook.company = '';
+  workbook.manager = '';
+
+  // Security: sanitize all cell data against formula injection
+  const rawData = data.length > 0 ? data : [["Contenido"], ["No hay datos disponibles"]];
+  const safeData = sanitizeExcelData(rawData);
+
   const styles = new ExcelStyleConfig();
   const dashboardBuilder = new ExcelDashboardBuilder(workbook, styles);
-  
+
   if (options.dashboard) {
     dashboardBuilder.createDashboard(options.dashboard);
   }
-  
+
   const sheetName = title.replace(/[\\/:*?\[\]]/g, "").slice(0, 31) || "Hoja1";
   const worksheet = workbook.addWorksheet(sheetName);
-  
+
   if (options.useProfessionalStyles && safeData.length > 1) {
     const headers = safeData[0].map(h => String(h));
     const rows = safeData.slice(1);
-    
+
     dashboardBuilder.applyProfessionalTableStyle(
       worksheet,
       1,
@@ -188,29 +260,29 @@ export async function generateExcelDocument(
         priorityColumn: options.priorityColumn,
       }
     );
-    
+
     const colWidths = safeData[0]?.map((_, colIndex) => {
       const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
       return Math.min(Math.max(maxLength, 12), 60);
     }) || [];
-    
+
     colWidths.forEach((width, index) => {
       worksheet.getColumn(index + 1).width = width;
     });
   } else {
     worksheet.addRows(safeData);
-    
+
     const colWidths = safeData[0]?.map((_, colIndex) => {
       const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
       return Math.min(Math.max(maxLength, 10), 50);
     }) || [];
-    
+
     worksheet.columns = colWidths.map((width, index) => ({
       key: String.fromCharCode(65 + index),
       width: width
     }));
   }
-  
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -231,6 +303,20 @@ const MAX_PPT_SLIDES = 200;
 const MAX_PPT_TITLE_LENGTH = 500;
 const MAX_PPT_CONTENT_ITEM_LENGTH = 5000;
 const MAX_PPT_CONTENT_ITEMS = 20;
+const MAX_PPT_TEXT_ELEMENTS_PER_SLIDE = 50;
+const MAX_PPT_TOTAL_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB total text content
+
+/**
+ * Sanitize text content for PPT slides.
+ * Strips control characters and null bytes that could corrupt the PPTX.
+ */
+function sanitizePptText(text: string): string {
+  return text
+    // Remove null bytes
+    .replace(/\0/g, "")
+    // Remove control characters except common whitespace
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
 
 export async function generatePptDocument(title: string, slides: { title: string; content: string[] }[]): Promise<Buffer> {
   // Input validation
@@ -247,12 +333,29 @@ export async function generatePptDocument(title: string, slides: { title: string
     throw new Error(`Too many slides: ${slides.length}. Maximum is ${MAX_PPT_SLIDES}`);
   }
 
+  // Security: enforce total content size to prevent memory exhaustion
+  let totalContentSize = title.length;
+  for (const slide of slides) {
+    totalContentSize += (slide.title || "").length;
+    if (Array.isArray(slide.content)) {
+      for (const item of slide.content) {
+        totalContentSize += typeof item === "string" ? item.length : String(item).length;
+      }
+    }
+    if (totalContentSize > MAX_PPT_TOTAL_CONTENT_SIZE) {
+      throw new Error(`PPT total content size exceeds maximum of ${MAX_PPT_TOTAL_CONTENT_SIZE / (1024 * 1024)}MB`);
+    }
+  }
+
   const pptx = new PptxGenJS();
-  pptx.title = title.substring(0, MAX_PPT_TITLE_LENGTH);
-  pptx.author = "Sira GPT";
+  pptx.title = sanitizePptText(title.substring(0, MAX_PPT_TITLE_LENGTH));
+  pptx.author = "IliaGPT";
+  // Security: don't include user-identifiable info in metadata
+  pptx.company = "";
+  pptx.subject = "";
 
   const titleSlide = pptx.addSlide();
-  titleSlide.addText(title.substring(0, MAX_PPT_TITLE_LENGTH), {
+  titleSlide.addText(sanitizePptText(title.substring(0, MAX_PPT_TITLE_LENGTH)), {
     x: 0.5,
     y: 2,
     w: 9,
@@ -268,7 +371,7 @@ export async function generatePptDocument(title: string, slides: { title: string
     const s = pptx.addSlide();
 
     // Sanitize and truncate slide title
-    const slideTitle = (slide.title || "").substring(0, MAX_PPT_TITLE_LENGTH);
+    const slideTitle = sanitizePptText((slide.title || "").substring(0, MAX_PPT_TITLE_LENGTH));
     s.addText(slideTitle, {
       x: 0.5,
       y: 0.3,
@@ -287,7 +390,9 @@ export async function generatePptDocument(title: string, slides: { title: string
 
     if (safeContent.length > 0) {
       const bulletPoints = safeContent.map(text => ({
-        text: (typeof text === "string" ? text : String(text)).substring(0, MAX_PPT_CONTENT_ITEM_LENGTH),
+        text: sanitizePptText(
+          (typeof text === "string" ? text : String(text)).substring(0, MAX_PPT_CONTENT_ITEM_LENGTH)
+        ),
         options: { bullet: true, fontSize: 18, color: "666666" },
       }));
 
@@ -307,40 +412,54 @@ export async function generatePptDocument(title: string, slides: { title: string
 }
 
 export function parseExcelFromText(text: string): any[][] {
-  const lines = text.trim().split("\n");
+  // Security: limit input text size
+  const safeText = text.length > WORD_MAX_CONTENT_SIZE
+    ? text.substring(0, WORD_MAX_CONTENT_SIZE)
+    : text;
+  const lines = safeText.trim().split("\n");
   const data: any[][] = [];
-  
+
   for (const line of lines) {
+    // Security: enforce row limit
+    if (data.length >= EXCEL_SAFE_MAX_ROWS) {
+      console.warn(`[parseExcelFromText] Row limit reached (${EXCEL_SAFE_MAX_ROWS}), truncating`);
+      break;
+    }
+
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
-    
+
+    let cells: string[];
     if (trimmedLine.includes("|")) {
-      const cells = trimmedLine.split("|").map(cell => cell.trim()).filter(cell => cell && !cell.match(/^-+$/));
-      if (cells.length > 0) {
-        data.push(cells);
-      }
+      cells = trimmedLine.split("|").map(cell => cell.trim()).filter(cell => cell && !cell.match(/^-+$/));
     } else if (trimmedLine.includes(",")) {
-      const cells = trimmedLine.split(",").map(cell => cell.trim());
-      if (cells.length > 1) {
-        data.push(cells);
-      } else {
-        data.push([trimmedLine]);
+      cells = trimmedLine.split(",").map(cell => cell.trim());
+      if (cells.length <= 1) {
+        cells = [trimmedLine];
       }
     } else if (trimmedLine.includes("\t")) {
-      const cells = trimmedLine.split("\t").map(cell => cell.trim());
-      data.push(cells);
+      cells = trimmedLine.split("\t").map(cell => cell.trim());
     } else if (trimmedLine.includes(";")) {
-      const cells = trimmedLine.split(";").map(cell => cell.trim());
-      data.push(cells);
+      cells = trimmedLine.split(";").map(cell => cell.trim());
     } else {
-      data.push([trimmedLine]);
+      cells = [trimmedLine];
+    }
+
+    // Security: enforce column limit and cell length limit
+    if (cells.length > EXCEL_SAFE_MAX_COLUMNS) {
+      cells = cells.slice(0, EXCEL_SAFE_MAX_COLUMNS);
+    }
+    cells = cells.map(c => c.length > EXCEL_MAX_CELL_LENGTH ? c.substring(0, EXCEL_MAX_CELL_LENGTH) : c);
+
+    if (cells.length > 0) {
+      data.push(cells);
     }
   }
-  
+
   if (data.length === 0) {
-    data.push(["Contenido"], [text.slice(0, 500)]);
+    data.push(["Contenido"], [safeText.slice(0, 500)]);
   }
-  
+
   return data;
 }
 

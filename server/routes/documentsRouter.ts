@@ -36,6 +36,8 @@ import {
   docConcurrencyLimiter,
   MAX_DOC_BODY_SIZE,
   MAX_HTML_CONTENT_SIZE,
+  applyDocumentSecurityHeaders,
+  sanitizeErrorMessage,
 } from "../services/documentSecurity";
 
 // Maximum request body size for document endpoints (1MB)
@@ -44,8 +46,28 @@ const DOC_BODY_LIMIT = "1mb";
 // Maximum code length for execute-code endpoint
 const MAX_EXECUTE_CODE_LENGTH = 50 * 1024;
 
+/** Whether to expose detailed error messages in API responses */
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/**
+ * Build a safe error response object. In production, internal details
+ * are stripped to prevent information leakage.
+ */
+function safeErrorResponse(publicMessage: string, error: unknown): { error: string; details?: string } {
+  if (IS_PRODUCTION) {
+    return { error: publicMessage };
+  }
+  return { error: publicMessage, details: sanitizeErrorMessage(error) };
+}
+
 export function createDocumentsRouter() {
   const router = Router();
+
+  // Apply security headers to all document routes
+  router.use((_req, res, next) => {
+    applyDocumentSecurityHeaders(res);
+    next();
+  });
 
   // ============================================
   // SIMPLE DOCUMENT GENERATION
@@ -161,9 +183,9 @@ export function createDocumentsRouter() {
         event: "generate_failure",
         docType: req.body?.type || "unknown",
         durationMs: Date.now() - startTime,
-        details: { error: error.message },
+        details: { error: sanitizeErrorMessage(error) },
       });
-      res.status(500).json({ error: "Failed to generate document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate document", error));
     }
   });
 
@@ -181,7 +203,7 @@ export function createDocumentsRouter() {
       res.send(buffer);
     } catch (error: any) {
       console.error("Agent tools catalog generation error:", error);
-      res.status(500).json({ error: "Failed to generate agent tools catalog", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate agent tools catalog", error));
     }
   });
 
@@ -248,7 +270,7 @@ export function createDocumentsRouter() {
       });
     } catch (error: any) {
       console.error("Document render error:", error);
-      res.status(500).json({ error: "Failed to render document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to render document", error));
     }
   });
 
@@ -324,7 +346,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to render Excel document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to render Excel document", error));
     }
   });
 
@@ -378,7 +400,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to render Word document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to render Word document", error));
     }
   });
 
@@ -469,7 +491,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to generate Excel document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate Excel document", error));
     }
   });
 
@@ -560,7 +582,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to generate Word document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate Word document", error));
     }
   });
 
@@ -633,7 +655,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to generate CV document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate CV document", error));
     }
   });
 
@@ -705,7 +727,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to generate Report document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate Report document", error));
     }
   });
 
@@ -777,7 +799,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to generate Letter document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate Letter document", error));
     }
   });
 
@@ -832,7 +854,7 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({ error: "Failed to render CV document", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to render CV document", error));
     }
   });
 
@@ -909,11 +931,11 @@ export function createDocumentsRouter() {
         durationMs: Date.now() - startTime,
         details: { error: error.message },
       });
-      res.status(500).json({
-        error: "Failed to execute document code",
-        details: error.message,
-        hint: "Check your code syntax and ensure createDocument() function is defined"
-      });
+      const response = safeErrorResponse("Failed to execute document code", error);
+      if (!IS_PRODUCTION) {
+        (response as any).hint = "Check your code syntax and ensure createDocument() function is defined";
+      }
+      res.status(500).json(response);
     }
   });
 
@@ -1002,7 +1024,7 @@ Generate the command plan:`;
       res.json(plan);
     } catch (error: any) {
       console.error("Document plan error:", error);
-      res.status(500).json({ error: "Failed to generate document plan", details: error.message });
+      res.status(500).json(safeErrorResponse("Failed to generate document plan", error));
     }
   });
 
@@ -1033,7 +1055,7 @@ Generate the command plan:`;
 }`;
       res.json({ code });
     } catch (error: any) {
-      res.status(500).json({ error: "Import failed", details: error.message });
+      res.status(500).json(safeErrorResponse("Import failed", error));
     }
   });
 
@@ -1078,7 +1100,7 @@ Generate the command plan:`;
 
       res.json({ errors });
     } catch (error: any) {
-      res.status(500).json({ error: "Grammar check failed", details: error.message });
+      res.status(500).json(safeErrorResponse("Grammar check failed", error));
     }
   });
 
@@ -1122,7 +1144,7 @@ Generate the command plan:`;
 
       res.json({ translatedCode: result.content });
     } catch (error: any) {
-      res.status(500).json({ error: "Translation failed", details: error.message });
+      res.status(500).json(safeErrorResponse("Translation failed", error));
     }
   });
 
@@ -1142,7 +1164,7 @@ Generate the command plan:`;
 
       res.json({ shareUrl, expiresIn: "24 hours" });
     } catch (error: any) {
-      res.status(500).json({ error: "Share failed", details: error.message });
+      res.status(500).json(safeErrorResponse("Share failed", error));
     }
   });
 
@@ -1166,7 +1188,7 @@ Generate the command plan:`;
     try {
       res.json({ success: true, message: "Email would be sent in production" });
     } catch (error: any) {
-      res.status(500).json({ error: "Email failed", details: error.message });
+      res.status(500).json(safeErrorResponse("Email failed", error));
     }
   });
 
@@ -1175,7 +1197,7 @@ Generate the command plan:`;
     try {
       res.status(501).json({ error: "PDF conversion requires LibreOffice installation" });
     } catch (error: any) {
-      res.status(500).json({ error: "PDF conversion failed", details: error.message });
+      res.status(500).json(safeErrorResponse("PDF conversion failed", error));
     }
   });
 
