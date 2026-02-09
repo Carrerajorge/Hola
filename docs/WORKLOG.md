@@ -10,7 +10,7 @@
 - Resultados:
   - type-check + tests + build: OK (agent-verify exit 0)
 - PRs:
-  - (pendiente)
+  - https://github.com/Carrerajorge/Hola/pull/137
 
 ## 2026-02-08
 - Resumen: Actualizado el playbook del equipo con una guía corta para el “Primer PR de prueba”.
