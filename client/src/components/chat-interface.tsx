@@ -2279,17 +2279,34 @@ export function ChatInterface({
       setUploadedFiles((prev: any) => [...prev, tempFile]);
 
       const doUpload = async (): Promise<void> => {
+        const retryFetch = async (fn: () => Promise<Response>, maxRetries = 3): Promise<Response> => {
+          let lastError: Error | null = null;
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+              const res = await fn();
+              return res;
+            } catch (err: any) {
+              lastError = err;
+              if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+              }
+            }
+          }
+          throw lastError || new Error("Request failed after retries");
+        };
+
         try {
-          const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+          const urlRes = await retryFetch(() => fetch("/api/objects/upload", { method: "POST" }), 2);
+          if (!urlRes.ok) throw new Error(`Failed to get upload URL (status ${urlRes.status})`);
           const { uploadURL, storagePath } = await urlRes.json();
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
-          const uploadRes = await fetch(uploadURL, {
+          const uploadRes = await retryFetch(() => fetch(uploadURL, {
             method: "PUT",
-            headers: { "Content-Type": file.type },
+            headers: { "Content-Type": file.type || "application/octet-stream" },
             body: file,
-          });
-          if (!uploadRes.ok) throw new Error("Upload failed");
+          }));
+          if (!uploadRes.ok) throw new Error(`Upload failed with status ${uploadRes.status}`);
 
           let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
 
