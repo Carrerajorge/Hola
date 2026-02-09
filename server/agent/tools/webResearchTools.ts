@@ -346,24 +346,16 @@ export class WebResearchEngine {
     this.rateLimiter.record(domain);
 
     try {
-      // Use the existing browser worker or fetch
-      const { browserWorker } = await import("../browser-worker");
+      // Use the existing fetchUrl service (faster, no browser overhead)
+      const { fetchUrl } = await import("../../services/webSearch");
 
-      const sessionId = await browserWorker.createSession();
-      let browseResult: { title: string; content: string; author?: string; publishedDate?: string } | null = null;
-      try {
-        const navResult = await browserWorker.navigate(sessionId, input.url);
-        const html = await browserWorker.getHtml(sessionId);
-        browseResult = {
-          title: navResult.title || "",
-          content: html || "",
-        };
-      } finally {
-        await browserWorker.destroySession(sessionId);
-      }
+      const fetchResult = await fetchUrl(input.url, {
+        extractText: input.extractMode === "readability",
+        maxLength: input.maxLength,
+      });
 
-      const content = (browseResult?.content || "").slice(0, input.maxLength);
-      const title = browseResult?.title || "";
+      const content = (fetchResult?.text || "").slice(0, input.maxLength);
+      const title = fetchResult?.title || "";
 
       // Cache the result
       this.cache.set(input.url, {
@@ -383,8 +375,8 @@ export class WebResearchEngine {
           title,
           content,
           wordCount: content.split(/\s+/).length,
-          author: browseResult?.author,
-          publishedDate: browseResult?.publishedDate,
+          author: undefined,
+          publishedDate: fetchResult?.publishedDate,
         } as FetchResult,
         citations: [citation],
         durationMs: Date.now() - start,

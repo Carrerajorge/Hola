@@ -44,6 +44,8 @@ import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
 import { createAgentModeRouter } from "./routes/agentRoutes";
+import { createOrchestratorRouter } from "./routes/orchestratorRoutes";
+import { registerAgenticTools } from "./agent/orchestrator/agenticToolRegistrations";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
@@ -541,6 +543,10 @@ export async function registerRoutes(
   app.use("/api/spreadsheet", createSpreadsheetRouter());
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
+  app.use("/api/orchestrator", createOrchestratorRouter());
+
+  // Register agentic tools (browser, research, documents, terminal)
+  registerAgenticTools();
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
   
