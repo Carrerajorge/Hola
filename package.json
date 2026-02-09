@@ -131,7 +131,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "asciimath2tex": "^1.5.0",
-    "axios": "^1.13.2",
+    "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.66.5",
     "class-variance-authority": "^0.7.1",
