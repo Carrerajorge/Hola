@@ -226,13 +226,33 @@ export async function generateProfessionalDashboard(config: DashboardConfig): Pr
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
+// PPT generation limits
+const MAX_PPT_SLIDES = 200;
+const MAX_PPT_TITLE_LENGTH = 500;
+const MAX_PPT_CONTENT_ITEM_LENGTH = 5000;
+const MAX_PPT_CONTENT_ITEMS = 20;
+
 export async function generatePptDocument(title: string, slides: { title: string; content: string[] }[]): Promise<Buffer> {
+  // Input validation
+  if (!title || typeof title !== "string") {
+    throw new Error("PPT title is required");
+  }
+  if (title.length > MAX_PPT_TITLE_LENGTH) {
+    throw new Error(`PPT title exceeds maximum length of ${MAX_PPT_TITLE_LENGTH} characters`);
+  }
+  if (!Array.isArray(slides) || slides.length === 0) {
+    throw new Error("At least one slide is required");
+  }
+  if (slides.length > MAX_PPT_SLIDES) {
+    throw new Error(`Too many slides: ${slides.length}. Maximum is ${MAX_PPT_SLIDES}`);
+  }
+
   const pptx = new PptxGenJS();
-  pptx.title = title;
+  pptx.title = title.substring(0, MAX_PPT_TITLE_LENGTH);
   pptx.author = "Sira GPT";
 
   const titleSlide = pptx.addSlide();
-  titleSlide.addText(title, {
+  titleSlide.addText(title.substring(0, MAX_PPT_TITLE_LENGTH), {
     x: 0.5,
     y: 2,
     w: 9,
@@ -246,8 +266,10 @@ export async function generatePptDocument(title: string, slides: { title: string
 
   for (const slide of slides) {
     const s = pptx.addSlide();
-    
-    s.addText(slide.title, {
+
+    // Sanitize and truncate slide title
+    const slideTitle = (slide.title || "").substring(0, MAX_PPT_TITLE_LENGTH);
+    s.addText(slideTitle, {
       x: 0.5,
       y: 0.3,
       w: 9,
@@ -258,9 +280,14 @@ export async function generatePptDocument(title: string, slides: { title: string
       fontFace: "Arial",
     });
 
-    if (slide.content.length > 0) {
-      const bulletPoints = slide.content.map(text => ({
-        text: text,
+    // Validate and truncate content items
+    const safeContent = Array.isArray(slide.content)
+      ? slide.content.slice(0, MAX_PPT_CONTENT_ITEMS)
+      : [];
+
+    if (safeContent.length > 0) {
+      const bulletPoints = safeContent.map(text => ({
+        text: (typeof text === "string" ? text : String(text)).substring(0, MAX_PPT_CONTENT_ITEM_LENGTH),
         options: { bullet: true, fontSize: 18, color: "666666" },
       }));
 
