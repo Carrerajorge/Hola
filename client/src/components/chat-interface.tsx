@@ -2816,6 +2816,11 @@ export function ChatInterface({
     const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
+      toast({
+        title: "Archivos en proceso",
+        description: "Espera a que los archivos terminen de cargarse antes de enviar.",
+        duration: 3000,
+      });
       return;
     }
 
@@ -2828,6 +2833,22 @@ export function ChatInterface({
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
       console.log("[handleSubmit] no content to submit, returning");
       return;
+    }
+
+    // FIX: Auto-generate a prompt when the user sends ONLY files without text.
+    // The backend rejects empty message content even when attachments are present,
+    // which causes files to "disappear" from the UI (already cleared) with no response.
+    let autoPromptForFiles = "";
+    if (!hasInput && hasFiles) {
+      const filesRef = uploadedFilesRef.current;
+      const hasImage = filesRef.some((f: any) => (f.type || "").startsWith("image/"));
+      const hasDoc = filesRef.some((f: any) => !(f.type || "").startsWith("image/"));
+      autoPromptForFiles = hasImage && !hasDoc
+        ? "Describe la imagen adjunta."
+        : hasDoc && !hasImage
+          ? "Analiza los documentos adjuntos y resume lo importante."
+          : "Analiza los archivos adjuntos y dime lo más importante.";
+      console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
     }
 
     // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
@@ -2897,7 +2918,7 @@ export function ChatInterface({
     // Handle Agent mode - show in chat, not side panel
     if (selectedTool === "agent") {
       try {
-        const userMessageContent = input;
+        const userMessageContent = input || autoPromptForFiles;
         const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
 
         // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
@@ -3714,8 +3735,8 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
     // -------------------------------------------------------------------------
-    // Capture state immediately
-    const userInput = input;
+    // Capture state immediately — use auto-generated prompt if user sent only files
+    const userInput = input || autoPromptForFiles;
     const currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = Date.now().toString();
 
@@ -4413,15 +4434,11 @@ IMPORTANTE:
             };
 
             // Build attachments array for streaming endpoint
+            // FIX: Normalize type to match backend schema: "document" | "image" | "file"
             const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
-                type: f.type.startsWith("image/") ? "image" as const :
-                  f.type.includes("pdf") ? "pdf" as const :
-                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
-                      f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-                        f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                          "document" as const,
+                type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
                 name: f.name,
                 mimeType: f.type,
                 storagePath: f.storagePath,
