@@ -87,7 +87,11 @@ docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
 sleep 5
 
 echo "▸ Starting updated containers..."
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --remove-orphans
+if ! docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --remove-orphans; then
+  echo "⚠ Rolling update failed; performing full restart..."
+  docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --remove-orphans || true
+  docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d
+fi
 
 echo "▸ Waiting for health..."
 for i in $(seq 1 30); do
