@@ -42,6 +42,7 @@ import { auditLog } from "../services/auditLogger";
 import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 import { conversationMemoryManager } from "../services/conversationMemory";
 import { conversationStateService } from "../services/conversationStateService";
+import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -1833,6 +1834,16 @@ ${attachmentContext}`;
       // Mark run as done if we claimed one
       if (claimedRun) {
         await storage.updateChatRunStatus(claimedRun.id, 'done');
+      }
+
+      // Fire-and-forget: Generate an AI-powered descriptive title for this chat
+      // based on the user's message and the assistant's response.
+      if (effectiveChatIdForPersistence && userMessageText && fullContent.trim()) {
+        void generateAndPersistChatTitle(
+          effectiveChatIdForPersistence,
+          userMessageText,
+          fullContent,
+        ).catch(e => console.warn('[Stream] Async title generation failed:', e));
       }
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
