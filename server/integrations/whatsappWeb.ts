@@ -60,10 +60,27 @@ export class WhatsAppWebManager extends EventEmitter {
   }
 
   private sessionDirForUser(userId: string): string {
-    const base = path.join(process.cwd(), 'data', 'whatsapp-web');
-    const dir = path.join(base, userId);
-    fs.mkdirSync(dir, { recursive: true });
-    return dir;
+    // Try primary path first (works in Docker with /app/data pre-created),
+    // fall back to OS temp dir if the primary is not writable (local dev, etc.)
+    const primary = path.join(process.cwd(), 'data', 'whatsapp-web');
+    const fallback = path.join(require('os').tmpdir(), 'whatsapp-web-sessions');
+
+    for (const base of [primary, fallback]) {
+      const dir = path.join(base, userId);
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        return dir;
+      } catch (e: any) {
+        if (e?.code === 'EACCES') {
+          console.warn(`[WhatsApp] Permission denied creating ${dir}, trying fallback...`);
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    // Should not reach here, but just in case
+    throw new Error('No se pudo crear el directorio de sesión WhatsApp (permiso denegado)');
   }
 
   private cleanSessionDir(userId: string): void {
