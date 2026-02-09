@@ -63,6 +63,7 @@ import agentPlanRouter from "./routes/agentPlanRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
 import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
+import ragMemoryRouter from "./routes/ragMemoryRouter";
 import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
@@ -588,6 +589,7 @@ export async function registerRoutes(
   app.use("/api/planning", agentPlanRouter);
   app.use("/api/document-analysis", documentAnalysisRouter);
   app.use("/api/rag", ragRouter);
+  app.use("/api/rag/memory", ragMemoryRouter);
   app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
   app.use(createSettingsRouter());
