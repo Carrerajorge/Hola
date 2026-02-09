@@ -28,6 +28,7 @@
 
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, Table, TableRow, TableCell, WidthType } from "docx";
+import { sanitizePlainText, sanitizeHttpUrl, sanitizeSearchQuery } from "../lib/textSanitizers";
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -622,23 +623,23 @@ async function searchCrossRef(
         
         const pubDate = item.published?.["date-parts"]?.[0] || item.created?.["date-parts"]?.[0] || [];
         
-        papers.push({
-          id: item.DOI || `crossref_${Date.now()}`,
-          title: item.title?.[0] || "",
-          authors,
-          year: pubDate[0] || 0,
-          month: pubDate[1],
-          journal: item["container-title"]?.[0] || "",
-          journalAbbreviation: item["short-container-title"]?.[0] || "",
-          volume: item.volume || "",
-          issue: item.issue || "",
-          pages: item.page || "",
-          abstract: item.abstract?.replace(/<[^>]*>/g, "") || "",
-          keywords: item.subject || [],
-          doi: item.DOI || "",
-          url: item.URL || `https://doi.org/${item.DOI}`,
-          language: item.language || "en",
-          documentType: item.type || "article",
+	        papers.push({
+	          id: item.DOI || `crossref_${Date.now()}`,
+	          title: item.title?.[0] || "",
+	          authors,
+	          year: pubDate[0] || 0,
+	          month: pubDate[1],
+	          journal: item["container-title"]?.[0] || "",
+	          journalAbbreviation: item["short-container-title"]?.[0] || "",
+	          volume: item.volume || "",
+	          issue: item.issue || "",
+	          pages: item.page || "",
+	          abstract: sanitizePlainText(item.abstract, { maxLen: 12000, collapseWs: true }),
+	          keywords: item.subject || [],
+	          doi: item.DOI || "",
+	          url: item.URL || `https://doi.org/${item.DOI}`,
+	          language: item.language || "en",
+	          documentType: item.type || "article",
           cityOfPublication: item["publisher-location"] || "",
           publisher: item.publisher || "",
           issn: item.ISSN?.[0] || "",
@@ -765,15 +766,17 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
     const xmlText = await fetchResponse.text();
     
     // Simple XML parsing (for production, use proper XML parser)
-    const articleMatches = xmlText.match(/<PubmedArticle>[\s\S]*?<\/PubmedArticle>/g) || [];
-    
-    for (const articleXml of articleMatches) {
-      const title = articleXml.match(/<ArticleTitle>([\s\S]*?)<\/ArticleTitle>/)?.[1]?.replace(/<[^>]*>/g, "") || "";
-      const abstract = articleXml.match(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/)?.[1]?.replace(/<[^>]*>/g, "") || "";
-      const year = articleXml.match(/<PubDate>[\s\S]*?<Year>(\d+)<\/Year>/)?.[1] || "";
-      const journal = articleXml.match(/<Journal>[\s\S]*?<Title>([\s\S]*?)<\/Title>/)?.[1] || "";
-      const doi = articleXml.match(/<ArticleId IdType="doi">([\s\S]*?)<\/ArticleId>/)?.[1] || "";
-      const pmid = articleXml.match(/<PMID[^>]*>(\d+)<\/PMID>/)?.[1] || "";
+	    const articleMatches = xmlText.match(/<PubmedArticle>[\s\S]*?<\/PubmedArticle>/g) || [];
+	    
+	    for (const articleXml of articleMatches) {
+	      const titleRaw = articleXml.match(/<ArticleTitle>([\s\S]*?)<\/ArticleTitle>/)?.[1] ?? "";
+	      const abstractRaw = articleXml.match(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/)?.[1] ?? "";
+	      const title = sanitizePlainText(titleRaw, { maxLen: 2000, collapseWs: true });
+	      const abstract = sanitizePlainText(abstractRaw, { maxLen: 12000, collapseWs: true });
+	      const year = articleXml.match(/<PubDate>[\s\S]*?<Year>(\d+)<\/Year>/)?.[1] || "";
+	      const journal = articleXml.match(/<Journal>[\s\S]*?<Title>([\s\S]*?)<\/Title>/)?.[1] || "";
+	      const doi = articleXml.match(/<ArticleId IdType="doi">([\s\S]*?)<\/ArticleId>/)?.[1] || "";
+	      const pmid = articleXml.match(/<PMID[^>]*>(\d+)<\/PMID>/)?.[1] || "";
       
       // Extract authors
       const authorMatches = articleXml.match(/<Author[^>]*>[\s\S]*?<\/Author>/g) || [];
@@ -783,15 +786,17 @@ async function searchPubMed(query: string, maxResults: number = 100): Promise<{ 
         const affiliation = authorXml.match(/<Affiliation>([\s\S]*?)<\/Affiliation>/)?.[1] || "";
         return { name: `${firstName} ${lastName}`.trim(), firstName, lastName, affiliation };
       });
-      
-      // Extract MeSH terms
-      const meshMatches = articleXml.match(/<DescriptorName[^>]*>([\s\S]*?)<\/DescriptorName>/g) || [];
-      const meshTerms = meshMatches.map(m => m.replace(/<[^>]*>/g, ""));
-      
-      papers.push({
-        id: pmid || `pubmed_${Date.now()}`,
-        title,
-        authors,
+	      
+	      // Extract MeSH terms
+	      const meshMatches = articleXml.match(/<DescriptorName[^>]*>([\s\S]*?)<\/DescriptorName>/g) || [];
+	      const meshTerms = meshMatches
+	        .map((m) => sanitizePlainText(m, { maxLen: 300, collapseWs: true }))
+	        .filter((t): t is string => Boolean(t));
+	      
+	      papers.push({
+	        id: pmid || `pubmed_${Date.now()}`,
+	        title,
+	        authors,
         year: parseInt(year) || 0,
         journal,
         abstract,
@@ -1643,50 +1648,28 @@ export class AcademicResearchEngineV3 {
    * Sanitize and harden search query input
    */
   private hardenQuery(raw: string): string {
-    if (!raw || typeof raw !== "string") return "";
-    let q = raw;
-    q = q.replace(/<[^>]*>/g, ""); // Strip HTML/script tags
-    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); // Remove control chars
-    q = q.normalize("NFC"); // Normalize unicode
-    q = q.replace(/\s+/g, " ").trim(); // Collapse whitespace
-    if (q.length > 500) q = q.substring(0, 500).trim(); // Limit length
-    return q;
+    return sanitizeSearchQuery(raw, 500);
   }
 
   /**
    * Sanitize paper text fields to prevent XSS
    */
   private sanitizePaper(paper: AcademicPaper): AcademicPaper {
-    const cleanText = (t: string | undefined) => {
-      if (!t) return t;
-      // Decode HTML entities, strip tags, remove control chars
-      let s = t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-      s = s.replace(/<[^>]*>/g, "");
-      s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-      return s.trim();
-    };
-    const cleanUrl = (u: string | undefined) => {
-      if (!u) return u;
-      const cleaned = (u || "").replace(/<[^>]*>/g, "").trim();
-      if (/^https?:\/\//i.test(cleaned)) return cleaned;
-      if (/^\/\//i.test(cleaned)) return `https:${cleaned}`;
-      return "";
-    };
     return {
       ...paper,
-      title: cleanText(paper.title) || "Untitled",
-      abstract: cleanText(paper.abstract),
-      journal: cleanText(paper.journal),
-      doi: cleanText(paper.doi),
-      url: cleanUrl(paper.url),
-      pdfUrl: cleanUrl(paper.pdfUrl),
-      publisher: cleanText(paper.publisher),
+      title: sanitizePlainText(paper.title || "", { maxLen: 500 }) || "Untitled",
+      abstract: sanitizePlainText(paper.abstract || "", { maxLen: 10000 }),
+      journal: sanitizePlainText(paper.journal || "", { maxLen: 500 }),
+      doi: sanitizePlainText(paper.doi || "", { maxLen: 300 }),
+      url: sanitizeHttpUrl(paper.url),
+      pdfUrl: sanitizeHttpUrl(paper.pdfUrl),
+      publisher: sanitizePlainText(paper.publisher || "", { maxLen: 500 }),
       authors: paper.authors.map(a => ({
         ...a,
-        name: cleanText(a.name) || "Unknown",
-        affiliation: cleanText(a.affiliation),
+        name: sanitizePlainText(a.name || "", { maxLen: 200 }) || "Unknown",
+        affiliation: sanitizePlainText(a.affiliation || "", { maxLen: 500 }),
       })),
-      keywords: (paper.keywords || []).map(k => cleanText(k) || "").filter(Boolean),
+      keywords: (paper.keywords || []).map(k => sanitizePlainText(k || "", { maxLen: 200 })).filter(Boolean),
     };
   }
 

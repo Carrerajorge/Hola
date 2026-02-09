@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { HTTP_HEADERS, TIMEOUTS, LIMITS } from "../lib/constants";
+import { sanitizePlainText, sanitizeSearchQuery } from "../lib/textSanitizers";
 
 export interface SearchOptions {
   maxResults?: number;
@@ -406,19 +407,7 @@ export class SearchOrchestrator {
    * Sanitize and harden web search query input
    */
   private sanitizeQuery(raw: string): string {
-    if (!raw || typeof raw !== "string") return "";
-    let q = raw;
-    // Strip HTML/script tags
-    q = q.replace(/<[^>]*>/g, "");
-    // Remove null bytes and control characters
-    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-    // Normalize unicode
-    q = q.normalize("NFC");
-    // Collapse whitespace
-    q = q.replace(/\s+/g, " ").trim();
-    // Limit length
-    if (q.length > 500) q = q.substring(0, 500).trim();
-    return q;
+    return sanitizeSearchQuery(raw, 500);
   }
 
   /**
@@ -427,10 +416,10 @@ export class SearchOrchestrator {
   private sanitizeResult(result: EnhancedSearchResult): EnhancedSearchResult {
     return {
       ...result,
-      title: (result.title || "").replace(/<[^>]*>/g, "").substring(0, 500),
-      snippet: (result.snippet || "").replace(/<[^>]*>/g, "").substring(0, 2000),
+      title: sanitizePlainText(result.title || "", { maxLen: 500 }),
+      snippet: sanitizePlainText(result.snippet || "", { maxLen: 2000 }),
       url: result.url || "",
-      source: (result.source || "").replace(/<[^>]*>/g, "").substring(0, 100),
+      source: sanitizePlainText(result.source || "", { maxLen: 100 }),
     };
   }
 

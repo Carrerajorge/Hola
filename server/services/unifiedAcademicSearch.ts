@@ -19,6 +19,7 @@
 import { JSDOM } from "jsdom";
 import { createClient, RedisClientType } from "redis";
 import crypto from "crypto";
+import { sanitizeSearchQuery } from "../lib/textSanitizers";
 
 // ============================================
 // TYPES
@@ -915,19 +916,7 @@ export interface UnifiedSearchOptions extends SearchOptions {
  * Sanitize and harden raw search query input
  */
 function hardenQuery(raw: string): string {
-  if (!raw || typeof raw !== "string") return "";
-  let q = raw;
-  // Strip HTML/script tags
-  q = q.replace(/<[^>]*>/g, "");
-  // Remove null bytes and control chars
-  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Normalize unicode
-  q = q.normalize("NFC");
-  // Collapse whitespace
-  q = q.replace(/\s+/g, " ").trim();
-  // Limit length
-  if (q.length > 500) q = q.substring(0, 500).trim();
-  return q;
+  return sanitizeSearchQuery(raw, 500);
 }
 
 export async function searchAllSources(query: string, options: UnifiedSearchOptions = {}): Promise<{

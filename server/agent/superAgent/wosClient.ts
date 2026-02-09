@@ -1,4 +1,5 @@
 import { translateToEnglish } from "./scopusClient";
+import { sanitizeSearchQuery } from "../../lib/textSanitizers";
 
 export interface WosArticle {
   id: string;
@@ -35,19 +36,7 @@ export function isWosConfigured(): boolean {
  * Sanitize and harden WoS search query input
  */
 function sanitizeWosQuery(raw: string): string {
-  if (!raw || typeof raw !== "string") return "";
-  let q = raw;
-  // Strip HTML/script tags
-  q = q.replace(/<[^>]*>/g, "");
-  // Remove null bytes and control characters
-  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Normalize unicode
-  q = q.normalize("NFC");
-  // Collapse whitespace
-  q = q.replace(/\s+/g, " ").trim();
-  // Limit length
-  if (q.length > 500) q = q.substring(0, 500).trim();
-  return q;
+  return sanitizeSearchQuery(raw, 500);
 }
 
 /**

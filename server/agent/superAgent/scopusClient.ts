@@ -1,5 +1,6 @@
 import { SourceSignal } from "./contracts";
 import { franc } from "franc";
+import { sanitizePlainText } from "../../lib/textSanitizers";
 
 // =============================================================================
 // Types
@@ -818,19 +819,7 @@ function quoteIfNeeded(term: string): string {
 }
 
 function sanitizeQueryInput(query: string): string {
-  if (!query || typeof query !== "string") return "";
-  let q = query;
-  // Strip HTML/script tags to prevent injection
-  q = q.replace(/<[^>]*>/g, "");
-  // Remove null bytes and control characters
-  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Normalize unicode (NFC for consistent matching across databases)
-  q = q.normalize("NFC");
-  // Collapse whitespace
-  q = q.replace(/\s+/g, " ").trim();
-  // Hard limit on input length (Scopus accepts longer queries)
-  if (q.length > 2000) q = q.substring(0, 2000).trim();
-  return q;
+  return sanitizePlainText(query, { maxLen: 2000, collapseWs: true });
 }
 
 function detectLanguageName(text: string): string {

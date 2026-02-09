@@ -1,4 +1,5 @@
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
+import { sanitizePlainText } from "../lib/textSanitizers";
 
 export class TextParser implements FileParser {
   name = "text";
@@ -23,8 +24,7 @@ export class TextParser implements FileParser {
     }
 
     if (type.mimeType === "text/html") {
-      const stripped = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-      return { text: stripped };
+      return { text: sanitizePlainText(text, { maxLen: 2_000_000, collapseWs: true }) };
     }
 
     return { text };

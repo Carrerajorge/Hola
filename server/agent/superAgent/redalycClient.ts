@@ -7,6 +7,8 @@
  * API Docs: https://zenodo.org/record/7774744
  */
 
+import { sanitizePlainText, sanitizeSearchQuery } from "../../lib/textSanitizers";
+
 export interface RedalycArticle {
     redalyc_id: string;
     title: string;
@@ -46,20 +48,12 @@ const USER_AGENT = (process.env.HTTP_USER_AGENT || "Mozilla/5.0 (compatible; Ili
  * Sanitize and harden Redalyc search query input
  */
 function sanitizeRedalycQuery(raw: string): string {
-    if (!raw || typeof raw !== "string") return "";
-    let q = raw;
-    // Strip HTML/script tags
-    q = q.replace(/<[^>]*>/g, "");
-    // Remove null bytes and control characters
-    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-    // Normalize unicode
-    q = q.normalize("NFC");
+    let q = sanitizeSearchQuery(raw, 500);
+    if (!q) return "";
     // Remove dangerous chars (keep letters, digits, spaces, common punctuation, accented chars)
     q = q.replace(/[^\w\s\-.,()'"áéíóúüñàèìòùâêîôûãõçÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÃÕÇ]/g, " ");
     // Collapse whitespace
     q = q.replace(/\s+/g, " ").trim();
-    // Limit length
-    if (q.length > 500) q = q.substring(0, 500).trim();
     return q;
 }
 
@@ -84,10 +78,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function stripHtml(text: string): string {
-    return (text || "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    return sanitizePlainText(text || "", { maxLen: 5000, collapseWs: true });
 }
 
 function normalizeDoi(raw: string | undefined): string | undefined {

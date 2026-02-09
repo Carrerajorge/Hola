@@ -7,6 +7,8 @@
  * API Docs: https://www.ncbi.nlm.nih.gov/books/NBK25500/
  */
 
+import { sanitizeSearchQuery } from "../../lib/textSanitizers";
+
 export interface PubMedArticle {
     pmid: string;
     title: string;
@@ -43,20 +45,12 @@ const REQUEST_TIMEOUT_MS = 15000;
  * Sanitize and harden PubMed search query input
  */
 function sanitizePubMedQuery(raw: string): string {
-    if (!raw || typeof raw !== "string") return "";
-    let q = raw;
-    // Strip HTML/script tags
-    q = q.replace(/<[^>]*>/g, "");
-    // Remove null bytes and control characters
-    q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-    // Normalize unicode
-    q = q.normalize("NFC");
+    let q = sanitizeSearchQuery(raw, 500);
+    if (!q) return "";
     // Remove characters that break PubMed queries (keep alphanumeric, spaces, hyphens, parentheses, brackets, quotes, colons)
     q = q.replace(/[^\w\s\-()[\]"':,.áéíóúüñàèìòùâêîôûãõç]/gi, " ");
     // Collapse whitespace
     q = q.replace(/\s+/g, " ").trim();
-    // Limit length
-    if (q.length > 500) q = q.substring(0, 500).trim();
     return q;
 }
 

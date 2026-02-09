@@ -11,6 +11,7 @@ import { lookupOpenAlexWorkByDoi, type AcademicCandidate } from "../agent/superA
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
 import { persistentJsonCacheGet, persistentJsonCacheSet } from "../lib/persistentJsonCache";
+import { sanitizePlainText } from "../lib/textSanitizers";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -230,14 +231,7 @@ function buildAffilCountries(region: AcademicRegion): string[] | undefined {
  * Sanitize export prompt to prevent injection
  */
 function sanitizeExportPrompt(raw: string): string {
-  if (!raw || typeof raw !== "string") return "";
-  let p = raw;
-  p = p.replace(/<[^>]*>/g, ""); // Strip HTML/script tags
-  p = p.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); // Remove control chars
-  p = p.normalize("NFC"); // Unicode normalization
-  p = p.replace(/\s+/g, " ").trim(); // Collapse whitespace
-  if (p.length > 2000) p = p.substring(0, 2000).trim(); // Length limit
-  return p;
+  return sanitizePlainText(raw, { maxLen: 2000, collapseWs: true });
 }
 
 export function planAcademicArticlesExport(prompt: string): AcademicArticlesExportPlan {

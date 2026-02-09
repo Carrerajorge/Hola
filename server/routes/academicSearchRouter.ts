@@ -18,6 +18,7 @@ import {
   getSourcesStatus,
   AcademicResult
 } from "../services/unifiedAcademicSearch";
+import { sanitizePlainText, sanitizeSearchQuery } from "../lib/textSanitizers";
 
 export const academicSearchRouter = Router();
 
@@ -38,24 +39,13 @@ function validateQuery(raw: any): { valid: true; query: string } | { valid: fals
     return { valid: false, error: "query is required and must be a string" };
   }
 
-  let q = raw;
-  // Strip HTML/script tags
-  q = q.replace(/<[^>]*>/g, "");
-  // Remove null bytes and control characters
-  q = q.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Normalize unicode
-  q = q.normalize("NFC");
-  // Collapse whitespace
-  q = q.replace(/\s+/g, " ").trim();
+  let q = sanitizeSearchQuery(raw, MAX_QUERY_LENGTH);
 
   if (q.length === 0) {
     return { valid: false, error: "query cannot be empty" };
   }
   if (q.length < 2) {
     return { valid: false, error: "query must be at least 2 characters" };
-  }
-  if (q.length > MAX_QUERY_LENGTH) {
-    q = q.substring(0, MAX_QUERY_LENGTH).trim();
   }
 
   return { valid: true, query: q };
@@ -239,11 +229,11 @@ academicSearchRouter.post("/cite", async (req, res) => {
     }
 
     // Sanitize input fields
-    const cleanTitle = String(article.title).replace(/<[^>]*>/g, "").trim().substring(0, 500);
-    const cleanAuthors = String(article.authors || "Unknown").replace(/<[^>]*>/g, "").trim().substring(0, 1000);
+    const cleanTitle = sanitizePlainText(String(article.title), { maxLen: 500 });
+    const cleanAuthors = sanitizePlainText(String(article.authors || "Unknown"), { maxLen: 1000 });
     const cleanYear = String(article.year || "n.d.").replace(/[^0-9n.d.]/g, "").substring(0, 10);
-    const cleanJournal = String(article.journal || "").replace(/<[^>]*>/g, "").trim().substring(0, 300);
-    const cleanDoi = article.doi ? String(article.doi).replace(/<[^>]*>/g, "").trim().substring(0, 200) : "";
+    const cleanJournal = sanitizePlainText(String(article.journal || ""), { maxLen: 300 });
+    const cleanDoi = article.doi ? sanitizePlainText(String(article.doi), { maxLen: 200, collapseWs: true }) : "";
 
     const doiPart = cleanDoi ? ` 🔗 https://doi.org/${cleanDoi}` : "";
     const citation = `${cleanAuthors} (${cleanYear}). ${cleanTitle}. ${cleanJournal}.${doiPart}`;

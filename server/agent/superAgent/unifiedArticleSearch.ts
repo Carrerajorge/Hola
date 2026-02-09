@@ -19,6 +19,7 @@ import { searchOpenAlex, type AcademicCandidate } from "./openAlexClient";
 import { lookupDOI, type CrossRefMetadata } from "./crossrefClient";
 import { searchWos, type WosArticle, isWosConfigured } from "./wosClient";
 import * as XLSX from "xlsx";
+import { sanitizePlainText, sanitizeSearchQuery, sanitizeHttpUrl } from "../../lib/textSanitizers";
 
 const PER_SOURCE_TIMEOUT_MS = 30_000;
 
@@ -339,18 +340,8 @@ function convertCrossRefMetadataToUnified(meta: CrossRefMetadata, source: Unifie
  * - Normalizes unicode for consistent cross-source results
  */
 function hardenSearchQuery(rawQuery: string): string {
-    if (!rawQuery || typeof rawQuery !== "string") return "";
-
-    let query = rawQuery;
-
-    // 1. Strip HTML/script tags to prevent XSS in downstream rendering
-    query = query.replace(/<[^>]*>/g, "");
-
-    // 2. Remove null bytes and control characters (except newlines/tabs)
-    query = query.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-
-    // 3. Normalize unicode (NFC form for consistent matching across DBs)
-    query = query.normalize("NFC");
+    let query = sanitizeSearchQuery(rawQuery, 500);
+    if (!query) return "";
 
     // 4. Remove excessive special characters that break API queries
     //    Keep: alphanumeric, spaces, hyphens, periods, commas, parentheses, quotes, colons, accented chars
@@ -717,32 +708,14 @@ export async function searchAllSources(
  * Applied to all articles from all sources before they reach the user.
  */
 function sanitizeArticleText(text: string | undefined | null): string {
-    if (!text || typeof text !== "string") return "";
-    let clean = text;
-    // Strip any HTML tags that might have slipped through API responses
-    clean = clean.replace(/<[^>]*>/g, "");
-    // Remove null bytes and control characters
-    clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-    // Decode common HTML entities
-    clean = clean.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-        .replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-    // Re-strip any tags that appeared after entity decoding
-    clean = clean.replace(/<[^>]*>/g, "");
-    // Normalize whitespace
-    clean = clean.replace(/\s+/g, " ").trim();
-    return clean;
+    return sanitizePlainText(text, { maxLen: 20000, collapseWs: true });
 }
 
 /**
  * Sanitize a URL string to prevent injection
  */
 function sanitizeUrl(url: string | undefined | null): string {
-    if (!url || typeof url !== "string") return "";
-    const trimmed = url.trim();
-    // Only allow http(s) and doi.org URLs
-    if (/^https?:\/\//i.test(trimmed)) return trimmed;
-    if (/^\/\//i.test(trimmed)) return `https:${trimmed}`;
-    return "";
+    return sanitizeHttpUrl(url);
 }
 
 /**
@@ -757,7 +730,7 @@ function sanitizeUnifiedArticle(article: UnifiedArticle): UnifiedArticle {
         journal: sanitizeArticleText(article.journal),
         abstract: sanitizeArticleText(article.abstract),
         keywords: (article.keywords || []).map(k => sanitizeArticleText(k)).filter(Boolean),
-        doi: (article.doi || "").replace(/<[^>]*>/g, "").trim(),
+        doi: sanitizePlainText(article.doi || "", { maxLen: 300, collapseWs: true }),
         url: sanitizeUrl(article.url),
         language: sanitizeArticleText(article.language),
         documentType: sanitizeArticleText(article.documentType),
