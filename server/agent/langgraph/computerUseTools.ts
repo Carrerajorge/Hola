@@ -74,11 +74,19 @@ export const computerUseNavigateTool = tool(
 
     try {
       // Try universal browser controller first, fall back to computer use engine
-      let result: any;
+      let navUrl = url;
+      let navTitle = "";
+      let navStatus: string | number = "navigated";
       try {
-        result = await universalBrowserController.navigate(sessionId, url, { waitUntil: waitUntil as any });
+        const result = await universalBrowserController.navigate(sessionId, url, { waitUntil: waitUntil as any });
+        navUrl = result.url || url;
+        navTitle = result.title || "";
+        navStatus = result.status ?? "navigated";
       } catch {
-        result = await computerUseEngine.navigateToUrl(sessionId, url);
+        const fallback = await computerUseEngine.navigateToUrl(sessionId, url);
+        navUrl = url;
+        navTitle = fallback.changesDetected?.find(c => c.startsWith("title:"))?.replace("title: ", "") || "";
+        navStatus = fallback.success ? "navigated" : "error";
       }
 
       let screenshotData: string | undefined;
@@ -92,11 +100,11 @@ export const computerUseNavigateTool = tool(
 
       return JSON.stringify({
         success: true,
-        url: result?.url || result?.currentUrl || url,
-        title: result?.title || result?.pageTitle || "",
-        status: result?.status || "navigated",
+        url: navUrl,
+        title: navTitle,
+        status: navStatus,
         screenshot: screenshotData ? "captured" : undefined,
-        screenshotData: screenshotData?.slice(0, 500) + (screenshotData && screenshotData.length > 500 ? "...[truncated]" : ""),
+        screenshotData: screenshotData ? screenshotData.slice(0, 500) + (screenshotData.length > 500 ? "...[truncated]" : "") : undefined,
       });
     } catch (error: any) {
       return JSON.stringify({ success: false, error: error.message });

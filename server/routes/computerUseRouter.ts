@@ -61,6 +61,7 @@ router.post("/session/create", async (req: Request, res: Response) => {
 router.post("/session/close", async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
     await computerUseEngine.closeSession(sessionId);
     res.json({ success: true });
   } catch (error) {
@@ -75,6 +76,7 @@ router.post("/session/close", async (req: Request, res: Response) => {
 router.post("/screen/screenshot", async (req: Request, res: Response) => {
   try {
     const { sessionId, fullPage, region, quality } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
     const screenshot = await computerUseEngine.captureScreenshot(sessionId, { fullPage, region, quality });
     res.json({ success: true, screenshot, format: "base64/png" });
   } catch (error) {
@@ -85,6 +87,7 @@ router.post("/screen/screenshot", async (req: Request, res: Response) => {
 router.post("/screen/analyze", async (req: Request, res: Response) => {
   try {
     const { sessionId, query } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
     const analysis = await computerUseEngine.analyzeScreen(sessionId, query);
     res.json({ success: true, analysis });
   } catch (error) {
@@ -99,6 +102,8 @@ router.post("/screen/analyze", async (req: Request, res: Response) => {
 router.post("/mouse/click", async (req: Request, res: Response) => {
   try {
     const { sessionId, x, y, button, clickCount, delay } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (x == null || y == null) return res.status(400).json({ success: false, error: "x and y coordinates are required" });
     const result = await computerUseEngine.mouseClick(sessionId, { x, y }, { button, clickCount, delay });
     res.json({ success: true, result });
   } catch (error) {
@@ -133,6 +138,8 @@ router.post("/mouse/scroll", async (req: Request, res: Response) => {
 router.post("/keyboard/type", async (req: Request, res: Response) => {
   try {
     const { sessionId, text, delay } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!text && text !== "") return res.status(400).json({ success: false, error: "text is required" });
     const result = await computerUseEngine.typeText(sessionId, text, { delay });
     res.json({ success: true, result });
   } catch (error) {
@@ -177,6 +184,8 @@ router.post("/browser/create-session", async (req: Request, res: Response) => {
 router.post("/browser/navigate", async (req: Request, res: Response) => {
   try {
     const { sessionId, url, waitUntil, timeout } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!url) return res.status(400).json({ success: false, error: "url is required" });
     const result = await universalBrowserController.navigate(sessionId, url, { waitUntil, timeout });
     res.json({ ...result, success: true });
   } catch (error) {
@@ -187,6 +196,8 @@ router.post("/browser/navigate", async (req: Request, res: Response) => {
 router.post("/browser/click", async (req: Request, res: Response) => {
   try {
     const { sessionId, selector, button, clickCount, timeout, force } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!selector) return res.status(400).json({ success: false, error: "selector is required" });
     const result = await universalBrowserController.click(sessionId, selector, { button, clickCount, timeout, force });
     res.json({ ...result, success: true });
   } catch (error) {
@@ -197,7 +208,9 @@ router.post("/browser/click", async (req: Request, res: Response) => {
 router.post("/browser/type", async (req: Request, res: Response) => {
   try {
     const { sessionId, selector, text, clear, delay, pressEnter } = req.body;
-    const result = await universalBrowserController.type(sessionId, selector, text, { clear, delay, pressEnter });
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!selector) return res.status(400).json({ success: false, error: "selector is required" });
+    const result = await universalBrowserController.type(sessionId, selector, text || "", { clear, delay, pressEnter });
     res.json({ ...result, success: true });
   } catch (error) {
     handleError(res, error);
@@ -285,6 +298,8 @@ router.post("/browser/cookies", async (req: Request, res: Response) => {
     } else if (action === "clear") {
       await universalBrowserController.clearCookies(sessionId);
       res.json({ success: true });
+    } else {
+      res.status(400).json({ success: false, error: `Unknown cookie action: ${action}` });
     }
   } catch (error) {
     handleError(res, error);
@@ -318,6 +333,8 @@ router.post("/terminal/create-session", async (req: Request, res: Response) => {
 router.post("/terminal/execute", async (req: Request, res: Response) => {
   try {
     const { sessionId, command, args, cwd, timeout, shell } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!command) return res.status(400).json({ success: false, error: "command is required" });
     const result = await terminalController.executeCommand(sessionId, { command, args, cwd, timeout, shell });
     res.json({ ...result, success: true });
   } catch (error) {
@@ -569,6 +586,7 @@ router.post("/vision/accessibility", async (req: Request, res: Response) => {
 router.post("/agent/execute-goal", async (req: Request, res: Response) => {
   try {
     const { goal, context } = req.body;
+    if (!goal?.description) return res.status(400).json({ success: false, error: "goal.description is required" });
 
     // Ensure goal has required fields
     const agentGoal = {
@@ -639,6 +657,8 @@ router.get("/agent/state", (_req: Request, res: Response) => {
 router.post("/task/execute", async (req: Request, res: Response) => {
   try {
     const { sessionId, goal } = req.body;
+    if (!sessionId) return res.status(400).json({ success: false, error: "sessionId is required" });
+    if (!goal?.description) return res.status(400).json({ success: false, error: "goal.description is required" });
 
     const taskGoal = {
       description: goal.description,
