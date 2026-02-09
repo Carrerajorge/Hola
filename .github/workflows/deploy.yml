@@ -19,14 +19,13 @@ permissions:
   contents: read
 
 env:
-  # Use GitHub Secrets so the deploy target can be changed without code changes.
-  # Defaults are set to the public SSH endpoint (port 2222) because GitHub runners
-  # cannot reach private Tailscale IPs without additional networking setup.
-  VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
-  VPS_USER: ${{ secrets.VPS_USER || 'root' }}
-  VPS_PORT: ${{ secrets.VPS_PORT || '2222' }}
-  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-  COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+  # Defaults: public SSH endpoint (port 2222).
+  # GitHub runners cannot reach private Tailscale IPs without extra setup.
+  VPS_HOST: 69.62.98.126
+  VPS_USER: root
+  VPS_PORT: "2222"
+  DEPLOY_PATH: /opt/hola
+  COMPOSE_PROJECT: iliagpt
 
 jobs:
   # ── CI Gate ─────────────────────────────────────────────
@@ -42,6 +41,13 @@ jobs:
     needs: [ci]
     if: always() && (needs.ci.result == 'success' || github.event.inputs.skip_ci == 'true')
     timeout-minutes: 15
+    # Resolve secrets at the job level (workflow-level `env` + reusable workflows can be finicky).
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '2222' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
     environment:
       name: production
       url: https://iliagpt.com
@@ -74,6 +80,21 @@ jobs:
             PROJECT="iliagpt"
 
             cd "$DEPLOY_PATH"
+
+            # ── Load SANDBOX_RUNNER_TOKEN for compose variable expansion ──
+            # docker compose only expands ${VARS} from the process environment (and .env),
+            # not from `env_file:`. Without this, runner auth tokens end up empty.
+            if [ -f .env.production ]; then
+              export SANDBOX_RUNNER_TOKEN="$(grep '^SANDBOX_RUNNER_TOKEN=' .env.production | head -n1 | cut -d= -f2- || true)"
+              if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
+                export SANDBOX_RUNNER_TOKEN="$(openssl rand -hex 32)"
+                if grep -q '^SANDBOX_RUNNER_TOKEN=' .env.production; then
+                  sed -i "s/^SANDBOX_RUNNER_TOKEN=.*/SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}/" .env.production
+                else
+                  echo "SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}" >> .env.production
+                fi
+              fi
+            fi
 
             # ── Pull latest code ──
             echo "▸ Pulling latest code..."
