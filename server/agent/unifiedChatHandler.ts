@@ -16,6 +16,11 @@ import type { TraceEventType } from "@shared/schema";
 import { executeAgentLoop } from "./agentExecutor";
 import { agentManager } from "./agentOrchestrator";
 
+// ============================================================================
+// Latency Mode types
+// ============================================================================
+export type LatencyMode = 'fast' | 'deep' | 'auto';
+
 export interface UnifiedChatRequest {
   messages: Array<{ role: string; content: string }>;
   chatId: string;
@@ -24,6 +29,7 @@ export interface UnifiedChatRequest {
   messageId?: string;
   attachments?: AttachmentSpec[];
   sessionState?: SessionState;
+  latencyMode?: LatencyMode;
 }
 
 export interface UnifiedChatContext {
@@ -31,6 +37,94 @@ export interface UnifiedChatContext {
   runId: string;
   startTime: number;
   isAgenticMode: boolean;
+  latencyMode: LatencyMode;
+  resolvedLane: 'fast' | 'deep';
+}
+
+// ============================================================================
+// SSE Buffered Writer — batches small deltas into ~30ms flushes
+// ============================================================================
+export class SseBufferedWriter {
+  private buffer = '';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private seq = 0;
+  private closed = false;
+
+  constructor(
+    private res: Response,
+    private runId: string,
+    private flushIntervalMs = 30,
+    private maxBufferBytes = 512,
+  ) {}
+
+  /** Write a chunk delta. Batched and flushed on interval or size threshold. */
+  pushDelta(content: string): void {
+    if (this.closed) return;
+    this.buffer += content;
+
+    // Approximate byte length (UTF-8: most chars are 1 byte, some up to 4)
+    if (this.buffer.length >= this.maxBufferBytes) {
+      this.flush();
+      return;
+    }
+
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.flush();
+      }, this.flushIntervalMs);
+    }
+  }
+
+  /** Force-flush any buffered content immediately. */
+  flush(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.buffer.length === 0 || this.closed) return;
+
+    this.seq++;
+    writeSse(this.res, 'chunk', {
+      content: this.buffer,
+      sequence: this.seq,
+      runId: this.runId,
+    });
+    this.buffer = '';
+  }
+
+  /** Flush remaining buffer and return total chunks written. */
+  finalize(): number {
+    this.flush();
+    this.closed = true;
+    return this.seq;
+  }
+
+  get sequenceCount(): number {
+    return this.seq;
+  }
+}
+
+// ============================================================================
+// Resolve which lane (fast/deep) a request should use
+// ============================================================================
+export function resolveLatencyLane(
+  latencyMode: LatencyMode,
+  requestSpec: RequestSpec,
+  hasAttachments: boolean,
+): 'fast' | 'deep' {
+  if (latencyMode === 'fast') return 'fast';
+  if (latencyMode === 'deep') return 'deep';
+
+  // auto: decide based on intent & complexity signals
+  const heavyIntents = ['research', 'document_generation', 'data_analysis', 'code_generation',
+    'presentation_creation', 'spreadsheet_creation', 'multi_step_task', 'web_automation'];
+
+  if (heavyIntents.includes(requestSpec.intent)) return 'deep';
+  if (hasAttachments) return 'deep';
+  if (requestSpec.intentConfidence > 0.7 && requestSpec.intent !== 'chat') return 'deep';
+
+  return 'fast';
 }
 
 function writeSse(res: Response, event: string, data: object): boolean {
@@ -202,10 +296,21 @@ export async function createUnifiedRun(
 
   const runId = request.runId || randomUUID();
 
-  const isAgenticMode =
-    requestSpec.intent !== 'chat' ||
-    requestSpec.intentConfidence > 0.7 ||
-    (request.attachments && request.attachments.length > 0);
+  const latencyMode: LatencyMode = request.latencyMode || 'auto';
+
+  const hasAttachments = !!(request.attachments && request.attachments.length > 0);
+  const isAgenticMode: boolean =
+    latencyMode !== 'fast' && (
+      requestSpec.intent !== 'chat' ||
+      requestSpec.intentConfidence > 0.7 ||
+      hasAttachments
+    );
+
+  const resolvedLane = resolveLatencyLane(
+    latencyMode,
+    requestSpec,
+    hasAttachments,
+  );
 
   try {
     // Ensure the chat exists before persisting agent runs (FK: agent_mode_runs.chat_id -> chats.id).
@@ -229,13 +334,15 @@ export async function createUnifiedRun(
     console.error('[UnifiedChat] Failed to persist run:', error);
   }
 
-  console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}`);
+  console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}, lane: ${resolvedLane}`);
 
   return {
     requestSpec,
     runId,
     startTime,
-    isAgenticMode
+    isAgenticMode,
+    latencyMode,
+    resolvedLane,
   };
 }
 
@@ -261,7 +368,7 @@ export async function executeUnifiedChat(
     systemPrompt?: string;
   } = {}
 ): Promise<void> {
-  const { requestSpec, runId, isAgenticMode } = context;
+  const { requestSpec, runId, isAgenticMode, resolvedLane } = context;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -271,6 +378,7 @@ export async function executeUnifiedChat(
   res.setHeader("X-Run-Id", runId);
   res.setHeader("X-Intent", requestSpec.intent);
   res.setHeader("X-Agentic-Mode", String(isAgenticMode));
+  res.setHeader("X-Latency-Lane", resolvedLane);
   res.flushHeaders();
 
   // Handle WhatsApp-style confirmations: user replies with CONFIRM or CANCEL
@@ -321,10 +429,19 @@ export async function executeUnifiedChat(
     intent: requestSpec.intent,
     deliverableType: requestSpec.deliverableType,
     isAgenticMode,
+    latencyLane: resolvedLane,
     timestamp: Date.now()
   });
 
   if (isAgenticMode) {
+    // Emit thinking event immediately so TTFT is low even for heavy pipelines
+    writeSse(res, 'thinking', {
+      step: 'planning',
+      message: 'Analizando solicitud...',
+      runId,
+      timestamp: Date.now(),
+    });
+
     await emitTraceEvent(runId, 'thinking', {
       content: `Analyzing request: ${requestSpec.intent}`,
       phase: 'planning'
@@ -341,6 +458,9 @@ export async function executeUnifiedChat(
 
   try {
     const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
+
+    // In fast lane, cap maxTokens for quick responses
+    const fastLaneMaxTokens = resolvedLane === 'fast' ? 400 : undefined;
 
     const formattedMessages = [
       { role: "system" as const, content: systemContent },
@@ -374,13 +494,18 @@ export async function executeUnifiedChat(
         durationMs: Date.now() - context.startTime,
         intent: requestSpec.intent,
         isAgenticMode: true,
+        latencyLane: resolvedLane,
         timestamp: Date.now()
       });
     } else {
+      // Use buffered writer to batch small deltas (~30ms intervals)
+      const writer = new SseBufferedWriter(res, runId);
+
       const streamGenerator = llmGateway.streamChat(formattedMessages, {
         userId: request.userId,
         requestId: runId,
         disableImageGeneration: options.disableImageGeneration,
+        ...(fastLaneMaxTokens ? { maxTokens: fastLaneMaxTokens } : {}),
       });
 
       for await (const chunk of streamGenerator) {
@@ -388,11 +513,7 @@ export async function executeUnifiedChat(
           fullResponse += chunk.content;
           chunkCount++;
 
-          writeSse(res, 'chunk', {
-            content: chunk.content,
-            sequence: chunkCount,
-            runId
-          });
+          writer.pushDelta(chunk.content);
 
           if (options.onChunk) {
             options.onChunk(chunk.content);
@@ -414,6 +535,9 @@ export async function executeUnifiedChat(
         }
       }
 
+      // Flush any remaining buffered content
+      writer.finalize();
+
       await emitTraceEvent(runId, 'done', {
         summary: fullResponse.slice(0, 200),
         durationMs: Date.now() - context.startTime,
@@ -422,9 +546,10 @@ export async function executeUnifiedChat(
 
       writeSse(res, 'done', {
         runId,
-        totalChunks: chunkCount,
+        totalChunks: writer.sequenceCount,
         durationMs: Date.now() - context.startTime,
         intent: requestSpec.intent,
+        latencyLane: resolvedLane,
         timestamp: Date.now()
       });
     }

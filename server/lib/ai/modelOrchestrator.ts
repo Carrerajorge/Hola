@@ -31,6 +31,8 @@ export interface ModelConfig {
     reliabilityScore: number; // 0-1
 }
 
+export type LatencyLane = 'fast' | 'deep';
+
 export interface PromptRequest {
     taskId: string;
     messages: any[];
@@ -41,6 +43,7 @@ export interface PromptRequest {
         features?: ('vision' | 'functionCalling' | 'jsonMode')[];
         tier?: ModelTier;
         jsonMode?: boolean;
+        latencyLane?: LatencyLane;
     };
     metadata?: Record<string, any>;
 }
@@ -114,7 +117,10 @@ class ModelRouter extends EventEmitter {
     }
 
     /**
-     * Route a request to the best fitting model
+     * Route a request to the best fitting model.
+     * When latencyLane is set, it biases selection:
+     *   fast → prefer flash/instant tiers (lowest latencyScore)
+     *   deep → allow ultra/pro tiers (highest quality)
      */
     selectModel(request: PromptRequest): ModelConfig {
         const candidates = Array.from(this.models.values())
@@ -122,6 +128,26 @@ class ModelRouter extends EventEmitter {
 
         if (candidates.length === 0) {
             throw new Error('No models available meeting requirements');
+        }
+
+        const lane = request.requirements.latencyLane;
+
+        // Fast lane: always prefer lowest-latency model regardless of complexity
+        if (lane === 'fast') {
+            const flashModels = candidates
+                .filter(m => m.tier === 'flash' || m.tier === 'instant')
+                .sort((a, b) => a.latencyScore - b.latencyScore);
+            if (flashModels.length > 0) return flashModels[0];
+            // Fallback: just pick lowest latency among all candidates
+            return candidates.sort((a, b) => a.latencyScore - b.latencyScore)[0];
+        }
+
+        // Deep lane: prefer higher-quality tiers
+        if (lane === 'deep') {
+            const proOrUltra = candidates
+                .filter(m => m.tier === 'ultra' || m.tier === 'pro')
+                .sort((a, b) => a.reliabilityScore > b.reliabilityScore ? -1 : 1);
+            if (proOrUltra.length > 0) return proOrUltra[0];
         }
 
         // Task Complexity Analysis (Task 63)
@@ -149,6 +175,7 @@ class ModelRouter extends EventEmitter {
 
     private meetsRequirements(model: ModelConfig, requirements: PromptRequest['requirements']): boolean {
         if (requirements.minContext && model.contextWindow < requirements.minContext) return false;
+        if (requirements.maxLatency && model.latencyScore > requirements.maxLatency) return false;
         if (requirements.features) {
             for (const feature of requirements.features) {
                 if (!model.capabilities[feature]) return false;

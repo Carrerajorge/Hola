@@ -18,8 +18,8 @@ import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
-import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
-import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
+import { createUnifiedRun, hydrateSessionState, emitTraceEvent, SseBufferedWriter, resolveLatencyLane } from "../agent/unifiedChatHandler";
+import type { UnifiedChatRequest, UnifiedChatContext, LatencyMode } from "../agent/unifiedChatHandler";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
 import { routeIntent, type IntentResult } from "../services/intentRouter";
 import { questionClassifier, type QuestionClassification } from "../services/questionClassifier";
@@ -658,7 +658,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto, latencyMode: rawLatencyMode } = req.body;
+      const latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
 
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
@@ -691,6 +692,29 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      // ── EARLY SSE SETUP ────────────────────────────────────────────
+      // Open SSE *before* any heavy I/O (web search, academic search,
+      // history augmentation) to minimize TTFT (Time-To-First-Token).
+      const sseAlreadyOpen = res.headersSent;
+      if (!sseAlreadyOpen) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Transfer-Encoding", "chunked");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Latency-Mode", latencyMode);
+        res.flushHeaders();
+
+        // Immediately send a start-handshake so the client knows the stream is alive
+        writeSse(res, 'start', {
+          requestId,
+          latencyMode,
+          timestamp: Date.now(),
+        });
+      }
+
       // Web/Academic search is gated by user settings (webSearchAuto) unless explicitly requested.
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = lastUserMsg?.content || '';
@@ -699,9 +723,19 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       const requestedWebSearch = !!forceWebSearch || !!webSearchAuto;
       const allowAutoSearch = featureFlags.webSearchAuto && !requestedWebSearch && !hasAnyAttachments;
-      const shouldSearch = requestedWebSearch || allowAutoSearch;
+      // In fast lane, skip auto-search entirely (only honor explicit forceWebSearch)
+      const shouldSearch = latencyMode === 'fast'
+        ? !!forceWebSearch
+        : (requestedWebSearch || allowAutoSearch);
 
       if (shouldSearch && userQuery) {
+        // Emit thinking event so the user sees progress while search runs
+        writeSse(res, 'thinking', {
+          step: 'searching',
+          message: 'Buscando fuentes relevantes...',
+          requestId,
+          timestamp: Date.now(),
+        });
         try {
           const { needsAcademicSearch, needsWebSearch, searchWeb } = await import('../services/webSearch');
           const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
@@ -1004,8 +1038,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           runId: runId,
           messageId: `msg_${Date.now()}`,
           attachments: attachmentSpecs,
+          latencyMode,
         });
-        console.log(`[Stream] UnifiedContext created - intent: ${unifiedContext.requestSpec.intent}, confidence: ${unifiedContext.requestSpec.intentConfidence.toFixed(2)}, primaryAgent: ${unifiedContext.requestSpec.primaryAgent}`);
+        console.log(`[Stream] UnifiedContext created - intent: ${unifiedContext.requestSpec.intent}, confidence: ${unifiedContext.requestSpec.intentConfidence.toFixed(2)}, lane: ${unifiedContext.resolvedLane}, primaryAgent: ${unifiedContext.requestSpec.primaryAgent}`);
       } catch (contextError) {
         console.error('[Stream] Failed to create unified context:', contextError);
       }
@@ -1040,28 +1075,21 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         console.log(`[Run] Successfully claimed run ${runId}`);
       }
 
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("Transfer-Encoding", "chunked");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("X-Request-Id", requestId);
-      if (claimedRun) {
-        res.setHeader("X-Run-Id", claimedRun.id);
+      // SSE headers were already set early (before search). This block only
+      // runs if we somehow got here without the early setup (e.g. production
+      // mode intercepted and then fell through). In normal flow, headers are
+      // already sent and these calls become no-ops.
+      if (!res.headersSent) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Transfer-Encoding", "chunked");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Latency-Mode", latencyMode);
+        res.flushHeaders();
       }
-      if (unifiedContext) {
-        res.setHeader("X-Intent", unifiedContext.requestSpec.intent);
-        res.setHeader("X-Intent-Confidence", String(unifiedContext.requestSpec.intentConfidence.toFixed(2)));
-        res.setHeader("X-Primary-Agent", unifiedContext.requestSpec.primaryAgent);
-        res.setHeader("X-Agentic-Mode", String(unifiedContext.isAgenticMode));
-      }
-      if (intentResult) {
-        res.setHeader("X-NLU-Intent", intentResult.intent);
-        res.setHeader("X-NLU-Confidence", String(intentResult.confidence.toFixed(2)));
-        res.setHeader("X-NLU-Format", intentResult.output_format || "none");
-      }
-      res.flushHeaders();
 
       // Emit NLU intent result as SSE event for frontend visibility
       if (intentResult) {
@@ -1562,10 +1590,13 @@ ${attachmentContext}`;
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
 
-      writeSse(res, 'start', {
+      // Enriched context event (the lightweight 'start' was already sent early for low TTFT)
+      writeSse(res, 'context', {
         requestId,
         runId: effectiveRunId,
         assistantMessageId,
+        latencyMode,
+        latencyLane: unifiedContext?.resolvedLane || 'fast',
         intent: unifiedContext?.requestSpec.intent,
         intentConfidence: unifiedContext?.requestSpec.intentConfidence,
         deliverableType: unifiedContext?.requestSpec.deliverableType,
@@ -1622,18 +1653,40 @@ ${attachmentContext}`;
 
       console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
 
+      // Apply latency-lane-aware token limit:
+      //  fast → hard cap to keep response short & snappy
+      //  deep → use the question-classification-derived limit
+      const resolvedLane = unifiedContext?.resolvedLane || 'fast';
+      const laneMaxTokens = resolvedLane === 'fast'
+        ? Math.min(effectiveMaxTokens, 400)
+        : effectiveMaxTokens;
+
+      // Emit thinking event so user sees we're about to generate
+      writeSse(res, 'thinking', {
+        step: 'generating',
+        message: resolvedLane === 'fast' ? 'Generando respuesta...' : 'Generando respuesta detallada...',
+        requestId,
+        timestamp: Date.now(),
+      });
+
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
           userId: userId || conversationId || "anonymous",
           requestId,
           disableImageGeneration: hasAttachments,
-          maxTokens: effectiveMaxTokens,
+          maxTokens: laneMaxTokens,
         }
       );
 
       let fullContent = "";
       let lastAckSequence = -1;
+
+      // ── BUFFERED WRITER ────────────────────────────────────────
+      // Batch small deltas into ~30ms flushes to reduce res.write()
+      // overhead. The frontend already does RAF throttling, so this
+      // matches perfectly.
+      const writer = new SseBufferedWriter(res, effectiveRunId, 30, 512);
 
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
@@ -1647,26 +1700,28 @@ ${attachmentContext}`;
         }
 
         if (chunk.done) {
+          // Flush remaining buffered content before done event
+          writer.finalize();
+
           console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
             runId: effectiveRunId,
             intent: unifiedContext?.requestSpec.intent,
+            latencyLane: resolvedLane,
             webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
             timestamp: Date.now(),
             ...sessionMetadata
           });
         } else {
-          writeSse(res, 'chunk', {
-            content: chunk.content,
-            sequenceId: chunk.sequenceId,
-            requestId: chunk.requestId,
-            runId: effectiveRunId,
-            timestamp: Date.now(),
-          });
+          // Push delta into buffer — will be flushed on interval/size threshold
+          writer.pushDelta(chunk.content);
         }
       }
+
+      // Ensure buffer is fully flushed after loop
+      writer.finalize();
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.
@@ -1735,6 +1790,7 @@ ${attachmentContext}`;
           requestId,
           runId: effectiveRunId,
           assistantMessageId,
+          latencyLane: resolvedLane,
           webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
           timestamp: Date.now()
         });
@@ -1743,6 +1799,8 @@ ${attachmentContext}`;
           requestId,
           runId: effectiveRunId,
           assistantMessageId,
+          latencyMode,
+          latencyLane: resolvedLane,
           totalSequences: lastAckSequence + 1,
           contentLength: fullContent.length,
           intent: unifiedContext?.requestSpec.intent,

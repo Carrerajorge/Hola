@@ -301,6 +301,18 @@ export function useStreamChat(deps: StreamChatDeps) {
               }
 
               // Handle AI state changes from events
+              if (currentEventType === "thinking") {
+                // Server is doing heavy I/O (search, context load) — keep thinking state
+                setAiState("thinking");
+                onAiStateChange?.("thinking");
+              }
+
+              if (currentEventType === "context") {
+                // Enriched metadata arrived — switch to responding
+                setAiState("responding");
+                onAiStateChange?.("responding");
+              }
+
               if (currentEventType === "production_start") {
                 setAiState("agent_working");
                 onAiStateChange?.("agent_working");
