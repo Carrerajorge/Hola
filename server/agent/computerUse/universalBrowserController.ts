@@ -419,7 +419,11 @@ export class UniversalBrowserController extends EventEmitter {
     }
     tab.active = true;
     session.activeTabId = tabId;
-    await tab.page.bringToFront();
+    try {
+      await tab.page.bringToFront();
+    } catch (error: any) {
+      throw new Error(`Failed to switch tab: ${error.message}`);
+    }
   }
 
   async closeTab(sessionId: string, tabId: string): Promise<void> {
@@ -698,11 +702,16 @@ export class UniversalBrowserController extends EventEmitter {
     const page = this.getActivePage(sessionId);
 
     // Get page HTML (truncated for LLM)
-    const html = await page.evaluate(() => {
-      const clone = document.documentElement.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("script, style, svg, noscript").forEach(el => el.remove());
-      return clone.outerHTML.slice(0, 30000);
-    });
+    let html: string;
+    try {
+      html = await page.evaluate(() => {
+        const clone = document.documentElement.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll("script, style, svg, noscript").forEach(el => el.remove());
+        return clone.outerHTML.slice(0, 30000);
+      });
+    } catch (error: any) {
+      throw new Error(`Failed to extract page HTML: ${error.message}`);
+    }
 
     const response = await this.llmClient.chat.completions.create({
       model: "grok-4-1-fast-non-reasoning",

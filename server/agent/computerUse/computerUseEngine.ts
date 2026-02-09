@@ -579,7 +579,11 @@ RESPOND IN VALID JSON ONLY with this structure:
     const session = this.sessions.get(sessionId);
     if (!session?.page) throw new Error(`No browser session: ${sessionId}`);
 
-    return session.page.evaluate(script);
+    try {
+      return await session.page.evaluate(script);
+    } catch (error: any) {
+      throw new Error(`JavaScript execution failed: ${error.message}`);
+    }
   }
 
   async getPageContent(sessionId: string): Promise<{
@@ -594,7 +598,8 @@ RESPOND IN VALID JSON ONLY with this structure:
     const session = this.sessions.get(sessionId);
     if (!session?.page) throw new Error(`No browser session: ${sessionId}`);
 
-    return session.page.evaluate(() => {
+    try {
+    return await session.page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a[href]")).slice(0, 50).map(a => ({
         text: (a as HTMLAnchorElement).innerText?.trim().slice(0, 100) || "",
         href: (a as HTMLAnchorElement).href,
@@ -622,6 +627,9 @@ RESPOND IN VALID JSON ONLY with this structure:
         buttons,
       };
     });
+    } catch (error: any) {
+      throw new Error(`Failed to get page content: ${error.message}`);
+    }
   }
 
   // ============================================

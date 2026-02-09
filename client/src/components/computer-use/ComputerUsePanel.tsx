@@ -50,12 +50,21 @@ interface GenerationResult {
 const API_BASE = "/api/computer-use";
 
 async function apiCall(endpoint: string, method: string = "POST", body?: any): Promise<any> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return res.json();
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const errorText = await res.text();
+      return { success: false, error: `HTTP ${res.status}: ${errorText}` };
+    }
+    return res.json();
+  } catch (error: any) {
+    return { success: false, error: error.message || "Network error" };
+  }
 }
 
 // ============================================

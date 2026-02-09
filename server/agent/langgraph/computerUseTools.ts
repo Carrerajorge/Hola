@@ -92,9 +92,9 @@ export const computerUseNavigateTool = tool(
 
       return JSON.stringify({
         success: true,
-        url: result.url || url,
-        title: result.title || "",
-        status: result.status,
+        url: result?.url || result?.currentUrl || url,
+        title: result?.title || result?.pageTitle || "",
+        status: result?.status || "navigated",
         screenshot: screenshotData ? "captured" : undefined,
         screenshotData: screenshotData?.slice(0, 500) + (screenshotData && screenshotData.length > 500 ? "...[truncated]" : ""),
       });
