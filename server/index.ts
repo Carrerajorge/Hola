@@ -33,6 +33,7 @@ import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
+import { canonicalUrlMiddleware } from "./middleware/canonicalUrl";
 import { setupSecurity } from "./middleware/security";
 import { runCleanup } from "./lib/cleanup";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
@@ -54,6 +55,9 @@ declare module "http" {
 
 // Request logger middleware with correlation context - must go first
 app.use(requestLoggerMiddleware);
+
+// Canonical URL redirect (www -> non-www) - must be before CORS and sessions
+app.use(canonicalUrlMiddleware);
 
 // Compression middleware - should be early to compress all eligible responses
 app.use(compression());

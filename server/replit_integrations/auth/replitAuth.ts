@@ -115,9 +115,11 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
+      // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments.
       sameSite: isReplitDeployment ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
+      // Don't set domain - let browser use host-only cookie for iliagpt.com
     },
   });
 }
