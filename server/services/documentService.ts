@@ -1,13 +1,42 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { generatePdfFromHtml, PdfOptions } from "./pdfGeneration";
-import { 
-  generateWordDocument, 
-  generateExcelDocument, 
+import {
+  generateWordDocument,
+  generateExcelDocument,
   generatePptDocument,
   parseExcelFromText,
   parseSlidesFromText
 } from "./documentGeneration";
+
+// ============================================
+// SECURITY: HTML entity escaping to prevent XSS
+// ============================================
+
+const HTML_ESCAPE_MAP: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#x27;",
+  "/": "&#x2F;",
+  "`": "&#96;",
+};
+
+function escapeHtml(str: unknown): string {
+  const s = String(str ?? "");
+  return s.replace(/[&<>"'`/]/g, (char) => HTML_ESCAPE_MAP[char] || char);
+}
+
+// ============================================
+// SECURITY: Document store limits
+// ============================================
+
+/** Maximum number of documents stored simultaneously */
+const MAX_DOCUMENT_STORE_COUNT = 200;
+
+/** Maximum total bytes across all stored documents (500MB) */
+const MAX_DOCUMENT_STORE_BYTES = 500 * 1024 * 1024;
 
 export const DocumentTypeSchema = z.enum(["pdf", "docx", "xlsx", "pptx"]);
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
@@ -194,19 +223,25 @@ function renderTemplateToHtml(template: DocumentTemplate, data: Record<string, a
 }
 
 function renderInvoiceHtml(data: Record<string, any>): string {
-  const items = data.items || [];
+  const items = Array.isArray(data.items) ? data.items.slice(0, 1000) : [];
   const total = items.reduce((sum: number, item: any) => {
-    return sum + (item.quantity || 1) * (item.unitPrice || 0);
+    const qty = Number(item.quantity) || 1;
+    const price = Number(item.unitPrice) || 0;
+    return sum + qty * price;
   }, 0);
 
-  const itemsHtml = items.map((item: any) => `
+  const itemsHtml = items.map((item: any) => {
+    const qty = Number(item.quantity) || 1;
+    const price = Number(item.unitPrice) || 0;
+    return `
     <tr>
-      <td>${item.description || ""}</td>
-      <td style="text-align: center">${item.quantity || 1}</td>
-      <td style="text-align: right">$${(item.unitPrice || 0).toFixed(2)}</td>
-      <td style="text-align: right">$${((item.quantity || 1) * (item.unitPrice || 0)).toFixed(2)}</td>
+      <td>${escapeHtml(item.description)}</td>
+      <td style="text-align: center">${escapeHtml(qty)}</td>
+      <td style="text-align: right">$${escapeHtml(price.toFixed(2))}</td>
+      <td style="text-align: right">$${escapeHtml((qty * price).toFixed(2))}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   return `
     <!DOCTYPE html>
@@ -229,22 +264,22 @@ function renderInvoiceHtml(data: Record<string, any>): string {
       <div class="header">
         <div>
           <div class="invoice-title">INVOICE</div>
-          <div class="invoice-number">${data.invoiceNumber || "INV-001"}</div>
+          <div class="invoice-number">${escapeHtml(data.invoiceNumber || "INV-001")}</div>
         </div>
         <div style="text-align: right">
-          <div><strong>${data.companyName || ""}</strong></div>
-          <div>${data.companyAddress || ""}</div>
+          <div><strong>${escapeHtml(data.companyName)}</strong></div>
+          <div>${escapeHtml(data.companyAddress)}</div>
         </div>
       </div>
-      
+
       <div style="margin-bottom: 30px">
         <strong>Bill To:</strong><br>
-        ${data.clientName || ""}<br>
-        ${data.clientAddress || ""}
+        ${escapeHtml(data.clientName)}<br>
+        ${escapeHtml(data.clientAddress)}
       </div>
-      
-      ${data.dueDate ? `<div><strong>Due Date:</strong> ${data.dueDate}</div>` : ""}
-      
+
+      ${data.dueDate ? `<div><strong>Due Date:</strong> ${escapeHtml(data.dueDate)}</div>` : ""}
+
       <table>
         <thead>
           <tr>
@@ -258,10 +293,10 @@ function renderInvoiceHtml(data: Record<string, any>): string {
           ${itemsHtml}
         </tbody>
       </table>
-      
-      <div class="total">Total: $${total.toFixed(2)}</div>
-      
-      ${data.notes ? `<div class="notes"><strong>Notes:</strong><br>${data.notes}</div>` : ""}
+
+      <div class="total">Total: $${escapeHtml(total.toFixed(2))}</div>
+
+      ${data.notes ? `<div class="notes"><strong>Notes:</strong><br>${escapeHtml(data.notes)}</div>` : ""}
     </body>
     </html>
   `;
@@ -281,12 +316,12 @@ function renderReportHtml(data: Record<string, any>): string {
       </style>
     </head>
     <body>
-      <h1>${data.title || "Report"}</h1>
+      <h1>${escapeHtml(data.title || "Report")}</h1>
       <div class="meta">
-        ${data.author ? `<div>Author: ${data.author}</div>` : ""}
-        ${data.date ? `<div>Date: ${data.date}</div>` : ""}
+        ${data.author ? `<div>Author: ${escapeHtml(data.author)}</div>` : ""}
+        ${data.date ? `<div>Date: ${escapeHtml(data.date)}</div>` : ""}
       </div>
-      <div class="content">${data.content || ""}</div>
+      <div class="content">${escapeHtml(data.content)}</div>
     </body>
     </html>
   `;
@@ -310,21 +345,21 @@ function renderLetterHtml(data: Record<string, any>): string {
     </head>
     <body>
       <div class="sender">
-        ${data.senderName || ""}<br>
-        ${data.senderAddress || ""}
+        ${escapeHtml(data.senderName)}<br>
+        ${escapeHtml(data.senderAddress)}
       </div>
-      
-      <div class="date">${data.date || new Date().toLocaleDateString()}</div>
-      
-      <div class="recipient">${data.recipient || ""}</div>
-      
-      ${data.subject ? `<div class="subject">Subject: ${data.subject}</div>` : ""}
-      
-      <div class="body">${data.body || ""}</div>
-      
+
+      <div class="date">${escapeHtml(data.date || new Date().toLocaleDateString())}</div>
+
+      <div class="recipient">${escapeHtml(data.recipient)}</div>
+
+      ${data.subject ? `<div class="subject">Subject: ${escapeHtml(data.subject)}</div>` : ""}
+
+      <div class="body">${escapeHtml(data.body)}</div>
+
       <div class="closing">
-        ${data.closing || "Sincerely"},<br><br>
-        ${data.senderName || ""}
+        ${escapeHtml(data.closing || "Sincerely")},<br><br>
+        ${escapeHtml(data.senderName)}
       </div>
     </body>
     </html>
@@ -332,7 +367,6 @@ function renderLetterHtml(data: Record<string, any>): string {
 }
 
 function renderGenericHtml(title: string, data: Record<string, any>): string {
-  const content = data.content || "";
   return `
     <!DOCTYPE html>
     <html>
@@ -345,8 +379,8 @@ function renderGenericHtml(title: string, data: Record<string, any>): string {
       </style>
     </head>
     <body>
-      <h1>${title}</h1>
-      <div class="content">${content}</div>
+      <h1>${escapeHtml(title)}</h1>
+      <div class="content">${escapeHtml(data.content)}</div>
     </body>
     </html>
   `;
@@ -448,8 +482,10 @@ export async function renderDocument(request: DocumentRenderRequest): Promise<Ge
     expiresAt: new Date(Date.now() + DOCUMENT_EXPIRY_MS),
   };
   
+  // Security: enforce document store limits
+  enforceDocumentStoreLimits();
   documentStore.set(docId, document);
-  
+
   return document;
 }
 
@@ -472,7 +508,7 @@ export function deleteGeneratedDocument(id: string): boolean {
 export function cleanupExpiredDocuments(): number {
   const now = new Date();
   let cleaned = 0;
-  
+
   const entries = Array.from(documentStore.entries());
   for (const [id, doc] of entries) {
     if (now > doc.expiresAt) {
@@ -480,13 +516,58 @@ export function cleanupExpiredDocuments(): number {
       cleaned++;
     }
   }
-  
+
   return cleaned;
 }
 
+/**
+ * Security: enforce document store size limits to prevent memory exhaustion.
+ * Evicts oldest documents when count or total byte limits are exceeded.
+ */
+function enforceDocumentStoreLimits(): void {
+  // Evict expired first
+  cleanupExpiredDocuments();
+
+  // Evict oldest if count limit exceeded
+  while (documentStore.size >= MAX_DOCUMENT_STORE_COUNT) {
+    let oldest: { id: string; createdAt: Date } | null = null;
+    for (const [id, doc] of documentStore) {
+      if (!oldest || doc.createdAt < oldest.createdAt) {
+        oldest = { id, createdAt: doc.createdAt };
+      }
+    }
+    if (oldest) {
+      documentStore.delete(oldest.id);
+    } else {
+      break;
+    }
+  }
+
+  // Evict oldest if total bytes exceeded
+  let totalBytes = 0;
+  for (const doc of documentStore.values()) {
+    totalBytes += doc.buffer.length;
+  }
+  while (totalBytes > MAX_DOCUMENT_STORE_BYTES && documentStore.size > 0) {
+    let oldest: { id: string; createdAt: Date; size: number } | null = null;
+    for (const [id, doc] of documentStore) {
+      if (!oldest || doc.createdAt < oldest.createdAt) {
+        oldest = { id, createdAt: doc.createdAt, size: doc.buffer.length };
+      }
+    }
+    if (oldest) {
+      documentStore.delete(oldest.id);
+      totalBytes -= oldest.size;
+    } else {
+      break;
+    }
+  }
+}
+
+// Cleanup every 2 minutes (more frequent than before)
 setInterval(() => {
   const cleaned = cleanupExpiredDocuments();
   if (cleaned > 0) {
-    console.log(`[documentService] Cleaned up ${cleaned} expired documents`);
+    console.log(`[documentService] Cleaned up ${cleaned} expired documents (store size: ${documentStore.size})`);
   }
-}, 5 * 60 * 1000);
+}, 2 * 60 * 1000);

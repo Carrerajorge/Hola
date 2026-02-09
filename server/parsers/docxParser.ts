@@ -2,6 +2,18 @@ import mammoth from "mammoth";
 import JSZip from "jszip";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
+// Security limits
+const DOCX_MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const DOCX_MAX_EXTRACTED_TEXT = 10 * 1024 * 1024; // 10MB max extracted text
+const DOCX_MAX_METADATA_VALUE_LENGTH = 1000;
+
+/** Sanitize metadata values to prevent injection in output */
+function sanitizeMetadataValue(value: string): string {
+  return String(value)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .substring(0, DOCX_MAX_METADATA_VALUE_LENGTH);
+}
+
 export class DocxParser implements FileParser {
   name = "docx";
   supportedMimeTypes = [
@@ -11,6 +23,11 @@ export class DocxParser implements FileParser {
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     const startTime = Date.now();
     console.log(`[DocxParser] Starting DOCX parse, size: ${content.length} bytes`);
+
+    // Security: enforce file size limit
+    if (content.length > DOCX_MAX_FILE_SIZE) {
+      throw new Error(`DOCX file exceeds maximum size of ${DOCX_MAX_FILE_SIZE / (1024 * 1024)}MB`);
+    }
 
     try {
       const [htmlResult, metadata] = await Promise.all([
@@ -69,19 +86,19 @@ export class DocxParser implements FileParser {
       }
 
       const metadata: Record<string, any> = {};
-      
+
       const titleMatch = coreXml.match(/<dc:title>([^<]*)<\/dc:title>/);
-      if (titleMatch) metadata.title = titleMatch[1];
-      
+      if (titleMatch) metadata.title = sanitizeMetadataValue(titleMatch[1]);
+
       const creatorMatch = coreXml.match(/<dc:creator>([^<]*)<\/dc:creator>/);
-      if (creatorMatch) metadata.author = creatorMatch[1];
-      
+      if (creatorMatch) metadata.author = sanitizeMetadataValue(creatorMatch[1]);
+
       const subjectMatch = coreXml.match(/<dc:subject>([^<]*)<\/dc:subject>/);
-      if (subjectMatch) metadata.subject = subjectMatch[1];
-      
+      if (subjectMatch) metadata.subject = sanitizeMetadataValue(subjectMatch[1]);
+
       const createdMatch = coreXml.match(/<dcterms:created[^>]*>([^<]*)<\/dcterms:created>/);
       if (createdMatch) metadata.creationDate = this.formatDate(createdMatch[1]);
-      
+
       const modifiedMatch = coreXml.match(/<dcterms:modified[^>]*>([^<]*)<\/dcterms:modified>/);
       if (modifiedMatch) metadata.modificationDate = this.formatDate(modifiedMatch[1]);
 
@@ -111,9 +128,10 @@ export class DocxParser implements FileParser {
   }
 
   private htmlToStructuredText(html: string): string {
-    const lines: string[] = [];
-    
-    let processed = html
+    // Security: limit input HTML size for processing
+    const safeHtml = html.length > DOCX_MAX_EXTRACTED_TEXT ? html.substring(0, DOCX_MAX_EXTRACTED_TEXT) : html;
+
+    let processed = safeHtml
       .replace(/<h1[^>]*class="title"[^>]*>(.*?)<\/h1>/gi, (_, content) => `# ${this.stripTags(content)}\n\n`)
       .replace(/<h1[^>]*>(.*?)<\/h1>/gi, (_, content) => `# ${this.stripTags(content)}\n\n`)
       .replace(/<h2[^>]*class="subtitle"[^>]*>(.*?)<\/h2>/gi, (_, content) => `## ${this.stripTags(content)}\n\n`)

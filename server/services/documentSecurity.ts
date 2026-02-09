@@ -144,7 +144,26 @@ export function validatePrompt(prompt: unknown): PromptValidationResult {
 const MAX_GENERATED_BUFFER_SIZE = 100 * 1024 * 1024;
 
 /**
+ * Expected magic bytes for common document types.
+ * Used to verify that generated buffers contain the expected format.
+ */
+const DOC_MAGIC_BYTES: Record<string, number[]> = {
+  // DOCX, XLSX, PPTX are all ZIP-based (PK header)
+  word: [0x50, 0x4B, 0x03, 0x04],
+  excel: [0x50, 0x4B, 0x03, 0x04],
+  ppt: [0x50, 0x4B, 0x03, 0x04],
+  docx: [0x50, 0x4B, 0x03, 0x04],
+  xlsx: [0x50, 0x4B, 0x03, 0x04],
+  pptx: [0x50, 0x4B, 0x03, 0x04],
+  cv: [0x50, 0x4B, 0x03, 0x04],
+  report: [0x50, 0x4B, 0x03, 0x04],
+  letter: [0x50, 0x4B, 0x03, 0x04],
+  pdf: [0x25, 0x50, 0x44, 0x46], // %PDF
+};
+
+/**
  * Validate that a generated document buffer is within acceptable limits
+ * and has the correct magic bytes for its claimed type.
  */
 export function validateBufferSize(buffer: Buffer, docType: string): { valid: boolean; error?: string } {
   if (!buffer || buffer.length === 0) {
@@ -156,6 +175,18 @@ export function validateBufferSize(buffer: Buffer, docType: string): { valid: bo
       valid: false,
       error: `Generated ${docType} document exceeds maximum size of ${MAX_GENERATED_BUFFER_SIZE / 1024 / 1024}MB`,
     };
+  }
+
+  // Validate magic bytes match expected format
+  const expectedMagic = DOC_MAGIC_BYTES[docType.toLowerCase()];
+  if (expectedMagic && buffer.length >= expectedMagic.length) {
+    const headerMatch = expectedMagic.every((byte, i) => buffer[i] === byte);
+    if (!headerMatch) {
+      return {
+        valid: false,
+        error: `Generated ${docType} document has invalid file signature`,
+      };
+    }
   }
 
   return { valid: true };
@@ -452,6 +483,86 @@ export function logDocumentEvent(event: DocumentAuditEvent): void {
 
   // Structured JSON logging for observability pipelines
   console.log(`[DocAudit] ${JSON.stringify(logEntry)}`);
+}
+
+// ============================================
+// EXCEL/CSV CONTENT VALIDATION
+// ============================================
+
+/**
+ * Dangerous formula prefixes for spreadsheet injection prevention.
+ * Values starting with these characters may be interpreted as formulas
+ * by Excel, LibreOffice Calc, Google Sheets, etc.
+ */
+const FORMULA_INJECTION_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
+
+/**
+ * Check if a string value could trigger formula injection in a spreadsheet.
+ */
+export function isFormulaInjection(value: string): boolean {
+  if (!value || typeof value !== "string") return false;
+  const trimmed = value.trimStart();
+  return FORMULA_INJECTION_PREFIXES.some(prefix => trimmed.startsWith(prefix));
+}
+
+/**
+ * Sanitize a value to prevent formula injection by prepending a single quote.
+ */
+export function sanitizeFormulaValue(value: string): string {
+  if (isFormulaInjection(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+// ============================================
+// SECURITY RESPONSE HEADERS
+// ============================================
+
+/**
+ * Security headers to set on all document download responses.
+ * Prevents MIME-sniffing, framing attacks, and ensures
+ * Content-Disposition is respected.
+ */
+export const DOCUMENT_SECURITY_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "X-Download-Options": "noopen",
+  "Cache-Control": "no-store, no-cache, must-revalidate, private",
+  "Pragma": "no-cache",
+  "Content-Security-Policy": "default-src 'none'",
+};
+
+/**
+ * Apply security headers to an Express response for document downloads.
+ */
+export function applyDocumentSecurityHeaders(res: { setHeader: (name: string, value: string) => void }): void {
+  for (const [header, value] of Object.entries(DOCUMENT_SECURITY_HEADERS)) {
+    res.setHeader(header, value);
+  }
+}
+
+// ============================================
+// ERROR SANITIZATION
+// ============================================
+
+/**
+ * Sanitize an error message for safe inclusion in API responses.
+ * Removes file system paths, stack traces, and internal details.
+ */
+export function sanitizeErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    // Remove file paths
+    .replace(/\/[^\s:)]+/g, "[path]")
+    // Remove Windows paths
+    .replace(/[A-Z]:\\[^\s:)]+/g, "[path]")
+    // Remove stack trace references
+    .replace(/at\s+.+:\d+:\d+/g, "[stack]")
+    // Remove module references
+    .replace(/\(node:\w+:\d+:\d+\)/g, "[internal]")
+    // Cap length
+    .substring(0, 500);
 }
 
 // ============================================
