@@ -14,23 +14,23 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     try {
         const userReq = req as AuthenticatedRequest;
         const session = req.session as any;
-        
-        // Get user info from multiple possible sources
-        const userEmail = userReq.user?.claims?.email || 
-                         userReq.user?.email ||
-                         session?.passport?.user?.claims?.email || 
-                         session?.passport?.user?.email ||
-                         (req as any).user?.profile?.emails?.[0]?.value;
-                         
-        const userId = userReq.user?.claims?.sub || 
-                      userReq.user?.id || 
-                      session?.authUserId ||
-                      session?.passport?.user?.claims?.sub ||
-                      session?.passport?.user?.id;
 
-        console.log("[Admin] Auth check:", { 
-            userEmail, 
-            userId, 
+        // Get user info from multiple possible sources
+        const userEmail = userReq.user?.claims?.email ||
+            userReq.user?.email ||
+            session?.passport?.user?.claims?.email ||
+            session?.passport?.user?.email ||
+            (req as any).user?.profile?.emails?.[0]?.value;
+
+        const userId = userReq.user?.claims?.sub ||
+            userReq.user?.id ||
+            session?.authUserId ||
+            session?.passport?.user?.claims?.sub ||
+            session?.passport?.user?.id;
+
+        console.log("[Admin] Auth check:", {
+            userEmail,
+            userId,
             hasUser: !!userReq.user,
             hasSession: !!session,
             sessionKeys: session ? Object.keys(session) : []
@@ -54,13 +54,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         // Verify against database role - check by userId OR email
         if (!isAdmin) {
             let dbUser = null;
-            
+
             if (userId) {
                 const result = await db.select({ role: users.role, email: users.email })
                     .from(users).where(eq(users.id, userId));
                 dbUser = result[0];
             }
-            
+
             // Fallback: check by email if userId didn't find admin
             if (!dbUser?.role && userEmail) {
                 const normalizedEmail = userEmail.toLowerCase().trim();
@@ -71,7 +71,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
                     .limit(1);
                 dbUser = result[0];
             }
-            
+
             isAdmin = dbUser?.role === "admin";
             console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
         }
@@ -265,7 +265,9 @@ export function checkApiKeyExists(provider: string): boolean {
         'perplexity': process.env.PERPLEXITY_API_KEY,
         'deepseek': process.env.DEEPSEEK_API_KEY,
         'mistral': process.env.MISTRAL_API_KEY,
-        'cohere': process.env.COHERE_API_KEY
+        'cohere': process.env.COHERE_API_KEY,
+        'scopus': process.env.SCOPUS_API_KEY,
+        'scielo': process.env.SCIELO_API_KEY,
     };
     return !!keyMap[normalized];
 }
