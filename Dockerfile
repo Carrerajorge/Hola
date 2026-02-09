@@ -53,8 +53,8 @@ COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 
 # Create temp directories for uploads/sandbox with correct permissions
 # (We only need to chown these specific dirs, files are already owned via COPY)
-RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace \
-  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace
+RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data \
+  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data
 
 USER iliagpt
 
