@@ -88,7 +88,7 @@ import { dirname } from 'path';
 // When output format is ESM, these are not defined by Node.
 // Provide a minimal shim to avoid runtime crashes like:
 //   ReferenceError: module is not defined in ES module scope
-const module = { exports: {} as any };
+const module = { exports: {} };
 const exports = module.exports;
 
 const require = createRequire(import.meta.url);
