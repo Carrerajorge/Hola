@@ -18,6 +18,19 @@ import {
   generateReport,
   getQuickStats,
 } from "../services/openClawVerifier";
+import {
+  listOpenClaw1000Capabilities,
+  getOpenClaw1000Capability,
+  getOpenClaw1000QuickStats,
+  verifyOpenClaw1000Capability,
+  verifyOpenClaw1000Batch,
+  generateOpenClaw1000Report,
+} from "../services/openClaw1000Service";
+import {
+  OPENCLAW_1000,
+  getOpenClaw1000CapabilitiesByCategory,
+  type OpenClaw1000Category,
+} from "../capabilities/generated/openClaw1000Capabilities.generated";
 
 const router = Router();
 
@@ -218,6 +231,134 @@ router.get("/categories", (_req: Request, res: Response) => {
     res.json({ success: true, categories: breakdown });
   } catch (error: any) {
     console.error("[OpenClaw] Error getting categories:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * =========================
+ * OpenClaw 1000 Endpoints
+ * =========================
+ */
+
+router.get("/capabilities-1000", (req: Request, res: Response) => {
+  try {
+    const { category, status } = req.query;
+    const capabilities = listOpenClaw1000Capabilities({
+      category: typeof category === "string" ? category : undefined,
+      status: typeof status === "string" ? status : undefined,
+    });
+
+    res.json({
+      success: true,
+      total: capabilities.length,
+      stats: getOpenClaw1000QuickStats(),
+      capabilities,
+    });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error listing capabilities:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/capabilities-1000/:id", (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, error: "Invalid capability ID" });
+    }
+
+    const capability = getOpenClaw1000Capability(id);
+    if (!capability) {
+      return res.status(404).json({ success: false, error: `Capability ${id} not found` });
+    }
+
+    res.json({ success: true, capability });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error getting capability:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/stats-1000", (_req: Request, res: Response) => {
+  try {
+    res.json({ success: true, ...getOpenClaw1000QuickStats() });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error getting stats:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post("/verify-1000/:id([0-9]+)", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ success: false, error: "Invalid capability ID" });
+    }
+
+    const result = await verifyOpenClaw1000Capability(id);
+    res.json({ success: true, result });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error verifying capability:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post("/verify-1000/batch", async (req: Request, res: Response) => {
+  try {
+    const { ids, category } = req.body || {};
+    const results = await verifyOpenClaw1000Batch({
+      ids: Array.isArray(ids) ? ids : undefined,
+      category: typeof category === "string" ? category : undefined,
+    });
+
+    const summary = {
+      total: results.length,
+      passed: results.filter((r) => r.verifyStatus === "PASS").length,
+      failed: results.filter((r) => r.verifyStatus === "FAIL").length,
+      skipped: results.filter((r) => r.verifyStatus === "SKIP").length,
+      stubs: results.filter((r) => r.verifyStatus === "STUB").length,
+      errors: results.filter((r) => r.verifyStatus === "ERROR").length,
+    };
+
+    res.json({ success: true, summary, results });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error in batch verification:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/report-1000", async (_req: Request, res: Response) => {
+  try {
+    const report = await generateOpenClaw1000Report();
+    res.json({ success: true, report });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error generating report:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/categories-1000", (_req: Request, res: Response) => {
+  try {
+    const categories = [...new Set(OPENCLAW_1000.map((c) => c.category))] as OpenClaw1000Category[];
+    const breakdown = categories.map((cat) => {
+      const caps = getOpenClaw1000CapabilitiesByCategory(cat);
+      return {
+        category: cat,
+        total: caps.length,
+        implemented: caps.filter((c) => c.status === "implemented").length,
+        partial: caps.filter((c) => c.status === "partial").length,
+        stub: caps.filter((c) => c.status === "stub").length,
+        missing: caps.filter((c) => c.status === "missing").length,
+        coveragePercent: Math.round(
+          ((caps.filter((c) => c.status === "implemented" || c.status === "partial").length) / caps.length) * 1000
+        ) / 10,
+      };
+    });
+
+    res.json({ success: true, categories: breakdown });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error getting categories:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

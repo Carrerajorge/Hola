@@ -20,6 +20,11 @@ import { searchWos, WosArticle } from "./wosClient";
 import { runAcademicPipeline, candidatesToSourceSignals, PipelineResult, PipelineConfig } from "./academicPipeline";
 import { PromptUnderstanding, UserSpec, TaskSpec } from "../promptUnderstanding";
 import { requestUnderstandingAgent } from "../requestUnderstanding";
+import {
+  buildOpenClaw1000CapabilityProfile,
+  suggestOpenClaw1000ToolForStep,
+  type OpenClaw1000CapabilityProfile,
+} from "../../services/openClaw1000CapabilityProfiler";
 
 function isWosConfigured(): boolean {
   return !!process.env.WOS_API_KEY;
@@ -78,6 +83,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
   private eventCounter: number = 0;
   private abortSignal?: AbortSignal;
   private promptUnderstanding: PromptUnderstanding;
+  private capabilityProfile: OpenClaw1000CapabilityProfile | null = null;
 
   constructor(sessionId: string, config: Partial<OrchestratorConfig> = {}) {
     super();
@@ -199,6 +205,77 @@ export class SuperAgentOrchestrator extends EventEmitter {
     };
   }
 
+  private applyOpenClawCapabilityProfile(contract: AgentContract, prompt: string): AgentContract {
+    const profile = buildOpenClaw1000CapabilityProfile(prompt, {
+      limit: 24,
+      minScore: 0.1,
+      includeStatuses: ["implemented", "partial"],
+    });
+    this.capabilityProfile = profile;
+
+    if (profile.matches.length === 0) {
+      return contract;
+    }
+
+    const usedTools = new Set(
+      contract.plan
+        .map((step) => step.tool)
+        .filter((tool): tool is string => Boolean(tool) && tool !== "unknown")
+    );
+
+    const enrichedPlan = contract.plan.map((step) => {
+      if (step.tool && step.tool !== "unknown") {
+        return step;
+      }
+
+      const stepContext = `${step.action} ${JSON.stringify(step.input || {})}`;
+      const suggestedTool = suggestOpenClaw1000ToolForStep(stepContext, profile, usedTools);
+      if (!suggestedTool) return step;
+
+      usedTools.add(suggestedTool);
+      return { ...step, tool: suggestedTool };
+    });
+
+    const capabilityChecks = profile.matches.slice(0, 8).map((match, index) => ({
+      id: `oc_${match.capability.code}_${index + 1}`,
+      condition: `${match.capability.capability} :: tool=${match.capability.toolName}`,
+      threshold: Math.round(match.score * 100),
+      required: match.capability.status === "implemented",
+    }));
+
+    const mergedChecks = [...contract.acceptance_checks];
+    const existingCheckIds = new Set(mergedChecks.map((check) => check.id));
+    for (const check of capabilityChecks) {
+      if (!existingCheckIds.has(check.id)) {
+        mergedChecks.push(check);
+      }
+    }
+
+    const mergedEntities = Array.from(new Set([
+      ...contract.parsed_entities,
+      ...profile.matches.slice(0, 12).map((match) => `openclaw:${match.capability.code}`),
+      ...profile.categories.slice(0, 6).map((group) => `openclaw_category:${group.category}`),
+    ]));
+
+    const requirements = { ...contract.requirements };
+    const suggestsResearch = profile.categories.some((group) =>
+      group.category === "academic_research" ||
+      group.category === "web_realtime_search" ||
+      group.category === "knowledge_rag_memory"
+    );
+    if (suggestsResearch && requirements.min_sources <= 0) {
+      requirements.min_sources = 20;
+    }
+
+    return {
+      ...contract,
+      requirements,
+      plan: enrichedPlan,
+      acceptance_checks: mergedChecks,
+      parsed_entities: mergedEntities,
+    };
+  }
+
   private emitThought(content: string): void {
     this.emitSSE("thought", { content, timestamp: Date.now() });
   }
@@ -265,7 +342,30 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
       this.emitThought("Generando plan de ejecución basado en las tareas detectadas...");
       let contract = this.convertSpecToContract(processingResult.spec, prompt);
+      contract = this.applyOpenClawCapabilityProfile(contract, prompt);
       this.emitThought(`Plan generado: Intención detectada como '${contract.intent}'.`);
+      if (this.capabilityProfile && this.capabilityProfile.matches.length > 0) {
+        const topCapabilities = this.capabilityProfile.matches.slice(0, 5).map((match) =>
+          `${match.capability.code}:${match.capability.toolName}`
+        );
+        this.emitThought(
+          `OpenClaw1000 activo: ${this.capabilityProfile.matches.length} capacidades alineadas. Top: ${topCapabilities.join(", ")}.`
+        );
+        this.emitSSE("progress", {
+          phase: "planning",
+          status: "capability_profile",
+          matched: this.capabilityProfile.matches.length,
+          categories: this.capabilityProfile.categories,
+          recommended_tools: this.capabilityProfile.recommendedTools,
+          top_capabilities: this.capabilityProfile.matches.slice(0, 10).map((match) => ({
+            id: match.capability.id,
+            code: match.capability.code,
+            capability: match.capability.capability,
+            tool: match.capability.toolName,
+            score: match.score,
+          })),
+        });
+      }
 
       console.log("[SuperAgent] Contract generated:", JSON.stringify(contract, null, 2));
 
@@ -312,6 +412,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
         target: contract.requirements?.min_sources || 50,
         steps: contract.plan,
         requirements: contract.requirements,
+        capability_profile: this.capabilityProfile
+          ? {
+            matched: this.capabilityProfile.matches.length,
+            categories: this.capabilityProfile.categories,
+            recommendedTools: this.capabilityProfile.recommendedTools,
+          }
+          : undefined,
         rules: {
           yearStart: yearRange.start || new Date().getFullYear() - 5,
           yearEnd: yearRange.end || new Date().getFullYear(),
@@ -348,8 +455,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
     const requirements = this.state.contract.requirements;
     const researchDecision = shouldResearch(this.state.contract.original_prompt);
+    const capabilityDrivenResearch = this.capabilityProfile?.categories.some((group) =>
+      group.category === "academic_research" ||
+      group.category === "web_realtime_search" ||
+      group.category === "knowledge_rag_memory"
+    ) ?? false;
 
-    if (researchDecision.shouldResearch || requirements.min_sources > 0) {
+    if (researchDecision.shouldResearch || requirements.min_sources > 0 || capabilityDrivenResearch) {
       this.checkAbort();
       await this.executeSignalsPhase();
       this.checkAbort();
@@ -1524,6 +1636,14 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
       for (const source of topSources) {
         parts.push(`- [${source.title}](${source.url}) (${source.domain})\n`);
+      }
+    }
+
+    if (this.capabilityProfile && this.capabilityProfile.matches.length > 0) {
+      parts.push(`\n### OpenClaw1000 Capability Profile\n`);
+      parts.push(`Matched capabilities: **${this.capabilityProfile.matches.length}**\n`);
+      for (const match of this.capabilityProfile.matches.slice(0, 5)) {
+        parts.push(`- ${match.capability.code} ${match.capability.capability} (${match.capability.toolName}) score=${match.score}\n`);
       }
     }
 

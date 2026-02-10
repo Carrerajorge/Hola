@@ -11,6 +11,7 @@ import { getEventStore } from "../agent/superAgent/tracing/EventStore";
 import { createClient } from "redis";
 import { promises as fs } from "fs";
 import { conversationMemoryManager } from "../services/conversationMemory";
+import { buildOpenClaw1000CapabilityProfile } from "../services/openClaw1000CapabilityProfiler";
 
 const router = Router();
 
@@ -155,11 +156,31 @@ router.post("/super/analyze", async (req: Request, res: Response) => {
 
     const validation = validateContract(contract);
     const researchDecision = shouldResearch(prompt);
+    const capabilityProfile = buildOpenClaw1000CapabilityProfile(prompt, {
+      limit: 20,
+      minScore: 0.1,
+      includeStatuses: ["implemented", "partial"],
+    });
 
     res.json({
       contract,
       validation,
       research_decision: researchDecision,
+      openclaw_1000_profile: {
+        total: capabilityProfile.total,
+        eligible: capabilityProfile.eligible,
+        matched: capabilityProfile.matches.length,
+        categories: capabilityProfile.categories,
+        recommendedTools: capabilityProfile.recommendedTools,
+        top: capabilityProfile.matches.slice(0, 10).map((match) => ({
+          id: match.capability.id,
+          code: match.capability.code,
+          capability: match.capability.capability,
+          category: match.capability.category,
+          tool: match.capability.toolName,
+          score: match.score,
+        })),
+      },
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });

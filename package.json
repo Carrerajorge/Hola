@@ -23,7 +23,10 @@
     "verify": "bash ./scripts/agent-verify.sh",
     "verify:sandbox": "AGENT_VERIFY_SKIP_TESTS=true bash ./scripts/agent-verify.sh",
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list",
-    "test:e2e": "npx playwright test --reporter=html"
+    "test:e2e": "npx playwright test --reporter=html",
+    "test:emaiti": "node scripts/run-emaiti-capabilities.cjs",
+    "generate:openclaw1000": "node scripts/generate-openclaw1000.cjs /Users/ale/Downloads/Iliagpt_1000_Implementaciones_Limpio.txt /Users/ale/Desktop/ILIACODEX/Hola",
+    "test:openclaw1000": "vitest run tests/unit/openclaw1000-service.test.ts tests/unit/openclaw1000-capability-profiler.test.ts"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",

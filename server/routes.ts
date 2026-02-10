@@ -84,6 +84,8 @@ import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
 import { getSuperAgentCoverageReport, type SuperAgentCoverageSource } from "./services/superAgentCoverage";
+import { listOpenClaw1000Capabilities, getOpenClaw1000QuickStats } from "./services/openClaw1000Service";
+import { buildOpenClaw1000CapabilityProfile } from "./services/openClaw1000CapabilityProfiler";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
@@ -738,6 +740,66 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: error.message || "Failed to compute super agent coverage",
+      });
+    }
+  });
+
+  // GET /api/super-agent/capabilities-1000 - Runtime catalog for OpenClaw1000
+  // Query:
+  // - ?category=<category>
+  // - ?status=implemented|partial|stub|missing
+  // - ?q=<prompt-like text> (returns capability profile + filtered matches)
+  // - ?limit=1..1000
+  app.get("/api/super-agent/capabilities-1000", (req: Request, res: Response) => {
+    try {
+      const category = typeof req.query.category === "string" ? req.query.category : undefined;
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+      const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : NaN;
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 200;
+
+      let capabilities = listOpenClaw1000Capabilities({ category, status });
+      let profileSummary: any = null;
+
+      if (query.length > 0) {
+        const profile = buildOpenClaw1000CapabilityProfile(query, {
+          limit: 80,
+          minScore: 0.08,
+          includeStatuses: status
+            ? [status as "implemented" | "partial" | "stub" | "missing"]
+            : ["implemented", "partial"],
+        });
+        const matchedIds = new Set(profile.matches.map((match) => match.capability.id));
+        capabilities = capabilities.filter((capability) => matchedIds.has(capability.id));
+        profileSummary = {
+          query: profile.query,
+          matched: profile.matches.length,
+          categories: profile.categories,
+          recommendedTools: profile.recommendedTools,
+          top: profile.matches.slice(0, 15).map((match) => ({
+            id: match.capability.id,
+            code: match.capability.code,
+            capability: match.capability.capability,
+            tool: match.capability.toolName,
+            category: match.capability.category,
+            score: match.score,
+          })),
+        };
+      }
+
+      res.json({
+        success: true,
+        catalog: "openclaw1000",
+        stats: getOpenClaw1000QuickStats(),
+        total: capabilities.length,
+        profile: profileSummary,
+        capabilities: capabilities.slice(0, limit),
+      });
+    } catch (error: any) {
+      console.error("[SuperAgentCapabilities1000] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to load OpenClaw1000 capabilities",
       });
     }
   });
