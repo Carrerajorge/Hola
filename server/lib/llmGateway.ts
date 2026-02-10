@@ -392,11 +392,20 @@ class LLMGateway {
 
   // ===== Context Truncation =====
   truncateContext(messages: ChatCompletionMessageParam[], maxTokens: number = MAX_CONTEXT_TOKENS): ChatCompletionMessageParam[] {
-    let totalEstimatedTokens = messages.reduce((sum, msg) => {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      return sum + Math.ceil(content.length / 4);
-    }, 0);
+    const toText = (msg: ChatCompletionMessageParam): string =>
+      typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
 
+    const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+
+    const truncateText = (text: string, budgetTokens: number): string => {
+      if (budgetTokens <= 0) return "";
+      const maxChars = budgetTokens * 4;
+      if (text.length <= maxChars) return text;
+      // Keep the beginning: system prompts and user queries usually lead with the key info.
+      return text.slice(0, Math.max(0, maxChars - 16)) + "... [truncated]";
+    };
+
+    const totalEstimatedTokens = messages.reduce((sum, msg) => sum + estimateTokens(toText(msg)), 0);
     if (totalEstimatedTokens <= maxTokens) {
       return messages;
     }
@@ -404,32 +413,100 @@ class LLMGateway {
     const systemMessages = messages.filter((m) => m.role === "system");
     const otherMessages = messages.filter((m) => m.role !== "system");
 
-    const truncated: ChatCompletionMessageParam[] = [...systemMessages];
-    let remainingTokens = maxTokens - systemMessages.reduce((sum, msg) => {
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      return sum + Math.ceil(content.length / 4);
-    }, 0);
+    // Gemini requires at least one non-system "content" message. If the caller built a system-only
+    // request, keep as much system as possible (but the provider may still reject it).
+    if (otherMessages.length === 0) {
+      const out: ChatCompletionMessageParam[] = [];
+      let remaining = maxTokens;
+      for (const sys of systemMessages) {
+        if (remaining <= 0) break;
+        const text = toText(sys);
+        const tokens = estimateTokens(text);
+        if (tokens <= remaining) {
+          out.push(sys);
+          remaining -= tokens;
+        } else {
+          out.push({ ...sys, content: truncateText(text, remaining) } as ChatCompletionMessageParam);
+          remaining = 0;
+          break;
+        }
+      }
+      console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${maxTokens} tokens (system-only)`);
+      return out;
+    }
 
-    for (let i = otherMessages.length - 1; i >= 0; i--) {
-      const msg = otherMessages[i];
-      const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      const msgTokens = Math.ceil(content.length / 4);
+    // Always keep at least the last user message (or last non-system message as fallback) so we never
+    // send an empty contents array to Gemini after system-message extraction.
+    const mustKeepIndex = (() => {
+      for (let i = otherMessages.length - 1; i >= 0; i--) {
+        if (otherMessages[i].role === "user") return i;
+      }
+      return otherMessages.length - 1;
+    })();
 
-      if (msgTokens <= remainingTokens) {
-        truncated.splice(systemMessages.length, 0, msg);
-        remainingTokens -= msgTokens;
-      } else if (remainingTokens > 100) {
-        const truncatedContent = content.slice(0, remainingTokens * 4);
-        truncated.splice(systemMessages.length, 0, {
-          ...msg,
-          content: truncatedContent + "... [truncated]",
-        } as ChatCompletionMessageParam);
+    let mustKeep: ChatCompletionMessageParam = otherMessages[mustKeepIndex];
+    let mustKeepText = toText(mustKeep);
+    let mustKeepTokens = estimateTokens(mustKeepText);
+
+    if (mustKeepTokens > maxTokens) {
+      mustKeepText = truncateText(mustKeepText, maxTokens);
+      mustKeep = { ...mustKeep, content: mustKeepText } as ChatCompletionMessageParam;
+      mustKeepTokens = estimateTokens(mustKeepText);
+    }
+
+    // Reserve budget for the must-keep message, then spend the remainder on system + recent history.
+    let remainingTokens = maxTokens - mustKeepTokens;
+
+    const outSystem: ChatCompletionMessageParam[] = [];
+    for (const sys of systemMessages) {
+      if (remainingTokens <= 0) break;
+      const text = toText(sys);
+      const tokens = estimateTokens(text);
+      if (tokens <= remainingTokens) {
+        outSystem.push(sys);
+        remainingTokens -= tokens;
+      } else {
+        outSystem.push({ ...sys, content: truncateText(text, remainingTokens) } as ChatCompletionMessageParam);
+        remainingTokens = 0;
         break;
       }
     }
 
+    const outOthers: ChatCompletionMessageParam[] = [mustKeep];
+    for (let i = mustKeepIndex - 1; i >= 0; i--) {
+      if (remainingTokens <= 0) break;
+      const msg = otherMessages[i];
+      const text = toText(msg);
+      const tokens = estimateTokens(text);
+
+      if (tokens <= remainingTokens) {
+        outOthers.unshift(msg);
+        remainingTokens -= tokens;
+      } else {
+        // If we still have some room, include a truncated version of this message and stop.
+        if (remainingTokens >= 50) {
+          outOthers.unshift({ ...msg, content: truncateText(text, remainingTokens) } as ChatCompletionMessageParam);
+          remainingTokens = 0;
+        }
+        break;
+      }
+    }
+
+    const truncated: ChatCompletionMessageParam[] = [...outSystem, ...outOthers];
     console.log(`[LLMGateway] Truncated context from ${totalEstimatedTokens} to ~${maxTokens - remainingTokens} tokens`);
     return truncated;
+  }
+
+  private getTruncationBudget(maxOutputTokens?: number): number {
+    if (typeof maxOutputTokens !== "number" || !Number.isFinite(maxOutputTokens) || maxOutputTokens <= 0) {
+      return MAX_CONTEXT_TOKENS;
+    }
+
+    // `maxTokens` is an output budget. For small outputs (e.g. 30-80 tokens), we still need enough
+    // context budget to carry system prompts + the user message. Use a floor to prevent "system-only"
+    // truncation that breaks Gemini (contents required).
+    const scaled = Math.floor(maxOutputTokens * 16);
+    return Math.min(MAX_CONTEXT_TOKENS, Math.max(800, scaled));
   }
 
   // ===== Message Conversion =====
@@ -578,8 +655,8 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    // Truncate context
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    // Truncate context (budget is independent from max output tokens; we keep a safe floor for small outputs).
+    const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
 
     // Create the request promise
     const requestPromise = this.executeWithFallback(
@@ -1200,7 +1277,7 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+    const truncatedMessages = this.truncateContext(messages, this.getTruncationBudget(options.maxTokens));
 
     // Check for existing checkpoint (recovery)
     const existingCheckpoint = this.streamCheckpoints.get(requestId);
