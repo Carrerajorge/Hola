@@ -2256,6 +2256,46 @@ for (const tool of extendedTools) {
   toolRegistry.register(tool);
 }
 
+// Register OpenClaw capability tools (academic, document, agent management)
+import { academicTools } from "./tools/academicTools";
+import { documentAdvancedTools } from "./tools/documentAdvancedTools";
+import { agentManagementTools } from "./tools/agentManagementTools";
+
+function registerSimpleTools(
+  simpleTools: Array<{ name: string; description: string; schema: any; execute: (params: any) => Promise<any>; category: string }>
+) {
+  for (const st of simpleTools) {
+    const adapted: ToolDefinition = {
+      name: st.name,
+      description: st.description,
+      inputSchema: st.schema,
+      execute: async (input: any, _context: ToolContext): Promise<ToolResult> => {
+        const startTime = Date.now();
+        try {
+          const result = await st.execute(input);
+          return {
+            success: true,
+            output: result,
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        } catch (error: any) {
+          return {
+            success: false,
+            output: null,
+            error: { code: `${st.name.toUpperCase()}_ERROR`, message: error.message, retryable: false },
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
+      },
+    };
+    toolRegistry.register(adapted);
+  }
+}
+
+registerSimpleTools(academicTools);
+registerSimpleTools(documentAdvancedTools);
+registerSimpleTools(agentManagementTools);
+
 export {
   analyzeSpreadsheetSchema,
   webSearchSchema,
