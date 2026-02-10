@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import { createHttpTestClient } from "../../tests/helpers/httpTestClient";
 
@@ -12,6 +12,12 @@ vi.mock("../services/settingsConfigService", () => ({
 }));
 
 describe("maintenanceModeMiddleware", () => {
+  beforeEach(() => {
+    // Avoid cross-test pollution from other test files that may mock/unmock settingsConfigService.
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
   it("blocks non-admin API routes with 503", async () => {
     const { maintenanceModeMiddleware } = await import("../middleware/maintenanceMode");
 

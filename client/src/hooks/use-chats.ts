@@ -1181,6 +1181,9 @@ export function useChats() {
       queue.push(message);
       pendingMessageQueue.set(chatId, queue);
 
+      // Debounce the creation to prevent race conditions if multiple messages are sent quickly
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       try {
         console.error("[CRITICAL] About to POST /api/chats - forced pending creation");
         const res = await fetch("/api/chats", {
