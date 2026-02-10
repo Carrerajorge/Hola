@@ -62,7 +62,8 @@ else
 fi
 git pull --ff-only origin main
 echo "▸ Current commit: $(git rev-parse --short HEAD)"
-export APP_VERSION="$(git rev-parse --short HEAD)"
+APP_VERSION="$(git rev-parse --short HEAD)"
+export APP_VERSION
 echo "▸ APP_VERSION: ${APP_VERSION}"
 
 # docker compose expands ${VARS} from process env (and .env), not from env_file.
@@ -82,17 +83,24 @@ if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
 fi
 
 echo "▸ Building images..."
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" build app worker sandbox-runner
+compose() {
+  # Ensure build args and runtime env interpolation always see the version/token,
+  # even if the shell export is lost for some reason.
+  APP_VERSION="$APP_VERSION" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+}
+
+compose build app worker sandbox-runner
 
 echo "▸ Rolling update: keeping postgres/redis up..."
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
+compose up -d postgres redis
 sleep 5
 
 echo "▸ Starting updated containers..."
-if ! docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --remove-orphans; then
+if ! compose up -d --remove-orphans; then
   echo "⚠ Rolling update failed; performing full restart..."
-  docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --remove-orphans || true
-  docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d
+  compose down --remove-orphans || true
+  compose up -d
 fi
 
 echo "▸ Waiting for health..."
@@ -103,14 +111,14 @@ for i in $(seq 1 30); do
   fi
   if [ "$i" -eq 30 ]; then
     echo "✗ Health failed"
-    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --tail=120 app
+    compose logs --tail=120 app
     exit 1
   fi
   echo "  Attempt $i/30..."
   sleep 5
 done
 
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" ps
+compose ps
 curl -s http://127.0.0.1:5000/health || true
 DEPLOY
 

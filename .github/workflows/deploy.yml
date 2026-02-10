@@ -104,18 +104,27 @@ jobs:
             git checkout main
             git pull --ff-only origin main
 
+            # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
+            export APP_VERSION="$(git rev-parse --short HEAD)"
+            echo "▸ APP_VERSION: ${APP_VERSION}"
+
+            compose() {
+              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+                docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+            }
+
             # ── Build new images ──
             echo "▸ Building Docker images..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" build --no-cache app worker sandbox-runner
+            compose build --no-cache app worker sandbox-runner
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
+            compose up -d postgres redis
             sleep 5
 
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d
+            compose up -d
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -126,7 +135,7 @@ jobs:
               fi
               if [ "$i" -eq 30 ]; then
                 echo "✗ Health check failed after 30 attempts"
-                docker compose -p "$PROJECT" -f "$COMPOSE_FILE" logs --tail=50 app
+                compose logs --tail=50 app
                 exit 1
               fi
               echo "  Attempt $i/30 - waiting..."
@@ -142,7 +151,7 @@ jobs:
             echo "═══════════════════════════════════════════"
             echo "  ✓ Deploy complete!"
             echo "═══════════════════════════════════════════"
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" ps
+            compose ps
             echo ""
             curl -s http://127.0.0.1:5000/health || true
           DEPLOY_SCRIPT
@@ -227,15 +236,24 @@ jobs:
             git checkout main
             git pull --ff-only origin main
 
+            # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
+            export APP_VERSION="$(git rev-parse --short HEAD)"
+            echo "▸ APP_VERSION: ${APP_VERSION}"
+
+            compose() {
+              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+                docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+            }
+
             echo "▸ Building Docker images..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" build --no-cache app worker sandbox-runner
+            compose build --no-cache app worker sandbox-runner
 
             echo "▸ Rolling update: stopping app containers..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d postgres redis
+            compose up -d postgres redis
             sleep 5
 
             echo "▸ Starting updated containers..."
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d
+            compose up -d
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
@@ -245,7 +263,7 @@ jobs:
               fi
               if [ "$i" -eq 30 ]; then
                 echo "✗ Health check failed after 30 attempts"
-                docker compose -p "$PROJECT" -f "$COMPOSE_FILE" logs --tail=50 app
+                compose logs --tail=50 app
                 exit 1
               fi
               echo "  Attempt $i/30 - waiting..."
@@ -259,7 +277,7 @@ jobs:
             echo "═══════════════════════════════════════════"
             echo "  ✓ Deploy complete!"
             echo "═══════════════════════════════════════════"
-            docker compose -p "$PROJECT" -f "$COMPOSE_FILE" ps
+            compose ps
             echo ""
             curl -s http://127.0.0.1:5000/health || true
           DEPLOY_SCRIPT
