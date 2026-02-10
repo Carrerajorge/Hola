@@ -669,6 +669,99 @@ export function useChats() {
     });
   }, []);
 
+  const fetchChatDetails = useCallback(async (chatId: string) => {
+    // Skip if it's a pending chat or we're already loading
+    if (isPendingChat(chatId)) return;
+
+    try {
+      const res = await fetch(`/api/chats/${chatId}`, {
+        headers: { ...getAnonUserIdHeader() },
+        credentials: "include"
+      });
+      
+      if (!res.ok) {
+        if (res.status === 404) {
+          // Chat not found, maybe deleted. Remove from list.
+          setChats(prev => prev.filter(c => c.id !== chatId));
+        }
+        return;
+      }
+
+      const fullChat = await res.json();
+      
+      // Hydrate attachments (logic copied from original loadChatsFromServer)
+      const convDocs: any[] = fullChat.conversationDocuments || [];
+      const docsByMessageId = new Map<string, any[]>();
+      for (const doc of convDocs) {
+        if (doc.messageId) {
+          const existing = docsByMessageId.get(doc.messageId) || [];
+          existing.push(doc);
+          docsByMessageId.set(doc.messageId, existing);
+        }
+      }
+
+      const messages = (fullChat.messages || []).map((msg: any) => {
+        if (msg.requestId) markRequestPersisted(msg.requestId);
+
+        let hydratedAttachments = msg.attachments;
+        if ((!hydratedAttachments || hydratedAttachments.length === 0) && docsByMessageId.has(msg.id)) {
+          hydratedAttachments = docsByMessageId.get(msg.id)!.map((doc: any) => ({
+            id: doc.id,
+            fileId: doc.metadata?.fileId || doc.id,
+            name: doc.fileName,
+            type: doc.mimeType,
+            mimeType: doc.mimeType,
+            size: doc.fileSize || 0,
+            storagePath: doc.storagePath,
+          }));
+        } else if (hydratedAttachments && hydratedAttachments.length > 0 && docsByMessageId.has(msg.id)) {
+          const docs = docsByMessageId.get(msg.id)!;
+          hydratedAttachments = hydratedAttachments.map((att: any) => {
+            const matchingDoc = docs.find((d: any) =>
+              d.fileName === att.name ||
+              (d.metadata?.fileId && d.metadata.fileId === att.fileId)
+            );
+            if (matchingDoc) {
+              return {
+                ...att,
+                storagePath: att.storagePath || matchingDoc.storagePath,
+                size: att.size || matchingDoc.fileSize || 0,
+                mimeType: att.mimeType || matchingDoc.mimeType,
+              };
+            }
+            return att;
+          });
+        }
+
+        return {
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date(msg.createdAt),
+          requestId: msg.requestId,
+          userMessageId: msg.userMessageId,
+          attachments: hydratedAttachments,
+          sources: msg.sources,
+          figmaDiagram: msg.figmaDiagram,
+          googleFormPreview: msg.googleFormPreview,
+          gmailPreview: msg.gmailPreview,
+          generatedImage: msg.generatedImage,
+          webSources: msg.webSources || msg.metadata?.webSources,
+          confidence: msg.confidence || msg.metadata?.confidence,
+          uncertaintyReason: msg.uncertaintyReason || msg.metadata?.uncertaintyReason,
+          retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
+        };
+      });
+
+      setChats(prev => prev.map(c => 
+        c.id === chatId ? { ...c, messages } : c
+      ));
+
+    } catch (error) {
+      console.warn(`Failed to fetch details for chat ${chatId}:`, error);
+    }
+  }, []);
+
   const loadChatsFromServer = useCallback(async () => {
     try {
       const res = await fetch("/api/chats", {
@@ -678,97 +771,18 @@ export function useChats() {
       if (!res.ok) throw new Error("Failed to load chats");
       const serverChats = await res.json();
 
-      const formattedChats: Chat[] = await Promise.all(
-        serverChats.map(async (chat: any) => {
-          const chatRes = await fetch(`/api/chats/${chat.id}`, {
-            headers: { ...getAnonUserIdHeader() },
-            credentials: "include"
-          });
-          const fullChat = await chatRes.json();
-
-          // Build a lookup of conversationDocuments by messageId for attachment hydration.
-          // conversationDocuments are the durable server records of uploaded files.
-          const convDocs: any[] = fullChat.conversationDocuments || [];
-          const docsByMessageId = new Map<string, any[]>();
-          for (const doc of convDocs) {
-            if (doc.messageId) {
-              const existing = docsByMessageId.get(doc.messageId) || [];
-              existing.push(doc);
-              docsByMessageId.set(doc.messageId, existing);
-            }
-          }
-
-          return {
-            id: chat.id,
-            stableKey: `stable-${chat.id}`, // Use ID as stable key for server chats
-            title: chat.title,
-            timestamp: new Date(chat.updatedAt).getTime(),
-            archived: chat.archived === "true",
-            hidden: chat.hidden === "true",
-            pinned: chat.pinned === "true",
-            pinnedAt: chat.pinnedAt,
-            messages: (fullChat.messages || []).map((msg: any) => {
-              // Hydrate savedRequestIds from server data
-              if (msg.requestId) {
-                markRequestPersisted(msg.requestId);
-              }
-
-              // Hydrate attachments: prefer message JSONB, fall back to conversationDocuments
-              let hydratedAttachments = msg.attachments;
-              if ((!hydratedAttachments || hydratedAttachments.length === 0) && docsByMessageId.has(msg.id)) {
-                // No JSONB attachments — reconstruct from conversationDocuments
-                hydratedAttachments = docsByMessageId.get(msg.id)!.map((doc: any) => ({
-                  id: doc.id,
-                  fileId: doc.metadata?.fileId || doc.id,
-                  name: doc.fileName,
-                  type: doc.mimeType,
-                  mimeType: doc.mimeType,
-                  size: doc.fileSize || 0,
-                  storagePath: doc.storagePath,
-                }));
-              } else if (hydratedAttachments && hydratedAttachments.length > 0 && docsByMessageId.has(msg.id)) {
-                // JSONB attachments exist — enrich with any missing data from conversationDocuments
-                const docs = docsByMessageId.get(msg.id)!;
-                hydratedAttachments = hydratedAttachments.map((att: any) => {
-                  const matchingDoc = docs.find((d: any) =>
-                    d.fileName === att.name ||
-                    (d.metadata?.fileId && d.metadata.fileId === att.fileId)
-                  );
-                  if (matchingDoc) {
-                    return {
-                      ...att,
-                      storagePath: att.storagePath || matchingDoc.storagePath,
-                      size: att.size || matchingDoc.fileSize || 0,
-                      mimeType: att.mimeType || matchingDoc.mimeType,
-                    };
-                  }
-                  return att;
-                });
-              }
-
-              return {
-                id: msg.id,
-                role: msg.role,
-                content: msg.content,
-                timestamp: new Date(msg.createdAt),
-                requestId: msg.requestId,
-                userMessageId: msg.userMessageId,
-                attachments: hydratedAttachments,
-                sources: msg.sources,
-                figmaDiagram: msg.figmaDiagram,
-                googleFormPreview: msg.googleFormPreview,
-                gmailPreview: msg.gmailPreview,
-                generatedImage: msg.generatedImage,
-                // webSources can come from metadata or direct field
-                webSources: msg.webSources || msg.metadata?.webSources,
-                confidence: msg.confidence || msg.metadata?.confidence,
-                uncertaintyReason: msg.uncertaintyReason || msg.metadata?.uncertaintyReason,
-                retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
-              };
-            }),
-          };
-        })
-      );
+      // Only fetch basic metadata for the list. Do not fetch full message history for all chats (N+1 avoidance).
+      const formattedChats: Chat[] = serverChats.map((chat: any) => ({
+        id: chat.id,
+        stableKey: `stable-${chat.id}`,
+        title: chat.title,
+        timestamp: new Date(chat.updatedAt).getTime(),
+        archived: chat.archived === "true",
+        hidden: chat.hidden === "true",
+        pinned: chat.pinned === "true",
+        pinnedAt: chat.pinnedAt,
+        messages: [] // Don't load messages until active
+      }));
 
       // Return chats sorted by timestamp (no mock data)
       return formattedChats.sort((a, b) => b.timestamp - a.timestamp);
@@ -777,6 +791,17 @@ export function useChats() {
       return null;
     }
   }, []);
+
+  // Fetch details for active chat when selected
+  useEffect(() => {
+    if (activeChatId && !isPendingChat(activeChatId)) {
+      // Check if we already have messages
+      const chat = chats.find(c => c.id === activeChatId);
+      if (chat && chat.messages.length === 0) {
+        fetchChatDetails(activeChatId);
+      }
+    }
+  }, [activeChatId, fetchChatDetails, chats]);
 
   useEffect(() => {
     const initChats = async () => {
