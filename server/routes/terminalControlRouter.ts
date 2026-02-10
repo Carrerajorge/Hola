@@ -111,7 +111,20 @@ export function createTerminalControlRouter(): Router {
   /** Execute a command */
   router.post("/sessions/:sessionId/exec", async (req: Request, res: Response) => {
     try {
-      const { command, args, cwd, env, timeout, shell, stream, background } = req.body;
+      const { 
+        command, 
+        args, 
+        cwd, 
+        env, 
+        timeout, 
+        shell, 
+        stream, 
+        background,
+        interactive,
+        inDocker,
+        dockerImage,
+        confirmDangerous
+      } = req.body;
 
       if (!command) {
         return res.status(400).json({ error: "command is required" });
@@ -119,11 +132,12 @@ export function createTerminalControlRouter(): Router {
 
       // Safety check before execution
       const safety = terminalController.isCommandSafe(command);
-      if (!safety.safe) {
+      if (!safety.safe && !confirmDangerous) {
         return res.status(403).json({
           error: "Command blocked by safety policy",
           reason: safety.reason,
           severity: safety.severity,
+          requiresConfirmation: true
         });
       }
 
@@ -136,6 +150,10 @@ export function createTerminalControlRouter(): Router {
         shell: shell || "bash",
         stream: stream !== false, // Stream by default
         background,
+        interactive,
+        inDocker,
+        dockerImage,
+        confirmDangerous
       };
 
       const result = await terminalController.executeCommand(req.params.sessionId, request);

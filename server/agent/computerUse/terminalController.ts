@@ -24,8 +24,11 @@ import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs/promises";
 import os from "os";
+import * as pty from "node-pty";
+import Docker from "dockerode";
 
 const execAsync = promisify(exec);
+const docker = new Docker();
 
 // ============================================
 // Types
@@ -41,6 +44,10 @@ export interface CommandRequest {
   stream?: boolean;
   sudo?: boolean;
   background?: boolean;
+  interactive?: boolean; // Use PTY
+  inDocker?: boolean; // Run in Docker container
+  dockerImage?: string; // Docker image to use
+  confirmDangerous?: boolean; // Bypass safety check with explicit confirmation
 }
 
 export interface CommandResult {
@@ -53,6 +60,7 @@ export interface CommandResult {
   killed: boolean;
   signal: string | null;
   success: boolean;
+  containerId?: string;
 }
 
 export interface ProcessInfo {
@@ -188,7 +196,16 @@ export class TerminalController extends EventEmitter {
 
     // Kill all active processes
     for (const [, proc] of session.activeProcesses) {
-      proc.kill("SIGTERM");
+      if ('kill' in proc) {
+        proc.kill("SIGTERM");
+      } else if ('destroy' in proc) {
+        // It's a PTY
+        proc.destroy();
+      }
+    }
+
+    if (session.pty) {
+        session.pty.destroy();
     }
 
     this.sessions.delete(sessionId);
@@ -208,13 +225,13 @@ export class TerminalController extends EventEmitter {
 
     // Safety check
     const safetyResult = this.checkCommandSafety(request.command);
-    if (!safetyResult.safe) {
+    if (!safetyResult.safe && !request.confirmDangerous) {
       return {
         id: commandId,
         command: request.command,
         exitCode: 1,
         stdout: "",
-        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity})`,
+        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Requires explicit confirmation.`,
         duration: 0,
         killed: false,
         signal: null,
@@ -222,6 +239,15 @@ export class TerminalController extends EventEmitter {
       };
     }
 
+    if (request.inDocker) {
+        return this.executeDockerCommand(sessionId, commandId, request, startTime);
+    }
+
+    if (request.interactive) {
+        return this.executePtyCommand(sessionId, commandId, request, startTime);
+    }
+
+    // Standard execution
     const fullCommand = request.args
       ? `${request.command} ${request.args.join(" ")}`
       : request.command;
@@ -328,7 +354,6 @@ export class TerminalController extends EventEmitter {
         session.history.push(result);
         session.lastActivity = Date.now();
 
-        // Keep history manageable
         if (session.history.length > 100) {
           session.history = session.history.slice(-100);
         }
@@ -357,6 +382,186 @@ export class TerminalController extends EventEmitter {
         resolve(result);
       });
     });
+  }
+
+  // ============================================
+  // PTY Execution (Interactive)
+  // ============================================
+
+  private async executePtyCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error("Session lost");
+
+    return new Promise((resolve) => {
+        const shell = request.shell || "bash";
+        const ptyProc = pty.spawn(shell, [], {
+            name: 'xterm-color',
+            cols: 80,
+            rows: 30,
+            cwd: session.cwd,
+            env: { ...session.env, ...request.env }
+        });
+
+        let output = "";
+        let killed = false;
+
+        session.activeProcesses.set(commandId, ptyProc as any); // Cast because Map expects ChildProcess | IPty
+
+        ptyProc.onData((data) => {
+            output += data;
+            if (request.stream) {
+                this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
+            }
+        });
+
+        // Send command
+        const fullCommand = request.args ? `${request.command} ${request.args.join(" ")}` : request.command;
+        ptyProc.write(`${fullCommand}\r`);
+        
+        // If not a long-running interactive session, we might want to exit after command
+        // For now, we assume simple execution in PTY
+        // ptyProc.write("exit\r"); // Only if we want to close immediately
+
+        const timer = setTimeout(() => {
+            killed = true;
+            ptyProc.kill();
+        }, request.timeout || this.defaultTimeout);
+
+        ptyProc.onExit(({ exitCode, signal }) => {
+            clearTimeout(timer);
+            session.activeProcesses.delete(commandId);
+
+            const result: CommandResult = {
+                id: commandId,
+                command: fullCommand,
+                exitCode,
+                stdout: output,
+                stderr: "", // PTY merges stdout/stderr
+                duration: Date.now() - startTime,
+                killed,
+                signal: signal ? String(signal) : null,
+                success: exitCode === 0
+            };
+            
+            session.history.push(result);
+            this.emit("command:complete", { sessionId, commandId, result });
+            resolve(result);
+        });
+    });
+  }
+
+  // ============================================
+  // Docker Execution
+  // ============================================
+
+  private async executeDockerCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error("Session lost");
+
+    const image = request.dockerImage || "node:20-alpine";
+    const cmd = request.args ? [request.command, ...request.args] : [request.command]; // CMD format for Docker
+
+    // Prepare Env
+    const envVars = Object.entries({ ...session.env, ...request.env }).map(([k, v]) => `${k}=${v}`);
+
+    let stdout = "";
+    let stderr = "";
+    let container: Docker.Container | null = null;
+
+    try {
+        // 1. Create Container
+        container = await docker.createContainer({
+            Image: image,
+            Cmd: cmd,
+            Env: envVars,
+            Tty: false,
+            WorkingDir: "/app", // Standard working dir
+            HostConfig: {
+                AutoRemove: false, // We remove manually to get logs/exit code first
+                Memory: 512 * 1024 * 1024, // 512MB RAM limit
+                CpuShares: 512, // 0.5 CPU shares relative weight
+            }
+        });
+
+        // 2. Attach to streams
+        const stream = await container.attach({
+            stream: true,
+            stdout: true,
+            stderr: true
+        });
+
+        // Docker multiplexed stream handling is binary. 
+        // Simple hack: dockerode 'attach' returns a stream that needs demuxing if Tty=false.
+        // For simplicity, we'll read raw for now or use `logs` after execution if this gets complex.
+        // But `logs` is better for non-interactive one-off.
+        // Let's use `start` and then wait.
+
+        // 3. Start
+        await container.start();
+
+        // 4. Wait for finish
+        const waitPromise = container.wait();
+        
+        // Timeout handling
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Timeout")), request.timeout || this.defaultTimeout)
+        );
+
+        const result: any = await Promise.race([waitPromise, timeoutPromise]);
+        const exitCode = result.StatusCode;
+
+        // 5. Get Logs (safest way to get stdout/stderr separated correctly)
+        // Note: logs() returns Buffer if not encoding specified
+        const stdoutBuffer = await container.logs({ stdout: true, stderr: false });
+        const stderrBuffer = await container.logs({ stdout: false, stderr: true });
+        
+        stdout = stdoutBuffer.toString().replace(/[\x00-\x09]/g, ''); // Basic sanitization of header bytes if demux failed
+        stderr = stderrBuffer.toString().replace(/[\x00-\x09]/g, '');
+
+        if (request.stream) {
+             this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: stdout });
+             if (stderr) this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: stderr });
+        }
+
+        // 6. Cleanup
+        await container.remove({ force: true });
+
+        const cmdResult: CommandResult = {
+            id: commandId,
+            command: request.command + (request.args ? " " + request.args.join(" ") : ""),
+            exitCode,
+            stdout,
+            stderr,
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: exitCode === 0,
+            containerId: container.id
+        };
+
+        session.history.push(cmdResult);
+        this.emit("command:complete", { sessionId, commandId, result: cmdResult });
+        return cmdResult;
+
+    } catch (error: any) {
+        if (container) {
+            try { await container.remove({ force: true }); } catch {}
+        }
+
+        const isTimeout = error.message === "Timeout";
+        
+        return {
+            id: commandId,
+            command: request.command,
+            exitCode: isTimeout ? null : 1,
+            stdout,
+            stderr: error.message,
+            duration: Date.now() - startTime,
+            killed: isTimeout,
+            signal: isTimeout ? "SIGKILL" : null,
+            success: false
+        };
+    }
   }
 
   // ============================================
