@@ -8,6 +8,8 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache libc6-compat python3 make g++
 COPY package.json package-lock.json ./
+# `npm ci` runs `postinstall`, so ensure any referenced scripts exist in this stage.
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
 RUN npm ci
 
 # ============================================
