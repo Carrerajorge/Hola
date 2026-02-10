@@ -14,6 +14,7 @@ export type SessionUser = {
 
 export function buildSessionUserFromDbUser(dbUser: any): SessionUser {
   return {
+    id: String(dbUser.id),
     claims: {
       sub: String(dbUser.id),
       email: dbUser.email ?? null,

@@ -4442,6 +4442,10 @@ export function ChatInterface({
             // If image generation fails, continue with normal chat to explain
             console.error("Image generation failed:", imgError);
           }
+        }
+
+        // ── SSE STREAMING (runs for ALL messages, not just image fallback) ──
+        {
           const fileContents = currentUploadedFiles
             .filter(f => f.content && f.status === "ready")
             .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)

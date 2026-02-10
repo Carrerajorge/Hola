@@ -8,7 +8,7 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 horas
 async function cleanupDirectory(dirPath: string) {
   try {
     const fullPath = path.resolve(process.cwd(), dirPath);
-    
+
     // Check if dir exists
     try {
       await fs.access(fullPath);
@@ -22,25 +22,25 @@ async function cleanupDirectory(dirPath: string) {
 
     for (const file of files) {
       if (file === ".gitkeep") continue;
-      
+
       const filePath = path.join(fullPath, file);
       try {
         const stats = await fs.stat(filePath);
         if (now - stats.mtimeMs > MAX_AGE_MS) {
           // Es viejo, borrar
           if (stats.isDirectory()) {
-             // Opcional: borrar subdirectorios viejos recursivamente si se desea
-             // await fs.rm(filePath, { recursive: true, force: true });
+            // Opcional: borrar subdirectorios viejos recursivamente si se desea
+            // await fs.rm(filePath, { recursive: true, force: true });
           } else {
-             await fs.unlink(filePath);
-             deletedCount++;
+            await fs.unlink(filePath);
+            deletedCount++;
           }
         }
       } catch (err) {
         console.error(`Error processing file ${filePath}:`, err);
       }
     }
-    
+
     if (deletedCount > 0) {
       Logger.info(`[Cleanup] Deleted ${deletedCount} old files from ${dirPath}`);
     }
@@ -57,7 +57,8 @@ export async function runCleanup() {
   Logger.info("[Cleanup] Finished.");
 }
 
-// Si se ejecuta directamente
-if (require.main === module) {
+// Si se ejecuta directamente (ESM-compatible)
+const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+if (isMainModule) {
   runCleanup().catch(console.error);
 }

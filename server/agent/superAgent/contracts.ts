@@ -5,6 +5,7 @@ export const IntentTypeSchema = z.enum([
   "research",
   "create_docx",
   "create_xlsx",
+  "create_pptx",
   "mixed"
 ]);
 

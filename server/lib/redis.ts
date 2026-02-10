@@ -21,26 +21,40 @@ function buildRedisClient(): Redis {
   const host = process.env.REDIS_HOST;
   const port = process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : undefined;
 
+  // Cap reconnection attempts so we don't spam logs when Redis is unavailable.
+  const MAX_RETRIES = 5;
+  const retryStrategy = (times: number) => {
+    if (times > MAX_RETRIES) {
+      // Returning null tells ioredis to stop retrying.
+      return null;
+    }
+    return Math.min(times * 500, 3000);
+  };
+
   // Prefer REDIS_URL when available (docker-compose sets this in production).
   const client = redisUrl
     ? new Redis(redisUrl, {
-        // BullMQ and other libs rely on unlimited retries per request.
-        maxRetriesPerRequest: null,
-        lazyConnect: true,
-        enableReadyCheck: true,
-      })
+      maxRetriesPerRequest: null,
+      lazyConnect: true,
+      enableReadyCheck: true,
+      retryStrategy,
+    })
     : new Redis({
-        host: host || '127.0.0.1',
-        port: port || 6379,
-        password: process.env.REDIS_PASSWORD || undefined,
-        maxRetriesPerRequest: null,
-        lazyConnect: true,
-        enableReadyCheck: true,
-      });
+      host: host || '127.0.0.1',
+      port: port || 6379,
+      password: process.env.REDIS_PASSWORD || undefined,
+      maxRetriesPerRequest: null,
+      lazyConnect: true,
+      enableReadyCheck: true,
+      retryStrategy,
+    });
 
+  let errorLoggedOnce = false;
   client.on('error', (err) => {
-    // Keep logs terse; transient connection errors can happen during deploys.
-    logger.error('Redis error', { error: err?.message || String(err) });
+    if (!errorLoggedOnce) {
+      logger.error('Redis unavailable — will degrade gracefully', { error: err?.message || String(err) });
+      errorLoggedOnce = true;
+    }
   });
 
   return client;

@@ -551,6 +551,123 @@ function formatAuthorsChicago(authors: Author[]): string {
   return `${authors[0].name} et al.`;
 }
 
+export function generateVancouverCitation(paper: AcademicPaper): string {
+  // Vancouver (ICMJE) numbered style — used in biomedical sciences
+  const authors = formatAuthorsVancouver(paper.authors);
+  const title = paper.title.endsWith(".") ? paper.title : `${paper.title}.`;
+  const journal = paper.journal || "";
+  const year = paper.year || "n.d.";
+  const doi = paper.doi ? ` doi:${paper.doi}` : "";
+
+  if (journal) {
+    return `${authors} ${title} ${abbreviateJournal(journal)}. ${year}.${doi}`;
+  }
+  return `${authors} ${title} ${year}.${doi}`;
+}
+
+function formatAuthorsVancouver(authors: Author[]): string {
+  if (!authors || authors.length === 0) return "Unknown.";
+  if (authors.length <= 6) {
+    return authors.map(a => formatAuthorNameVancouver(a.name)).join(", ") + ".";
+  }
+  // 7+ authors: list first 6, then et al.
+  const first6 = authors.slice(0, 6).map(a => formatAuthorNameVancouver(a.name)).join(", ");
+  return `${first6}, et al.`;
+}
+
+function formatAuthorNameVancouver(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const lastName = parts[parts.length - 1];
+  const initials = parts.slice(0, -1).map(p => p.charAt(0).toUpperCase()).join("");
+  return `${lastName} ${initials}`;
+}
+
+function abbreviateJournal(journal: string): string {
+  // Simple abbreviation: remove common articles/prepositions, truncate words > 4 chars
+  return journal
+    .replace(/\b(the|of|and|in|for|on|a|an)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function generateHarvardCitation(paper: AcademicPaper): string {
+  const authors = formatAuthorsHarvard(paper.authors);
+  const year = paper.year || "n.d.";
+  const title = `'${paper.title}'`;
+  const journal = paper.journal ? `*${paper.journal}*` : "";
+  const doi = paper.doi ? `doi:${paper.doi}` : "";
+
+  return `${authors} (${year}) ${title}, ${journal}. ${doi}`.replace(/\s+/g, " ").trim();
+}
+
+function formatAuthorsHarvard(authors: Author[]): string {
+  if (!authors || authors.length === 0) return "Unknown";
+  if (authors.length === 1) return authors[0].name;
+  if (authors.length === 2) return `${authors[0].name} and ${authors[1].name}`;
+  return `${authors[0].name} et al.`;
+}
+
+export function generateIEEECitation(paper: AcademicPaper): string {
+  const authors = formatAuthorsIEEE(paper.authors);
+  const title = `"${paper.title},"`;
+  const journal = paper.journal ? `*${paper.journal}*,` : "";
+  const year = paper.year ? `${paper.year}` : "n.d.";
+  const doi = paper.doi ? `doi: ${paper.doi}.` : "";
+
+  return `${authors} ${title} ${journal} ${year}. ${doi}`.replace(/\s+/g, " ").trim();
+}
+
+function formatAuthorsIEEE(authors: Author[]): string {
+  if (!authors || authors.length === 0) return "Unknown,";
+  return authors.map(a => {
+    const parts = a.name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    const lastName = parts[parts.length - 1];
+    const initials = parts.slice(0, -1).map(p => p.charAt(0).toUpperCase() + ".").join(" ");
+    return `${initials} ${lastName}`;
+  }).join(", ") + ",";
+}
+
+/**
+ * Export papers to RIS format (Research Information Systems).
+ * Compatible with EndNote, Zotero, Mendeley, etc.
+ */
+export function exportToRIS(papers: AcademicPaper[]): string {
+  const entries: string[] = [];
+
+  for (const paper of papers) {
+    const lines: string[] = [];
+    lines.push("TY  - JOUR");
+
+    for (const author of paper.authors) {
+      lines.push(`AU  - ${author.name}`);
+    }
+
+    lines.push(`TI  - ${paper.title}`);
+
+    if (paper.journal) lines.push(`JO  - ${paper.journal}`);
+    if (paper.year) lines.push(`PY  - ${paper.year}`);
+    if (paper.abstract) lines.push(`AB  - ${paper.abstract}`);
+    if (paper.doi) lines.push(`DO  - ${paper.doi}`);
+    if (paper.url) lines.push(`UR  - ${paper.url}`);
+    if (paper.language) lines.push(`LA  - ${paper.language}`);
+
+    if (paper.keywords) {
+      for (const kw of paper.keywords) {
+        lines.push(`KW  - ${kw}`);
+      }
+    }
+
+    lines.push(`DB  - ${paper.source}`);
+    lines.push("ER  - ");
+
+    entries.push(lines.join("\n"));
+  }
+
+  return entries.join("\n\n");
+}
+
 // ============================================================================
 // EXPORT FUNCTIONS
 // ============================================================================

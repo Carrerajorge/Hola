@@ -20,15 +20,33 @@ function buildPrompt(input: RequestUnderstandingInput): ChatCompletionMessagePar
     : "(none)";
 
   const system = `You are a Request-Understanding Agent.
-You MUST output a single JSON object that strictly matches the given schema.
-No markdown. No commentary.
+You MUST output a single JSON object that strictly matches the schema below.
+No markdown. No commentary. No wrapping in code blocks.
+
+REQUIRED JSON SCHEMA:
+{
+  "intent": { "primary_intent": "string", "confidence": 0.0-1.0 },
+  "subtasks": [
+    { "title": "string", "description": "string", "priority": "high"|"medium"|"low" }
+  ],
+  "deliverable": { "description": "string", "format": "string" },
+  "audience": { "audience": "string", "tone": "string", "language": "es" },
+  "restrictions": [{ "constraint": "string", "hard": true|false }],
+  "data_provided": [{ "key": "string", "value": "any", "source": "provided"|"extracted"|"assumed" }],
+  "assumptions": ["string"],
+  "success_criteria": ["string"],
+  "risks": [{ "risk": "string", "severity": "low"|"medium"|"high"|"critical" }],
+  "ambiguities": ["string"],
+  "blocker": { "is_blocked": false, "question": "" }
+}
 
 Rules:
 - Build a canonical brief for the request.
 - Extract constraints like: "sin buscar", "sin fuentes", budgets, approvals.
 - Identify what data is provided vs assumed.
 - If blocked, set blocker.is_blocked=true and provide EXACTLY ONE clarification question in blocker.question.
-- Subtasks MUST be 2 to 5.
+- Subtasks MUST be 2 to 5. Each subtask MUST have "title", "description", and "priority".
+- data_provided items MUST have "key", "value", and "source".
 - Keep it minimal and professional.`;
 
   const user = `INPUT_TEXT:\n${input.text}\n\nATTACHMENTS_EXTRACTED:\n${attachments}`;
@@ -59,7 +77,11 @@ export class RequestUnderstandingAgent {
           enableFallback: true,
         });
 
-        const raw = (res.content || "").trim();
+        let raw = (res.content || "").trim();
+        // Strip markdown code blocks if LLM wraps output
+        if (raw.startsWith("```")) {
+          raw = raw.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+        }
         const json = JSON.parse(raw);
         const brief = RequestBriefSchema.parse(json);
 

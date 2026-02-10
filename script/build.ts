@@ -24,7 +24,9 @@ async function bumpBuiltSwCleanupVersion() {
     src = await readFile(swCleanupPath, "utf-8");
   }
 
-  const version = `build-${Date.now()}`;
+  // Prefer an explicit version injected at build time (e.g. git SHA via Docker build-arg).
+  // Fallback to a timestamp so the cleanup script still changes between builds.
+  const version = process.env.VITE_APP_VERSION || process.env.APP_VERSION || `build-${Date.now()}`;
   const next = src.replace(
     /var APP_VERSION = '([^']*)';/,
     `var APP_VERSION = '${version}';`

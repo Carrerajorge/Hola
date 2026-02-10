@@ -290,7 +290,9 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
   const sanitized = sanitizeWebQuery(query);
   if (!sanitized) return { query, results: [], contents: [] };
   const results: SearchResult[] = [];
-  const seenDomains = new Set<string>();
+  const domainCounts = new Map<string, number>();
+  const seenUrls = new Set<string>();
+  const MAX_PER_DOMAIN = 5; // Allow up to 5 results per domain for more coverage
 
   // Helper to extract domain from URL
   const extractDomain = (url: string): string => {
@@ -301,32 +303,12 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
     }
   };
 
-  try {
-    // Request more results than needed to ensure diversity after deduplication
-    const requestCount = Math.min(maxResults * 2, 30);
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(sanitized)}`;
-
-    // IMPORTANT: Protect the initial search request with a hard timeout.
-    // If this hangs, /api/chat/stream never flushes headers and the UI stays stuck on "Buscando".
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-
-    const response = await fetch(searchUrl, {
-      headers: getHeaders(),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.status}`);
-    }
-
-    const html = await response.text();
+  // Parse results from a DuckDuckGo HTML page
+  const parseDDGPage = (html: string): void => {
     const dom = new JSDOM(html);
     const doc = dom.window.document;
 
-    for (const result of Array.from(doc.querySelectorAll(".result")).slice(0, requestCount)) {
+    for (const result of Array.from(doc.querySelectorAll(".result"))) {
       if (results.length >= maxResults) break;
 
       const titleEl = result.querySelector(".result__title a");
@@ -341,12 +323,14 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
           if (match) url = decodeURIComponent(match[1]);
         }
 
-        if (url && !url.includes("duckduckgo.com")) {
+        if (url && !url.includes("duckduckgo.com") && !seenUrls.has(url)) {
           const domain = extractDomain(url);
 
-          // Skip duplicate domains to ensure source diversity
-          if (seenDomains.has(domain)) continue;
-          seenDomains.add(domain);
+          // Allow up to MAX_PER_DOMAIN results per domain for broader coverage
+          const count = domainCounts.get(domain) || 0;
+          if (count >= MAX_PER_DOMAIN) continue;
+          domainCounts.set(domain, count + 1);
+          seenUrls.add(url);
 
           results.push({
             title: titleEl.textContent?.trim() || "",
@@ -356,20 +340,119 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
         }
       }
     }
+  };
+
+  // Fetch a single DuckDuckGo search page with timeout
+  const fetchDDGPage = async (pageUrl: string, timeoutMs: number = 4000): Promise<string | null> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(pageUrl, {
+        headers: getHeaders(),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!response.ok) return null;
+      return await response.text();
+    } catch {
+      clearTimeout(timeout);
+      return null;
+    }
+  };
+
+  try {
+    // Page 1: Initial search
+    const baseUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(sanitized)}`;
+    const page1Html = await fetchDDGPage(baseUrl);
+    if (page1Html) {
+      parseDDGPage(page1Html);
+    }
+
+    // Pages 2+ : DuckDuckGo HTML paginates via POST with form data (s=offset, dc=offset+1)
+    // Each page returns ~25-30 results. Fetch more pages concurrently if we need more results.
+    const resultsAfterPage1 = results.length;
+    if (results.length < maxResults) {
+      const pagesToFetch: number[] = [];
+      const resultsPerPage = 30;
+      for (let offset = resultsPerPage; offset < maxResults * 2; offset += resultsPerPage) {
+        pagesToFetch.push(offset);
+        if (pagesToFetch.length >= 3) break; // Max 3 extra pages (total ~120 raw results)
+      }
+
+      const extraPages = await Promise.allSettled(
+        pagesToFetch.map(async (offset) => {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          try {
+            const formBody = `q=${encodeURIComponent(sanitized)}&s=${offset}&dc=${offset + 1}&o=json&api=d.js`;
+            const response = await fetch("https://html.duckduckgo.com/html/", {
+              method: "POST",
+              headers: {
+                ...getHeaders(),
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: formBody,
+              signal: controller.signal,
+            });
+            clearTimeout(timeout);
+            if (!response.ok) return null;
+            return await response.text();
+          } catch {
+            clearTimeout(timeout);
+            return null;
+          }
+        })
+      );
+
+      for (const pageResult of extraPages) {
+        if (results.length >= maxResults) break;
+        if (pageResult.status === "fulfilled" && pageResult.value) {
+          parseDDGPage(pageResult.value);
+        }
+      }
+    }
+    console.log(`[WebSearch] Pagination complete: page1=${resultsAfterPage1}, total=${results.length}/${maxResults}`);
   } catch (error) {
     console.error("Search error:", error);
   }
 
-  const contents: { url: string; title: string; content: string; imageUrl?: string; siteName?: string; publishedDate?: string }[] = [];
+  console.log(`[WebSearch] Total unique results: ${results.length}, unique domains: ${domainCounts.size}`);
 
-  // ULTRA-FAST: Only fetch metadata (no full page content) with 2s total timeout
-  const TOTAL_FETCH_TIMEOUT = 2000;
+  const contents: { url: string; title: string; content: string; imageUrl?: string; siteName?: string; publishedDate?: string }[] = [];
 
   // Create metadata map to enrich results (include canonicalUrl)
   const metadataMap = new Map<string, { imageUrl?: string; siteName?: string; publishedDate?: string; canonicalUrl?: string }>();
 
-  // Only fetch metadata (fast) not full content (slow) for top results
-  const metadataPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
+  // Fetch FULL page content for top 5 results (for LLM context), metadata-only for the rest
+  const FULL_CONTENT_COUNT = 5;
+  const FULL_CONTENT_MAX_CHARS = 1500; // Enough text per source for meaningful LLM context
+  const TOTAL_FETCH_TIMEOUT = 10000; // Allow more time for 50+ results
+
+  // Phase 1: Fetch full content for top results (these give the LLM real information)
+  const fullContentPromises = results.slice(0, FULL_CONTENT_COUNT).map(async (result) => {
+    try {
+      const page = await fetchPageContent(result.url);
+      if (page) {
+        metadataMap.set(result.url, {
+          imageUrl: page.imageUrl,
+          siteName: page.siteName,
+          publishedDate: page.publishedDate,
+          canonicalUrl: page.canonicalUrl
+        });
+        contents.push({
+          url: result.url,
+          title: page.title || result.title,
+          content: (page.text || result.snippet || "").slice(0, FULL_CONTENT_MAX_CHARS),
+          imageUrl: page.imageUrl,
+          siteName: page.siteName,
+          publishedDate: page.publishedDate
+        });
+      }
+    } catch { }
+  });
+
+  // Phase 2: Fetch metadata-only for remaining results (fast, for UI enrichment)
+  const metadataPromises = results.slice(FULL_CONTENT_COUNT, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
     try {
       const metadata = await fetchPageMetadata(result.url);
       if (metadata) {
@@ -382,7 +465,7 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
         contents.push({
           url: result.url,
           title: metadata.title || result.title,
-          content: result.snippet?.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH) || "",
+          content: result.snippet?.slice(0, LIMITS.MAX_CONTENT_LENGTH) || "",
           imageUrl: metadata.imageUrl,
           siteName: metadata.siteName,
           publishedDate: metadata.publishedDate
@@ -391,9 +474,9 @@ export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_S
     } catch { }
   });
 
-  // Race against aggressive timeout
+  // Race all fetches against timeout
   await Promise.race([
-    Promise.allSettled(metadataPromises),
+    Promise.allSettled([...fullContentPromises, ...metadataPromises]),
     new Promise<void>(resolve => setTimeout(resolve, TOTAL_FETCH_TIMEOUT))
   ]);
 

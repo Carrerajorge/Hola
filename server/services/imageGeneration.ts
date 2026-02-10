@@ -1,7 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI from "openai";
 
-const geminiApiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "";
+// Keep env var resolution consistent with the rest of the codebase (chat uses GEMINI_API_KEY or GOOGLE_API_KEY).
+const geminiApiKey =
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_API_KEY ||
+  process.env.AI_INTEGRATIONS_GEMINI_API_KEY ||
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+  "";
 const xaiApiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY || "";
 
 // Lazy initialization to avoid errors during import

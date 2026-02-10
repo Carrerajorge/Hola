@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from "docx";
+import pptxgenImport from "pptxgenjs";
+const PptxGenJS = (pptxgenImport as any).default || pptxgenImport;
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -40,6 +42,19 @@ export interface DocxSpec {
     author?: string;
     subject?: string;
     keywords?: string[];
+  };
+}
+
+export interface PptxSpec {
+  title: string;
+  slides: Array<{
+    title: string;
+    bullets: string[];
+    notes?: string;
+  }>;
+  metadata?: {
+    author?: string;
+    subject?: string;
   };
 }
 
@@ -242,6 +257,71 @@ export async function createDocx(spec: DocxSpec): Promise<ArtifactMeta> {
   return {
     id,
     type: "docx",
+    name: filename,
+    path: filepath,
+    downloadUrl: `/api/super/artifacts/${id}/download`,
+    size: stats.size,
+    createdAt: Date.now(),
+  };
+}
+
+export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
+  await ensureArtifactsDir();
+
+  const id = randomUUID();
+  const filename = `${spec.title.replace(/[^a-zA-Z0-9]/g, "_")}_${id.substring(0, 8)}.pptx`;
+  const filepath = path.join(ARTIFACTS_DIR, filename);
+
+  const pptx = new PptxGenJS();
+  pptx.author = spec.metadata?.author || "IliaGPT Super Agent";
+  pptx.subject = spec.metadata?.subject || spec.title;
+  pptx.title = spec.title;
+
+  // Title slide
+  const titleSlide = pptx.addSlide();
+  titleSlide.addText(spec.title, {
+    x: 0.5, y: 1.5, w: 9, h: 2,
+    fontSize: 32, bold: true, color: "1A1A2E",
+    align: "center", valign: "middle",
+  });
+  titleSlide.addText(spec.metadata?.author || "IliaGPT Super Agent", {
+    x: 0.5, y: 4, w: 9, h: 0.5,
+    fontSize: 14, color: "666666",
+    align: "center",
+  });
+
+  // Content slides
+  for (const slideSpec of spec.slides) {
+    const slide = pptx.addSlide();
+
+    slide.addText(slideSpec.title, {
+      x: 0.5, y: 0.3, w: 9, h: 0.8,
+      fontSize: 24, bold: true, color: "1A1A2E",
+    });
+
+    const bulletText = slideSpec.bullets.map(b => ({
+      text: b,
+      options: { fontSize: 16, color: "333333", bullet: true, breakLine: true } as any,
+    }));
+
+    slide.addText(bulletText, {
+      x: 0.5, y: 1.3, w: 9, h: 3.8,
+      valign: "top",
+    });
+
+    if (slideSpec.notes) {
+      slide.addNotes(slideSpec.notes);
+    }
+  }
+
+  const pptxBuffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
+  await fs.writeFile(filepath, pptxBuffer);
+
+  const stats = await fs.stat(filepath);
+
+  return {
+    id,
+    type: "pptx",
     name: filename,
     path: filepath,
     downloadUrl: `/api/super/artifacts/${id}/download`,

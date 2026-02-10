@@ -122,6 +122,7 @@ import { errorHandler } from "./middleware/error";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
+import openClawRouter from "./routes/openClawRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -605,6 +606,9 @@ export async function registerRoutes(
   app.use("/api/browser-control", createBrowserControlRouter());
   app.use("/api/terminal", createTerminalControlRouter());
   app.use("/api/workflows", createWorkflowRouter());
+
+  // ===== OpenClaw 500 Capabilities Verification =====
+  app.use("/api/openclaw", openClawRouter);
 
   // ===== Run Detail Endpoints =====
   app.use("/api/runs", createRunRouter());

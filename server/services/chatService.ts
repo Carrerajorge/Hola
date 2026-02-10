@@ -1669,15 +1669,17 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         }
 
         if (searchResults.contents.length > 0) {
-          webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
+          webSearchInfo = "\n\n---\nTienes acceso a búsqueda web. A continuación se muestran los resultados de búsqueda actualizados que DEBES usar para responder al usuario. Sintetiza la información, cita las fuentes con [número] y proporciona una respuesta completa basada en estos datos:\n\n**Información de Internet (actualizada):**\n" +
             searchResults.contents.map((content, i) =>
               `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
-            ).join("\n\n");
+            ).join("\n\n") +
+            "\n\nIMPORTANTE: Usa la información anterior para dar una respuesta completa y útil. NO digas que no tienes acceso a internet o noticias en tiempo real. Los datos anteriores son reales y actualizados.";
         } else if (searchResults.results.length > 0) {
-          webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
+          webSearchInfo = "\n\n---\nTienes acceso a búsqueda web. A continuación se muestran los resultados de búsqueda actualizados que DEBES usar para responder al usuario. Sintetiza la información y cita las fuentes con [número]:\n\n**Resultados de búsqueda web:**\n" +
             searchResults.results.map((r, i) =>
               `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
-            ).join("\n");
+            ).join("\n") +
+            "\n\nIMPORTANTE: Usa la información anterior para dar una respuesta completa y útil. NO digas que no tienes acceso a internet o noticias en tiempo real. Los datos anteriores son reales y actualizados.";
         }
       } catch (error) {
         await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
@@ -1974,6 +1976,11 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
     : (gptSystemPrompt
       ? `${gptSystemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
       : `${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`);
+
+  console.log(`[ChatService:Debug] webSearchInfo length: ${webSearchInfo.length}, systemContent length: ${systemContent.length}, has webSearch: ${webSearchInfo.length > 0}`);
+  if (webSearchInfo.length > 0) {
+    console.log(`[ChatService:Debug] webSearchInfo preview: ${webSearchInfo.substring(0, 200)}`);
+  }
 
   const systemMessage: ChatMessage = {
     role: "system",

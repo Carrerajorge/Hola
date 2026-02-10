@@ -7,7 +7,7 @@ export const BriefIntentSchema = z.object({
 
 export const BriefSubTaskSchema = z.object({
   title: z.string().min(1),
-  description: z.string().min(1),
+  description: z.string().default(""),
   priority: z.enum(["high", "medium", "low"]).default("medium"),
 });
 
@@ -28,7 +28,7 @@ export const BriefConstraintSchema = z.object({
 });
 
 export const BriefDataPointSchema = z.object({
-  key: z.string().min(1),
+  key: z.string().default("unknown"),
   value: z.any(),
   source: z.enum(["provided", "extracted", "assumed"]).default("provided"),
 });

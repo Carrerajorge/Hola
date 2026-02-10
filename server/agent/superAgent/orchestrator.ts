@@ -13,7 +13,7 @@ import { parsePromptToContract, validateContract, repairContract } from "./contr
 import { shouldResearch } from "./researchPolicy";
 import { collectSignals, SignalsProgress } from "./signalsPipeline";
 import { deepDiveSources, DeepDiveProgress, ExtractedContent } from "./deepDivePipeline";
-import { createXlsx, createDocx, storeArtifactMeta, packCitations, XlsxSpec, DocxSpec } from "./artifactTools";
+import { createXlsx, createDocx, createPptx, storeArtifactMeta, packCitations, XlsxSpec, DocxSpec, PptxSpec } from "./artifactTools";
 import { evaluateQualityGate, shouldRetry, formatGateReport } from "./qualityGate";
 import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, ScopusArticle } from "./scopusClient";
 import { searchWos, WosArticle } from "./wosClient";
@@ -131,16 +131,26 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const hasSearch = spec.tasks.some(t => t.verb.includes("SEARCH"));
     const hasDoc = spec.tasks.some(t => t.verb.includes("CREATE_DOCUMENT") || t.verb.includes("DOC"));
     const hasXls = spec.tasks.some(t => t.verb.includes("CREATE_SPREADSHEET") || t.verb.includes("EXCEL"));
+    const hasPpt = spec.tasks.some(t => t.verb.includes("CREATE_PRESENTATION") || t.verb.includes("PRESENTATION") || t.verb.includes("PPT") || t.verb.includes("SLIDES"));
 
-    if (hasDoc && hasXls) intent = "mixed";
+    // Also detect pptx from original prompt as fallback
+    const promptLower = originalPrompt.toLowerCase();
+    const hasPptFromPrompt = !hasPpt && /\b(powerpoint|pptx|presentaci[oó]n|slides?|diapositivas?)\b/i.test(promptLower);
+
+    const effectiveHasPpt = hasPpt || hasPptFromPrompt;
+
+    const multiFormat = [hasDoc, hasXls, effectiveHasPpt].filter(Boolean).length > 1;
+    if (multiFormat) intent = "mixed";
+    else if (effectiveHasPpt) intent = "create_pptx";
     else if (hasDoc) intent = "create_docx";
     else if (hasXls) intent = "create_xlsx";
     else if (hasSearch) intent = "research";
 
     // Extract requirements
     const mustCreate: ("docx" | "xlsx" | "pptx")[] = [];
-    if (hasDoc) mustCreate.push("docx");
+    if (hasDoc && !effectiveHasPpt) mustCreate.push("docx");
     if (hasXls) mustCreate.push("xlsx");
+    if (effectiveHasPpt) mustCreate.push("pptx");
 
     // Extract quantity
     let minSources = 0;
@@ -1017,6 +1027,47 @@ export class SuperAgentOrchestrator extends EventEmitter {
             success: true,
             output: { artifact_id: artifact.id },
           });
+        } else if (docType === "pptx") {
+          this.emitSSE("progress", {
+            phase: "export",
+            status: "generating",
+            message: "Generando presentación PowerPoint...",
+            document_type: "pptx",
+          });
+          this.emitSSE("artifact_generating", {
+            artifact_type: "pptx",
+            filename: "presentation.pptx",
+          });
+          const spec = this.buildPptxSpec();
+          const artifact = await createPptx(spec);
+          storeArtifactMeta(artifact);
+
+          this.state.artifacts.push({
+            id: artifact.id,
+            type: "pptx",
+            name: artifact.name,
+            download_url: artifact.downloadUrl,
+          });
+
+          this.emitSSE("artifact", artifact);
+          this.emitSSE("progress", {
+            phase: "export",
+            status: "completed",
+            message: `PowerPoint generado: ${artifact.name}`,
+            document_type: "pptx",
+            artifact_id: artifact.id,
+          });
+          this.emitSSE("tool_result", {
+            tool_call_id: `tc_create_${docType}`,
+            success: true,
+            output: { artifact_id: artifact.id, download_url: artifact.downloadUrl },
+          });
+
+          this.state.tool_results.push({
+            tool_call_id: `tc_create_${docType}`,
+            success: true,
+            output: { artifact_id: artifact.id },
+          });
         }
       } catch (error: any) {
         this.emitSSE("tool_result", {
@@ -1295,6 +1346,57 @@ export class SuperAgentOrchestrator extends EventEmitter {
       metadata: {
         author: "IliaGPT Super Agent",
         subject: this.state?.contract.original_prompt,
+      },
+    };
+  }
+
+  private buildPptxSpec(): PptxSpec {
+    const sources = this.state?.sources || [];
+    const deepSources = this.state?.deep_sources || [];
+    const prompt = this.state?.contract.original_prompt || "Presentation";
+
+    const slides: PptxSpec["slides"] = [];
+
+    // Summary slide
+    slides.push({
+      title: "Resumen",
+      bullets: [
+        `Investigación: "${prompt.substring(0, 80)}"`,
+        `Fuentes analizadas: ${sources.length}`,
+        `Fuentes con análisis profundo: ${deepSources.length}`,
+      ],
+    });
+
+    // Key findings slides from deep sources
+    const claims = deepSources.flatMap(s => (s.claims || []).map(c => ({ claim: c, source: s.title })));
+    for (let i = 0; i < Math.min(claims.length, 15); i += 5) {
+      const chunk = claims.slice(i, i + 5);
+      slides.push({
+        title: `Hallazgos Clave ${Math.floor(i / 5) + 1}`,
+        bullets: chunk.map(c => c.claim.substring(0, 200)),
+      });
+    }
+
+    // Top sources slide
+    slides.push({
+      title: "Fuentes Principales",
+      bullets: sources.slice(0, 8).map((s, i) => `${i + 1}. ${s.title.substring(0, 80)} (${s.domain})`),
+    });
+
+    // Ensure at least 3 slides
+    if (slides.length < 3) {
+      slides.push({
+        title: "Fuentes Adicionales",
+        bullets: sources.slice(0, 5).map(s => `${s.title.substring(0, 100)} — ${s.url}`),
+      });
+    }
+
+    return {
+      title: prompt.substring(0, 100),
+      slides,
+      metadata: {
+        author: "IliaGPT Super Agent",
+        subject: prompt,
       },
     };
   }

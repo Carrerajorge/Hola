@@ -314,6 +314,9 @@ export function useSettings(userId?: string | null) {
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSyncedRef = useRef<string>('');
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
+  // Ref to track current settings without causing callback recreation
+  const settingsRef = useRef<UserSettings>(settings);
+  settingsRef.current = settings;
 
   const syncSettingsToServer = useCallback(async (settingsToSync?: UserSettings): Promise<boolean> => {
     if (!userId) {
@@ -321,9 +324,9 @@ export function useSettings(userId?: string | null) {
       return false;
     }
 
-    const currentSettings = settingsToSync || settings;
+    const currentSettings = settingsToSync || settingsRef.current;
     const apiSettings = mapLocalToApiSettings(currentSettings);
-    
+
     setIsSyncing(true);
     try {
       const success = await saveUserSettings(userId, apiSettings);
@@ -334,7 +337,7 @@ export function useSettings(userId?: string | null) {
     } finally {
       setIsSyncing(false);
     }
-  }, [settings, userId]);
+  }, [userId]);
 
   const loadSettingsFromServer = useCallback(async (): Promise<boolean> => {
     if (!userId) {
@@ -352,14 +355,14 @@ export function useSettings(userId?: string | null) {
           saveSettings(merged);
           return merged;
         });
-        lastSyncedRef.current = JSON.stringify(mapLocalToApiSettings({ ...settings, ...mappedSettings }));
+        lastSyncedRef.current = JSON.stringify(mapLocalToApiSettings({ ...settingsRef.current, ...mappedSettings }));
         return true;
       }
       return false;
     } finally {
       setIsSyncing(false);
     }
-  }, [settings, userId]);
+  }, [userId]);
 
   const debouncedSyncToServer = useCallback((newSettings: UserSettings) => {
     if (syncTimeoutRef.current) {

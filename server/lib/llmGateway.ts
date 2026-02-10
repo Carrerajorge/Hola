@@ -172,7 +172,7 @@ function detectProviderFromModel(model: string | undefined): LLMProvider | null 
   if (/deepseek/i.test(model)) {
     return "deepseek";
   }
-  if (/^(gpt-|o\\d|chatgpt)/i.test(model)) {
+  if (/^(gpt-|o\d|chatgpt)/i.test(model)) {
     return "openai";
   }
 

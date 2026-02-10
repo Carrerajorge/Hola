@@ -58,14 +58,16 @@ const PromptTemplatesDialogLazy = lazy(() =>
 export default function Home() {
   const isMobile = useIsMobile();
   const [location, setLocation] = useLocation();
-  const { isAuthenticated, isLoading, isReady } = useAuth();
+  const { user, isLoading, isReady } = useAuth();
 
 
   useEffect(() => {
-    if (isReady && !isLoading && !isAuthenticated) {
+    // Allow anonymous/guest sessions to use the chat UI. Only redirect when we
+    // couldn't establish any identity at all (e.g. auth fetch and anon identity failed).
+    if (isReady && !isLoading && !user) {
       setLocation("/welcome");
     }
-  }, [isAuthenticated, isLoading, isReady, setLocation]);
+  }, [user, isLoading, isReady, setLocation]);
 
   useEffect(() => {
     useMediaLibrary.getState().preload();

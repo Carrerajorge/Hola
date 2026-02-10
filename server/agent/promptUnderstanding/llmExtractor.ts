@@ -103,7 +103,7 @@ OUTPUT JSON FORMAT:
   "tasks": [
     {
       "id": "task_1",
-      "verb": "SEARCH_ACADEMIC" | "SEARCH_WEB" | "CREATE_DOCUMENT" | "CREATE_SPREADSHEET" | "ANALYZE" | "TRANSLATE",
+      "verb": "SEARCH_ACADEMIC" | "SEARCH_WEB" | "CREATE_DOCUMENT" | "CREATE_SPREADSHEET" | "CREATE_PRESENTATION" | "ANALYZE" | "TRANSLATE",
       "object": "string (what to act on)",
       "tool_hints": ["string (suggested tool name)"],
       "params": [{"name": "string", "value": "string"}],

@@ -17,7 +17,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+ARG APP_VERSION=dev
 ENV NODE_ENV=production
+ENV VITE_APP_VERSION=$APP_VERSION
 # Build client and server
 RUN npm run build
 

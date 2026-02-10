@@ -62,6 +62,8 @@ else
 fi
 git pull --ff-only origin main
 echo "▸ Current commit: $(git rev-parse --short HEAD)"
+export APP_VERSION="$(git rev-parse --short HEAD)"
+echo "▸ APP_VERSION: ${APP_VERSION}"
 
 # docker compose expands ${VARS} from process env (and .env), not from env_file.
 if [ -f .env.production ]; then

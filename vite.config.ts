@@ -32,6 +32,9 @@ export default defineConfig(async () => {
       metaImagesPlugin(),
       VitePWA({
         registerType: "autoUpdate",
+        // Production incident fix: unregister SW + clear caches so users cannot get stuck on stale builds.
+        // This disables PWA caching in prod while we stabilize updates.
+        selfDestroying: isProd,
         includeAssets: ["favicon.ico", "robots.txt", "apple-touch-icon.png"],
         manifest: {
           name: "MICHAT PRO - AI Assistant",

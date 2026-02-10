@@ -352,58 +352,14 @@ export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRe
   return (
     <>
       <div className="relative my-4" data-testid="news-cards-container">
-        {/* Header with toolbar and sources badges */}
-        <div className="flex items-center justify-between mb-3 gap-4">
-          {/* Left side: Title and action buttons */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">
-              Noticias relacionadas
-            </span>
-            <span className="text-xs text-muted-foreground">
-              ({sources.length} resultados)
-            </span>
-          </div>
-          
-          {/* Right side: Source badges + Fuentes button */}
-          <div className="flex items-center gap-3">
-            {/* Source badges (show first 5 unique sources) */}
-            <div className="hidden sm:flex items-center gap-1">
-              {uniqueSources.slice(0, 5).map((source, idx) => (
-                <SourceBadge key={`badge-${idx}`} source={source} />
-              ))}
-              {uniqueSources.length > 5 && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => setShowSourcesPanel(true)}
-                        className="w-6 h-6 rounded-full border border-border bg-muted hover:border-primary transition-all flex items-center justify-center text-xs font-medium text-muted-foreground"
-                      >
-                        +{uniqueSources.length - 5}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">
-                      Ver todas las fuentes
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-            
-            {/* Fuentes button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowSourcesPanel(true)}
-              className="text-xs gap-1.5"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              Fuentes
-              <span className="ml-1 px-1.5 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-medium">
-                {uniqueSources.length}
-              </span>
-            </Button>
-          </div>
+        {/* Header */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-sm font-medium text-foreground">
+            Noticias relacionadas
+          </span>
+          <span className="text-xs text-muted-foreground">
+            ({sources.length} resultados)
+          </span>
         </div>
         
         {/* Horizontal scrollable cards container */}
@@ -448,8 +404,55 @@ export const NewsCards = memo(function NewsCards({ sources, maxDisplay = 8, onRe
             </button>
           )}
         </div>
+
+        {/* News summary with direct links */}
+        <div className="mt-3 space-y-1.5">
+          {displaySources.map((source, idx) => {
+            const domain = source.domain?.replace(/^www\./, "") || "";
+            return (
+              <a
+                key={`summary-${idx}`}
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-muted/60 transition-colors group text-left"
+              >
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                  alt=""
+                  className="w-4 h-4 rounded-full mt-0.5 flex-shrink-0"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-xs font-medium text-foreground truncate group-hover:text-primary transition-colors min-w-0">
+                      {source.title || domain}
+                    </span>
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-shrink-0 text-sm leading-none hover:scale-110 transition-transform"
+                      title={source.url}
+                      onClick={(e) => e.stopPropagation()}
+                    >🔗</a>
+                  </div>
+                  {source.snippet && (
+                    <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                      {source.snippet}
+                    </p>
+                  )}
+                  <span className="text-[10px] text-muted-foreground/60">
+                    {domain}
+                    {source.date && ` · ${formatRelativeDate(source.date, { timeZone: platformTimeZone, dateFormat: platformDateFormat })}`}
+                  </span>
+                </div>
+              </a>
+            );
+          })}
+        </div>
       </div>
-      
+
       {/* Sources panel overlay */}
       {showSourcesPanel && (
         <>

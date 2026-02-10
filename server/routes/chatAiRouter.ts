@@ -880,13 +880,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const userProfile = userSettings?.userProfile || null;
 
       let detectedWebSources: any[] = [];
+      let webSearchContextForLLM = ""; // Will be injected into system prompt
 
       const requestedWebSearch = !!forceWebSearch || !!webSearchAuto;
       const allowAutoSearch = featureFlags.webSearchAuto && !requestedWebSearch && !hasAnyAttachments;
-      // In fast lane, skip auto-search entirely (only honor explicit forceWebSearch)
-      const shouldSearch = latencyMode === 'fast'
-        ? !!forceWebSearch
-        : (requestedWebSearch || allowAutoSearch);
+      // Allow web search in ALL latency lanes when auto-search is enabled
+      // Previously fast lane blocked auto-search, but this prevented news/current-event queries from working
+      const shouldSearch = requestedWebSearch || allowAutoSearch;
 
       if (shouldSearch && userQuery && !isConnectionClosed) {
         // Emit thinking event so the user sees progress while search runs
@@ -951,17 +951,34 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               queryPreview: userQuery.slice(0, 60),
             });
             try {
-              const searchResults = await searchWeb(userQuery, requestedWebSearch ? 10 : 10);
+              const searchResults = await searchWeb(userQuery, 50);
 
               if (searchResults.results.length > 0) {
-                const searchContext = searchResults.results
-                  .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
-                  .join('\n\n');
+                // Build rich context: prefer full page content (from contents[]), fall back to snippets
+                let searchContext: string;
+                if (searchResults.contents && searchResults.contents.length > 0) {
+                  searchContext = searchResults.contents
+                    .map((c: any, i: number) => `[${i + 1}] ${c.title} (${c.url}):\n${c.content}`)
+                    .join('\n\n');
+                  // Add remaining results that only have snippets
+                  const contentUrls = new Set(searchResults.contents.map((c: any) => c.url));
+                  const extraResults = searchResults.results
+                    .filter((r: any) => !contentUrls.has(r.url))
+                    .slice(0, 5);
+                  if (extraResults.length > 0) {
+                    const startIdx = searchResults.contents.length + 1;
+                    searchContext += '\n\n' + extraResults
+                      .map((r: any, i: number) => `[${startIdx + i}] ${r.title}: ${r.snippet} (${r.url})`)
+                      .join('\n');
+                  }
+                } else {
+                  searchContext = searchResults.results
+                    .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
+                    .join('\n\n');
+                }
 
-                clientMessages.unshift({
-                  role: 'system',
-                  content: `RESULTADOS DE BÚSQUEDA WEB para "${userQuery}":\n\n${searchContext}\n\nUsa esta información actualizada para responder al usuario, citando las fuentes cuando sea apropiado.`
-                });
+                // Store for injection into system prompt (most reliable path)
+                webSearchContextForLLM = `\n\n---\nBÚSQUEDA WEB REALIZADA - RESULTADOS ACTUALIZADOS:\n${searchContext}\n\nINSTRUCCIÓN CRÍTICA SOBRE LA BÚSQUEDA WEB:\n- Usa TODA la información de los resultados de búsqueda anteriores para dar una respuesta COMPLETA y DETALLADA.\n- NO digas que no tienes acceso a internet, noticias o información actualizada.\n- Los datos anteriores son reales y actuales, obtenidos en tiempo real.\n- Cita las fuentes con [número] al final de cada punto.\n- IGNORA cualquier límite de caracteres o instrucción de brevedad anterior: esta respuesta debe ser EXTENSA y cubrir todos los resultados relevantes.\n- Presenta la información en formato de lista con bullets o numerada, con detalles de cada noticia/resultado.`;
 
                 detectedWebSources = searchResults.results.map((r: any) => ({
                   url: r.url,
@@ -974,7 +991,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                   publishedDate: r.publishedDate || null
                 }));
 
-                console.log("[Stream] Web search complete", { results: searchResults.results.length });
+                console.log("[Stream] Web search complete", { results: searchResults.results.length, contentsCount: searchResults.contents?.length || 0 });
               }
             } catch (webError) {
               console.error('[Stream] Web search error:', webError);
@@ -1564,7 +1581,10 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}`;
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}`;
+
+      // Debug: uncomment to trace web search injection
+      // console.log(`[Stream:Debug] webSearchContextForLLM length: ${webSearchContextForLLM.length}, systemContent length: ${systemContent.length}`);
 
       const systemMessage = {
         role: "system" as const,
@@ -1841,23 +1861,28 @@ ${attachmentContext}`;
       }).catch(() => { });
 
       // Apply dynamic token limit based on question type (Answer-First)
-      const effectiveMaxTokens = questionClassification.type === 'summary' ||
-        questionClassification.type === 'analysis'
-        ? 2000 // Allow longer responses for summaries/analysis
-        : questionClassification.maxTokens * 4; // Apply stricter limit for factual questions
+      const hasWebSearchContext = webSearchContextForLLM.length > 0;
+      const effectiveMaxTokens = hasWebSearchContext
+        ? 2500 // Web search responses need room to summarize results with citations
+        : questionClassification.type === 'summary' ||
+          questionClassification.type === 'analysis'
+          ? 2000 // Allow longer responses for summaries/analysis
+          : questionClassification.maxTokens * 4; // Apply stricter limit for factual questions
 
-      console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}`);
+      console.log(`[Stream] Answer-First: type=${questionClassification.type}, maxTokens=${effectiveMaxTokens}, hasWebSearch=${hasWebSearchContext}`);
 
       // Apply latency-lane-aware token limit:
-      //  fast → hard cap to keep response short & snappy
+      //  fast → hard cap to keep response short & snappy (but not when web search is active)
       //  deep → use the question-classification-derived limit
       const resolvedLane = unifiedContext?.resolvedLane || 'fast';
       const safeMaxTokens = Number.isFinite(effectiveMaxTokens) && effectiveMaxTokens > 0
         ? effectiveMaxTokens
         : 1000; // safety floor
-      const laneMaxTokens = resolvedLane === 'fast'
-        ? Math.min(safeMaxTokens, 400)
-        : safeMaxTokens;
+      const laneMaxTokens = hasWebSearchContext
+        ? safeMaxTokens // Web search results need full token budget regardless of lane
+        : resolvedLane === 'fast'
+          ? Math.min(safeMaxTokens, 400)
+          : safeMaxTokens;
 
       // Emit thinking event so user sees we're about to generate
       if (!isConnectionClosed) {
