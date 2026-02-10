@@ -1143,6 +1143,12 @@ class LLMGateway {
       throw new Error("Gemini API error: No valid messages after conversion (contents are required)");
     }
 
+    // Gemini can consume hidden "thinking" tokens; very small output budgets can produce empty/partial
+    // visible text. Enforce a safe floor so the user reliably gets an answer.
+    const maxOutputTokens = typeof options.maxTokens === "number"
+      ? Math.max(options.maxTokens, 256)
+      : options.maxTokens;
+
     let response;
     try {
       response = await geminiChat(geminiMessages, {
@@ -1150,7 +1156,7 @@ class LLMGateway {
         systemInstruction,
         temperature: options.temperature ?? 0.7,
         topP: options.topP ?? 1,
-        maxOutputTokens: options.maxTokens,
+        maxOutputTokens,
       });
     } catch (error: any) {
       const latencyMs = Date.now() - startTime;
@@ -1172,6 +1178,11 @@ class LLMGateway {
       });
 
       throw error;
+    }
+
+    if (!response.content || !response.content.trim()) {
+      // Treat empty output as a provider failure so fallback providers can recover.
+      throw new Error("Gemini API error: Empty response content");
     }
 
     const latencyMs = Date.now() - startTime;
@@ -1307,6 +1318,13 @@ class LLMGateway {
 
         for await (const chunk of stream) {
           accumulatedContent += chunk.content;
+
+          // Some providers can return a "done" marker without any visible text (e.g. if the output
+          // budget is too low or the response is otherwise suppressed). Treat that as a failure so
+          // fallback providers can attempt recovery.
+          if (chunk.done && accumulatedContent.trim().length === 0) {
+            throw new Error(`Empty streamed response from provider ${provider}`);
+          }
 
           const streamChunk: StreamChunk = {
             content: chunk.content,
@@ -1645,12 +1663,16 @@ class LLMGateway {
     const model = modelProvider === "gemini" ? options.model! : GEMINI_MODELS.FLASH;
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
+    const maxOutputTokens = typeof options.maxTokens === "number"
+      ? Math.max(options.maxTokens, 256)
+      : options.maxTokens;
+
     const stream = geminiStreamChat(geminiMessages, {
       model: model as any,
       systemInstruction,
       temperature: options.temperature ?? 0.7,
       topP: options.topP ?? 1,
-      maxOutputTokens: options.maxTokens,
+      maxOutputTokens,
       responseModalities: options.disableImageGeneration ? ["text"] : undefined,
     });
 

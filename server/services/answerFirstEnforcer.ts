@@ -66,11 +66,21 @@ Usuario: "¿Cuánto cuesta el boleto?"
 ✓ CORRECTO: "El boleto cuesta USD 360.64 en total (USD 280.00 + USD 80.64 de impuestos) [documento p:1]."
 ✗ INCORRECTO: "El documento contiene información detallada sobre los costos..."`;
 
+// Lite rules for non-document contexts. Gemini (and other providers) can behave
+// strangely with very verbose system prompts for trivial questions, and citation
+// requirements don't apply when no documents were provided.
+const STRICT_ANSWER_FIRST_RULES_LITE = `
+REGLA CRÍTICA - ANSWER-FIRST:
+- Empieza con la respuesta directa (sin introducciones).
+- Si es Sí/No: empieza con "Sí" o "No".
+- Sé conciso. No agregues información no solicitada.
+- No inventes citas ni fuentes si NO hay documentos adjuntos.`;
+
 // =============================================================================
 // Format Instructions by Question Type
 // =============================================================================
 
-function getFormatInstructions(classification: QuestionClassification): string {
+function getFormatInstructions(classification: QuestionClassification, hasDocuments: boolean): string {
     const { type, maxCharacters, extractedTarget } = classification;
 
     switch (type) {
@@ -79,7 +89,7 @@ function getFormatInstructions(classification: QuestionClassification): string {
 FORMATO REQUERIDO: Respuesta directa en UNA SOLA frase.
 - Máximo ${maxCharacters} caracteres
 - Incluye el dato exacto que busca el usuario${extractedTarget ? `: ${extractedTarget.entity}` : ''}
-- Termina con la cita [documento p:X]
+- ${hasDocuments ? 'Termina con la cita [documento p:X]' : 'NO inventes citas ni fuentes'}
 - NO agregues información adicional no solicitada`;
 
         case 'yes_no':
@@ -88,13 +98,13 @@ FORMATO REQUERIDO: Sí/No + explicación breve.
 - Primera palabra: "Sí" o "No"
 - Segunda parte: explicación de máximo 2 frases
 - Máximo ${maxCharacters} caracteres en total
-- Incluye cita del documento`;
+- ${hasDocuments ? 'Incluye cita del documento' : 'NO inventes citas ni fuentes'}`;
 
         case 'factual_multiple':
             return `
 FORMATO REQUERIDO: Lista corta numerada.
 - Máximo 5 items
-- Cada item: dato + cita
+- ${hasDocuments ? 'Cada item: dato + cita' : 'Cada item: dato (sin inventar citas)'}
 - Sin explicaciones extensas
 - Máximo ${maxCharacters} caracteres`;
 
@@ -102,7 +112,7 @@ FORMATO REQUERIDO: Lista corta numerada.
             return `
 FORMATO REQUERIDO: Lista numerada completa.
 - Extrae TODOS los items solicitados
-- Formato: número. dato [cita]
+- ${hasDocuments ? 'Formato: número. dato [cita]' : 'Formato: número. dato'}
 - Sin comentarios adicionales`;
 
         case 'summary':
@@ -129,7 +139,7 @@ FORMATO REQUERIDO: Saludo breve y natural.
 FORMATO: Respuesta concisa y relevante.
 - Responde directamente lo que se pregunta
 - Máximo ${maxCharacters} caracteres
-- Incluye citas si hay documentos`;
+- ${hasDocuments ? 'Incluye citas del documento' : 'No inventes citas ni fuentes'}`;
     }
 }
 
@@ -145,19 +155,20 @@ export function buildAnswerFirstPrompt(context: AnswerFirstContext): AnswerFirst
 
     const constraints: string[] = [];
     const parts: string[] = [BASE_SYSTEM_PROMPT];
+    const hasDocuments = !!documentContext;
 
     // Add strict rules for factual questions
     if (classification.type === 'factual_simple' ||
         classification.type === 'yes_no' ||
         classification.type === 'factual_multiple') {
-        parts.push(STRICT_ANSWER_FIRST_RULES);
+        parts.push(hasDocuments ? STRICT_ANSWER_FIRST_RULES : STRICT_ANSWER_FIRST_RULES_LITE);
         constraints.push('Primera frase debe ser la respuesta directa');
         constraints.push('NO usar RESUMEN EJECUTIVO');
         constraints.push(`Máximo ${classification.maxCharacters} caracteres`);
     }
 
     // Format instructions
-    const formatInstructions = getFormatInstructions(classification);
+    const formatInstructions = getFormatInstructions(classification, hasDocuments);
     parts.push(formatInstructions);
 
     // Document context instructions
