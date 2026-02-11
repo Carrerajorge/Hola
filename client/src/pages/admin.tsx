@@ -90,8 +90,9 @@ import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
+import { TerminalPanel } from "@/components/terminal-panel";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel" | "terminal";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -107,6 +108,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "settings", label: "Settings", icon: Settings },
   { id: "agentic", label: "Agentic Engine", icon: Bot },
   { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
+  { id: "terminal", label: "Terminal", icon: Terminal },
 ];
 
 function DashboardSection() {
@@ -6227,6 +6229,13 @@ export default function AdminPage() {
         return <AgenticEngineDashboard />;
       case "excel":
         return <ExcelManagerSection />;
+      case "terminal":
+        // Terminal needs full height minus padding to handle internal scrolling
+        return (
+          <div className="h-[calc(100vh-6rem)]">
+            <TerminalPanel />
+          </div>
+        );
       default:
         return <DashboardSection />;
     }
