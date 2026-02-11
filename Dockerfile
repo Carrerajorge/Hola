@@ -30,9 +30,11 @@ RUN npm run build
 # ============================================
 FROM node:22-alpine AS prod-deps
 WORKDIR /app
+# Install build tools for native modules (node-pty, etc.)
+RUN apk add --no-cache libc6-compat python3 make g++
 COPY package.json package-lock.json ./
-# Install ONLY production dependencies, skipping scripts to be faster/safer
-RUN npm ci --only=production --ignore-scripts
+# Install production dependencies (allow scripts for native compilation)
+RUN npm ci --only=production
 
 # ============================================
 # Stage 4: Sandbox Runner
