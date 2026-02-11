@@ -18,13 +18,134 @@
  */
 
 import { Router, Request, Response } from "express";
+import { EventEmitter } from "events";
 import { TerminalController, CommandRequest, FileOperation } from "../agent/computerUse/terminalController";
+import { RemoteShellController } from "../agent/computerUse/remoteShellController";
+import { remoteShellRepository } from "../repositories/remoteShellRepository";
+import { encryptSecret, decryptSecret, isRemoteSecretConfigured } from "../lib/crypto/secretVault";
+import { storage } from "../storage";
+import { type AuthenticatedRequest } from "../types/express";
 import { WebSocket } from "ws";
 
 const terminalController = new TerminalController();
+const remoteShellController = new RemoteShellController();
 
 // Track WebSocket clients subscribed to terminal sessions
 const terminalClients = new Map<string, Set<WebSocket>>();
+
+const controllerListeners = new Map<string, {
+  source: EventEmitter;
+  output: (data: any) => void;
+  complete: (data: any) => void;
+}>();
+
+function attachStreamingListeners(source: EventEmitter, sessionId: string) {
+  const handleOutput = (data: any) => {
+    if (data.sessionId !== sessionId) return;
+    broadcastTerminalOutput(sessionId, {
+      type: "output",
+      commandId: data.commandId,
+      stream: data.stream,
+      chunk: data.chunk,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleComplete = (data: any) => {
+    if (data.sessionId !== sessionId) return;
+    broadcastTerminalOutput(sessionId, {
+      type: "complete",
+      commandId: data.commandId,
+      result: data.result,
+      timestamp: Date.now(),
+    });
+  };
+
+  source.on("command:output", handleOutput);
+  source.on("command:complete", handleComplete);
+
+  controllerListeners.set(sessionId, {
+    source,
+    output: handleOutput,
+    complete: handleComplete,
+  });
+}
+
+function detachStreamingListeners(sessionId: string) {
+  const listeners = controllerListeners.get(sessionId);
+  if (!listeners) return;
+  listeners.source.off("command:output", listeners.output);
+  listeners.source.off("command:complete", listeners.complete);
+  controllerListeners.delete(sessionId);
+}
+
+terminalController.on("session:closed", ({ sessionId }) => {
+  detachStreamingListeners(sessionId);
+  terminalClients.delete(sessionId);
+});
+
+remoteShellController.on("session:closed", ({ sessionId }) => {
+  detachStreamingListeners(sessionId);
+  terminalClients.delete(sessionId);
+});
+
+function getAuthContext(req: Request) {
+  const authReq = req as AuthenticatedRequest;
+  const session: any = req.session || {};
+  const user = authReq.user as any;
+
+  const userId =
+    user?.claims?.sub ||
+    user?.id ||
+    session?.authUserId ||
+    session?.passport?.user?.claims?.sub ||
+    session?.passport?.user?.id ||
+    null;
+
+  const email =
+    user?.claims?.email ||
+    user?.email ||
+    session?.passport?.user?.claims?.email ||
+    session?.passport?.user?.email ||
+    null;
+
+  return { userId, email };
+}
+
+async function auditAdminAction(
+  req: Request,
+  action: string,
+  targetType: string,
+  targetId?: string,
+  details?: Record<string, any>
+) {
+  const { userId } = getAuthContext(req);
+  if (!userId) return;
+  try {
+    await storage.createAdminAuditLog({
+      adminId: userId,
+      action,
+      targetType,
+      targetId,
+      details,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || undefined,
+    });
+  } catch (err) {
+    console.warn("[remote-shell] failed to audit action", err);
+  }
+}
+
+function ensureRemoteSecretConfiguredOrThrow() {
+  if (!isRemoteSecretConfigured()) {
+    throw new Error("REMOTE_SHELL_SECRET is not configured on the server");
+  }
+}
+
+function canAccessTarget(target: { ownerId: string; allowedAdminIds: string[] | null }, adminId: string) {
+  if (target.ownerId === adminId) return true;
+  return Boolean(target.allowedAdminIds?.includes(adminId));
+}
 
 export function createTerminalControlRouter(): Router {
   const router = Router();
@@ -39,29 +160,7 @@ export function createTerminalControlRouter(): Router {
       const { cwd, env } = req.body;
       const sessionId = terminalController.createSession(cwd, env);
 
-      // Set up output streaming
-      terminalController.on("command:output", (data) => {
-        if (data.sessionId === sessionId) {
-          broadcastTerminalOutput(sessionId, {
-            type: "output",
-            commandId: data.commandId,
-            stream: data.stream,
-            chunk: data.chunk,
-            timestamp: Date.now(),
-          });
-        }
-      });
-
-      terminalController.on("command:complete", (data) => {
-        if (data.sessionId === sessionId) {
-          broadcastTerminalOutput(sessionId, {
-            type: "complete",
-            commandId: data.commandId,
-            result: data.result,
-            timestamp: Date.now(),
-          });
-        }
-      });
+      attachStreamingListeners(terminalController, sessionId);
 
       res.json({
         sessionId,
@@ -542,6 +641,342 @@ export function createTerminalControlRouter(): Router {
       res.json({ path: dirPath, entries, count: entries.length });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Remote Shell Sessions
+  // ============================================
+
+  router.post("/remote/sessions", async (req: Request, res: Response) => {
+    try {
+      const { host, port, username, password, privateKey, passphrase, keepAliveInterval, keepAliveCountMax } = req.body || {};
+
+      if (!host || !username) {
+        return res.status(400).json({ error: "host and username are required" });
+      }
+
+      if (!password && !privateKey) {
+        return res.status(400).json({ error: "password or privateKey is required" });
+      }
+
+      const { sessionId, cwd } = await remoteShellController.createSession({
+        host,
+        port,
+        username,
+        password,
+        privateKey,
+        passphrase,
+        keepAliveInterval,
+        keepAliveCountMax,
+      });
+
+      attachStreamingListeners(remoteShellController, sessionId);
+      await auditAdminAction(req, "remote_shell.session_start", "remote_session", sessionId, { host, username });
+
+      res.json({ sessionId, cwd });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.delete("/remote/sessions/:sessionId", async (req: Request, res: Response) => {
+    try {
+      remoteShellController.closeSession(req.params.sessionId);
+      detachStreamingListeners(req.params.sessionId);
+      terminalClients.delete(req.params.sessionId);
+      await auditAdminAction(req, "remote_shell.session_end", "remote_session", req.params.sessionId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/remote/sessions/:sessionId", (req: Request, res: Response) => {
+    try {
+      const session = remoteShellController.getSessionInfo(req.params.sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json({
+        sessionId: session.id,
+        cwd: session.cwd,
+        connectedAt: session.createdAt,
+        lastActivity: session.lastActivity,
+        host: session.connection.host,
+        username: session.connection.username,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/remote/sessions/:sessionId/history", (req: Request, res: Response) => {
+    try {
+      const limit = parseInt(req.query.limit as string, 10) || 50;
+      const history = remoteShellController.getHistory(req.params.sessionId, limit);
+      res.json({ history });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/remote/sessions/:sessionId/exec", async (req: Request, res: Response) => {
+    try {
+      const { command, args, env, timeout, stream, interactive, confirmDangerous } = req.body || {};
+      if (!command) {
+        return res.status(400).json({ error: "command is required" });
+      }
+
+      const safety = terminalController.isCommandSafe(command);
+      if (!safety.safe && !confirmDangerous) {
+        return res.status(403).json({
+          error: "Command blocked by safety policy",
+          reason: safety.reason,
+          severity: safety.severity,
+          requiresConfirmation: true,
+        });
+      }
+
+      const request: CommandRequest = {
+        command,
+        args,
+        env,
+        timeout: timeout || 30000,
+        stream: stream !== false,
+        interactive,
+        confirmDangerous,
+      };
+
+      const result = await remoteShellController.executeCommand(req.params.sessionId, request);
+
+      const session = remoteShellController.getSessionInfo(req.params.sessionId);
+      await auditAdminAction(req, "remote_shell.exec", "remote_session", req.params.sessionId, {
+        host: session?.connection.host,
+        username: session?.connection.username,
+        command,
+        exitCode: result.exitCode,
+        durationMs: result.duration,
+        success: result.success,
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================
+  // Remote Shell Targets
+  // ============================================
+
+  router.get("/remote/targets", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      const targets = await remoteShellRepository.listTargetsForAdmin(userId);
+      res.json({ targets });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/remote/targets", async (req: Request, res: Response) => {
+    try {
+      ensureRemoteSecretConfiguredOrThrow();
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const { name, host, port, username, authType, secret, allowedAdminIds, notes } = req.body || {};
+
+      if (!name || !host || !username || !authType) {
+        return res.status(400).json({ error: "name, host, username and authType are required" });
+      }
+
+      if (!secret || typeof secret !== "string") {
+        return res.status(400).json({ error: "secret is required" });
+      }
+
+      if (!["password", "private_key"].includes(authType)) {
+        return res.status(400).json({ error: "authType must be password or private_key" });
+      }
+
+      const encryptedSecret = encryptSecret(secret);
+      const secretHint = authType === "password" ? secret.slice(-4) : secret.slice(0, 16);
+
+      const target = await remoteShellRepository.createTarget({
+        name,
+        host,
+        port,
+        username,
+        authType,
+        encryptedSecret,
+        secretHint,
+        ownerId: userId,
+        allowedAdminIds: Array.isArray(allowedAdminIds) ? allowedAdminIds : [],
+        notes,
+      });
+
+      await auditAdminAction(req, "remote_target.create", "remote_target", target.id, {
+        host,
+        username,
+      });
+
+      res.status(201).json({ target });
+    } catch (error: any) {
+      const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  router.put("/remote/targets/:targetId", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const target = await remoteShellRepository.getTargetById(req.params.targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Target not found" });
+      }
+      if (!canAccessTarget(target, userId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const { name, host, port, username, authType, secret, allowedAdminIds, notes } = req.body || {};
+
+      const updates: any = {};
+      if (name !== undefined) updates.name = name;
+      if (host !== undefined) updates.host = host;
+      if (port !== undefined) updates.port = port;
+      if (username !== undefined) updates.username = username;
+      if (authType !== undefined) {
+        if (!["password", "private_key"].includes(authType)) {
+          return res.status(400).json({ error: "authType must be password or private_key" });
+        }
+        updates.authType = authType;
+      }
+      if (notes !== undefined) updates.notes = notes;
+      if (allowedAdminIds !== undefined) {
+        updates.allowedAdminIds = Array.isArray(allowedAdminIds) ? allowedAdminIds : [];
+      }
+
+      if (secret !== undefined) {
+        ensureRemoteSecretConfiguredOrThrow();
+        if (!secret) {
+          return res.status(400).json({ error: "secret cannot be empty" });
+        }
+        updates.encryptedSecret = encryptSecret(secret);
+        updates.secretHint = updates.authType === "private_key" || target.authType === "private_key"
+          ? secret.slice(0, 16)
+          : secret.slice(-4);
+      }
+
+      const updated = await remoteShellRepository.updateTarget(req.params.targetId, updates);
+      await auditAdminAction(req, "remote_target.update", "remote_target", req.params.targetId, updates);
+      res.json({ target: updated });
+    } catch (error: any) {
+      const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  router.delete("/remote/targets/:targetId", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const target = await remoteShellRepository.getTargetById(req.params.targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Target not found" });
+      }
+      if (!canAccessTarget(target, userId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      await remoteShellRepository.deleteTarget(req.params.targetId);
+      await auditAdminAction(req, "remote_target.delete", "remote_target", req.params.targetId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/remote/targets/:targetId/test", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      const target = await remoteShellRepository.getTargetById(req.params.targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Target not found" });
+      }
+      if (!canAccessTarget(target, userId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      ensureRemoteSecretConfiguredOrThrow();
+      const secret = decryptSecret(target.encryptedSecret);
+      const { sessionId } = await remoteShellController.createSession({
+        host: target.host,
+        port: target.port ?? 22,
+        username: target.username,
+        password: target.authType === "password" ? secret : undefined,
+        privateKey: target.authType === "private_key" ? secret : undefined,
+      });
+      remoteShellController.closeSession(sessionId);
+      res.json({ success: true });
+    } catch (error: any) {
+      const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
+      res.status(status).json({ error: error.message });
+    }
+  });
+
+  router.post("/remote/targets/:targetId/sessions", async (req: Request, res: Response) => {
+    try {
+      const { userId } = getAuthContext(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      const target = await remoteShellRepository.getTargetById(req.params.targetId);
+      if (!target) {
+        return res.status(404).json({ error: "Target not found" });
+      }
+      if (!canAccessTarget(target, userId)) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      ensureRemoteSecretConfiguredOrThrow();
+      const secret = decryptSecret(target.encryptedSecret);
+
+      const { sessionId, cwd } = await remoteShellController.createSession({
+        host: target.host,
+        port: target.port ?? 22,
+        username: target.username,
+        password: target.authType === "password" ? secret : undefined,
+        privateKey: target.authType === "private_key" ? secret : undefined,
+      });
+
+      attachStreamingListeners(remoteShellController, sessionId);
+      await remoteShellRepository.recordSuccess(target.id);
+      await auditAdminAction(req, "remote_shell.session_start", "remote_target", target.id, {
+        sessionId,
+        host: target.host,
+        username: target.username,
+      });
+
+      res.json({ sessionId, cwd, targetId: target.id });
+    } catch (error: any) {
+      const status = error.message?.includes("REMOTE_SHELL_SECRET") ? 503 : 500;
+      res.status(status).json({ error: error.message });
     }
   });
 

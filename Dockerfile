@@ -4,7 +4,7 @@
 # ============================================
 # Stage 1: Dependencies (All)
 # ============================================
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache libc6-compat python3 make g++
 COPY package.json package-lock.json ./
@@ -15,7 +15,7 @@ RUN npm ci
 # ============================================
 # Stage 2: Build
 # ============================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -28,7 +28,7 @@ RUN npm run build
 # ============================================
 # Stage 3: Production Dependencies
 # ============================================
-FROM node:20-alpine AS prod-deps
+FROM node:22-alpine AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Install ONLY production dependencies, skipping scripts to be faster/safer
@@ -37,7 +37,7 @@ RUN npm ci --only=production --ignore-scripts
 # ============================================
 # Stage 4: Sandbox Runner
 # ============================================
-FROM node:20-alpine AS sandbox-runner
+FROM node:22-alpine AS sandbox-runner
 
 WORKDIR /app
 
@@ -59,7 +59,7 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 # Stage 5: Production Runner
 # ============================================
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 # Create non-root user for security

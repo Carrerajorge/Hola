@@ -379,6 +379,33 @@ export const insertCostBudgetSchema = createInsertSchema(costBudgets);
 export type InsertCostBudget = z.infer<typeof insertCostBudgetSchema>;
 export type CostBudget = typeof costBudgets.$inferSelect;
 
+// Remote shell targets
+export const remoteShellTargets = pgTable("remote_shell_targets", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: text("name").notNull(),
+    host: text("host").notNull(),
+    port: integer("port").default(22),
+    username: text("username").notNull(),
+    authType: text("auth_type").notNull(),
+    encryptedSecret: text("encrypted_secret").notNull(),
+    secretHint: text("secret_hint"),
+    ownerId: varchar("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    allowedAdminIds: text("allowed_admin_ids").array().default(sql`ARRAY[]::text[]`),
+    notes: text("notes"),
+    lastConnectedAt: timestamp("last_connected_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+    index("remote_shell_targets_owner_idx").on(table.ownerId),
+    index("remote_shell_targets_host_idx").on(table.host),
+    index("remote_shell_targets_created_idx").on(table.createdAt),
+]);
+
+export const insertRemoteShellTargetSchema = createInsertSchema(remoteShellTargets);
+
+export type InsertRemoteShellTarget = z.infer<typeof insertRemoteShellTargetSchema>;
+export type RemoteShellTarget = typeof remoteShellTargets.$inferSelect;
+
 // API Logs - Detailed request/response logging
 export const apiLogs = pgTable("api_logs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

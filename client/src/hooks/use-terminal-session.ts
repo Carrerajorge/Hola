@@ -29,18 +29,40 @@ export interface TerminalLine {
   timestamp: number;
 }
 
+type SessionType = "local" | "remote" | null;
+
 export interface TerminalSessionState {
   sessionId: string | null;
   status: "idle" | "connecting" | "active" | "closed" | "error";
+  sessionType: SessionType;
   cwd: string;
   lines: TerminalLine[];
   isExecuting: boolean;
   error: string | null;
+  remoteContext?: {
+    targetId?: string;
+    name?: string;
+    host?: string;
+    username?: string;
+  };
+}
+
+export interface RemoteShellTargetSummary {
+  id: string;
+  name: string;
+  host: string;
+  port?: number;
+  username: string;
+  authType: "password" | "private_key";
+  secretHint?: string;
+  notes?: string;
+  lastConnectedAt?: string;
 }
 
 const initialState: TerminalSessionState = {
   sessionId: null,
   status: "idle",
+  sessionType: null,
   cwd: "",
   lines: [],
   isExecuting: false,
@@ -60,6 +82,7 @@ function createLine(type: TerminalLine["type"], content: string): TerminalLine {
 
 export function useTerminalSession() {
   const [state, setState] = useState<TerminalSessionState>(initialState);
+  const [remoteTargets, setRemoteTargets] = useState<RemoteShellTargetSummary[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
   const addLine = useCallback((type: TerminalLine["type"], content: string) => {
@@ -68,6 +91,17 @@ export function useTerminalSession() {
       lines: [...prev.lines, createLine(type, content)],
     }));
   }, []);
+
+  const getSessionEndpoint = useCallback(
+    (sessionId: string | null, suffix: string) => {
+      if (!sessionId) return null;
+      const base = state.sessionType === "remote"
+        ? `/api/terminal/remote/sessions/${sessionId}`
+        : `/api/terminal/sessions/${sessionId}`;
+      return `${base}${suffix}`;
+    },
+    [state.sessionType]
+  );
 
   const connectWebSocket = useCallback((sessionId: string) => {
     if (wsRef.current) {
@@ -121,8 +155,8 @@ export function useTerminalSession() {
     };
   }, []);
 
-  /** Create a new terminal session */
-  const createSession = useCallback(async (cwd?: string, env?: Record<string, string>) => {
+  /** Create a new local terminal session */
+  const startLocalSession = useCallback(async (cwd?: string, env?: Record<string, string>) => {
     try {
       setState((prev) => ({ ...prev, status: "connecting" }));
 
@@ -142,10 +176,12 @@ export function useTerminalSession() {
       setState({
         sessionId,
         status: "active",
+        sessionType: "local",
         cwd: sessionCwd,
         lines: [createLine("system", `Terminal session started. Working directory: ${sessionCwd}`)],
         isExecuting: false,
         error: null,
+        remoteContext: undefined,
       });
 
       connectWebSocket(sessionId);
@@ -160,14 +196,170 @@ export function useTerminalSession() {
     }
   }, [connectWebSocket]);
 
+  /** Create a remote session with manual credentials */
+  const startRemoteSession = useCallback(async (options: {
+    host: string;
+    port?: number;
+    username: string;
+    password?: string;
+    privateKey?: string;
+    passphrase?: string;
+  }) => {
+    try {
+      setState((prev) => ({ ...prev, status: "connecting" }));
+
+      const response = await fetch("/api/terminal/remote/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to start remote session");
+      }
+
+      const { sessionId, cwd } = await response.json();
+
+      setState({
+        sessionId,
+        status: "active",
+        sessionType: "remote",
+        cwd,
+        lines: [createLine("system", `Remote session started on ${options.host}`)],
+        isExecuting: false,
+        error: null,
+        remoteContext: {
+          host: options.host,
+          username: options.username,
+        },
+      });
+
+      connectWebSocket(sessionId);
+      return sessionId;
+    } catch (error: any) {
+      setState((prev) => ({
+        ...prev,
+        status: "error",
+        error: error.message,
+      }));
+      throw error;
+    }
+  }, [connectWebSocket]);
+
+  /** Create remote session from saved target */
+  const startRemoteSessionFromTarget = useCallback(async (targetId: string) => {
+    try {
+      setState((prev) => ({ ...prev, status: "connecting" }));
+
+      const response = await fetch(`/api/terminal/remote/targets/${targetId}/sessions`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to start remote session");
+      }
+
+      const { sessionId, cwd, targetId: returnedTargetId } = await response.json();
+      const target = remoteTargets.find((t) => t.id === returnedTargetId);
+
+      setState({
+        sessionId,
+        status: "active",
+        sessionType: "remote",
+        cwd,
+        lines: [createLine("system", `Remote session started via target ${target?.name || returnedTargetId}`)],
+        isExecuting: false,
+        error: null,
+        remoteContext: target
+          ? {
+              targetId: target.id,
+              name: target.name,
+              host: target.host,
+              username: target.username,
+            }
+          : { targetId: returnedTargetId },
+      });
+
+      connectWebSocket(sessionId);
+      return sessionId;
+    } catch (error: any) {
+      setState((prev) => ({
+        ...prev,
+        status: "error",
+        error: error.message,
+      }));
+      throw error;
+    }
+  }, [connectWebSocket, remoteTargets]);
+
+  /** Remote targets */
+  const fetchRemoteTargets = useCallback(async () => {
+    try {
+      const response = await fetch("/api/terminal/remote/targets");
+      if (!response.ok) {
+        throw new Error("Failed to load remote targets");
+      }
+      const data = await response.json();
+      setRemoteTargets(data.targets || []);
+      return data.targets || [];
+    } catch (error) {
+      console.error(error);
+      return [];
+    }
+  }, []);
+
+  const createRemoteTarget = useCallback(async (payload: {
+    name: string;
+    host: string;
+    port?: number;
+    username: string;
+    authType: "password" | "private_key";
+    secret: string;
+    allowedAdminIds?: string[];
+    notes?: string;
+  }) => {
+    const response = await fetch("/api/terminal/remote/targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to create target");
+    }
+    const data = await response.json();
+    setRemoteTargets((prev) => [...prev, data.target]);
+    return data.target as RemoteShellTargetSummary;
+  }, []);
+
+  const deleteRemoteTarget = useCallback(async (targetId: string) => {
+    const response = await fetch(`/api/terminal/remote/targets/${targetId}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Failed to delete target");
+    }
+    setRemoteTargets((prev) => prev.filter((t) => t.id !== targetId));
+  }, []);
+
   /** Execute a command */
   const executeCommand = useCallback(async (command: string, options?: {
     shell?: "bash" | "sh" | "zsh" | "powershell" | "cmd";
     timeout?: number;
     cwd?: string;
     env?: Record<string, string>;
+    interactive?: boolean;
+    inDocker?: boolean;
+    dockerImage?: string;
+    confirmDangerous?: boolean;
   }) => {
     if (!state.sessionId) return null;
+
+    const endpoint = getSessionEndpoint(state.sessionId, "/exec");
+    if (!endpoint) return null;
 
     setState((prev) => ({
       ...prev,
@@ -176,7 +368,7 @@ export function useTerminalSession() {
     }));
 
     try {
-      const response = await fetch(`/api/terminal/sessions/${state.sessionId}/exec`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -185,6 +377,17 @@ export function useTerminalSession() {
           ...options,
         }),
       });
+
+      if (response.status === 403) {
+        const errorData = await response.json();
+        if (errorData.requiresConfirmation) {
+          // Instead of failing immediately, return a special result indicating confirmation is needed
+          addLine("error", `⚠️ SAFETY ALERT: ${errorData.reason}`);
+          addLine("error", `This command is potentially dangerous (Severity: ${errorData.severity}).`);
+          setState((prev) => ({ ...prev, isExecuting: false }));
+          return { success: false, requiresConfirmation: true, reason: errorData.reason };
+        }
+      }
 
       const result: CommandResult = await response.json();
 
@@ -208,33 +411,44 @@ export function useTerminalSession() {
 
       // Update cwd in case command changed it
       try {
-        const sessionRes = await fetch(`/api/terminal/sessions/${state.sessionId}`);
-        if (sessionRes.ok) {
-          const sessionData = await sessionRes.json();
-          setState((prev) => ({
-            ...prev,
-            cwd: sessionData.cwd,
-            isExecuting: false,
-          }));
+        const sessionInfoEndpoint = getSessionEndpoint(state.sessionId, "");
+        if (sessionInfoEndpoint) {
+          const sessionRes = await fetch(sessionInfoEndpoint);
+          if (sessionRes.ok) {
+            const sessionData = await sessionRes.json();
+            setState((prev) => ({
+              ...prev,
+              cwd: sessionData.cwd ?? prev.cwd,
+            }));
+          }
         }
       } catch {
-        setState((prev) => ({ ...prev, isExecuting: false }));
+        // ignore
       }
 
+      setState((prev) => ({ ...prev, isExecuting: false }));
       return result;
     } catch (error: any) {
       addLine("error", `Error: ${error.message}`);
       setState((prev) => ({ ...prev, isExecuting: false }));
       return null;
     }
-  }, [state.sessionId, addLine]);
+  }, [state.sessionId, addLine, getSessionEndpoint]);
 
   /** Execute a script */
   const executeScript = useCallback(async (language: string, code: string, options?: {
     timeout?: number;
     args?: string[];
+    shell?: "bash" | "sh" | "zsh" | "powershell" | "cmd";
   }) => {
     if (!state.sessionId) return null;
+    if (state.sessionType === "remote") {
+      addLine("error", "Script runner is only available for local sessions.");
+      return null;
+    }
+
+    const endpoint = getSessionEndpoint(state.sessionId, "/script");
+    if (!endpoint) return null;
 
     setState((prev) => ({
       ...prev,
@@ -246,7 +460,7 @@ export function useTerminalSession() {
     }));
 
     try {
-      const response = await fetch(`/api/terminal/sessions/${state.sessionId}/script`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ language, code, ...options }),
@@ -280,9 +494,16 @@ export function useTerminalSession() {
     recursive?: boolean;
   }) => {
     if (!state.sessionId) return null;
+    if (state.sessionType === "remote") {
+      addLine("error", "File manager is only available for local sessions.");
+      return null;
+    }
+
+    const endpoint = getSessionEndpoint(state.sessionId, "/file");
+    if (!endpoint) return null;
 
     try {
-      const response = await fetch(`/api/terminal/sessions/${state.sessionId}/file`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(operation),
@@ -293,7 +514,7 @@ export function useTerminalSession() {
       addLine("error", `File operation error: ${error.message}`);
       return null;
     }
-  }, [state.sessionId, addLine]);
+  }, [state.sessionId, addLine, state.sessionType, getSessionEndpoint]);
 
   /** Get system info */
   const getSystemInfo = useCallback(async () => {
@@ -334,25 +555,27 @@ export function useTerminalSession() {
   const getHistory = useCallback(async (limit?: number) => {
     if (!state.sessionId) return null;
 
+    const suffix = limit ? `/history?limit=${limit}` : "/history";
+    const endpoint = getSessionEndpoint(state.sessionId, suffix);
+    if (!endpoint) return null;
+
     try {
-      const url = limit
-        ? `/api/terminal/sessions/${state.sessionId}/history?limit=${limit}`
-        : `/api/terminal/sessions/${state.sessionId}/history`;
-      const response = await fetch(url);
+      const response = await fetch(endpoint);
       return await response.json();
     } catch (error: any) {
       return null;
     }
-  }, [state.sessionId]);
+  }, [state.sessionId, getSessionEndpoint]);
 
   /** Close the session */
   const closeSession = useCallback(async () => {
     if (!state.sessionId) return;
 
     try {
-      await fetch(`/api/terminal/sessions/${state.sessionId}`, {
-        method: "DELETE",
-      });
+      const endpoint = getSessionEndpoint(state.sessionId, "");
+      if (endpoint) {
+        await fetch(endpoint, { method: "DELETE" });
+      }
     } catch (error) {
       console.error("Error closing terminal session:", error);
     }
@@ -363,7 +586,7 @@ export function useTerminalSession() {
     }
 
     setState(initialState);
-  }, [state.sessionId]);
+  }, [state.sessionId, getSessionEndpoint]);
 
   /** Clear terminal output */
   const clearOutput = useCallback(() => {
@@ -393,7 +616,13 @@ export function useTerminalSession() {
 
   return {
     state,
-    createSession,
+    startLocalSession,
+    startRemoteSession,
+    startRemoteSessionFromTarget,
+    remoteTargets,
+    fetchRemoteTargets,
+    createRemoteTarget,
+    deleteRemoteTarget,
     executeCommand,
     executeScript,
     fileOperation,

@@ -101,6 +101,7 @@ import { twoFactorRouter } from "./routes/twoFactorRouter";
 import { apiKeysRouter } from "./routes/apiKeysRouter";
 import { memoryRouter } from "./routes/memoryRouter";
 import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
+import { requireAdmin as requireAdminMiddleware } from "./routes/admin/utils";
 import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
 import { createSecurityRouter } from "./routes/securityRouter";
@@ -606,7 +607,7 @@ export async function registerRoutes(
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
-  app.use("/api/terminal", createTerminalControlRouter());
+  app.use("/api/terminal", requireAdminMiddleware, createTerminalControlRouter());
   app.use("/api/workflows", createWorkflowRouter());
 
   // ===== OpenClaw 500 Capabilities Verification =====

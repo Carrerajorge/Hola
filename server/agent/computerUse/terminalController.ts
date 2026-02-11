@@ -458,7 +458,7 @@ export class TerminalController extends EventEmitter {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error("Session lost");
 
-    const image = request.dockerImage || "node:20-alpine";
+    const image = request.dockerImage || "node:22-alpine";
     const cmd = request.args ? [request.command, ...request.args] : [request.command]; // CMD format for Docker
 
     // Prepare Env
@@ -480,6 +480,11 @@ export class TerminalController extends EventEmitter {
                 AutoRemove: false, // We remove manually to get logs/exit code first
                 Memory: 512 * 1024 * 1024, // 512MB RAM limit
                 CpuShares: 512, // 0.5 CPU shares relative weight
+                Privileged: false,
+                SecurityOpt: ["no-new-privileges"], // Hardening: Prevent privilege escalation
+                CapDrop: ["ALL"], // Drop all capabilities
+                NetworkMode: "none", // Default to no network for safety
+                ReadonlyRootfs: false, // Allow writing to tmp/app for now
             }
         });
 
