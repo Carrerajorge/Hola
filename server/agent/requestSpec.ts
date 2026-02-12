@@ -151,7 +151,10 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
     /\b(implementa|implement|desarrolla|develop|crea|create)\b.*\b(en|in)\b.*\b(python|javascript|typescript|java|c\+\+)\b/i
   ],
   web_automation: [
+    // Navigation to websites (with or without "web/sitio" keyword — detect by URL patterns)
     /\b(navega|navigate|abre|open|visita|visit|scrape|extrae de)\b.*\b(web|página|page|sitio|site|url)\b/i,
+    /\b(navega|navigate|abre|open|visita|visit|ve a|ir a|entra|ingresa|accede|go to)\b.*\b(\.com|\.pe|\.org|\.net|\.io|www\.)\b/i,
+    /\b(navega|navigate|abre|open|visita|visit|ve a|ir a|entra|ingresa|accede|go to)\b.*\b(google|youtube|amazon|facebook|twitter|instagram|linkedin|whatsapp|wikipedia|mercadolibre|mesa247)\b/i,
     /\b(automatiza|automate)\b.*\b(browser|navegador)\b/i,
     /\b(reserva|reservación|reservation|book|booking)\b.*\b(restaurante|restaurant|hotel|vuelo|flight|mesa|table)\b/i,
     /\b(compra|buy|purchase|ordena|order)\b.*\b(en línea|online|web|internet|boleto|ticket)\b/i,
@@ -160,9 +163,14 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
     /\b(busca|buscar|encuentra|search|find)\b.*\b(vuelos?|flights?|pasajes?|boletos?|tickets?)\b/i,
     /\b(busca|buscar|encuentra|search|find)\b.*\b(hoteles?|hotels?|hospedaje|alojamiento|accommodation)\b/i,
     /\b(reserva|book|compra|buy)\b.*\b(vuelos?|flights?|pasajes?|boletos?)\b/i,
-    // Direct web actions
-    /\b(entra|ingresa|accede|go to|ir a|ve a)\b.*\b(\.com|\.pe|\.org|\.net|www\.)\b/i,
+    // Direct web actions with URL patterns
     /\b(haz|make|realiza|do|ejecuta|execute)\b.*\b(en|on|in)\b.*\b(\.com|\.pe|web|sitio|página)\b/i,
+    // Explicit browser control commands
+    /\b(usa|use|controla|control)\b.*\b(navegador|browser|chromium|chrome)\b/i,
+    // "navega a [anything]" — navigation verb always implies browser automation
+    /\b(navega|navigate|visita|visit)\b\s+(a|to|hacia)\b/i,
+    // "busca en [website]" pattern
+    /\b(busca|search|encuentra|find)\b.*\b(en|on|in)\b.*\b(\.com|\.pe|\.org|google|youtube|amazon)\b/i,
   ],
   image_generation: [
     /\b(genera|generate|crea|create|dibuja|draw|hazme|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i
@@ -243,8 +251,17 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
     }
   }
   
+  // PRIORITY: Check web_automation first — navigation commands should always route to browser,
+  // even if they also contain words like "busca" that match research patterns.
+  const webAutoPatterns = INTENT_PATTERNS.web_automation || [];
+  for (const pattern of webAutoPatterns) {
+    if (pattern.test(lowerMessage)) {
+      return { intent: "web_automation", confidence: 0.85 };
+    }
+  }
+
   for (const [intent, patterns] of Object.entries(INTENT_PATTERNS) as [IntentType, RegExp[]][]) {
-    if (intent === "chat" || intent === "unknown") continue;
+    if (intent === "chat" || intent === "unknown" || intent === "web_automation") continue;
     for (const pattern of patterns) {
       if (pattern.test(lowerMessage)) {
         return { intent, confidence: 0.8 };

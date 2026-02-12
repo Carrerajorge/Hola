@@ -434,6 +434,7 @@ async function executeToolCall(
       }
 
       case "browse_and_act": {
+        let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
         try {
           const { universalBrowserController } = await import("./computerUse/universalBrowserController");
           const sessionId = await universalBrowserController.createSession("chrome-desktop");
@@ -448,12 +449,50 @@ async function executeToolCall(
             : (requestedUrl || "https://www.mesa247.pe");
           console.log(`[AgentExecutor] Browser session created: ${sessionId}, navigating to ${effectiveUrl}`);
           const requestedMaxSteps = Number.isFinite(Number(args.maxSteps)) ? Number(args.maxSteps) : undefined;
-          // Keep steps tight for fast UX — 8 steps max, 90s total runtime
-          const maxSteps = Math.max(1, Math.min(requestedMaxSteps ?? 8, 12));
-          const maxRuntimeMs = 90000;  // 90 seconds max
-          const decisionTimeoutMs = 15000;  // 15s per Grok decision
+          // Allow up to 20 steps, 3 minutes total runtime, 25s per Gemini vision decision
+          const maxSteps = Math.max(1, Math.min(requestedMaxSteps ?? 15, 20));
+          const maxRuntimeMs = 180000;  // 3 minutes max
+          const decisionTimeoutMs = 25000;  // 25s per Gemini vision decision
           try {
+            // Send immediate "browser_started" event so the UI opens the virtual computer immediately
+            if (sseRes) {
+              try {
+                const r = sseRes as any;
+                if (!r.writableEnded && !r.destroyed) {
+                  sseRes.write(`event: browser_step\ndata: ${JSON.stringify({
+                    runId,
+                    stepNumber: 0,
+                    totalSteps: maxSteps,
+                    action: "navigate",
+                    reasoning: `Abriendo navegador y navegando a ${effectiveUrl}...`,
+                    goalProgress: "0%",
+                    screenshot: "",
+                    url: effectiveUrl,
+                    title: "Cargando...",
+                  })}\n\n`);
+                  if (typeof r.flush === "function") r.flush();
+                }
+              } catch {}
+            }
+
             await universalBrowserController.navigate(sessionId, effectiveUrl);
+
+            // Start heartbeat: sends keep-alive events every 5s during long operations
+            if (sseRes) {
+              heartbeatInterval = setInterval(() => {
+                try {
+                  const r = sseRes as any;
+                  if (!r.writableEnded && !r.destroyed) {
+                    sseRes.write(`event: heartbeat\ndata: ${JSON.stringify({ runId, timestamp: Date.now() })}\n\n`);
+                    if (typeof r.flush === "function") r.flush();
+                  } else {
+                    if (heartbeatInterval) clearInterval(heartbeatInterval);
+                  }
+                } catch {
+                  if (heartbeatInterval) clearInterval(heartbeatInterval);
+                }
+              }, 5000);
+            }
 
             // Real-time step callback: sends browser_step SSE events with screenshots
             const onBrowserStep = (step: {
@@ -521,7 +560,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 120000 }
+                  { maxRuntimeMs: 180000 }
                 );
               })()
               : await universalBrowserController.agenticNavigate(
@@ -535,6 +574,9 @@ async function executeToolCall(
                   maxConsecutiveDecisionFailures: isReservationGoal ? 3 : 2,
                 }
               );
+            // Stop heartbeat after task completes
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+
             console.log(`[AgentExecutor] Browser task completed: success=${taskResult.success}, steps=${taskResult.steps.length}, maxSteps=${maxSteps}, runtimeMs=${maxRuntimeMs}`);
             const rawStatus = String(taskResult?.data?.status || "").toLowerCase();
             const hasConfirmationEvidence = Boolean(
@@ -565,10 +607,12 @@ async function executeToolCall(
               screenshotsCount: taskResult.screenshots.length,
             };
           } finally {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
             await universalBrowserController.closeSession(sessionId).catch(() => {});
             console.log(`[AgentExecutor] Browser session closed: ${sessionId}`);
           }
         } catch (err: any) {
+          if (heartbeatInterval) clearInterval(heartbeatInterval);
           console.error(`[AgentExecutor] browse_and_act error:`, err?.message || err);
           console.error(`[AgentExecutor] browse_and_act stack:`, err?.stack?.split('\n').slice(0, 5).join('\n'));
           result = { error: err.message, details: err?.cause?.message || err?.code || 'unknown' };

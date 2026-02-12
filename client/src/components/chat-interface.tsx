@@ -4923,6 +4923,11 @@ IMPORTANTE:
                     lastSeq = data.sequenceId;
                   }
 
+                  // Handle heartbeat events — keep connection alive, no action needed
+                  if (currentEventType === 'heartbeat') {
+                    continue;
+                  }
+
                   // Handle completion events (done or complete)
                   if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
                     console.debug('[SSE] Stream complete event received');

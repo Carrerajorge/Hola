@@ -21,6 +21,7 @@ import { EventEmitter } from "events";
 import fs from "fs/promises";
 import path from "path";
 import OpenAI from "openai";
+import { getGeminiClientOrThrow } from "../../lib/gemini";
 
 // ============================================
 // Types
@@ -1172,7 +1173,8 @@ export class UniversalBrowserController extends EventEmitter {
   }
 
   // ============================================
-  // Smart Agentic Navigation (LLM-powered)
+  // Smart Agentic Navigation (Gemini Vision-powered)
+  // Uses screenshot-based visual understanding for decisions
   // ============================================
 
   async agenticNavigate(sessionId: string, goal: string, maxSteps: number = 20, onStep?: (step: {
@@ -1198,9 +1200,9 @@ export class UniversalBrowserController extends EventEmitter {
     const screenshots: string[] = [];
     let data: any = {};
     const startTime = Date.now();
-    const maxRuntimeMs = Math.max(10000, options?.maxRuntimeMs ?? 120000);
-    const decisionTimeoutMs = Math.max(5000, options?.decisionTimeoutMs ?? 20000);
-    const maxConsecutiveDecisionFailures = Math.max(1, options?.maxConsecutiveDecisionFailures ?? 2);
+    const maxRuntimeMs = Math.max(10000, options?.maxRuntimeMs ?? 180000); // 3 minutes
+    const decisionTimeoutMs = Math.max(5000, options?.decisionTimeoutMs ?? 25000); // 25s per decision
+    const maxConsecutiveDecisionFailures = Math.max(1, options?.maxConsecutiveDecisionFailures ?? 3);
     let consecutiveDecisionFailures = 0;
     let previousActionSignature: string | null = null;
     let repeatedActionCount = 0;
@@ -1212,6 +1214,14 @@ export class UniversalBrowserController extends EventEmitter {
       const cleaned = match[1].split(/\b(?:para|for|el|on|a las|at)\b/i)[0].trim();
       return cleaned;
     })();
+
+    // Get Gemini client for vision-based decisions
+    let geminiClient: ReturnType<typeof getGeminiClientOrThrow> | null = null;
+    try {
+      geminiClient = getGeminiClientOrThrow();
+    } catch {
+      console.warn("[BrowserAgent] Gemini unavailable, falling back to Grok text-only");
+    }
 
     for (let i = 0; i < maxSteps; i++) {
       const elapsedMs = Date.now() - startTime;
@@ -1249,10 +1259,10 @@ export class UniversalBrowserController extends EventEmitter {
         page = recovered;
       }
 
+      // Take screenshot for vision-based analysis
       let screenshotBase64 = "";
       try {
-        // Use JPEG with lower quality for faster SSE transmission (PNG is 3-5x larger)
-        screenshotBase64 = await this.screenshot(sessionId, { type: "jpeg", quality: 50 });
+        screenshotBase64 = await this.screenshot(sessionId, { type: "jpeg", quality: 60 });
         screenshots.push(screenshotBase64);
       } catch (error: any) {
         const msg = `screenshot_failed: ${error?.message || "unknown error"}`;
@@ -1260,6 +1270,7 @@ export class UniversalBrowserController extends EventEmitter {
         steps.push(`Warning: ${msg}`);
       }
 
+      // Get page info for context
       let pageInfo: {
         url: string;
         title: string;
@@ -1277,14 +1288,14 @@ export class UniversalBrowserController extends EventEmitter {
         pageInfo = await page.evaluate(() => ({
           url: window.location.href,
           title: document.title,
-          text: document.body?.innerText?.slice(0, 5000) || "",
-          forms: Array.from(document.querySelectorAll("input, textarea, select, button")).slice(0, 20).map(el => ({
+          text: document.body?.innerText?.slice(0, 3000) || "",
+          forms: Array.from(document.querySelectorAll("input, textarea, select, button, a[href]")).slice(0, 30).map(el => ({
             tag: el.tagName,
-            type: (el as HTMLInputElement).type,
-            name: (el as HTMLInputElement).name || (el as HTMLInputElement).id,
-            placeholder: (el as HTMLInputElement).placeholder,
-            text: (el as HTMLElement).innerText?.slice(0, 50),
-            value: (el as HTMLInputElement).value,
+            type: (el as HTMLInputElement).type || "",
+            name: (el as HTMLInputElement).name || (el as HTMLInputElement).id || "",
+            placeholder: (el as HTMLInputElement).placeholder || "",
+            text: (el as HTMLElement).innerText?.slice(0, 80) || "",
+            value: (el as HTMLInputElement).value || "",
           })),
         }));
       } catch (error: any) {
@@ -1299,14 +1310,14 @@ export class UniversalBrowserController extends EventEmitter {
         pageInfo = await page.evaluate(() => ({
           url: window.location.href,
           title: document.title,
-          text: document.body?.innerText?.slice(0, 5000) || "",
-          forms: Array.from(document.querySelectorAll("input, textarea, select, button")).slice(0, 20).map(el => ({
+          text: document.body?.innerText?.slice(0, 3000) || "",
+          forms: Array.from(document.querySelectorAll("input, textarea, select, button, a[href]")).slice(0, 30).map(el => ({
             tag: el.tagName,
-            type: (el as HTMLInputElement).type,
-            name: (el as HTMLInputElement).name || (el as HTMLInputElement).id,
-            placeholder: (el as HTMLInputElement).placeholder,
-            text: (el as HTMLElement).innerText?.slice(0, 50),
-            value: (el as HTMLInputElement).value,
+            type: (el as HTMLInputElement).type || "",
+            name: (el as HTMLInputElement).name || (el as HTMLInputElement).id || "",
+            placeholder: (el as HTMLInputElement).placeholder || "",
+            text: (el as HTMLElement).innerText?.slice(0, 80) || "",
+            value: (el as HTMLInputElement).value || "",
           })),
         }));
       }
@@ -1325,10 +1336,9 @@ export class UniversalBrowserController extends EventEmitter {
         return { success: false, steps, data, screenshots };
       }
 
-      let response: Awaited<ReturnType<typeof this.llmClient.chat.completions.create>>;
-      try {
-        const reservationInstructions = isReservationGoal
-          ? `\nReservation-specific rules:
+      // Build the decision prompt
+      const reservationInstructions = isReservationGoal
+        ? `\nReservation-specific rules:
 - Use action "done" ONLY after explicit confirmation is visible (e.g. "confirmed", "reserva confirmada", confirmation code/reference).
 - If blocked because required user data is missing, use action "done" with:
   {"status":"needs_user_input","missingFields":["field"],"question":"ask one concise question"}
@@ -1336,44 +1346,96 @@ export class UniversalBrowserController extends EventEmitter {
   {"status":"confirmed","confirmationCode":"...", "restaurant":"...", "date":"...", "time":"...", "partySize":"..."}
 - If max progress reached without proof, use:
   {"status":"unconfirmed","reason":"why not confirmed","lastUrl":"..."}`
-          : "";
-        const llmDecisionPromise = this.llmClient.chat.completions.create({
-          model: "grok-4-1-fast-non-reasoning",
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert web automation agent. You control a browser to accomplish the user's goal.
+        : "";
 
-Current page: ${pageInfo.url}
-Title: ${pageInfo.title}
-Interactive elements: ${JSON.stringify(pageInfo.forms)}
+      const systemPrompt = `You are an expert web automation agent controlling a real Chromium browser. You can SEE the page via screenshots.
 
-Previous steps: ${steps.join(" -> ")}
+CURRENT STATE:
+- URL: ${pageInfo.url}
+- Title: ${pageInfo.title}
+- Step: ${i + 1}/${maxSteps}
+- Previous actions: ${steps.slice(-5).join(" → ") || "none"}
 
-Respond with ONE action in JSON:
+INTERACTIVE ELEMENTS ON PAGE:
+${pageInfo.forms.slice(0, 25).map((f, idx) => `[${idx}] <${f.tag.toLowerCase()} type="${f.type}" name="${f.name}" placeholder="${f.placeholder}"> text="${f.text}" value="${f.value}"`).join("\n")}
+
+Respond with EXACTLY ONE JSON action:
 {
-  "action": "click" | "type" | "navigate" | "scroll" | "wait" | "extract" | "done",
-  "selector": "CSS selector",
-  "value": "text to type or URL to navigate",
-  "reasoning": "why this action",
-  "goalProgress": "how close to goal (0-100%)",
-  "extractedData": {} // any data extracted so far
+  "action": "click" | "type" | "navigate" | "scroll" | "wait" | "select" | "done",
+  "selector": "CSS selector targeting the element",
+  "value": "text to type, URL to navigate, or option to select",
+  "reasoning": "brief explanation of why this action",
+  "goalProgress": "percentage like 30%",
+  "extractedData": {}
 }
 
-If the goal is accomplished, use action "done" with extractedData containing results.${reservationInstructions}`,
+RULES:
+- Look at the screenshot to understand the visual layout
+- Use precise CSS selectors (prefer name, id, or unique attributes)
+- For dropdowns/selects, use action "select" with value being the option text
+- After typing in search fields, you may need to click a search/submit button or press Enter
+- If you see a cookie banner or popup, dismiss it first
+- If the page hasn't loaded yet, use "wait"
+- ONLY use "done" when the goal is truly accomplished${reservationInstructions}`;
+
+      let planned: any = null;
+
+      try {
+        // Use Gemini Vision if available (can SEE the screenshot)
+        if (geminiClient && screenshotBase64) {
+          const geminiDecisionPromise = geminiClient.models.generateContent({
+            model: "gemini-2.0-flash",
+            contents: [{
+              role: "user",
+              parts: [
+                { text: `${systemPrompt}\n\nGOAL: ${goal}\n\nAnalyze the screenshot and the page elements above. What is the SINGLE best next action to achieve the goal? Respond with ONLY the JSON object, no markdown.` },
+                { inlineData: { mimeType: "image/jpeg", data: screenshotBase64 } },
+              ],
+            }],
+            config: {
+              temperature: 0.1,
+              maxOutputTokens: 1024,
             },
-            { role: "user", content: `GOAL: ${goal}\n\nPage text (truncated): ${pageInfo.text.slice(0, 3000)}` },
-          ],
-          max_tokens: 1024,
-          temperature: 0.1,
-        });
+          } as any);
 
-        const llmTimeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`LLM decision timeout after ${decisionTimeoutMs}ms`)), decisionTimeoutMs)
-        );
+          const geminiTimeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Gemini vision timeout after ${decisionTimeoutMs}ms`)), decisionTimeoutMs)
+          );
 
-        response = await Promise.race([llmDecisionPromise, llmTimeoutPromise]);
-        consecutiveDecisionFailures = 0;
+          const geminiResponse = await Promise.race([geminiDecisionPromise, geminiTimeoutPromise]);
+          const geminiText = geminiResponse?.text ?? geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+
+          const jsonMatch = geminiText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            planned = JSON.parse(jsonMatch[0]);
+          }
+          consecutiveDecisionFailures = 0;
+        }
+
+        // Fallback to Grok text-only if Gemini unavailable or failed
+        if (!planned) {
+          const grokDecisionPromise = this.llmClient.chat.completions.create({
+            model: "grok-4-1-fast-non-reasoning",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: `GOAL: ${goal}\n\nPage text (truncated): ${pageInfo.text.slice(0, 2000)}` },
+            ],
+            max_tokens: 1024,
+            temperature: 0.1,
+          });
+
+          const grokTimeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Grok decision timeout after ${decisionTimeoutMs}ms`)), decisionTimeoutMs)
+          );
+
+          const grokResponse = await Promise.race([grokDecisionPromise, grokTimeoutPromise]);
+          const grokText = grokResponse.choices[0]?.message?.content || "{}";
+          const jsonMatch = grokText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            planned = JSON.parse(jsonMatch[0]);
+          }
+          consecutiveDecisionFailures = 0;
+        }
       } catch (error: any) {
         consecutiveDecisionFailures++;
         const errMsg = error?.message || "Unknown LLM decision error";
@@ -1393,18 +1455,8 @@ If the goal is accomplished, use action "done" with extractedData containing res
         continue;
       }
 
-      const text = response.choices[0]?.message?.content || "{}";
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.log(`[BrowserAgent] Step ${i + 1}: LLM response not JSON, skipping`);
-        continue;
-      }
-
-      let planned: any;
-      try {
-        planned = JSON.parse(jsonMatch[0]);
-      } catch {
-        steps.push("Error: Failed to parse LLM response as JSON");
+      if (!planned) {
+        steps.push("Error: Could not parse LLM response as JSON action");
         continue;
       }
 
@@ -1451,7 +1503,7 @@ If the goal is accomplished, use action "done" with extractedData containing res
                 const count = await page.getByText(term, { exact: false }).count();
                 if (count > 0) {
                   await page.getByText(term, { exact: false }).first().click({ timeout: 1500 });
-                  steps.push(`Heuristic recovery: clicked result text \"${term}\"`);
+                  steps.push(`Heuristic recovery: clicked result text "${term}"`);
                   recovered = true;
                   break;
                 }
@@ -1516,7 +1568,7 @@ If the goal is accomplished, use action "done" with extractedData containing res
         // Send final screenshot after "done" action
         if (onStep) {
           try {
-            const finalScreenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 50 });
+            const finalScreenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 60 });
             onStep({
               stepNumber: i + 1,
               totalSteps: maxSteps,
@@ -1555,7 +1607,19 @@ If the goal is accomplished, use action "done" with extractedData containing res
             await this.navigate(sessionId, planned.value);
             break;
           case "scroll":
-            await this.scroll(sessionId, { direction: "down", amount: 500 });
+            await this.scroll(sessionId, { direction: planned.value === "up" ? "up" : "down", amount: 500 });
+            break;
+          case "select":
+            try {
+              await page.selectOption(planned.selector, { label: planned.value });
+            } catch {
+              // Fallback: try clicking the option text
+              try {
+                await page.click(`${planned.selector} option:has-text("${planned.value}")`);
+              } catch {
+                steps.push(`Warning: Could not select "${planned.value}" in ${planned.selector}`);
+              }
+            }
             break;
           case "wait":
             await page.waitForTimeout(2000);
@@ -1572,7 +1636,8 @@ If the goal is accomplished, use action "done" with extractedData containing res
           // Best-effort pause; continue loop if page changed/closed
         }
       } catch (error: any) {
-        steps.push(`Error: ${error.message}`);
+        steps.push(`Error executing ${planned.action}: ${error.message}`);
+        // Don't abort on action errors - let the LLM see the new state and adapt
       }
     }
 

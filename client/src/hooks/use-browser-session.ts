@@ -85,29 +85,39 @@ export function globalUpdateFromSseStep(step: {
   title: string;
 }) {
   console.log('[BrowserSession] updateFromSseStep called:', step.stepNumber, step.action, step.url?.substring(0, 50));
-  setGlobalState(prev => ({
-    ...prev,
-    sessionId: prev.sessionId || `sse-browser-${Date.now()}`,
-    status: step.action === "done" ? "completed" : "active",
-    objective: prev.objective,
-    currentUrl: step.url || prev.currentUrl,
-    currentTitle: step.title || prev.currentTitle,
-    screenshot: step.screenshot ? `data:image/jpeg;base64,${step.screenshot}` : prev.screenshot,
-    actions: [
-      ...prev.actions,
-      {
-        type: step.action,
-        params: {
-          reasoning: step.reasoning,
-          goalProgress: step.goalProgress,
-          url: step.url,
+  setGlobalState(prev => {
+    // Auto-initialize session if this is the first step (stepNumber 0 = browser_started)
+    const sessionId = prev.sessionId || `sse-browser-${Date.now()}`;
+    const status = step.action === "done" ? "completed" : "active";
+    // Only add to actions array if not a duplicate of the last action
+    const lastAction = prev.actions[prev.actions.length - 1];
+    const isDuplicate = lastAction && lastAction.type === step.action &&
+      lastAction.params?.url === step.url;
+
+    return {
+      ...prev,
+      sessionId,
+      status,
+      objective: prev.objective || step.reasoning || "Automatización web",
+      currentUrl: step.url || prev.currentUrl,
+      currentTitle: step.title || prev.currentTitle,
+      screenshot: step.screenshot ? `data:image/jpeg;base64,${step.screenshot}` : prev.screenshot,
+      actions: isDuplicate ? prev.actions : [
+        ...prev.actions,
+        {
+          type: step.action,
+          params: {
+            reasoning: step.reasoning,
+            goalProgress: step.goalProgress,
+            url: step.url,
+          },
+          timestamp: new Date(),
         },
-        timestamp: new Date(),
-      },
-    ],
-    events: prev.events,
-    error: null,
-  }));
+      ],
+      events: prev.events,
+      error: null,
+    };
+  });
 }
 
 export function globalResetBrowserSession() {
