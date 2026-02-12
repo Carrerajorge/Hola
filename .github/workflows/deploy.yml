@@ -137,7 +137,7 @@ jobs:
             compose up -d postgres redis
             sleep 5
             echo "▸ Running database migrations..."
-            compose run --rm --no-deps app node dist/migrate.cjs
+            compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
 
             # ── Free app port from legacy/non-compose processes ──
             echo "▸ Ensuring port 5000 is free..."
@@ -342,7 +342,7 @@ jobs:
             compose up -d postgres redis
             sleep 5
             echo "▸ Running database migrations..."
-            compose run --rm --no-deps app node dist/migrate.cjs
+            compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
 
             echo "▸ Ensuring port 5000 is free..."
             docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
