@@ -328,11 +328,21 @@ export function registerAuthRoutes(app: Express): void {
       });
     } catch (error: any) {
       const requestId = (res as any)?.locals?.requestId as string | undefined;
+      const cause = error?.cause as any;
+      const errorProps = Object.fromEntries(
+        Object.getOwnPropertyNames(error || {}).map((key) => [key, (error as any)[key]])
+      );
       authLoginLogger
         .withRequest(requestId, req?.session?.authUserId || req?.user?.claims?.sub)
         .error("Login handler exception", {
           message: error?.message || String(error),
           stack: error?.stack,
+          name: error?.name,
+          causeMessage: cause?.message,
+          causeCode: cause?.code,
+          causeDetail: cause?.detail,
+          causeHint: cause?.hint,
+          errorProps,
           route: "/api/auth/login",
         });
       console.error("Login error:", {
