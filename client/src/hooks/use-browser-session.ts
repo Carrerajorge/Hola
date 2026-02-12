@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 
 export interface BrowserAction {
   type: string;
@@ -37,8 +37,87 @@ const initialState: BrowserSessionState = {
   error: null,
 };
 
+// ─── Global singleton store ───
+// This state lives OUTSIDE React so it survives component remounts.
+// When ChatInterface remounts (new chat key), the new instance picks up
+// the in-flight browser session state from the old async handleSubmit.
+
+let globalState: BrowserSessionState = { ...initialState };
+const listeners = new Set<() => void>();
+
+function getSnapshot(): BrowserSessionState {
+  return globalState;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function setGlobalState(updater: BrowserSessionState | ((prev: BrowserSessionState) => BrowserSessionState)) {
+  const newState = typeof updater === "function" ? updater(globalState) : updater;
+  if (newState !== globalState) {
+    globalState = newState;
+    listeners.forEach(l => l());
+  }
+}
+
+// ─── Standalone functions (callable from stale closures) ───
+
+export function globalStartSseSession(objective: string) {
+  console.log('[BrowserSession] startSseSession called:', objective);
+  setGlobalState({
+    ...initialState,
+    sessionId: `sse-browser-${Date.now()}`,
+    status: "connecting",
+    objective,
+  });
+}
+
+export function globalUpdateFromSseStep(step: {
+  stepNumber: number;
+  totalSteps: number;
+  action: string;
+  reasoning: string;
+  goalProgress: string;
+  screenshot: string;
+  url: string;
+  title: string;
+}) {
+  console.log('[BrowserSession] updateFromSseStep called:', step.stepNumber, step.action, step.url?.substring(0, 50));
+  setGlobalState(prev => ({
+    ...prev,
+    sessionId: prev.sessionId || `sse-browser-${Date.now()}`,
+    status: step.action === "done" ? "completed" : "active",
+    objective: prev.objective,
+    currentUrl: step.url || prev.currentUrl,
+    currentTitle: step.title || prev.currentTitle,
+    screenshot: step.screenshot ? `data:image/jpeg;base64,${step.screenshot}` : prev.screenshot,
+    actions: [
+      ...prev.actions,
+      {
+        type: step.action,
+        params: {
+          reasoning: step.reasoning,
+          goalProgress: step.goalProgress,
+          url: step.url,
+        },
+        timestamp: new Date(),
+      },
+    ],
+    events: prev.events,
+    error: null,
+  }));
+}
+
+export function globalResetBrowserSession() {
+  setGlobalState({ ...initialState });
+}
+
+// ─── React hook ───
+
 export function useBrowserSession() {
-  const [state, setState] = useState<BrowserSessionState>(initialState);
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const wsRef = useRef<WebSocket | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -48,7 +127,7 @@ export function useBrowserSession() {
       if (response.ok) {
         const data = await response.json();
         if (data.screenshot) {
-          setState(prev => {
+          setGlobalState(prev => {
             if (prev.sessionId === sessionId) {
               return { ...prev, screenshot: data.screenshot };
             }
@@ -66,16 +145,16 @@ export function useBrowserSession() {
       const response = await fetch(`/api/browser/session/${sessionId}`);
       if (response.ok) {
         const session = await response.json();
-        setState(prev => {
+        setGlobalState(prev => {
           if (prev.sessionId === sessionId) {
             let newStatus = prev.status;
             if (session.status === "completed") newStatus = "completed";
             else if (session.status === "error") newStatus = "error";
             else if (session.status === "cancelled") newStatus = "cancelled";
             else if (session.status === "active" || session.status === "running") newStatus = "active";
-            
-            return { 
-              ...prev, 
+
+            return {
+              ...prev,
               status: newStatus,
               currentUrl: session.currentUrl || prev.currentUrl,
               currentTitle: session.currentTitle || prev.currentTitle,
@@ -95,10 +174,10 @@ export function useBrowserSession() {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
-    
+
     fetchScreenshot(sessionId);
     fetchSessionState(sessionId);
-    
+
     pollingRef.current = setInterval(async () => {
       const session = await fetchSessionState(sessionId);
       if (session && (session.status === "completed" || session.status === "error" || session.status === "cancelled")) {
@@ -125,7 +204,7 @@ export function useBrowserSession() {
     }
     stopPolling();
 
-    setState({
+    setGlobalState({
       ...initialState,
       sessionId,
       status: "connecting",
@@ -133,7 +212,7 @@ export function useBrowserSession() {
     });
 
     startPolling(sessionId);
-    setState(prev => ({ ...prev, status: "active" }));
+    setGlobalState(prev => ({ ...prev, status: "active" }));
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
@@ -146,9 +225,9 @@ export function useBrowserSession() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         if (data.type === "subscribed") {
-          setState(prev => ({ ...prev, status: "active" }));
+          setGlobalState(prev => ({ ...prev, status: "active" }));
         } else if (data.messageType === "browser_event") {
           const eventType = data.eventType as BrowserEvent["type"];
           const browserEvent: BrowserEvent = {
@@ -158,7 +237,7 @@ export function useBrowserSession() {
             data: data.data,
           };
 
-          setState(prev => {
+          setGlobalState(prev => {
             const newState = { ...prev, events: [...prev.events, browserEvent] };
 
             if (browserEvent.data?.screenshot) {
@@ -204,7 +283,7 @@ export function useBrowserSession() {
     ws.onerror = (error) => {
       console.error("Browser WebSocket error, using polling fallback:", error);
     };
-    
+
     ws.onclose = () => {
       wsRef.current = null;
     };
@@ -212,32 +291,32 @@ export function useBrowserSession() {
 
   const createSession = useCallback(async (objective: string, config?: any) => {
     try {
-      setState(prev => ({ ...prev, status: "connecting", objective }));
-      
+      setGlobalState(prev => ({ ...prev, status: "connecting", objective }));
+
       const response = await fetch("/api/browser/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ objective, config }),
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Failed to create session");
       }
-      
+
       const { sessionId } = await response.json();
       subscribeToSession(sessionId, objective);
-      
+
       return sessionId;
     } catch (error: any) {
-      setState(prev => ({ ...prev, status: "error", error: error.message }));
+      setGlobalState(prev => ({ ...prev, status: "error", error: error.message }));
       throw error;
     }
   }, [subscribeToSession]);
 
   const navigate = useCallback(async (url: string) => {
     if (!state.sessionId) return null;
-    
+
     try {
       const response = await fetch(`/api/browser/session/${state.sessionId}/navigate`, {
         method: "POST",
@@ -253,7 +332,7 @@ export function useBrowserSession() {
 
   const click = useCallback(async (selector: string) => {
     if (!state.sessionId) return null;
-    
+
     try {
       const response = await fetch(`/api/browser/session/${state.sessionId}/click`, {
         method: "POST",
@@ -269,7 +348,7 @@ export function useBrowserSession() {
 
   const type = useCallback(async (selector: string, text: string) => {
     if (!state.sessionId) return null;
-    
+
     try {
       const response = await fetch(`/api/browser/session/${state.sessionId}/type`, {
         method: "POST",
@@ -285,7 +364,7 @@ export function useBrowserSession() {
 
   const scroll = useCallback(async (direction: "up" | "down", amount?: number) => {
     if (!state.sessionId) return null;
-    
+
     try {
       const response = await fetch(`/api/browser/session/${state.sessionId}/scroll`, {
         method: "POST",
@@ -301,7 +380,7 @@ export function useBrowserSession() {
 
   const getPageState = useCallback(async () => {
     if (!state.sessionId) return null;
-    
+
     try {
       const response = await fetch(`/api/browser/session/${state.sessionId}/state`);
       return await response.json();
@@ -313,11 +392,11 @@ export function useBrowserSession() {
 
   const cancel = useCallback(async () => {
     if (!state.sessionId) return;
-    
+
     try {
       await fetch(`/api/browser/session/${state.sessionId}/cancel`, { method: "POST" });
       stopPolling();
-      setState(prev => ({ ...prev, status: "cancelled" }));
+      setGlobalState(prev => ({ ...prev, status: "cancelled" }));
     } catch (error) {
       console.error("Cancel error:", error);
     }
@@ -325,7 +404,7 @@ export function useBrowserSession() {
 
   const close = useCallback(async () => {
     if (!state.sessionId) return;
-    
+
     try {
       await fetch(`/api/browser/session/${state.sessionId}`, { method: "DELETE" });
       stopPolling();
@@ -333,7 +412,7 @@ export function useBrowserSession() {
         wsRef.current.close();
         wsRef.current = null;
       }
-      setState(initialState);
+      setGlobalState({ ...initialState });
     } catch (error) {
       console.error("Close error:", error);
     }
@@ -345,8 +424,28 @@ export function useBrowserSession() {
       wsRef.current.close();
       wsRef.current = null;
     }
-    setState(initialState);
+    setGlobalState({ ...initialState });
   }, [stopPolling]);
+
+  // Direct update from SSE browser_step events (no WebSocket/polling needed)
+  // These now delegate to global functions so they work across remounts
+  const updateFromSseStep = useCallback((step: {
+    stepNumber: number;
+    totalSteps: number;
+    action: string;
+    reasoning: string;
+    goalProgress: string;
+    screenshot: string;
+    url: string;
+    title: string;
+  }) => {
+    globalUpdateFromSseStep(step);
+  }, []);
+
+  // Start an SSE-based browser session (for agent loop browser automation)
+  const startSseSession = useCallback((objective: string) => {
+    globalStartSseSession(objective);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -369,5 +468,7 @@ export function useBrowserSession() {
     cancel,
     close,
     reset,
+    updateFromSseStep,
+    startSseSession,
   };
 }

@@ -25,12 +25,8 @@ import {
   verifyOpenClaw1000Capability,
   verifyOpenClaw1000Batch,
   generateOpenClaw1000Report,
+  getOpenClaw1000ExecutionRoadmap,
 } from "../services/openClaw1000Service";
-import {
-  OPENCLAW_1000,
-  getOpenClaw1000CapabilitiesByCategory,
-  type OpenClaw1000Category,
-} from "../capabilities/generated/openClaw1000Capabilities.generated";
 
 const router = Router();
 
@@ -340,9 +336,10 @@ router.get("/report-1000", async (_req: Request, res: Response) => {
 
 router.get("/categories-1000", (_req: Request, res: Response) => {
   try {
-    const categories = [...new Set(OPENCLAW_1000.map((c) => c.category))] as OpenClaw1000Category[];
+    const allCapabilities = listOpenClaw1000Capabilities();
+    const categories = [...new Set(allCapabilities.map((c) => c.category))];
     const breakdown = categories.map((cat) => {
-      const caps = getOpenClaw1000CapabilitiesByCategory(cat);
+      const caps = allCapabilities.filter((capability) => capability.category === cat);
       return {
         category: cat,
         total: caps.length,
@@ -359,6 +356,23 @@ router.get("/categories-1000", (_req: Request, res: Response) => {
     res.json({ success: true, categories: breakdown });
   } catch (error: any) {
     console.error("[OpenClaw1000] Error getting categories:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get("/roadmap-1000", (req: Request, res: Response) => {
+  try {
+    const startIdRaw = typeof req.query.startId === "string" ? Number.parseInt(req.query.startId, 10) : 1;
+    const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : 50;
+
+    const roadmap = getOpenClaw1000ExecutionRoadmap({
+      startId: Number.isFinite(startIdRaw) ? startIdRaw : 1,
+      limit: Number.isFinite(limitRaw) ? limitRaw : 50,
+    });
+
+    res.json({ success: true, roadmap });
+  } catch (error: any) {
+    console.error("[OpenClaw1000] Error generating roadmap:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -6,9 +6,6 @@
 import {
   OPENCLAW_1000,
   getOpenClaw1000CapabilityById,
-  getOpenClaw1000CapabilitiesByCategory,
-  getOpenClaw1000Gaps,
-  getOpenClaw1000Stats,
   type OpenClaw1000Capability,
   type OpenClaw1000Category,
   type CapabilityStatus,
@@ -17,6 +14,12 @@ import {
   OPENCLAW_1000_EMAITI_MATRIX,
   getOpenClaw1000EmaitiEntry,
 } from "../capabilities/generated/openClaw1000EmaitiMatrix.generated";
+import {
+  getOpenClaw1000RuntimeGaps,
+  getOpenClaw1000RuntimeStats,
+  toOpenClaw1000RuntimeCapabilities,
+  toOpenClaw1000RuntimeCapability,
+} from "./openClaw1000RuntimeStatus";
 
 export type OpenClaw1000VerifyStatus = "PASS" | "FAIL" | "SKIP" | "STUB" | "ERROR";
 
@@ -74,13 +77,37 @@ export interface OpenClaw1000Report {
   recommendations: string[];
 }
 
+export interface OpenClaw1000RoadmapItem {
+  sequence: number;
+  id: number;
+  code: string;
+  capability: string;
+  category: OpenClaw1000Category;
+  toolName: string;
+  status: CapabilityStatus;
+  track: "hardening" | "implementation" | "net_new";
+  featureFlag: string;
+}
+
+export interface OpenClaw1000ExecutionRoadmap {
+  startId: number;
+  limit: number;
+  totalBacklog: number;
+  summary: {
+    partial: number;
+    stub: number;
+    missing: number;
+  };
+  items: OpenClaw1000RoadmapItem[];
+}
+
 export function listOpenClaw1000Capabilities(options?: {
   category?: string;
   status?: string;
 }): OpenClaw1000Capability[] {
   const { category, status } = options || {};
 
-  let caps = OPENCLAW_1000;
+  let caps = toOpenClaw1000RuntimeCapabilities(OPENCLAW_1000);
 
   if (category) {
     caps = caps.filter((c) => c.category === (category as OpenClaw1000Category));
@@ -94,12 +121,14 @@ export function listOpenClaw1000Capabilities(options?: {
 }
 
 export function getOpenClaw1000Capability(id: number): OpenClaw1000Capability | undefined {
-  return getOpenClaw1000CapabilityById(id);
+  const capability = getOpenClaw1000CapabilityById(id);
+  if (!capability) return undefined;
+  return toOpenClaw1000RuntimeCapability(capability);
 }
 
 export function getOpenClaw1000QuickStats() {
-  const stats = getOpenClaw1000Stats();
-  const gaps = getOpenClaw1000Gaps();
+  const stats = getOpenClaw1000RuntimeStats();
+  const gaps = getOpenClaw1000RuntimeGaps();
 
   return {
     ...stats,
@@ -112,7 +141,7 @@ export function getOpenClaw1000QuickStats() {
 
 export async function verifyOpenClaw1000Capability(id: number): Promise<OpenClaw1000VerificationResult> {
   const start = Date.now();
-  const cap = getOpenClaw1000CapabilityById(id);
+  const cap = getOpenClaw1000Capability(id);
 
   if (!cap) {
     return {
@@ -182,12 +211,12 @@ export async function verifyOpenClaw1000Batch(options?: {
   let caps: OpenClaw1000Capability[];
   if (ids && ids.length > 0) {
     caps = ids
-      .map((id) => getOpenClaw1000CapabilityById(id))
+      .map((id) => getOpenClaw1000Capability(id))
       .filter((c): c is OpenClaw1000Capability => Boolean(c));
   } else if (category) {
-    caps = getOpenClaw1000CapabilitiesByCategory(category as OpenClaw1000Category);
+    caps = listOpenClaw1000Capabilities({ category });
   } else {
-    caps = OPENCLAW_1000;
+    caps = listOpenClaw1000Capabilities();
   }
 
   const out: OpenClaw1000VerificationResult[] = [];
@@ -202,8 +231,8 @@ export async function verifyOpenClaw1000Batch(options?: {
 
 export async function generateOpenClaw1000Report(): Promise<OpenClaw1000Report> {
   const start = Date.now();
-  const stats = getOpenClaw1000Stats();
-  const gaps = getOpenClaw1000Gaps();
+  const stats = getOpenClaw1000RuntimeStats();
+  const gaps = getOpenClaw1000RuntimeGaps();
 
   const all = await verifyOpenClaw1000Batch();
 
@@ -279,5 +308,54 @@ export async function generateOpenClaw1000Report(): Promise<OpenClaw1000Report> 
     categories,
     gaps,
     recommendations,
+  };
+}
+
+export function getOpenClaw1000ExecutionRoadmap(options?: {
+  startId?: number;
+  limit?: number;
+}): OpenClaw1000ExecutionRoadmap {
+  const startIdRaw = options?.startId ?? 1;
+  const startId = Number.isFinite(startIdRaw) ? Math.max(1, Math.floor(startIdRaw)) : 1;
+  const limitRaw = options?.limit ?? 50;
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.floor(limitRaw), 1), 200) : 50;
+
+  const orderedBacklog = listOpenClaw1000Capabilities()
+    .filter((capability) => capability.id >= startId && capability.status !== "implemented")
+    .sort((a, b) => a.id - b.id);
+
+  const summary = orderedBacklog.reduce(
+    (acc, capability) => {
+      if (capability.status === "partial") acc.partial += 1;
+      else if (capability.status === "stub") acc.stub += 1;
+      else acc.missing += 1;
+      return acc;
+    },
+    { partial: 0, stub: 0, missing: 0 }
+  );
+
+  const items = orderedBacklog.slice(0, limit).map((capability, index) => ({
+    sequence: index + 1,
+    id: capability.id,
+    code: capability.code,
+    capability: capability.capability,
+    category: capability.category,
+    toolName: capability.toolName,
+    status: capability.status,
+    track:
+      capability.status === "partial"
+        ? "hardening"
+        : capability.status === "stub"
+          ? "implementation"
+          : "net_new",
+    featureFlag: capability.featureFlag,
+  }));
+
+  return {
+    startId,
+    limit,
+    totalBacklog: orderedBacklog.length,
+    summary,
+    items,
   };
 }

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { EventEmitter } from 'events';
 import pino from 'pino';
@@ -9,9 +10,11 @@ import pino from 'pino';
 
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type WASocket,
+  type WAMessage,
   type AuthenticationState,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -26,9 +29,27 @@ export type WhatsAppWebStatus =
   | { state: 'pairing_code'; phone: string; code: string }
   | { state: 'connected'; me?: { id?: string; name?: string } };
 
+export interface WhatsAppMediaAttachment {
+  type: 'image' | 'document' | 'audio' | 'video' | 'sticker';
+  buffer: Buffer;
+  mimetype: string;
+  fileName?: string;
+  caption?: string;
+  /** Local path where the file was saved */
+  localPath: string;
+}
+
+export interface WhatsAppInboundMessage {
+  from: string;
+  text: string;
+  messageId?: string;
+  timestamp?: number;
+  media?: WhatsAppMediaAttachment;
+}
+
 export interface WhatsAppWebEvents {
   status: (userId: string, status: WhatsAppWebStatus) => void;
-  inbound_message: (userId: string, msg: { from: string; text: string; messageId?: string; timestamp?: number }) => void;
+  inbound_message: (userId: string, msg: WhatsAppInboundMessage) => void;
 }
 
 interface SocketRecord {
@@ -45,6 +66,8 @@ export class WhatsAppWebManager extends EventEmitter {
   private reconnectAttempts = new Map<string, number>();
   // Track processed message IDs to prevent duplicate auto-replies
   private processedMessages = new Map<string, number>();
+  // Track message IDs sent by the bot to avoid infinite self-chat loops
+  private botSentMessageIds = new Set<string>();
   private processedMessagesCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
@@ -63,7 +86,7 @@ export class WhatsAppWebManager extends EventEmitter {
     // Try primary path first (works in Docker with /app/data pre-created),
     // fall back to OS temp dir if the primary is not writable (local dev, etc.)
     const primary = path.join(process.cwd(), 'data', 'whatsapp-web');
-    const fallback = path.join(require('os').tmpdir(), 'whatsapp-web-sessions');
+    const fallback = path.join(os.tmpdir(), 'whatsapp-web-sessions');
 
     for (const base of [primary, fallback]) {
       const dir = path.join(base, userId);
@@ -343,14 +366,24 @@ export class WhatsAppWebManager extends EventEmitter {
       }
     });
 
-    // Inbound messages
+    // Inbound messages (text + media)
     sock.ev.on('messages.upsert', (m) => {
       try {
         if (!m.messages || m.messages.length === 0) return;
         for (const msg of m.messages) {
-          if (msg.key.fromMe) continue;
           const from = msg.key.remoteJid || 'unknown';
           if (from === 'unknown' || from === 'status@broadcast') continue;
+
+          // Allow messages from self-chat (same JID as connected user) even if fromMe
+          const myJid = sock.user?.id;
+          const myBaseJid = myJid?.includes(':') ? myJid.split(':')[0] + '@s.whatsapp.net' : myJid;
+          const isSelfChat = myBaseJid && from === myBaseJid;
+
+          // Skip own messages UNLESS it's a self-chat (user messaging themselves to talk to ILIAGPT)
+          if (msg.key.fromMe && !isSelfChat) continue;
+
+          // Skip bot-sent messages to prevent infinite self-chat loops
+          if (msg.key.id && this.botSentMessageIds.has(msg.key.id)) continue;
 
           const text =
             (msg.message as any)?.conversation ||
@@ -362,13 +395,23 @@ export class WhatsAppWebManager extends EventEmitter {
             (msg.message as any)?.listResponseMessage?.title ||
             '';
 
-          if (!text) continue;
+          // Detect media type
+          const msgContent = msg.message as any;
+          const hasImage = !!msgContent?.imageMessage;
+          const hasDocument = !!msgContent?.documentMessage;
+          const hasAudio = !!msgContent?.audioMessage;
+          const hasVideo = !!msgContent?.videoMessage;
+          const hasSticker = !!msgContent?.stickerMessage;
+          const hasMedia = hasImage || hasDocument || hasAudio || hasVideo || hasSticker;
 
-          this.emit('inbound_message', userId, {
-            from,
-            text,
-            messageId: msg.key.id || undefined,
-            timestamp: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : undefined,
+          // Skip messages with no text AND no media
+          if (!text && !hasMedia) continue;
+
+          // Fire-and-forget media download + emit
+          void this.processInboundMessage(userId, msg, from, text, hasMedia, {
+            hasImage, hasDocument, hasAudio, hasVideo, hasSticker,
+          }).catch(e => {
+            console.error('[WhatsApp] processInboundMessage error:', e);
           });
         }
       } catch (e) {
@@ -450,13 +493,172 @@ export class WhatsAppWebManager extends EventEmitter {
     console.info('[WhatsApp] All sessions closed');
   }
 
+  /**
+   * Download media from a WhatsApp message, save to disk, emit inbound_message with media info.
+   */
+  private async processInboundMessage(
+    userId: string,
+    msg: WAMessage,
+    from: string,
+    text: string,
+    hasMedia: boolean,
+    mediaFlags: { hasImage: boolean; hasDocument: boolean; hasAudio: boolean; hasVideo: boolean; hasSticker: boolean },
+  ): Promise<void> {
+    let media: WhatsAppMediaAttachment | undefined;
+
+    if (hasMedia) {
+      try {
+        const msgContent = msg.message as any;
+        let mediaType: WhatsAppMediaAttachment['type'];
+        let mimetype = 'application/octet-stream';
+        let fileName: string | undefined;
+
+        if (mediaFlags.hasImage) {
+          mediaType = 'image';
+          mimetype = msgContent.imageMessage?.mimetype || 'image/jpeg';
+        } else if (mediaFlags.hasDocument) {
+          mediaType = 'document';
+          mimetype = msgContent.documentMessage?.mimetype || 'application/octet-stream';
+          fileName = msgContent.documentMessage?.fileName || msgContent.documentMessage?.title;
+        } else if (mediaFlags.hasAudio) {
+          mediaType = 'audio';
+          mimetype = msgContent.audioMessage?.mimetype || 'audio/ogg';
+        } else if (mediaFlags.hasVideo) {
+          mediaType = 'video';
+          mimetype = msgContent.videoMessage?.mimetype || 'video/mp4';
+        } else {
+          mediaType = 'sticker';
+          mimetype = msgContent.stickerMessage?.mimetype || 'image/webp';
+        }
+
+        // Download media buffer
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+
+        // Determine file extension from mimetype
+        const extMap: Record<string, string> = {
+          'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
+          'audio/ogg': '.ogg', 'audio/ogg; codecs=opus': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a',
+          'video/mp4': '.mp4',
+          'application/pdf': '.pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+          'application/msword': '.doc',
+        };
+        const ext = extMap[mimetype] || (fileName ? path.extname(fileName) : '.bin');
+        const savedFileName = fileName || `wa_${mediaType}_${Date.now()}${ext}`;
+
+        // Save to uploads/whatsapp/
+        const waUploadsDir = path.join(process.cwd(), 'uploads', 'whatsapp');
+        fs.mkdirSync(waUploadsDir, { recursive: true });
+        const localPath = path.join(waUploadsDir, savedFileName);
+        fs.writeFileSync(localPath, buffer);
+
+        console.log(`[WhatsApp] Downloaded ${mediaType} (${buffer.length} bytes) → ${localPath}`);
+
+        media = { type: mediaType, buffer, mimetype, fileName: savedFileName, localPath };
+      } catch (dlErr: any) {
+        console.error('[WhatsApp] Media download failed:', dlErr?.message || dlErr);
+        // Still emit the message with whatever text we have
+      }
+    }
+
+    // Build descriptive text if message is media-only (no caption)
+    let finalText = text;
+    if (!finalText && media) {
+      switch (media.type) {
+        case 'image': finalText = '[El usuario envió una imagen]'; break;
+        case 'document': finalText = `[El usuario envió un documento: ${media.fileName || 'archivo'}]`; break;
+        case 'audio': finalText = '[El usuario envió un mensaje de voz]'; break;
+        case 'video': finalText = '[El usuario envió un video]'; break;
+        case 'sticker': finalText = '[El usuario envió un sticker]'; break;
+      }
+    }
+
+    if (!finalText) return; // Nothing to process
+
+    this.emit('inbound_message', userId, {
+      from,
+      text: finalText,
+      messageId: msg.key.id || undefined,
+      timestamp: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : undefined,
+      media,
+    } as WhatsAppInboundMessage);
+  }
+
   async sendText(userId: string, toJid: string, text: string): Promise<void> {
     const rec = this.sockets.get(userId);
     if (!rec || rec.status.state !== 'connected') {
       throw new Error('WhatsApp no está conectado');
     }
-    await rec.sock.sendMessage(toJid, { text });
+    const sent = await rec.sock.sendMessage(toJid, { text });
+    // Track bot-sent message IDs to prevent infinite self-chat loops
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      // Auto-cleanup after 5 minutes
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+
+  async sendDocument(userId: string, toJid: string, buffer: Buffer, fileName: string, mimetype: string, caption?: string): Promise<void> {
+    const rec = this.sockets.get(userId);
+    if (!rec || rec.status.state !== 'connected') {
+      throw new Error('WhatsApp no está conectado');
+    }
+    const sent = await rec.sock.sendMessage(toJid, {
+      document: buffer,
+      fileName,
+      mimetype,
+      ...(caption ? { caption } : {}),
+    });
+    if (sent?.key?.id) {
+      this.botSentMessageIds.add(sent.key.id);
+      setTimeout(() => this.botSentMessageIds.delete(sent.key.id!), 5 * 60_000).unref?.();
+    }
+  }
+  /**
+   * Auto-reconnect persisted sessions on server startup.
+   * Scans the session directory for existing auth states and reconnects them.
+   */
+  async autoReconnect(): Promise<void> {
+    const bases = [
+      path.join(process.cwd(), 'data', 'whatsapp-web'),
+      path.join(os.tmpdir(), 'whatsapp-web-sessions'),
+    ];
+
+    for (const base of bases) {
+      try {
+        if (!fs.existsSync(base)) continue;
+        const userDirs = fs.readdirSync(base);
+        for (const userId of userDirs) {
+          const sessionDir = path.join(base, userId);
+          const stat = fs.statSync(sessionDir);
+          if (!stat.isDirectory()) continue;
+
+          // Check if there are auth files (creds.json indicates a saved session)
+          const credsFile = path.join(sessionDir, 'creds.json');
+          if (!fs.existsSync(credsFile)) continue;
+
+          console.log(`[WhatsApp] Auto-reconnecting session for user ${userId}...`);
+          try {
+            await this.startWithOptions(userId);
+            console.log(`[WhatsApp] Auto-reconnect successful for user ${userId}`);
+          } catch (e: any) {
+            console.error(`[WhatsApp] Auto-reconnect failed for user ${userId}:`, e?.message || e);
+          }
+        }
+      } catch {
+        // Directory doesn't exist or isn't readable — skip
+      }
+    }
   }
 }
 
 export const whatsappWebManager = new WhatsAppWebManager();
+
+// Auto-reconnect persisted sessions after a short delay (let the server finish starting)
+setTimeout(() => {
+  whatsappWebManager.autoReconnect().catch((e) => {
+    console.error('[WhatsApp] Auto-reconnect error:', e);
+  });
+}, 3000);

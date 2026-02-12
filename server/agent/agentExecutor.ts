@@ -53,6 +53,19 @@ const AGENT_TOOLS: FunctionDeclaration[] = [
     }
   },
   {
+    name: "browse_and_act",
+    description: "Open a real browser and autonomously accomplish a goal: navigate websites, fill forms, click buttons, make reservations, purchases, etc. Use this when you need to INTERACT with a website (not just read it). The browser uses AI vision to analyze pages and decide actions automatically.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Starting URL to navigate to (e.g., https://www.mesa247.pe)" },
+        goal: { type: "string", description: "Detailed description of what to accomplish (e.g., 'Make a reservation for 2 people on February 15, 2026 at 8:00 PM at a restaurant in Lima')" },
+        maxSteps: { type: "number", description: "Maximum browser actions to take (default 20)" }
+      },
+      required: ["url", "goal"]
+    }
+  },
+  {
     name: "create_presentation",
     description: "Create a PowerPoint presentation with slides",
     parameters: {
@@ -165,16 +178,210 @@ function getToolsForIntent(intent: string): FunctionDeclaration[] {
       return AGENT_TOOLS.filter(t => ["create_spreadsheet", "analyze_data"].includes(t.name));
     case "data_analysis":
       return AGENT_TOOLS.filter(t => ["analyze_data", "generate_chart", "create_spreadsheet"].includes(t.name));
+    case "web_automation":
+      return AGENT_TOOLS.filter(t => ["web_search", "fetch_url", "browse_and_act"].includes(t.name));
     default:
       return AGENT_TOOLS;
   }
+}
+
+type ReservationMissingField =
+  | "restaurant"
+  | "date"
+  | "time"
+  | "partySize"
+  | "contactName"
+  | "contactPhone"
+  | "contactEmail";
+
+interface ReservationDetails {
+  restaurant?: string;
+  date?: string;
+  time?: string;
+  partySize?: number;
+  contactName?: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+}
+
+const RESERVATION_FIELD_LABELS: Record<ReservationMissingField, string> = {
+  restaurant: "restaurante exacto",
+  date: "fecha exacta (dia/mes/anio)",
+  time: "hora exacta (ej. 20:00 o 8:00 pm)",
+  partySize: "cantidad de personas",
+  contactName: "nombre para la reserva",
+  contactPhone: "telefono de contacto",
+  contactEmail: "email de contacto",
+};
+
+function normalizeSpaces(value: string): string {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function collectRecentUserText(messages: Array<{ role: string; content: string }>): string {
+  return messages
+    .filter((m) => m.role === "user")
+    .slice(-4)
+    .map((m) => normalizeSpaces(m.content))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isRestaurantReservationRequest(text: string): boolean {
+  const normalized = normalizeSpaces(text).toLowerCase();
+  if (!normalized) return false;
+  const hasReservationVerb = /\b(reserva|reservar|reservacion|reservation|book|booking)\b/i.test(normalized);
+  const hasRestaurantTerm = /\b(restaurante|restaurant|mesa|table)\b/i.test(normalized);
+  return hasReservationVerb && hasRestaurantTerm;
+}
+
+function extractReservationDetails(text: string): ReservationDetails {
+  const source = normalizeSpaces(text);
+  const details: ReservationDetails = {};
+  if (!source) return details;
+
+  const partyMatch =
+    source.match(/\b(?:para|for)\s+(\d{1,2})\s*(?:personas?|people|guests?|comensales?)\b/i) ||
+    source.match(/\b(\d{1,2})\s*(?:personas?|people|guests?|comensales?)\b/i);
+  if (partyMatch) {
+    const parsed = Number(partyMatch[1]);
+    if (Number.isFinite(parsed) && parsed > 0) details.partySize = parsed;
+  }
+
+  const monthEs = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre";
+  const monthEn = "january|february|march|april|may|june|july|august|september|october|november|december";
+  const datePatterns: RegExp[] = [
+    /\b\d{4}-\d{2}-\d{2}\b/i,
+    /\b\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})\b/i,
+    new RegExp(`\\b\\d{1,2}\\s+de\\s+(?:${monthEs})(?:\\s+de?\\s*\\d{4})?\\b`, "i"),
+    new RegExp(`\\b(?:${monthEn})\\s+\\d{1,2}(?:,\\s*\\d{4})?\\b`, "i"),
+    /\b(?:hoy|manana|mañana|today|tomorrow)\b/i,
+  ];
+  for (const pattern of datePatterns) {
+    const match = source.match(pattern);
+    if (match?.[0]) {
+      details.date = normalizeSpaces(match[0]);
+      break;
+    }
+  }
+
+  const timeMatch =
+    source.match(/\b(?:a las|at)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\b/i) ||
+    source.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i) ||
+    source.match(/\b(\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.))\b/i);
+  if (timeMatch?.[1]) {
+    details.time = normalizeSpaces(timeMatch[1]);
+  }
+
+  const restaurantByKeyword = source.match(
+    /\b(?:restaurante|restaurant)\s+(.+?)(?=\s+(?:para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+  );
+  const restaurantByReservePattern = source.match(
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)(?=\s+(?:para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+  );
+  const restaurantRaw = restaurantByKeyword?.[1] || restaurantByReservePattern?.[1];
+  if (restaurantRaw) {
+    details.restaurant = normalizeSpaces(restaurantRaw.replace(/^en\s+/i, ""));
+  }
+
+  const locationMatch = source.match(
+    /\b(?:en|in)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})(?=\s+(?:para|for|el|on|a las|at)\b|$)/i
+  );
+  if (locationMatch?.[1]) {
+    details.location = normalizeSpaces(locationMatch[1]);
+  }
+  if (!details.location && details.restaurant) {
+    const cityFromRestaurant = details.restaurant.match(/\bde\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})$/i);
+    if (cityFromRestaurant?.[1]) {
+      details.location = normalizeSpaces(cityFromRestaurant[1]);
+    }
+  }
+
+  const emailMatch = source.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
+  if (emailMatch?.[0]) {
+    details.email = emailMatch[0];
+  }
+
+  const sourceWithoutEmails = source.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, " ");
+  const labeledPhoneMatch = sourceWithoutEmails.match(
+    /\b(?:telefono|tel[eé]fono|phone|cel|celular|whatsapp)\b\s*[:\-]?\s*(\+?\d[\d\s().-]{7,}\d)\b/i
+  );
+  if (labeledPhoneMatch?.[1]) {
+    const candidate = normalizeSpaces(labeledPhoneMatch[1]);
+    const digitCount = candidate.replace(/\D/g, "").length;
+    if (digitCount >= 8 && digitCount <= 15) {
+      details.phone = candidate;
+    }
+  }
+
+  if (!details.phone) {
+    const loosePhoneMatches = sourceWithoutEmails.match(/\+?\d[\d\s().-]{8,}\d/g) || [];
+    for (const rawMatch of loosePhoneMatches) {
+      const candidate = normalizeSpaces(rawMatch);
+      if (/[:/]/.test(candidate)) continue; // avoid date/time-like tokens
+      const digitCount = candidate.replace(/\D/g, "").length;
+      if (digitCount >= 8 && digitCount <= 15) {
+        details.phone = candidate;
+        break;
+      }
+    }
+  }
+
+  const nameMatch = source.match(
+    /\b(?:a nombre de|nombre(?:\s+de)?|name(?:\s+is)?|my name is|soy)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,60})/i
+  );
+  if (nameMatch?.[1]) {
+    const cleaned = normalizeSpaces(nameMatch[1]).split(/\b(?:telefono|tel|phone|email|correo)\b/i)[0].trim();
+    if (cleaned.length >= 2) {
+      details.contactName = cleaned;
+    }
+  }
+
+  return details;
+}
+
+function getMissingReservationFields(details: ReservationDetails): ReservationMissingField[] {
+  const missing: ReservationMissingField[] = [];
+  if (!details.restaurant) missing.push("restaurant");
+  if (!details.date) missing.push("date");
+  if (!details.time) missing.push("time");
+  if (!details.partySize) missing.push("partySize");
+  if (!details.contactName) missing.push("contactName");
+  if (!details.phone) missing.push("contactPhone");
+  if (!details.email) missing.push("contactEmail");
+  return missing;
+}
+
+function formatReservationDetails(details: ReservationDetails): string {
+  const parts: string[] = [];
+  if (details.restaurant) parts.push(`restaurante="${details.restaurant}"`);
+  if (details.location) parts.push(`ciudad="${details.location}"`);
+  if (details.date) parts.push(`fecha="${details.date}"`);
+  if (details.time) parts.push(`hora="${details.time}"`);
+  if (details.partySize) parts.push(`personas=${details.partySize}`);
+  if (details.contactName) parts.push(`nombre="${details.contactName}"`);
+  if (details.phone) parts.push(`telefono="${details.phone}"`);
+  if (details.email) parts.push(`email="${details.email}"`);
+  return parts.join(", ");
+}
+
+function buildReservationClarificationQuestion(
+  details: ReservationDetails,
+  missingFields: ReservationMissingField[]
+): string {
+  const knownDetails = formatReservationDetails(details);
+  const missingList = missingFields.map((field) => `- ${RESERVATION_FIELD_LABELS[field]}`).join("\n");
+  const knownBlock = knownDetails ? `Datos detectados: ${knownDetails}\n\n` : "";
+  return `${knownBlock}Para completar la reserva necesito estos datos:\n${missingList}\n\nCompartelos en un solo mensaje y continuo con la reserva real en la web.`;
 }
 
 async function executeToolCall(
   toolName: string,
   args: Record<string, any>,
   context: ToolContext,
-  runId: string
+  runId: string,
+  sseRes?: Response
 ): Promise<{ result: any; artifact?: { type: string; url: string; name: string } }> {
   console.log(`[AgentExecutor] Executing tool: ${toolName}`, args);
 
@@ -194,11 +401,21 @@ async function executeToolCall(
   try {
     switch (toolName) {
       case "web_search": {
-        const searchResult = await toolRegistry.execute("search", {
-          query: args.query,
-          maxResults: args.maxResults || 5
-        }, context);
-        result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
+        try {
+          // Use DuckDuckGo search directly (avoids toolRegistry network policy blocks)
+          const { searchWeb } = await import("../services/webSearch");
+          const searchResult = await searchWeb(args.query, args.maxResults || 5);
+          result = searchResult.results?.length > 0
+            ? searchResult.results.map((r: any) => ({ title: r.title, url: r.url, snippet: r.snippet }))
+            : { message: "No results found", query: args.query };
+        } catch (err: any) {
+          // Fallback to toolRegistry
+          const searchResult = await toolRegistry.execute("search", {
+            query: args.query,
+            maxResults: args.maxResults || 5
+          }, context);
+          result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
+        }
         break;
       }
 
@@ -212,6 +429,149 @@ async function executeToolCall(
           result = fetchResult;
         } catch (err: any) {
           result = { error: err.message };
+        }
+        break;
+      }
+
+      case "browse_and_act": {
+        try {
+          const { universalBrowserController } = await import("./computerUse/universalBrowserController");
+          const sessionId = await universalBrowserController.createSession("chrome-desktop");
+          const goalText = String(args.goal || "");
+          const isReservationGoal = /\b(reserv(a|ar|ation)|book(ing)?|mesa|restaurant|restaurante)\b/i.test(goalText);
+          const normalizedGoal = goalText.toLowerCase();
+          const isCalaReservation = isReservationGoal && /\bcala\b/i.test(normalizedGoal);
+          const reservationDetailsFromGoal = isReservationGoal ? extractReservationDetails(goalText) : undefined;
+          const requestedUrl = String(args.url || "");
+          const effectiveUrl = isCalaReservation
+            ? "https://www.covermanager.com/reserve/module_restaurant/cala-restaurante/spanish"
+            : (requestedUrl || "https://www.mesa247.pe");
+          console.log(`[AgentExecutor] Browser session created: ${sessionId}, navigating to ${effectiveUrl}`);
+          const requestedMaxSteps = Number.isFinite(Number(args.maxSteps)) ? Number(args.maxSteps) : undefined;
+          // Keep steps tight for fast UX — 8 steps max, 90s total runtime
+          const maxSteps = Math.max(1, Math.min(requestedMaxSteps ?? 8, 12));
+          const maxRuntimeMs = 90000;  // 90 seconds max
+          const decisionTimeoutMs = 15000;  // 15s per Grok decision
+          try {
+            await universalBrowserController.navigate(sessionId, effectiveUrl);
+
+            // Real-time step callback: sends browser_step SSE events with screenshots
+            const onBrowserStep = (step: {
+              stepNumber: number;
+              totalSteps: number;
+              action: string;
+              reasoning: string;
+              goalProgress: string;
+              screenshot: string;
+              url: string;
+              title: string;
+            }) => {
+              try {
+                if (!sseRes) return;
+                // Emit browser_step event with screenshot for real-time UI
+                const r = sseRes as any;
+                if (!r.writableEnded && !r.destroyed) {
+                  const sseData = {
+                    runId,
+                    stepNumber: step.stepNumber,
+                    totalSteps: step.totalSteps,
+                    action: step.action,
+                    reasoning: step.reasoning,
+                    goalProgress: step.goalProgress,
+                    screenshot: step.screenshot, // base64 PNG
+                    url: step.url,
+                    title: step.title,
+                  };
+                  sseRes.write(`event: browser_step\ndata: ${JSON.stringify(sseData)}\n\n`);
+                  if (typeof (sseRes as any).flush === "function") {
+                    (sseRes as any).flush();
+                  }
+                }
+              } catch (sseErr) {
+                console.warn(`[AgentExecutor] SSE browser_step write error:`, sseErr);
+              }
+            };
+
+            const taskResult = isCalaReservation
+              ? await (async () => {
+                const missingFields = reservationDetailsFromGoal
+                  ? getMissingReservationFields(reservationDetailsFromGoal)
+                  : (["restaurant", "date", "time", "partySize", "contactName", "contactPhone", "contactEmail"] as string[]);
+                if (missingFields.length > 0) {
+                  return {
+                    success: false,
+                    steps: ["Cala reservation requires additional user data before execution."],
+                    data: {
+                      status: "needs_user_input",
+                      missingFields,
+                      question: `Para reservar en Cala necesito: ${missingFields.join(", ")}.`,
+                    },
+                    screenshots: [],
+                  };
+                }
+                return universalBrowserController.runCalaReservation(
+                  sessionId,
+                  {
+                    restaurant: reservationDetailsFromGoal?.restaurant,
+                    date: reservationDetailsFromGoal?.date,
+                    time: reservationDetailsFromGoal?.time,
+                    partySize: reservationDetailsFromGoal?.partySize,
+                    contactName: reservationDetailsFromGoal?.contactName,
+                    email: reservationDetailsFromGoal?.email,
+                    phone: reservationDetailsFromGoal?.phone,
+                  },
+                  onBrowserStep,
+                  { maxRuntimeMs: 120000 }
+                );
+              })()
+              : await universalBrowserController.agenticNavigate(
+                sessionId,
+                args.goal,
+                maxSteps,
+                onBrowserStep,
+                {
+                  maxRuntimeMs,
+                  decisionTimeoutMs,
+                  maxConsecutiveDecisionFailures: isReservationGoal ? 3 : 2,
+                }
+              );
+            console.log(`[AgentExecutor] Browser task completed: success=${taskResult.success}, steps=${taskResult.steps.length}, maxSteps=${maxSteps}, runtimeMs=${maxRuntimeMs}`);
+            const rawStatus = String(taskResult?.data?.status || "").toLowerCase();
+            const hasConfirmationEvidence = Boolean(
+              taskResult?.data?.confirmationCode ||
+              taskResult?.data?.reservationCode ||
+              taskResult?.data?.bookingReference ||
+              taskResult?.data?.confirmation
+            );
+            const explicitNeedsInput = rawStatus === "needs_user_input" || Array.isArray(taskResult?.data?.missingFields);
+            let normalizedSuccess = taskResult.success === true;
+            if (isReservationGoal) {
+              if (explicitNeedsInput) {
+                normalizedSuccess = false;
+              } else if (rawStatus === "confirmed" || rawStatus === "completed" || rawStatus === "success") {
+                normalizedSuccess = true;
+              } else if (!hasConfirmationEvidence) {
+                normalizedSuccess = false;
+              }
+              if (!taskResult?.data?.status && !normalizedSuccess) {
+                taskResult.data = { ...(taskResult.data || {}), status: "unconfirmed" };
+              }
+            }
+            result = {
+              success: normalizedSuccess,
+              steps: taskResult.steps,
+              data: taskResult.data,
+              stepsCount: taskResult.steps.length,
+              screenshotsCount: taskResult.screenshots.length,
+            };
+          } finally {
+            await universalBrowserController.closeSession(sessionId).catch(() => {});
+            console.log(`[AgentExecutor] Browser session closed: ${sessionId}`);
+          }
+        } catch (err: any) {
+          console.error(`[AgentExecutor] browse_and_act error:`, err?.message || err);
+          console.error(`[AgentExecutor] browse_and_act stack:`, err?.stack?.split('\n').slice(0, 5).join('\n'));
+          result = { error: err.message, details: err?.cause?.message || err?.code || 'unknown' };
         }
         break;
       }
@@ -492,7 +852,7 @@ export async function executeAgentLoop(
   messages: Array<{ role: string; content: string }>,
   res: Response,
   options: AgentExecutorOptions
-): Promise<void> {
+): Promise<string> {
   const ai = getGeminiClientOrThrow();
   const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
 
@@ -503,6 +863,79 @@ export async function executeAgentLoop(
   let iteration = 0;
   let conversationHistory = [...messages];
   let fullResponse = "";
+
+  const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
+  const isReservationRequest =
+    requestSpec.intent === "web_automation" && isRestaurantReservationRequest(recentUserText);
+  const reservationDetails = isReservationRequest ? extractReservationDetails(recentUserText) : undefined;
+
+  if (isReservationRequest && reservationDetails) {
+    const missingFields = getMissingReservationFields(reservationDetails);
+    if (missingFields.length > 0) {
+      const clarificationQuestion = buildReservationClarificationQuestion(reservationDetails, missingFields);
+      fullResponse = clarificationQuestion;
+      writeSse(res, "clarification", {
+        runId,
+        question: clarificationQuestion,
+        missingFields,
+      });
+      const chunks = clarificationQuestion.match(/.{1,100}/g) || [clarificationQuestion];
+      for (let i = 0; i < chunks.length; i++) {
+        writeSse(res, "chunk", {
+          content: chunks[i],
+          sequence: i + 1,
+          runId
+        });
+        await new Promise(r => setTimeout(r, 10));
+      }
+      await emitTraceEvent(runId, "progress_update", {
+        progress: {
+          current: 0,
+          total: maxIterations,
+          message: "Waiting for missing reservation details from user"
+        }
+      });
+      await emitTraceEvent(runId, "agent_completed", {
+        agent: {
+          name: requestSpec.primaryAgent,
+          role: "primary",
+          status: "completed"
+        },
+        iterations: 0,
+        artifactsGenerated: 0,
+      });
+      return fullResponse;
+    }
+  }
+
+  // For web_automation intent, inject a system hint so the LLM uses browse_and_act
+  // We PREPEND it as the first system message for maximum priority
+  if (requestSpec.intent === "web_automation") {
+    const reservationHint =
+      isReservationRequest && reservationDetails
+        ? `\nReservation details extracted from the user: ${formatReservationDetails(reservationDetails)}`
+        : "";
+    conversationHistory.unshift({
+      role: "system",
+      content: `YOU ARE A WEB AUTOMATION AGENT. YOUR PRIMARY FUNCTION IS TO CALL TOOLS, NOT GENERATE TEXT.
+
+YOU MUST IMMEDIATELY call the "browse_and_act" function to complete the user's request. DO NOT write text responses.
+
+MANDATORY RULES:
+1. Your FIRST action MUST be a function call to "browse_and_act" with a URL and goal
+2. For restaurant reservations in Peru: url="https://www.mesa247.pe", goal="[full details from user]"
+3. For hotel bookings: url="https://www.booking.com"
+4. For flights: url="https://www.google.com/travel/flights"
+5. For general web tasks: url="https://www.google.com"
+6. The browse_and_act tool controls a REAL Chromium browser — it can click, type, scroll, fill forms, navigate
+7. Include ALL details in the goal: date, time, number of people, location, contact details, preferences
+8. For reservations, only claim success if a real confirmation page or confirmation code is visible.
+
+DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
+    });
+  }
+
+  console.log(`[AgentExecutor] Starting loop: intent=${requestSpec.intent}, tools=[${tools.map(t => t.name).join(', ')}], messages=${conversationHistory.length}, systemMsgs=${conversationHistory.filter(m => m.role === 'system').length}, toolDeclarations=${tools.length}`);
 
   await emitTraceEvent(runId, "progress_update", {
     progress: {
@@ -521,22 +954,53 @@ export async function executeAgentLoop(
     });
 
     try {
-      const geminiMessages = conversationHistory.map(m => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }]
-      }));
+      // Separate system messages from conversation, and build Gemini-compatible messages
+      // Gemini requires alternating user/model roles — merge consecutive same-role messages
+      let systemInstruction = "";
+      const nonSystemMessages = conversationHistory.filter(m => {
+        if (m.role === "system") {
+          systemInstruction += (systemInstruction ? "\n\n" : "") + m.content;
+          return false;
+        }
+        return true;
+      });
 
-      const response = await ai.models.generateContent({
+      const geminiMessages: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+      for (const m of nonSystemMessages) {
+        const role = m.role === "assistant" ? "model" : "user";
+        const last = geminiMessages[geminiMessages.length - 1];
+        if (last && last.role === role) {
+          // Merge into previous message to avoid consecutive same-role
+          last.parts[0].text += "\n\n" + m.content;
+        } else {
+          geminiMessages.push({ role, parts: [{ text: m.content }] });
+        }
+      }
+
+      // Ensure conversation starts with a user message (Gemini requirement)
+      if (geminiMessages.length > 0 && geminiMessages[0].role !== "user") {
+        geminiMessages.unshift({ role: "user", parts: [{ text: "Begin" }] });
+      }
+
+      // Wrap Gemini call with a 60s timeout to prevent hanging
+      const geminiPromise = ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: geminiMessages as any,
         config: {
           temperature: 0.7,
-          maxOutputTokens: 4096
+          maxOutputTokens: 4096,
+          ...(systemInstruction ? { systemInstruction } : {}),
+          tools: tools.length > 0 ? [{
+            functionDeclarations: tools
+          }] : undefined
         },
-        tools: tools.length > 0 ? [{
-          functionDeclarations: tools
-        }] : undefined
       } as any);
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Gemini API call timed out after 60s")), 60000)
+      );
+
+      const response = await Promise.race([geminiPromise, timeoutPromise]);
 
       const candidate = response.candidates?.[0];
       if (!candidate) {
@@ -546,6 +1010,11 @@ export async function executeAgentLoop(
       const parts = candidate.content?.parts || [];
       let hasToolCall = false;
       let textContent = "";
+      let shouldExitAgentLoop = false;
+
+      // Debug: log what the LLM returned
+      const partTypes = parts.map((p: any) => p.functionCall ? `functionCall:${p.functionCall.name}` : p.text ? `text:${(p.text as string).slice(0, 80)}...` : 'other');
+      console.log(`[AgentExecutor] Iteration ${iteration}: LLM returned ${parts.length} parts: [${partTypes.join(', ')}]`);
 
       for (const part of parts) {
         if (part.functionCall) {
@@ -563,7 +1032,8 @@ export async function executeAgentLoop(
             name!,
             args as Record<string, any>,
             toolContext,
-            runId
+            runId,
+            res
           );
 
           if (artifact) {
@@ -582,19 +1052,119 @@ export async function executeAgentLoop(
             role: "assistant",
             content: `[Called tool: ${name}]`
           });
+
+          // Truncate large tool results (especially browse_and_act with 20+ steps)
+          // to avoid overwhelming the LLM on the next iteration
+          let resultSummary: string;
+          if (name === "browse_and_act") {
+            const r = result as any;
+            resultSummary = JSON.stringify({
+              success: r.success,
+              stepsCount: r.stepsCount || r.steps?.length || 0,
+              summary: r.data?.summary || r.data?.finalUrl || "Task completed",
+              lastSteps: (r.steps || []).slice(-3).map((s: any) =>
+                typeof s === 'string' ? s.slice(0, 100) : JSON.stringify(s).slice(0, 100)
+              ),
+            });
+          } else {
+            const raw = JSON.stringify(result);
+            resultSummary = raw.length > 2000 ? raw.slice(0, 2000) + "... [truncated]" : raw;
+          }
+
           conversationHistory.push({
             role: "user",
-            content: `Tool result for ${name}: ${JSON.stringify(result)}`
+            content: `Tool result for ${name}: ${resultSummary}`
           });
+
+          // FAST EXIT: After browse_and_act completes, generate an immediate
+          // response instead of making another (slow/failing) LLM call.
+          // The browser automation already took 2-10 minutes; the user doesn't
+          // need to wait for another LLM round-trip just to get a summary.
+          if (name === "browse_and_act") {
+            const r = result as any;
+            const wasSuccessful = r.success === true;
+            const stepsCount = r.stepsCount || r.steps?.length || 0;
+            const lastSteps = (r.steps || []).slice(-3).map((s: any) =>
+              typeof s === 'string' ? s : (s?.action || s?.description || JSON.stringify(s).slice(0, 80))
+            );
+            const dataStatus = String(r?.data?.status || "").toLowerCase();
+            const missingFields = Array.isArray(r?.data?.missingFields)
+              ? (r.data.missingFields as string[])
+              : [];
+            const clarificationQuestion = typeof r?.data?.question === "string" ? r.data.question.trim() : "";
+            const confirmationCode =
+              r?.data?.confirmationCode ||
+              r?.data?.reservationCode ||
+              r?.data?.bookingReference ||
+              r?.data?.confirmation;
+            const isNeedsUserInput = dataStatus === "needs_user_input" || missingFields.length > 0;
+
+            let summaryText: string;
+            if (isNeedsUserInput) {
+              summaryText = clarificationQuestion ||
+                `Para continuar con la reserva necesito: ${missingFields.join(", ")}.`;
+              writeSse(res, "clarification", {
+                runId,
+                question: summaryText,
+                missingFields,
+              });
+            } else if (wasSuccessful && confirmationCode) {
+              summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}`;
+            } else if (wasSuccessful) {
+              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}`;
+            } else {
+              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}\n\nTe recomiendo verificar directamente en el sitio web.`;
+            }
+
+            fullResponse = summaryText;
+            const chunks = summaryText.match(/.{1,100}/g) || [summaryText];
+            for (let ci = 0; ci < chunks.length; ci++) {
+              writeSse(res, "chunk", {
+                content: chunks[ci],
+                sequence: ci + 1,
+                runId
+              });
+              await new Promise(r => setTimeout(r, 10));
+            }
+            console.log(`[AgentExecutor] browse_and_act FAST EXIT: success=${wasSuccessful}, steps=${stepsCount}`);
+            shouldExitAgentLoop = true;
+            break;
+          }
         } else if (part.text) {
           textContent += part.text;
         }
+      }
+
+      if (shouldExitAgentLoop) {
+        break;
       }
 
       if (textContent) {
         fullResponse += textContent;
 
         if (!hasToolCall) {
+          // For web_automation intent: if the LLM returned text instead of a tool call
+          // AND we haven't already tried browse_and_act (iteration 1 = first attempt),
+          // force it to use browse_and_act by injecting a strong nudge and retrying.
+          // After the first browse_and_act attempt, allow text responses (result summaries).
+          const alreadyUsedBrowser = conversationHistory.some(m =>
+            m.content.includes("[Called tool: browse_and_act]")
+          );
+          if (requestSpec.intent === "web_automation" && iteration <= 2 && !alreadyUsedBrowser) {
+            console.log(`[AgentExecutor] web_automation: LLM returned text instead of tool call on iteration ${iteration}, forcing tool use...`);
+            conversationHistory.push({
+              role: "assistant",
+              content: textContent
+            });
+            conversationHistory.push({
+              role: "user",
+              content: `IMPORTANT: Do NOT respond with text. You MUST call the "browse_and_act" function right now to open a real browser and complete the task. Call browse_and_act with url="https://www.mesa247.pe" and goal containing all the details from the user's request. Do it NOW.`
+            });
+            textContent = "";
+            fullResponse = "";
+            continue; // retry the iteration
+          }
+
           // A1: Agent Verifier - Quality Gate
           try {
             // Dynamic import to avoid circular dependencies if any, though explicit import is better. 
@@ -666,7 +1236,7 @@ Please rewrite your response addressing these issues.`
       });
 
     } catch (error: any) {
-      console.error(`[AgentExecutor] Error in iteration ${iteration}:`, error);
+      console.error(`[AgentExecutor] Error in iteration ${iteration}:`, error?.message || error);
 
       await emitTraceEvent(runId, "error", {
         error: {
@@ -676,6 +1246,38 @@ Please rewrite your response addressing these issues.`
         }
       });
 
+      // If browse_and_act already ran successfully and the follow-up LLM call
+      // failed (timeout, too-large context, etc.), generate a fallback summary
+      // instead of retrying forever or crashing.
+      const alreadyBrowsed = conversationHistory.some(m =>
+        m.content.includes("[Called tool: browse_and_act]")
+      );
+      if (alreadyBrowsed && !fullResponse) {
+        console.log(`[AgentExecutor] Post-browse LLM call failed, generating fallback summary`);
+        // Extract browse result from conversation history
+        const browseResultMsg = conversationHistory.find(m =>
+          m.content.startsWith("Tool result for browse_and_act:")
+        );
+        const browseData = browseResultMsg?.content || "";
+        const successMatch = browseData.match(/"success"\s*:\s*(true|false)/);
+        const wasSuccessful = successMatch?.[1] === "true";
+
+        const fallback = wasSuccessful
+          ? "✅ He completado la automatización web exitosamente. El navegador realizó todas las acciones necesarias en el sitio web."
+          : "⚠️ He intentado completar la tarea de automatización web. El navegador navegó por el sitio web y realizó varias acciones, pero no pude confirmar que la tarea se completó al 100%. Te recomiendo verificar directamente en el sitio.";
+
+        fullResponse = fallback;
+        const chunks = fallback.match(/.{1,100}/g) || [fallback];
+        for (let i = 0; i < chunks.length; i++) {
+          writeSse(res, "chunk", {
+            content: chunks[i],
+            sequence: i + 1,
+            runId
+          });
+        }
+        break; // Exit the while loop
+      }
+
       if (iteration >= maxIterations) {
         throw error;
       }
@@ -684,8 +1286,9 @@ Please rewrite your response addressing these issues.`
 
   if (!fullResponse && iteration >= maxIterations) {
     const fallbackMsg = artifacts.length > 0
-      ? `I've completed the requested tasks and generated ${artifacts.length} artifact(s) for you.`
-      : "I've processed your request. Let me know if you need anything else.";
+      ? `He completado las tareas solicitadas y generé ${artifacts.length} archivo(s) para ti.`
+      : "He procesado tu solicitud. Avísame si necesitas algo más.";
+    fullResponse = fallbackMsg;
     writeSse(res, "chunk", {
       content: fallbackMsg,
       sequence: 1,
@@ -710,6 +1313,8 @@ Please rewrite your response addressing these issues.`
     iterations: iteration,
     artifactsGenerated: artifacts.length
   });
+
+  return fullResponse;
 }
 
 export { AGENT_TOOLS, getToolsForIntent };

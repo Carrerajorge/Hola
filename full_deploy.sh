@@ -36,7 +36,7 @@ ssh "$VPS_USER@$VPS_HOST" "
     if [ ! -f .env.production ] || ! grep -q 'DATABASE_URL' .env.production; then
         echo 'Creando .env.production...'
         cat > .env.production <<'ENDOFENV'
-PORT=5001
+PORT=5000
 NODE_ENV=production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat
 SESSION_SECRET=supersecret123456789abcdefghij12

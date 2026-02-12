@@ -1838,26 +1838,49 @@ const AssistantMessage = memo(function AssistantMessage({
             ) : null
           )}
           {documents.length > 0 && (
-            <div className="flex gap-2 flex-wrap mt-3">
-              {documents.map((doc, idx) => (
-                <Button
-                  key={idx}
-                  variant="outline"
-                  className="flex items-center gap-2 px-4 py-2 h-auto"
-                  onClick={() => onOpenDocumentPreview(doc)}
-                >
-                  {doc.type === "word" && (
-                    <FileText className="h-5 w-5 text-blue-600" />
-                  )}
-                  {doc.type === "excel" && (
-                    <FileSpreadsheet className="h-5 w-5 text-green-600" />
-                  )}
-                  {doc.type === "ppt" && (
-                    <FileIcon className="h-5 w-5 text-orange-600" />
-                  )}
-                  <span className="text-sm font-medium">{doc.title}</span>
-                </Button>
-              ))}
+            <div className="flex gap-3 flex-wrap mt-3">
+              {documents.map((doc, idx) => {
+                const docTheme = {
+                  word: { iconBg: 'bg-blue-600', icon: 'W', label: 'Word', textColor: 'text-blue-600' },
+                  excel: { iconBg: 'bg-green-600', icon: 'E', label: 'Excel', textColor: 'text-green-600' },
+                  ppt: { iconBg: 'bg-orange-500', icon: 'P', label: 'PowerPoint', textColor: 'text-orange-500' },
+                }[doc.type] || { iconBg: 'bg-gray-500', icon: '?', label: 'Documento', textColor: 'text-gray-500' };
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card hover:bg-accent/50 hover:shadow-md transition-all cursor-pointer group min-w-[240px] max-w-sm"
+                    onClick={() => onOpenDocumentPreview(doc)}
+                  >
+                    <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center shrink-0 shadow-sm", docTheme.iconBg)}>
+                      <span className="text-white text-sm font-bold">{docTheme.icon}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate text-foreground">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">{docTheme.label}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("h-8 w-8 rounded-lg", docTheme.textColor)}
+                        onClick={(e) => { e.stopPropagation(); onOpenDocumentPreview(doc); }}
+                        title="Vista previa"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg"
+                        onClick={(e) => { e.stopPropagation(); onOpenDocumentPreview(doc); }}
+                        title="Descargar"
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>
@@ -1965,40 +1988,51 @@ const AssistantMessage = memo(function AssistantMessage({
               </div>
             </div>
           ) : (
-            <div className="p-4 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+            (() => {
+              // Normalize artifact type for display: accept both word/excel/ppt and document/spreadsheet/presentation
+              const artTypeNorm: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };
+              const artType = artTypeNorm[message.artifact.type] || message.artifact.type;
+              const artFileName = message.artifact.filename || message.artifact.name;
+              return (
+            <div className={cn("p-4 rounded-xl border shadow-sm",
+              artType === "document" && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800",
+              artType === "spreadsheet" && "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border-green-200 dark:border-green-800",
+              artType === "presentation" && "bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-orange-200 dark:border-orange-800",
+              artType === "pdf" && "bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 border-red-200 dark:border-red-800",
+              !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800"
+            )}>
               <div className="flex items-center gap-3">
                 <div className={cn(
-                  "w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0",
-                  message.artifact.type === "document" && "bg-blue-600",
-                  message.artifact.type === "spreadsheet" && "bg-green-600",
-                  message.artifact.type === "presentation" && "bg-orange-600",
-                  message.artifact.type === "pdf" && "bg-red-600"
+                  "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm",
+                  artType === "document" && "bg-blue-600",
+                  artType === "spreadsheet" && "bg-green-600",
+                  artType === "presentation" && "bg-orange-500",
+                  artType === "pdf" && "bg-red-600",
+                  !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-gray-600"
                 )}>
-                  {message.artifact.type === "document" && <FileText className="h-6 w-6 text-white" />}
-                  {message.artifact.type === "spreadsheet" && <FileSpreadsheet className="h-6 w-6 text-white" />}
-                  {message.artifact.type === "presentation" && <FileIcon className="h-6 w-6 text-white" />}
-                  {message.artifact.type === "pdf" && <FileText className="h-6 w-6 text-white" />}
+                  {artType === "document" && <span className="text-white text-lg font-bold">W</span>}
+                  {artType === "spreadsheet" && <span className="text-white text-lg font-bold">E</span>}
+                  {artType === "presentation" && <span className="text-white text-lg font-bold">P</span>}
+                  {artType === "pdf" && <FileText className="h-6 w-6 text-white" />}
+                  {!["document", "spreadsheet", "presentation", "pdf"].includes(artType) && <FileIcon className="h-6 w-6 text-white" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {message.artifact.type === "document" && "Documento Word"}
-                    {message.artifact.type === "spreadsheet" && "Hoja de cálculo Excel"}
-                    {message.artifact.type === "presentation" && "Presentación PowerPoint"}
-                    {message.artifact.type === "pdf" && "Documento PDF"}
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate" title={artFileName}>
+                    {artFileName || (artType === "document" ? "Documento Word" : artType === "spreadsheet" ? "Hoja de cálculo Excel" : artType === "presentation" ? "Presentación PowerPoint" : artType === "pdf" ? "Documento PDF" : "Documento")}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB` : "Listo para descargar"}
+                    {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB · ` : ""}{artType === "document" ? "Word" : artType === "spreadsheet" ? "Excel" : artType === "presentation" ? "PowerPoint" : artType === "pdf" ? "PDF" : "Documento"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(message.artifact.type === "presentation" || message.artifact.type === "document" || message.artifact.type === "spreadsheet") && onReopenDocument && (
+                  {(artType === "presentation" || artType === "document" || artType === "spreadsheet") && onReopenDocument && (
                     <button
                       onClick={async () => {
-                        const docType = message.artifact?.type === "presentation" ? "ppt"
-                          : message.artifact?.type === "document" ? "word"
+                        const docType = artType === "presentation" ? "ppt"
+                          : artType === "document" ? "word"
                             : "excel";
-                        const docTitle = message.artifact?.type === "presentation" ? "Presentación PowerPoint"
-                          : message.artifact?.type === "document" ? "Documento Word"
+                        const docTitle = artType === "presentation" ? "Presentación PowerPoint"
+                          : artType === "document" ? "Documento Word"
                             : "Hoja de cálculo Excel";
 
                         // Try to fetch content from contentUrl if available (for PPT deck JSON)
@@ -2017,6 +2051,23 @@ const AssistantMessage = memo(function AssistantMessage({
                           }
                         }
 
+                        // For Word documents from production pipeline, fetch the docx and convert to HTML
+                        if (!content && docType === "word" && message.artifact.downloadUrl) {
+                          try {
+                            const response = await fetch(message.artifact.downloadUrl);
+                            if (response.ok) {
+                              const blob = await response.blob();
+                              const arrayBuffer = await blob.arrayBuffer();
+                              const mammoth = await import('mammoth');
+                              const result = await mammoth.convertToHtml({ arrayBuffer });
+                              content = result.value;
+                              console.log("[View] Converted Word doc to HTML, length:", content.length);
+                            }
+                          } catch (error) {
+                            console.error("[View] Failed to convert Word doc:", error);
+                          }
+                        }
+
                         onReopenDocument({
                           type: docType as "word" | "excel" | "ppt",
                           title: docTitle,
@@ -2032,8 +2083,14 @@ const AssistantMessage = memo(function AssistantMessage({
                   )}
                   <a
                     href={message.artifact.downloadUrl}
-                    download
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
+                    download={artFileName || true}
+                    className={cn("px-4 py-2 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors",
+                      artType === "document" && "bg-blue-600 hover:bg-blue-700",
+                      artType === "spreadsheet" && "bg-green-600 hover:bg-green-700",
+                      artType === "presentation" && "bg-orange-500 hover:bg-orange-600",
+                      artType === "pdf" && "bg-red-600 hover:bg-red-700",
+                      !["document", "spreadsheet", "presentation", "pdf"].includes(artType) && "bg-blue-600 hover:bg-blue-700"
+                    )}
                     data-testid={`button-download-artifact-${message.id}`}
                   >
                     <Download className="h-4 w-4" />
@@ -2042,6 +2099,8 @@ const AssistantMessage = memo(function AssistantMessage({
                 </div>
               </div>
             </div>
+              );
+            })()
           )}
         </div>
       )}

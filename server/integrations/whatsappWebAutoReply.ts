@@ -15,10 +15,17 @@ export function chunkText(text: string, maxLen = 1400): string[] {
 // Minimal in-memory Response-like collector for SSE output.
 export class MemorySseResponse {
   public chunks: Array<{ event: string; data: any }> = [];
+  public headersSent = false;
+  public writableEnded = false;
+  public destroyed = false;
+  public closed = false;
   private buffer = '';
 
   setHeader(..._args: any[]) { /* noop */ }
-  flushHeaders() { /* noop */ }
+  flushHeaders() { this.headersSent = true; }
+  flush() { /* noop */ }
+  status(_code: number) { return this; }
+  json(_data: any) { return this; }
   write(chunk: any) {
     this.buffer += String(chunk);
     while (true) {

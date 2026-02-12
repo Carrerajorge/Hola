@@ -18,7 +18,7 @@ module.exports = {
             // Inject loaded environment variables into the process
             env_production: {
                 NODE_ENV: 'production',
-                PORT: process.env.PORT || 5001,
+                PORT: process.env.PORT || 5000,
                 DATABASE_URL: process.env.DATABASE_URL,
                 SESSION_SECRET: process.env.SESSION_SECRET,
             },

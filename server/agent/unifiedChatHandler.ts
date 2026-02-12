@@ -548,7 +548,7 @@ export async function executeUnifiedChat(
       });
 
       for await (const chunk of streamGenerator) {
-        if (chunk.type === 'delta' && chunk.content) {
+        if (chunk.content) {
           fullResponse += chunk.content;
           chunkCount++;
 
@@ -567,10 +567,9 @@ export async function executeUnifiedChat(
               }
             });
           }
-        } else if (chunk.type === 'done') {
+        }
+        if (chunk.done) {
           break;
-        } else if (chunk.type === 'error') {
-          throw new Error(chunk.error || 'Stream error');
         }
       }
 

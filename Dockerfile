@@ -33,10 +33,9 @@ WORKDIR /app
 # Install build tools for native modules (node-pty, etc.)
 RUN apk add --no-cache libc6-compat python3 make g++
 COPY package.json package-lock.json ./
-# Scripts required for postinstall
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-# Install production dependencies (allow scripts for native compilation)
-RUN npm ci --only=production
+# Install production dependencies WITH scripts so native modules (e.g. node-pty) build correctly.
+RUN npm ci --omit=dev
 
 # ============================================
 # Stage 4: Sandbox Runner

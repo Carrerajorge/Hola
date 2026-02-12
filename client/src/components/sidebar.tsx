@@ -37,6 +37,7 @@ import {
   Download,
   MoveRight,
   Brain,
+  MessageCircle,
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -533,6 +534,7 @@ export function Sidebar({
           {/* Chat title and indicators */}
           <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
+            {chat.id.startsWith('wa_') && <MessageCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />}
             <TooltipProvider delayDuration={500}>
               <Tooltip>
                 <TooltipTrigger asChild>

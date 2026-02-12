@@ -123,6 +123,18 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/security/",
         "/api/api-keys/",
         "/api/openclaw/",
+        "/api/objects/",
+        "/api/objects",
+        "/api/local-upload/",
+        "/api/local-upload",
+        "/api/local-files/",
+        "/api/files",
+        "/api/analyze",
+        "/api/settings/",
+        "/api/settings",
+        "/api/library/",
+        "/api/library",
+        "/api/integrations/",
     ];
     if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
         return next();

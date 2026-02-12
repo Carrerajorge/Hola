@@ -320,53 +320,56 @@ const DocumentArtifact = memo(function DocumentArtifact({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer",
+        "flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer",
         "bg-card hover:bg-accent/50 border-border hover:border-border/80",
-        "hover:shadow-sm group"
+        "hover:shadow-md group"
       )}
       onClick={handleClick}
       data-testid={`artifact-document-${artifact.id}`}
     >
+      {/* Document Type Icon with Color */}
       <div
         className={cn(
-          "flex items-center justify-center w-10 h-10 rounded-lg shrink-0",
+          "flex items-center justify-center w-11 h-11 rounded-xl shrink-0 shadow-sm",
           "bg-gradient-to-br",
           theme.gradientFrom,
           theme.gradientTo
         )}
       >
-        <IconComponent className="h-5 w-5 text-white" />
+        <span className="text-white text-sm font-bold">{theme.icon}</span>
       </div>
 
+      {/* File Info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate text-foreground">
           {artifact.name}
         </p>
-        <div className="flex items-center gap-2 mt-0.5">
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal">
-            {theme.label}
-          </Badge>
-        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {theme.label}
+        </p>
       </div>
 
+      {/* Action Buttons - Always visible */}
       <div className="flex items-center gap-1 shrink-0">
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+          className={cn("h-9 w-9 rounded-lg transition-colors", theme.textColor, "hover:bg-accent")}
           onClick={handleClick}
+          title="Vista previa"
           data-testid={`preview-document-${artifact.id}`}
         >
-          <Eye className="h-4 w-4" />
+          <Eye className="h-4.5 w-4.5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="h-9 w-9 rounded-lg hover:bg-accent"
           onClick={handleDownload}
+          title="Descargar"
           data-testid={`download-document-${artifact.id}`}
         >
-          <Download className="h-4 w-4" />
+          <Download className="h-4.5 w-4.5" />
         </Button>
       </div>
     </div>

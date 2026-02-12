@@ -110,8 +110,27 @@ function wantsArtifactOutput(message: string): boolean {
     );
 }
 
+function isReservationAutomationRequest(message: string): boolean {
+    const normalized = message.toLowerCase();
+
+    const hasReservationVerb = /\b(reserva(?:r|cion|ción)?|reservation|book(?:ing)?)\b/i.test(normalized);
+    const hasReservationContext =
+        /\b(restaurante|restaurant|mesa|table|cala|covermanager|mesa247|hotel|vuelo|flight)\b/i.test(normalized) ||
+        /\b\d{1,2}\s*(personas?|people|guests?|comensales?)\b/i.test(normalized) ||
+        /\b(?:a las|at)\s*\d{1,2}(?::\d{2})?\b/i.test(normalized) ||
+        /\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/i.test(normalized);
+
+    return hasReservationVerb && hasReservationContext;
+}
+
 export function isProductionIntent(intentResult: IntentResult | null, message?: string): boolean {
     if (!intentResult) return false;
+
+    // Reservation/booking requests must route to web automation, not to document production.
+    if (message && isReservationAutomationRequest(message)) {
+        console.log(`[ProductionHandler] Reservation request detected, skipping production mode for: "${message.slice(0, 70)}..."`);
+        return false;
+    }
 
     // Previously we skipped production for "search-first" prompts.
     // That breaks the core workflow: "busca N artículos y exporta a Excel / crea PPT".
@@ -272,15 +291,17 @@ export async function handleProductionRequest(
 
     console.log(`[ProductionHandler] Deliverables: ${deliverables.join(', ')}`);
 
-    // Set SSE headers
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("Transfer-Encoding", "chunked");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("X-Production-Mode", "true");
-    res.setHeader("X-Run-Id", runId);
-    res.flushHeaders();
+    // Set SSE headers (only if not already sent by chatAiRouter's early SSE setup)
+    if (!res.headersSent) {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Transfer-Encoding", "chunked");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("X-Production-Mode", "true");
+        res.setHeader("X-Run-Id", runId);
+        res.flushHeaders();
+    }
 
     // Emit production start
     writeSse(res, 'production_start', {

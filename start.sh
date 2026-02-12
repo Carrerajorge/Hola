@@ -45,14 +45,14 @@ if [ ! -d "node_modules" ]; then
 fi
 
 # 6. Iniciar servidor
-echo -e "${GREEN}✅ Iniciando servidor en puerto 5001...${NC}"
+echo -e "${GREEN}✅ Iniciando servidor en puerto 5000...${NC}"
 npm run dev &
 
 # 7. Esperar a que esté listo
 echo -e "${YELLOW}Esperando a que el servidor esté listo...${NC}"
 for i in {1..30}; do
-    if curl -s http://localhost:5001 > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Servidor listo en http://localhost:5001${NC}"
+    if curl -s http://localhost:5000 > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ Servidor listo en http://localhost:5000${NC}"
         exit 0
     fi
     sleep 1

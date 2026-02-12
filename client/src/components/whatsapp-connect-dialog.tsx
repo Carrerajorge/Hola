@@ -233,6 +233,25 @@ export function WhatsAppConnectDialog({
     }
   };
 
+  const [testSent, setTestSent] = useState(false);
+
+  const sendTestMessage = async () => {
+    startBusy();
+    setError(null);
+    setTestSent(false);
+    try {
+      await api<{ success: true; sentTo: string }>('/api/integrations/whatsapp/web/test', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setTestSent(true);
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo enviar el mensaje de prueba');
+    } finally {
+      stopBusy();
+    }
+  };
+
   const toggleAutoReply = async () => {
     const newVal = !autoReply;
     try {
@@ -302,6 +321,11 @@ export function WhatsAppConnectDialog({
               <div className="text-xs text-muted-foreground text-center">
                 Los mensajes entrantes aparecerán en su bandeja automáticamente.
               </div>
+              {testSent && (
+                <div className="text-xs text-green-600 dark:text-green-400 text-center font-medium">
+                  Mensaje de prueba enviado a tu WhatsApp. Responde desde tu celular para chatear con ILIAGPT.
+                </div>
+              )}
               {/* Auto-reply toggle */}
               <div className="flex items-center justify-between pt-1 border-t">
                 <span className="text-sm">Respuesta automática (IA)</span>
@@ -419,9 +443,19 @@ export function WhatsAppConnectDialog({
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
             {status.state === 'connected' ? (
-              <Button variant="destructive" size="sm" onClick={disconnect} disabled={busy}>
-                {busy ? 'Desconectando...' : 'Desconectar'}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  onClick={sendTestMessage}
+                  disabled={busy}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {busy ? 'Enviando...' : testSent ? 'Enviado!' : 'Comprobar'}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={disconnect} disabled={busy}>
+                  {busy ? 'Desconectando...' : 'Desconectar'}
+                </Button>
+              </>
             ) : status.state === 'qr' ? (
               <>
                 <Button variant="outline" size="sm" onClick={restart} disabled={busy}>

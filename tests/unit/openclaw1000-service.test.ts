@@ -16,7 +16,17 @@ import {
   verifyOpenClaw1000Capability,
   verifyOpenClaw1000Batch,
   generateOpenClaw1000Report,
+  getOpenClaw1000ExecutionRoadmap,
 } from '../../server/services/openClaw1000Service';
+import { getOpenClawStats, OPENCLAW_500 } from '../../server/data/openClaw500Mapping';
+
+const openClaw500Stats = getOpenClawStats();
+const remainder = OPENCLAW_1000.length - OPENCLAW_500.length;
+const expectedImplemented = openClaw500Stats.implemented;
+const expectedPartial = openClaw500Stats.partial;
+const expectedStub = openClaw500Stats.stub;
+const expectedMissing = openClaw500Stats.missing + remainder;
+const expectedCoverage = Math.round(((expectedImplemented + expectedPartial) / OPENCLAW_1000.length) * 1000) / 10;
 
 describe('OpenClaw1000 generated mapping', () => {
   it('contains exactly 1000 capabilities', () => {
@@ -56,7 +66,7 @@ describe('OpenClaw1000 generated mapping', () => {
     expect(matrixLast?.checks.length).toBe(20);
   });
 
-  it('reports stats with full implementation coverage', () => {
+  it('generated stats default to implemented (generation artifact)', () => {
     const stats = getOpenClaw1000Stats();
     expect(stats.total).toBe(1000);
     expect(stats.implemented).toBe(1000);
@@ -82,7 +92,7 @@ describe('OpenClaw1000 service', () => {
     expect(academic.length).toBeGreaterThan(0);
 
     const implemented = listOpenClaw1000Capabilities({ status: 'implemented' });
-    expect(implemented.length).toBe(1000);
+    expect(implemented.length).toBe(expectedImplemented);
   });
 
   it('getOpenClaw1000Capability returns item by id', () => {
@@ -93,9 +103,14 @@ describe('OpenClaw1000 service', () => {
   it('getOpenClaw1000QuickStats returns 20k EMAITI checks total', () => {
     const stats = getOpenClaw1000QuickStats();
     expect(stats.total).toBe(1000);
+    expect(stats.implemented).toBe(expectedImplemented);
+    expect(stats.partial).toBe(expectedPartial);
+    expect(stats.stub).toBe(expectedStub);
+    expect(stats.missing).toBe(expectedMissing);
+    expect(stats.gapCount).toBe(expectedStub + expectedMissing);
     expect(stats.emaitiEntries).toBe(1000);
     expect(stats.emaitiChecksTotal).toBe(20000);
-    expect(stats.coveragePercent).toBe(100);
+    expect(stats.coveragePercent).toBe(expectedCoverage);
   });
 
   it('verifyOpenClaw1000Capability passes for valid capability', async () => {
@@ -125,10 +140,23 @@ describe('OpenClaw1000 service', () => {
   it('generateOpenClaw1000Report returns consistent totals', async () => {
     const report = await generateOpenClaw1000Report();
     expect(report.summary.total).toBe(1000);
-    expect(report.summary.passed).toBe(1000);
+    expect(report.summary.implemented).toBe(expectedImplemented);
+    expect(report.summary.partial).toBe(expectedPartial);
+    expect(report.summary.stub).toBe(expectedStub);
+    expect(report.summary.missing).toBe(expectedMissing);
+    expect(report.summary.passed).toBe(expectedImplemented + expectedPartial);
     expect(report.summary.failed).toBe(0);
+    expect(report.summary.skipped).toBe(expectedMissing);
     expect(report.summary.emaitiChecksTotal).toBe(20000);
-    expect(report.summary.coveragePercent).toBe(100);
-    expect(report.summary.overallStatus).toBe('PASS');
+    expect(report.summary.coveragePercent).toBe(expectedCoverage);
+    expect(report.summary.overallStatus).toBe('FAIL');
+  });
+
+  it('builds sequential roadmap for one-by-one implementation', () => {
+    const roadmap = getOpenClaw1000ExecutionRoadmap({ startId: 1, limit: 25 });
+    expect(roadmap.totalBacklog).toBe(expectedPartial + expectedStub + expectedMissing);
+    expect(roadmap.items.length).toBeLessThanOrEqual(25);
+    expect(roadmap.items.every((item) => item.status !== 'implemented')).toBe(true);
+    expect(roadmap.items.every((item, index) => item.sequence === index + 1)).toBe(true);
   });
 });

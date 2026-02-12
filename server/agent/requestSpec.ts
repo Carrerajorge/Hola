@@ -152,7 +152,17 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
   ],
   web_automation: [
     /\b(navega|navigate|abre|open|visita|visit|scrape|extrae de)\b.*\b(web|página|page|sitio|site|url)\b/i,
-    /\b(automatiza|automate)\b.*\b(browser|navegador)\b/i
+    /\b(automatiza|automate)\b.*\b(browser|navegador)\b/i,
+    /\b(reserva|reservación|reservation|book|booking)\b.*\b(restaurante|restaurant|hotel|vuelo|flight|mesa|table)\b/i,
+    /\b(compra|buy|purchase|ordena|order)\b.*\b(en línea|online|web|internet|boleto|ticket)\b/i,
+    /\b(busca y|search and)\b.*\b(reserva|book|compra|buy|registra|register)\b/i,
+    // Broader patterns for flight/hotel/travel searches and actions
+    /\b(busca|buscar|encuentra|search|find)\b.*\b(vuelos?|flights?|pasajes?|boletos?|tickets?)\b/i,
+    /\b(busca|buscar|encuentra|search|find)\b.*\b(hoteles?|hotels?|hospedaje|alojamiento|accommodation)\b/i,
+    /\b(reserva|book|compra|buy)\b.*\b(vuelos?|flights?|pasajes?|boletos?)\b/i,
+    // Direct web actions
+    /\b(entra|ingresa|accede|go to|ir a|ve a)\b.*\b(\.com|\.pe|\.org|\.net|www\.)\b/i,
+    /\b(haz|make|realiza|do|ejecuta|execute)\b.*\b(en|on|in)\b.*\b(\.com|\.pe|web|sitio|página)\b/i,
   ],
   image_generation: [
     /\b(genera|generate|crea|create|dibuja|draw|hazme|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i
@@ -197,6 +207,20 @@ const AGENT_MAPPING: Record<IntentType, SpecializedAgent[]> = {
 
 export function detectIntent(message: string, attachments: AttachmentSpec[] = []): { intent: IntentType; confidence: number } {
   const lowerMessage = message.toLowerCase();
+
+  // Reservation override: even short prompts like "reserva en cala para 2"
+  // should route to web automation instead of generic chat.
+  const hasReservationVerb = /\b(reserva|reservar|reservacion|reservation|book|booking)\b/i.test(lowerMessage);
+  const hasBookingContext =
+    /\b(restaurante|restaurant|mesa|table|hotel|vuelo|flight)\b/i.test(lowerMessage) ||
+    /\b(?:para|for)\s+\d{1,2}\b/i.test(lowerMessage) ||
+    /\b\d{1,2}\s*(?:personas?|people|guests?|comensales?)\b/i.test(lowerMessage) ||
+    /\b\d{1,2}(?::\d{2})\s*(?:am|pm)?\b/i.test(lowerMessage) ||
+    /\b(hoy|manana|mañana|today|tomorrow|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/i.test(lowerMessage) ||
+    /\ben\s+[a-záéíóúñ]/i.test(lowerMessage);
+  if (hasReservationVerb && hasBookingContext) {
+    return { intent: "web_automation", confidence: 0.9 };
+  }
 
   // Special-case: combined research + document deliverable (e.g., "investiga ... y crea un Word")
   // We treat this as a multi-step task so the agent will both research and generate a DOCX artifact.

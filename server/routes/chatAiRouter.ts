@@ -19,6 +19,7 @@ import { ObjectStorageService } from "../replit_integrations/object_storage/obje
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
 import { createUnifiedRun, hydrateSessionState, emitTraceEvent, SseBufferedWriter, resolveLatencyLane } from "../agent/unifiedChatHandler";
+import { executeAgentLoop } from "../agent/agentExecutor";
 import type { UnifiedChatRequest, UnifiedChatContext, LatencyMode } from "../agent/unifiedChatHandler";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
 import { routeIntent, type IntentResult } from "../services/intentRouter";
@@ -1011,51 +1012,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       );
       console.log(`[Stream API] Context augmented: ${clientMessages.length} client msgs -> ${messages.length} total`);
 
-      // DOC TOOL PRODUCTION MODE: When Word/Excel/PPT tool is selected, activate production directly
-      if (featureFlags.canvasEnabled && docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
-        console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: docTool=${docTool} - activating production mode directly`);
-
-        const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
-        const userMessageText = lastUserMessage?.content || '';
-
-        // Map docTool to corresponding intent
-        const toolToIntent = {
-          'word': 'CREATE_DOCUMENT' as const,
-          'excel': 'CREATE_SPREADSHEET' as const,
-          'ppt': 'CREATE_PRESENTATION' as const
-        };
-
-        const syntheticIntent: IntentResult = {
-          intent: toolToIntent[docTool as keyof typeof toolToIntent] || 'CREATE_DOCUMENT',
-          confidence: 1.0, // Full confidence since user explicitly selected tool
-          slots: {
-            topic: userMessageText
-          },
-          output_format: docTool,
-          language_detected: 'es',
-          normalized_text: userMessageText
-        };
-
-        try {
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
-
-          await handleProductionRequest(
-            {
-              message: userMessageText,
-              userId: effectiveUserId,
-              chatId: effectiveChatId,
-              intentResult: syntheticIntent,
-              locale: 'es',
-            },
-            res
-          );
-
-          // Production handler completed, exit early
-          return;
-        } catch (productionError: any) {
-          console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
-          // Continue to normal chat flow if production fails
-        }
+      // DOC TOOL: Stream content directly to client editor (real-time rendering)
+      // Previously this routed through handleProductionRequest which generates binary files.
+      // Now we let the normal streaming path handle it — content streams to TipTap/Handsontable/PPT editors.
+      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+        console.log(`[Stream] 📝 DOC TOOL STREAMING: docTool=${docTool} - using real-time editor streaming`);
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
@@ -1160,7 +1121,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               // Production handler completed, exit early
               return;
             } catch (productionError: any) {
-              console.error('[Stream] Production handler error, falling back to chat:', productionError);
+              console.error('[Stream] ❌ Production handler error (first intercept), falling back to chat:', productionError?.message || productionError);
+              console.error('[Stream] ❌ Production error stack:', productionError?.stack);
               // Continue to normal chat flow if production fails
             }
           }
@@ -1323,7 +1285,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             if (heartbeatInterval) clearInterval(heartbeatInterval);
             return;
           } catch (productionError: any) {
-            console.error('[Stream] Production handler error, falling back to chat:', productionError);
+            console.error('[Stream] ❌ Production handler error (second intercept), falling back to chat:', productionError?.message || productionError);
+            console.error('[Stream] ❌ Production error stack:', productionError?.stack);
             // Continue to normal chat flow if production fails
           }
         }
@@ -1582,6 +1545,18 @@ ${attachmentContext}`;
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
       systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}`;
+
+      // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
+      // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
+      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+        const docSystemPrompts: Record<string, string> = {
+          word: '\n\nMODO DOCUMENTO WORD:\nGenera el contenido del documento en formato Markdown bien estructurado con títulos (#, ##, ###), párrafos, listas, tablas y formato de texto (negrita, cursiva). Escribe contenido completo y profesional. No incluyas bloques de código, instrucciones meta ni explicaciones sobre lo que estás haciendo — solo el contenido del documento.',
+          excel: '\n\nMODO HOJA DE CÁLCULO:\nGenera los datos en formato CSV con cabeceras en la primera fila. Usa comas como separador de columnas y saltos de línea como separador de filas. No incluyas explicaciones ni texto adicional, solo los datos tabulares puros.',
+          ppt: '\n\nMODO PRESENTACIÓN:\nGenera una presentación como JSON array de slides con esta estructura: [{"title":"Título de slide", "bullets":["Punto 1","Punto 2"]}, ...]. No incluyas explicaciones ni bloques de código, solo el JSON puro.',
+        };
+        systemContent += docSystemPrompts[docTool] || '';
+        console.log(`[Stream] 📝 Added docTool system prompt for: ${docTool}`);
+      }
 
       // Debug: uncomment to trace web search injection
       // console.log(`[Stream:Debug] webSearchContextForLLM length: ${webSearchContextForLLM.length}, systemContent length: ${systemContent.length}`);
@@ -1894,6 +1869,62 @@ ${attachmentContext}`;
         });
       }
 
+      let fullContent = "";
+      let lastAckSequence = -1;
+      let agentLoopHandled = false;
+
+      // ── AGENT LOOP INTERCEPT ──────────────────────────────────
+      // For web_automation intent, route through the agent executor which has
+      // tools like browse_and_act (Playwright), web_search, fetch_url
+      if (unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
+        console.log(`[Stream] 🤖 WEB AUTOMATION: routing through executeAgentLoop with browse_and_act tool`);
+        try {
+          const agentMessages = [
+            { role: "system", content: typeof systemMessage.content === "string" ? systemMessage.content : "" },
+            ...formattedMessages.map((m: any) => ({ role: m.role as string, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }))
+          ];
+
+          const agentResponse = await executeAgentLoop(agentMessages, res, {
+            runId: effectiveRunId,
+            userId: userId || conversationId || "anonymous",
+            chatId: effectiveChatIdForPersistence,
+            requestSpec: unifiedContext.requestSpec,
+            maxIterations: 10
+          });
+
+          // Use the real response from the agent loop (not a placeholder)
+          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
+          fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
+          agentLoopHandled = true;
+          console.log(`[Stream] Agent loop completed, fullContent length: ${fullContent.length}`);
+        } catch (agentError: any) {
+          console.error(`[Stream] Agent loop error:`, agentError?.message || agentError);
+          // If the agent already sent some chunks (e.g. browse_and_act ran but
+          // the follow-up LLM failed), use whatever was sent as the final content
+          // rather than falling back to a completely different LLM stream.
+          if (fullContent.trim()) {
+            agentLoopHandled = true;
+          } else {
+            // Provide a direct fallback message instead of falling through to
+            // normal streaming which would ignore the browser automation context
+            fullContent = "He intentado realizar la automatización web pero encontré un problema. " +
+              "Puedes intentar de nuevo o describir tu solicitud de otra manera.";
+            agentLoopHandled = true;
+            if (!isConnectionClosed) {
+              writeSse(res, 'chunk', {
+                content: fullContent,
+                sequenceId: lastAckSequence + 1,
+                requestId,
+                runId: effectiveRunId,
+                timestamp: Date.now(),
+              });
+              lastAckSequence++;
+            }
+          }
+        }
+      }
+
+      if (!agentLoopHandled) {
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
@@ -1905,9 +1936,6 @@ ${attachmentContext}`;
           provider,
         }
       );
-
-      let fullContent = "";
-      let lastAckSequence = -1;
 
       // ── BUFFERED WRITER ────────────────────────────────────────
       // Batch small deltas into ~30ms flushes to reduce res.write()
@@ -1954,6 +1982,7 @@ ${attachmentContext}`;
       // Ensure buffer is fully flushed after loop and clean up listener
       writer.finalize();
       req.removeListener("close", onClose);
+      } // end if (!agentLoopHandled)
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.

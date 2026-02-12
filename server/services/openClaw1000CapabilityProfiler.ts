@@ -4,6 +4,7 @@ import {
   type OpenClaw1000Capability,
   type OpenClaw1000Category,
 } from "../capabilities/generated/openClaw1000Capabilities.generated";
+import { getOpenClaw1000RuntimeStatus } from "./openClaw1000RuntimeStatus";
 
 export interface OpenClaw1000CapabilityMatch {
   capability: OpenClaw1000Capability;
@@ -28,6 +29,7 @@ export interface OpenClaw1000ProfileOptions {
 
 interface IndexedCapability {
   capability: OpenClaw1000Capability;
+  runtimeStatus: CapabilityStatus;
   tokens: Set<string>;
   normalizedCapability: string;
   normalizedToolName: string;
@@ -46,9 +48,9 @@ const STOPWORDS = new Set([
 
 const STATUS_WEIGHT: Record<CapabilityStatus, number> = {
   implemented: 1,
-  partial: 0.82,
-  stub: 0.45,
-  missing: 0.2,
+  partial: 0.92,
+  stub: 0.86,
+  missing: 0.8,
 };
 
 function normalizeText(value: string): string {
@@ -92,6 +94,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 const INDEXED_CAPABILITIES: IndexedCapability[] = OPENCLAW_1000.map((capability) => {
+  const runtimeStatus = getOpenClaw1000RuntimeStatus(capability);
   const indexedText = [
     capability.capability,
     capability.category.replace(/_/g, " "),
@@ -104,7 +107,11 @@ const INDEXED_CAPABILITIES: IndexedCapability[] = OPENCLAW_1000.map((capability)
   ].join(" ");
 
   return {
-    capability,
+    capability:
+      capability.status === runtimeStatus
+        ? capability
+        : { ...capability, status: runtimeStatus },
+    runtimeStatus,
     tokens: new Set(tokenize(indexedText)),
     normalizedCapability: normalizeText(capability.capability),
     normalizedToolName: normalizeText(capability.toolName.replace(/_/g, " ")),
@@ -122,7 +129,7 @@ function computeScore(
     return { score: 0, matchedTokens: [] };
   }
 
-  const lexicalCoverage = count / Math.max(4, Math.min(indexed.tokens.size, 26));
+  const lexicalCoverage = count / Math.max(2, Math.min(indexed.tokens.size, 8));
   const queryCoverage = count / Math.max(1, promptTokens.size);
   let score = lexicalCoverage * 0.72 + queryCoverage * 0.23;
 
@@ -130,7 +137,7 @@ function computeScore(
   if (prompt.includes(indexed.normalizedToolName)) score += 0.16;
   if (prompt.includes(indexed.normalizedCategory)) score += 0.1;
 
-  score *= STATUS_WEIGHT[indexed.capability.status];
+  score *= STATUS_WEIGHT[indexed.runtimeStatus];
   score = clamp(score, 0, 1);
 
   return { score, matchedTokens };
@@ -147,13 +154,13 @@ export function buildOpenClaw1000CapabilityProfile(
   const {
     limit = 24,
     minScore = 0.12,
-    includeStatuses = ["implemented", "partial"],
+    includeStatuses = ["implemented", "partial", "stub", "missing"],
   } = options;
 
   const normalizedPrompt = normalizeText(query);
   const promptTokens = new Set(tokenize(query));
 
-  const eligible = INDEXED_CAPABILITIES.filter((entry) => includeStatuses.includes(entry.capability.status));
+  const eligible = INDEXED_CAPABILITIES.filter((entry) => includeStatuses.includes(entry.runtimeStatus));
   const matches: OpenClaw1000CapabilityMatch[] = [];
 
   for (const entry of eligible) {
