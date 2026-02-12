@@ -94,6 +94,12 @@ app.use(
 
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
+// Legacy public route: always route first-time users to home.
+// Kept server-side to avoid exposing JSON error payloads on direct /welcome hits.
+app.get(/^\/welcome\/?$/, (_req, res) => {
+  res.redirect(302, "/");
+});
+
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
 }

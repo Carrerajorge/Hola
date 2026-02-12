@@ -63,10 +63,20 @@ function ChatPageRedirect() {
 
   return <Home />;
 }
+
+function WelcomeRedirect() {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    setLocation("/", { replace: true });
+  }, [setLocation]);
+
+  return null;
+}
+
 const LoginPage = lazy(() => import("@/pages/login"));
 const LoginApprovePage = lazy(() => import("@/pages/login-approve"));
 const SignupPage = lazy(() => import("@/pages/signup"));
-const LandingPage = lazy(() => import("@/pages/landing"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 const ProfilePage = lazy(() => import("@/pages/profile"));
@@ -211,7 +221,7 @@ function Router() {
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
             <Route path={HOME_ROUTE_REGEX} component={Home} />
-            <Route path="/welcome" component={LandingPage} />
+            <Route path="/welcome" component={WelcomeRedirect} />
             <Route path="/login" component={LoginPage} />
             <Route path="/login/approve" component={LoginApprovePage} />
             <Route path="/signup" component={SignupPage} />
