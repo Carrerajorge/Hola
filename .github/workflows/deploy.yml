@@ -43,13 +43,12 @@ jobs:
     needs: [ci]
     if: ${{ always() && github.event_name == 'workflow_dispatch' && ((github.event.inputs.skip_ci == 'true' || github.event.inputs.skip_ci == true) || needs.ci.result == 'success') }}
     timeout-minutes: 35
-    # Resolve secrets at the job level (workflow-level `env` + reusable workflows can be finicky).
     env:
-      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
-      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
-      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      VPS_HOST: 69.62.98.126
+      VPS_USER: root
+      VPS_PORT: "8022"
+      DEPLOY_PATH: /opt/hola
+      COMPOSE_PROJECT: iliagpt
     environment:
       name: production
       url: https://iliagpt.com
@@ -57,6 +56,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
+          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          if [ -z "${DNS_IP}" ]; then
+            echo "❌ Failed to resolve iliagpt.com"
+            exit 1
+          fi
+          if [ "${DNS_IP}" != "${{ env.VPS_HOST }}" ]; then
+            echo "❌ Target host (${{ env.VPS_HOST }}) does not match iliagpt.com (${DNS_IP})"
+            exit 1
+          fi
 
       - name: Setup SSH key
         run: |
@@ -69,7 +83,8 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+          TARGET_SHA="${{ github.sha }}"
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
@@ -98,14 +113,22 @@ jobs:
               fi
             fi
 
-            # ── Pull latest code ──
-            echo "▸ Pulling latest code..."
+            # ── Checkout exact commit for deterministic deploys ──
+            echo "▸ Fetching repository and checking out target SHA..."
+            echo "▸ TARGET_SHA: ${TARGET_SHA}"
             git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
+            git checkout --force "${TARGET_SHA}"
+
+            CURRENT_SHA="$(git rev-parse --short HEAD)"
+            EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
+            echo "▸ Checked out SHA: ${CURRENT_SHA}"
+            if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then
+              echo "✗ Checked out SHA (${CURRENT_SHA}) does not match expected (${EXPECTED_SHA})"
+              exit 1
+            fi
 
             # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
-            export APP_VERSION="$(git rev-parse --short HEAD)"
+            export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
             compose() {
@@ -169,20 +192,63 @@ jobs:
             echo "═══════════════════════════════════════════"
             compose ps
             echo ""
-            curl -s http://127.0.0.1:5000/health || true
+
+            HEALTH_JSON="$(curl -sf http://127.0.0.1:5000/api/health)"
+            echo "${HEALTH_JSON}"
+            if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
+              echo "✗ Version mismatch on local health endpoint"
+              exit 1
+            fi
+
+            APP_HTML="$(curl -sf http://127.0.0.1:5000/)"
+            JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+            if [ -z "${JS_ASSET}" ]; then
+              echo "✗ Could not find main JS asset in app HTML"
+              exit 1
+            fi
+            echo "▸ Main JS asset: ${JS_ASSET}"
+
+            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
+              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+              exit 1
+            fi
           DEPLOY_SCRIPT
 
       - name: Verify production
         run: |
-          echo "▸ Verifying https://iliagpt.com..."
+          set -euo pipefail
+          EXPECTED_SHA="${{ github.sha }}"
+          EXPECTED_SHA="${EXPECTED_SHA:0:8}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED_SHA})..."
           sleep 10
           STATUS=$(curl -sI --max-time 15 https://iliagpt.com | head -1 || echo "UNREACHABLE")
           echo "Response: $STATUS"
-          if echo "$STATUS" | grep -qE "200|301|302"; then
-            echo "✓ Production site is live!"
-          else
-            echo "⚠ Warning: Site may not be responding correctly"
+          if ! echo "$STATUS" | grep -qE "200|301|302"; then
+            echo "❌ Production site is not responding correctly"
+            exit 1
           fi
+
+          HEALTH_JSON="$(curl -sf --max-time 20 https://iliagpt.com/api/health)"
+          echo "$HEALTH_JSON"
+          if ! echo "$HEALTH_JSON" | grep -q "\"version\":\"${EXPECTED_SHA}\""; then
+            echo "❌ Production health version mismatch"
+            exit 1
+          fi
+
+          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
+          JS_ASSET="$(echo "$HTML" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+          if [ -z "$JS_ASSET" ]; then
+            echo "❌ Could not find production main JS asset"
+            exit 1
+          fi
+          echo "▸ Production JS asset: $JS_ASSET"
+
+          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
+            echo "❌ Production JS does not contain logout hotfix marker"
+            exit 1
+          fi
+
+          echo "✓ Production site is live with expected deploy version and logout fix"
 
       - name: Notify on failure
         if: failure()
@@ -197,11 +263,11 @@ jobs:
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     timeout-minutes: 35
     env:
-      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
-      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
-      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      VPS_HOST: 69.62.98.126
+      VPS_USER: root
+      VPS_PORT: "8022"
+      DEPLOY_PATH: /opt/hola
+      COMPOSE_PROJECT: iliagpt
     environment:
       name: production
       url: https://iliagpt.com
@@ -212,6 +278,21 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
+          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          if [ -z "${DNS_IP}" ]; then
+            echo "❌ Failed to resolve iliagpt.com"
+            exit 1
+          fi
+          if [ "${DNS_IP}" != "${{ env.VPS_HOST }}" ]; then
+            echo "❌ Target host (${{ env.VPS_HOST }}) does not match iliagpt.com (${DNS_IP})"
+            exit 1
+          fi
+
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
@@ -221,7 +302,8 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+          TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
@@ -247,13 +329,21 @@ jobs:
               fi
             fi
 
-            echo "▸ Pulling latest code..."
+            echo "▸ Fetching repository and checking out target SHA..."
+            echo "▸ TARGET_SHA: ${TARGET_SHA}"
             git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
+            git checkout --force "${TARGET_SHA}"
+
+            CURRENT_SHA="$(git rev-parse --short HEAD)"
+            EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
+            echo "▸ Checked out SHA: ${CURRENT_SHA}"
+            if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then
+              echo "✗ Checked out SHA (${CURRENT_SHA}) does not match expected (${EXPECTED_SHA})"
+              exit 1
+            fi
 
             # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
-            export APP_VERSION="$(git rev-parse --short HEAD)"
+            export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
             compose() {
@@ -307,20 +397,63 @@ jobs:
             echo "═══════════════════════════════════════════"
             compose ps
             echo ""
-            curl -s http://127.0.0.1:5000/health || true
+
+            HEALTH_JSON="$(curl -sf http://127.0.0.1:5000/api/health)"
+            echo "${HEALTH_JSON}"
+            if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
+              echo "✗ Version mismatch on local health endpoint"
+              exit 1
+            fi
+
+            APP_HTML="$(curl -sf http://127.0.0.1:5000/)"
+            JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+            if [ -z "${JS_ASSET}" ]; then
+              echo "✗ Could not find main JS asset in app HTML"
+              exit 1
+            fi
+            echo "▸ Main JS asset: ${JS_ASSET}"
+
+            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
+              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+              exit 1
+            fi
           DEPLOY_SCRIPT
 
       - name: Verify production
         run: |
-          echo "▸ Verifying https://iliagpt.com..."
+          set -euo pipefail
+          EXPECTED_SHA="${{ github.event.workflow_run.head_sha }}"
+          EXPECTED_SHA="${EXPECTED_SHA:0:8}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED_SHA})..."
           sleep 10
           STATUS=$(curl -sI --max-time 15 https://iliagpt.com | head -1 || echo "UNREACHABLE")
           echo "Response: $STATUS"
-          if echo "$STATUS" | grep -qE "200|301|302"; then
-            echo "✓ Production site is live!"
-          else
-            echo "⚠ Warning: Site may not be responding correctly"
+          if ! echo "$STATUS" | grep -qE "200|301|302"; then
+            echo "❌ Production site is not responding correctly"
+            exit 1
           fi
+
+          HEALTH_JSON="$(curl -sf --max-time 20 https://iliagpt.com/api/health)"
+          echo "$HEALTH_JSON"
+          if ! echo "$HEALTH_JSON" | grep -q "\"version\":\"${EXPECTED_SHA}\""; then
+            echo "❌ Production health version mismatch"
+            exit 1
+          fi
+
+          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
+          JS_ASSET="$(echo "$HTML" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+          if [ -z "$JS_ASSET" ]; then
+            echo "❌ Could not find production main JS asset"
+            exit 1
+          fi
+          echo "▸ Production JS asset: $JS_ASSET"
+
+          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
+            echo "❌ Production JS does not contain logout hotfix marker"
+            exit 1
+          fi
+
+          echo "✓ Production site is live with expected deploy version and logout fix"
 
       - name: Notify on failure
         if: failure()
