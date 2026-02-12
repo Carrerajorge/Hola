@@ -12,7 +12,7 @@
 
 import { users, userSettings, libraryStorage, type User } from "@shared/schema";
 import { db } from "../../db";
-import { eq, or, sql } from "drizzle-orm";
+import { eq, or, sql, ilike } from "drizzle-orm";
 import { autoAcceptWorkspaceInvitationForUser } from "../../services/workspaceInvitationService";
 
 export type UpsertUser = {
@@ -52,7 +52,7 @@ class AuthStorage implements IAuthStorage {
       const [user] = await db
         .select()
         .from(users)
-        .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+        .where(ilike(users.email, normalizedEmail))
         .limit(1);
       return user;
     } catch (error: any) {

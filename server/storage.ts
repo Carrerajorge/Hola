@@ -1008,7 +1008,7 @@ export class MemStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = email.toLowerCase().trim();
-    const [result] = await dbRead.select().from(users).where(sql`LOWER(${users.email}) = ${normalizedEmail}`);
+    const [result] = await dbRead.select().from(users).where(ilike(users.email, normalizedEmail));
     return result;
   }
 
