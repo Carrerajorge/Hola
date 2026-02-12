@@ -7,6 +7,7 @@ import type { User } from "@shared/schema";
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
 const ANON_USER_ID_KEY = "siragpt_anon_user_id";
 const ANON_TOKEN_KEY = "siragpt_anon_token";
+const FORCE_SIGNED_OUT_KEY = "siragpt_force_signed_out";
 
 interface AuthContextType {
   user: User | null;
@@ -103,6 +104,26 @@ function setStoredAnonToken(token: string): void {
   }
 }
 
+function isForcedSignedOut(): boolean {
+  try {
+    return localStorage.getItem(FORCE_SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setForcedSignedOut(enabled: boolean): void {
+  try {
+    if (enabled) {
+      localStorage.setItem(FORCE_SIGNED_OUT_KEY, "1");
+    } else {
+      localStorage.removeItem(FORCE_SIGNED_OUT_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 // --- Fetch Logic ---
 
 async function fetchUser(): Promise<User | null> {
@@ -121,6 +142,7 @@ async function fetchUser(): Promise<User | null> {
     const user = await response.json();
     setStoredUser(user);
     clearAnonUserId();
+    setForcedSignedOut(false);
     return user;
   }
 
@@ -153,10 +175,16 @@ async function fetchUser(): Promise<User | null> {
 
   if (response.status === 401 || response.status === 403) {
     clearOldUserData();
+    if (isForcedSignedOut()) {
+      return null;
+    }
     return await tryAnonymousIdentity();
   }
 
   console.error("Auth fetch failed:", response.status, response.statusText);
+  if (isForcedSignedOut()) {
+    return null;
+  }
   return await tryAnonymousIdentity();
 }
 
@@ -189,11 +217,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors
     }
+    setForcedSignedOut(true);
+    clearAnonUserId();
     setStoredUser(null);
     queryClient.setQueryData(["/api/auth/user"], null);
     queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
     queryClient.clear();
-    window.location.href = "/welcome";
+    window.location.href = "/login?logged_out=1";
   }, [queryClient]);
 
   const refreshAuth = useCallback(async () => {
