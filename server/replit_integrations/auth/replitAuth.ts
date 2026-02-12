@@ -12,6 +12,7 @@ import { withRetry } from "../../utils/retry";
 import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter";
 import { recordLoginAttempt } from "../../services/twoFactorAuth";
 import { getSettingValue } from "../../services/settingsConfigService";
+import { setLogoutMarker } from "../../lib/logoutMarker";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {
@@ -285,6 +286,7 @@ function redirectAfterLegacyLogout(req: Request, res: Response, oidcConfig: any)
 
   // Always clear local session cookie.
   res.clearCookie("siragpt.sid");
+  setLogoutMarker(res);
 
   try {
     const replId = process.env.REPL_ID;

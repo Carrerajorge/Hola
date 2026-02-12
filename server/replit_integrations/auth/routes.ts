@@ -12,6 +12,7 @@ import { buildSessionUserFromDbUser } from "../../lib/sessionUser";
 import { computeMfaForUser, startMfaLoginChallenge } from "../../services/mfaLogin";
 import { createLogger } from "../../lib/structuredLogger";
 import { getSettingValue } from "../../services/settingsConfigService";
+import { setLogoutMarker, clearLogoutMarker } from "../../lib/logoutMarker";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
@@ -619,15 +620,18 @@ export function registerAuthRoutes(app: Express): void {
               console.error("Session destroy error:", destroyErr);
             }
             res.clearCookie("siragpt.sid");
+            setLogoutMarker(res);
             res.json({ success: true });
           });
           return;
         }
         res.clearCookie("siragpt.sid");
+        setLogoutMarker(res);
         res.json({ success: true });
       });
     } catch (error) {
       console.error("Logout error:", error);
+      setLogoutMarker(res);
       res.json({ success: true });
     }
   });
@@ -661,6 +665,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "User not found" });
       }
 
+      clearLogoutMarker(res);
       res.json(sanitizeUser(user));
     } catch (error) {
       console.error("Error fetching user:", error);

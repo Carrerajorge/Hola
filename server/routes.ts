@@ -68,6 +68,7 @@ import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
+import { hasLogoutMarker, clearLogoutMarker } from "./lib/logoutMarker";
 import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
@@ -450,6 +451,7 @@ export async function registerRoutes(
     }
 
     if (authUserId) {
+      clearLogoutMarker(res);
       // Get fresh role from database
       try {
         const dbUser = await storage.getUser(authUserId);
@@ -469,6 +471,12 @@ export async function registerRoutes(
           isAnonymous: false
         });
       }
+    }
+
+    // If user explicitly logged out, do NOT auto-create/return anonymous identity.
+    // This prevents old frontend bundles from auto-reauthing as anon right after logout.
+    if (hasLogoutMarker(req)) {
+      return res.status(401).json({ message: "Logged out" });
     }
 
     // For anonymous users, bind ID to session (not header) to prevent impersonation
