@@ -122,6 +122,20 @@ jobs:
             compose up -d postgres redis
             sleep 5
 
+            # ── Free app port from legacy/non-compose processes ──
+            echo "▸ Ensuring port 5000 is free..."
+            # Stop any container currently publishing host port 5000 (legacy stacks).
+            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
+            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
+            # Best effort: stop old PM2 process from previous non-docker deployments.
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 delete michat >/dev/null 2>&1 || true
+            fi
+            # Last resort if something non-docker still holds port 5000.
+            if command -v fuser >/dev/null 2>&1; then
+              fuser -k 5000/tcp >/dev/null 2>&1 || true
+            fi
+
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
             compose up -d
@@ -251,6 +265,16 @@ jobs:
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
             sleep 5
+
+            echo "▸ Ensuring port 5000 is free..."
+            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
+            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 delete michat >/dev/null 2>&1 || true
+            fi
+            if command -v fuser >/dev/null 2>&1; then
+              fuser -k 5000/tcp >/dev/null 2>&1 || true
+            fi
 
             echo "▸ Starting updated containers..."
             compose up -d
