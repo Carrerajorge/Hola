@@ -370,6 +370,15 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", authRateLimiter, (req, res, next) => {
+    // Default UX: route users to the first-party login screen.
+    // Replit OIDC is still available explicitly via /api/login?provider=replit
+    // for backward compatibility and controlled rollouts.
+    const provider = String((req.query as any)?.provider || "").toLowerCase();
+    const forceReplitOidc = provider === "replit" || provider === "oidc";
+    if (!forceReplitOidc) {
+      return res.redirect("/login");
+    }
+
     // Local Dev Bypass
     if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
       console.log('[Auth] Local dev detected (development only), bypassing OIDC login');

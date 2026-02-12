@@ -183,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const login = useCallback(() => {
-    window.location.href = "/api/login";
+    window.location.href = "/login";
   }, []);
 
   const logout = useCallback(async () => {

@@ -55,10 +55,21 @@ export default function LoginPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const prefilledEmail = (params.get("email") || "").trim();
+    if (prefilledEmail) {
+      setEmail(prefilledEmail);
+    }
     const errorCode = params.get("error");
     if (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) {
       setError(OAUTH_ERROR_MESSAGES[errorCode]);
-      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    if (prefilledEmail || errorCode) {
+      params.delete("email");
+      params.delete("error");
+      const rest = params.toString();
+      const nextUrl = rest ? `${window.location.pathname}?${rest}` : window.location.pathname;
+      window.history.replaceState({}, "", nextUrl);
     }
   }, []);
 

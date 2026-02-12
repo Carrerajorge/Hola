@@ -38,8 +38,10 @@ export default function SignupPage() {
   const handleSignup = () => {
     setTouched({ email: true, password: true, confirmPassword: true });
     if (isFormValid) {
-      // Redirect to Replit Auth
-      window.location.href = "/api/login";
+      // Email/password signup is completed in the first-party login flow.
+      // Keep the email context and avoid legacy Replit-only redirects.
+      const emailParam = encodeURIComponent(email);
+      window.location.href = `/login?email=${emailParam}`;
     }
   };
 
@@ -51,8 +53,8 @@ export default function SignupPage() {
   const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500'];
 
   const handleSocialSignup = () => {
-    // Redirect to Replit Auth (supports Google, Apple, etc.)
-    window.location.href = "/api/login";
+    // Direct Google OAuth entrypoint (first-party), avoiding legacy Replit OIDC redirects.
+    window.location.href = "/api/auth/google";
   };
 
   if (!platformLoading && !allowRegistration) {
