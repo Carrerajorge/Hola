@@ -48,7 +48,12 @@ class AuthStorage implements IAuthStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
-      const [user] = await db.select().from(users).where(eq(users.email, email));
+      const normalizedEmail = email.toLowerCase().trim();
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+        .limit(1);
       return user;
     } catch (error: any) {
       console.error(`[AuthStorage] getUserByEmail failed for email=${email}:`, error.message);

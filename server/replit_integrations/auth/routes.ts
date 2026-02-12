@@ -169,9 +169,9 @@ export function registerAuthRoutes(app: Express): void {
         });
       }
 
-      // Find user in database by email (case-insensitive).
-      // Avoid full-table scans (`getAllUsers`) to keep login path stable and fast.
-      const dbUser = await storage.getUserByEmail(email);
+      // Read through authStorage (primary DB connection) to avoid replica-read drift
+      // on the authentication critical path.
+      const dbUser = await authStorage.getUserByEmail(email);
 
       if (!dbUser) {
         try {
