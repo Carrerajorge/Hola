@@ -10,6 +10,9 @@ import { getSecureUserId } from "../../lib/anonUserHelper";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 import { buildSessionUserFromDbUser } from "../../lib/sessionUser";
 import { computeMfaForUser, startMfaLoginChallenge } from "../../services/mfaLogin";
+import { createLogger } from "../../lib/structuredLogger";
+
+const authLoginLogger = createLogger("auth-login");
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -324,6 +327,14 @@ export function registerAuthRoutes(app: Express): void {
         });
       });
     } catch (error: any) {
+      const requestId = (res as any)?.locals?.requestId as string | undefined;
+      authLoginLogger
+        .withRequest(requestId, req?.session?.authUserId || req?.user?.claims?.sub)
+        .error("Login handler exception", {
+          message: error?.message || String(error),
+          stack: error?.stack,
+          route: "/api/auth/login",
+        });
       console.error("Login error:", {
         message: error?.message || String(error),
         stack: error?.stack,
