@@ -114,8 +114,8 @@ jobs:
             }
 
             # ── Build new images ──
-            echo "▸ Building Docker images..."
-            compose build app worker sandbox-runner
+            echo "▸ Building Docker images (no cache)..."
+            compose build --no-cache app worker sandbox-runner
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
@@ -261,8 +261,8 @@ jobs:
                 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
             }
 
-            echo "▸ Building Docker images..."
-            compose build app worker sandbox-runner
+            echo "▸ Building Docker images (no cache)..."
+            compose build --no-cache app worker sandbox-runner
 
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
