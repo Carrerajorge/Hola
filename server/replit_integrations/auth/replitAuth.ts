@@ -28,6 +28,34 @@ export function getAuthMetrics() {
   return { ...AUTH_METRICS };
 }
 
+function isReplitOidcEnabled(): boolean {
+  return String(process.env.REPLIT_OIDC_ENABLED || "").toLowerCase() === "true";
+}
+
+function resolveSessionUserId(req: any): string | null {
+  const direct = req?.user?.claims?.sub || req?.user?.id;
+  if (direct) {
+    return String(direct);
+  }
+
+  const session = req?.session;
+  if (typeof session?.authUserId === "string" && session.authUserId) {
+    return session.authUserId;
+  }
+
+  const passportUser = session?.passport?.user;
+  if (typeof passportUser === "string" && passportUser) {
+    return passportUser;
+  }
+
+  const passportId = passportUser?.claims?.sub || passportUser?.id || passportUser?.sub;
+  if (typeof passportId === "string" && passportId) {
+    return passportId;
+  }
+
+  return null;
+}
+
 function createResilientPgSessionStore(sessionTtl: number) {
   const pgStore = connectPg(session);
   const store: any = new pgStore({
@@ -283,6 +311,7 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  const replitOidcEnabled = isReplitOidcEnabled();
   let oidcConfig: any = null;
 
   // Legacy logout route kept for backward compatibility with older frontend builds.
@@ -314,249 +343,46 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  // In non-Replit production deployments (e.g., VPS), REPL_ID may be unset.
-  // Do not crash the server if OIDC is not configured.
-  if (!process.env.REPL_ID) {
-    console.warn('[Auth] REPL_ID is not set; Replit OIDC auth is disabled.');
+  // Replit OIDC is explicitly disabled by default in this deployment.
+  // Keep routes for backward compatibility but route users to first-party login.
+  app.get("/api/login", authRateLimiter, (req, res) => {
+    return res.redirect("/login");
+  });
+
+  // Legacy callback endpoint from old Replit OIDC integrations.
+  // It is intentionally disabled now; users should authenticate via first-party providers.
+  app.get("/api/callback", authRateLimiter, (_req, res) => {
+    return res.redirect("/login?error=replit_disabled");
+  });
+
+  if (!replitOidcEnabled) {
+    console.log("[Auth] Replit OIDC disabled (REPLIT_OIDC_ENABLED != true).");
     return;
   }
 
-  oidcConfig = await getOidcConfig();
-
-  const verify: VerifyFunction = async (
-    tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
-    verified: passport.AuthenticateCallback
-  ) => {
-    try {
-      const user: any = {};
-      updateUserSession(user, tokens);
-
-      if (user.claims) {
-        await upsertUser(user.claims);
-      } else {
-        console.error("[Auth] No claims available after token processing - cannot create user");
-        return verified(new Error("No claims available"), undefined);
-      }
-
-      verified(null, user);
-    } catch (error) {
-      console.error("[Auth] Verify callback error:", error);
-      verified(error as Error, undefined);
-    }
-  };
-
-  // Keep track of registered strategies
-  const registeredStrategies = new Set<string>();
-
-  // Helper function to ensure strategy exists for a domain
-  const ensureStrategy = (domain: string) => {
-    const strategyName = `replitauth:${domain}`;
-    if (!registeredStrategies.has(strategyName)) {
-      const strategy = new Strategy(
-        {
-          name: strategyName,
-          config: oidcConfig,
-          scope: "openid email profile offline_access",
-          callbackURL: `https://${domain}/api/callback`,
-        },
-        verify
-      );
-      passport.use(strategy);
-      registeredStrategies.add(strategyName);
-    }
-  };
-
-  passport.serializeUser((user: Express.User, cb) => cb(null, user));
-  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
-
-  app.get("/api/login", authRateLimiter, (req, res, next) => {
-    // Default UX: route users to the first-party login screen.
-    // Replit OIDC is still available explicitly via /api/login?provider=replit
-    // for backward compatibility and controlled rollouts.
-    const provider = String((req.query as any)?.provider || "").toLowerCase();
-    const forceReplitOidc = provider === "replit" || provider === "oidc";
-    if (!forceReplitOidc) {
-      return res.redirect("/login");
-    }
-
-    // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
-      console.log('[Auth] Local dev detected (development only), bypassing OIDC login');
-      return res.redirect('/api/callback?code=local_dev_bypass');
-    }
-
-    AUTH_METRICS.loginAttempts++;
-    const startTime = Date.now();
-    console.log(`[Auth] Login initiated from IP: ${req.ip}, hostname: ${req.hostname}`);
-
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
-  });
-
-  app.get("/api/callback", authRateLimiter, async (req, res, next) => {
-    const startTime = Date.now();
-    const requestId = `cb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production' && req.query.code === 'local_dev_bypass') {
-      try {
-        console.log(`[Auth] [${requestId}] Handling local dev bypass callback`);
-        const mockUser = {
-          claims: {
-            sub: 'local-dev-user',
-            email: 'Carrerajorge874@gmail.com',
-            first_name: 'Local',
-            last_name: 'Dev',
-            profile_image_url: `https://ui-avatars.com/api/?name=Local+Dev&background=random`
-          },
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          last_refresh: Date.now()
-        };
-
-        // Ensure user exists in DB
-        console.log(`[Auth] [${requestId}] Upserting mock user...`);
-        await upsertUser(mockUser.claims);
-        console.log(`[Auth] [${requestId}] Mock user upserted. Logging in...`);
-
-        return req.logIn(mockUser, async (loginErr) => {
-          if (loginErr) {
-            console.error(`[Auth] Local login failed:`, loginErr);
-            return res.redirect("/login?error=login_failed");
-          }
-          console.log(`[Auth] [${requestId}] Local dev login successful for ${mockUser.claims.email}`);
-
-          // Mimic the success logic
-          try {
-            // Mock auth storage update or skip it if it fails
-            await authStorage.updateUserLogin(mockUser.claims.sub, {
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-
-            try {
-              await recordLoginAttempt(
-                mockUser.claims.email,
-                mockUser.claims.sub,
-                String(req.ip || req.socket.remoteAddress || "unknown"),
-                String(req.headers["user-agent"] || "unknown"),
-                true
-              );
-            } catch (e) {
-              console.warn("[Auth] Failed to record login_attempts (local dev):", (e as any)?.message || e);
-            }
-          } catch (e) { console.warn("Failed to log local auth audit", e) }
-
-          return res.redirect("/?auth=success");
-        });
-      } catch (error: any) {
-        console.error(`[Auth] [${requestId}] INTERNAL ERROR in local bypass:`, error);
-        return res.status(500).json({ error: error.message, stack: error.stack });
-      }
-    }
-
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
-      if (err) {
-        AUTH_METRICS.loginFailures++;
-        console.error(`[Auth] [${requestId}] Callback error after ${Date.now() - startTime}ms:`, {
-          error: err.message,
-          code: err.code,
-          ip: req.ip,
-        });
-        return res.redirect("/login?error=auth_failed");
-      }
-      if (!user) {
-        AUTH_METRICS.loginFailures++;
-        console.error(`[Auth] [${requestId}] No user returned after ${Date.now() - startTime}ms:`, {
-          info,
-          ip: req.ip,
-        });
-        return res.redirect("/login?error=no_user");
-      }
-      req.logIn(user, async (loginErr) => {
-        if (loginErr) {
-          AUTH_METRICS.loginFailures++;
-          console.error(`[Auth] [${requestId}] Login error after ${Date.now() - startTime}ms:`, {
-            error: loginErr.message,
-            ip: req.ip,
-          });
-          return res.redirect("/login?error=login_failed");
-        }
-
-        AUTH_METRICS.loginSuccess++;
-        AUTH_METRICS.sessionCreations++;
-
-        const userId = user.claims?.sub;
-        const loginDuration = Date.now() - startTime;
-        console.log(`[Auth] [${requestId}] Login successful in ${loginDuration}ms:`, {
-          userId,
-          email: user.claims?.email,
-          ip: req.ip,
-        });
-
-        if (userId) {
-          try {
-            await authStorage.updateUserLogin(userId, {
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-
-            try {
-              await recordLoginAttempt(
-                String(user.claims?.email || "unknown"),
-                userId,
-                String(req.ip || req.socket.remoteAddress || "unknown"),
-                String(req.headers["user-agent"] || "unknown"),
-                true
-              );
-            } catch (e) {
-              console.warn(`[Auth] [${requestId}] Failed to record login_attempts:`, (e as any)?.message || e);
-            }
-
-            await storage.createAuditLog({
-              userId,
-              action: "user_login",
-              resource: "auth",
-              details: {
-                email: user.claims?.email,
-                provider: "google_oauth",
-                duration_ms: loginDuration,
-              },
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-          } catch (auditError) {
-            console.warn(`[Auth] [${requestId}] Failed to create audit log:`, auditError);
-          }
-        }
-
-        return res.redirect("/?auth=success");
-      });
-    })(req, res, next);
-  });
+  // Safety: even if toggled on by env accidentally, we keep it disabled in code
+  // to avoid reintroducing external-provider lockups in production.
+  console.warn("[Auth] REPLIT_OIDC_ENABLED=true is ignored; Replit OIDC is permanently disabled.");
+  return;
 
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
-  // If Replit OIDC isn't configured, don't crash on token refresh paths.
-  if (!process.env.REPL_ID) {
-    return res.status(503).json({
-      message: "Authentication is not configured",
-      code: "AUTH_NOT_CONFIGURED",
-    });
-  }
-
+  const fallbackUserId = resolveSessionUserId(req as any);
   const user = req.user as any;
   const requestId = `auth-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
-  if (!req.isAuthenticated() || !user.expires_at) {
+  if (!req.isAuthenticated?.() && !fallbackUserId) {
     return res.status(401).json({
       message: "Unauthorized",
       code: "SESSION_INVALID",
     });
+  }
+
+  // Non-OIDC sessions (email/password, phone, Google/Microsoft/Auth0 passport profiles)
+  // should pass through without any refresh-token requirement.
+  if (!user?.expires_at || !user?.refresh_token) {
+    return next();
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -568,11 +394,11 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
 
   const refreshToken = user.refresh_token;
   if (!refreshToken) {
-    console.warn(`[Auth] [${requestId}] No refresh token available for user:`, user.claims?.sub);
-    return res.status(401).json({
-      message: "Session expired",
-      code: "NO_REFRESH_TOKEN",
-    });
+    return next();
+  }
+
+  if (!isReplitOidcEnabled() || !process.env.REPL_ID) {
+    return next();
   }
 
   if (timeUntilExpiry > 0) {

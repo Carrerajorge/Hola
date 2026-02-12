@@ -18,6 +18,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
   microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
   auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
+  replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
 };
 
 export default function LoginPage() {
