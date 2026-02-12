@@ -47,8 +47,8 @@ class AuthStorage implements IAuthStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
+    const normalizedEmail = email.toLowerCase().trim();
     try {
-      const normalizedEmail = email.toLowerCase().trim();
       const [user] = await db
         .select()
         .from(users)
@@ -56,6 +56,40 @@ class AuthStorage implements IAuthStorage {
         .limit(1);
       return user;
     } catch (error: any) {
+      const sqlCode = error?.cause?.code || error?.code;
+
+      // Backward-compatible fallback for partially migrated schemas:
+      // select only the minimum columns required by login/session.
+      if (sqlCode === "42703" || sqlCode === "42P01") {
+        try {
+          const result = await db.execute(sql`
+            SELECT id, email, password, first_name, last_name, username, role, status
+            FROM users
+            WHERE email ILIKE ${normalizedEmail}
+            LIMIT 1
+          `);
+          const row = (result as any)?.rows?.[0];
+          if (!row) return undefined;
+
+          return {
+            id: String(row.id),
+            email: row.email ?? null,
+            password: row.password ?? null,
+            firstName: row.first_name ?? row.firstName ?? null,
+            lastName: row.last_name ?? row.lastName ?? null,
+            username: row.username ?? null,
+            role: row.role ?? "user",
+            status: row.status ?? "active",
+          } as User;
+        } catch (fallbackError: any) {
+          console.error(
+            `[AuthStorage] getUserByEmail fallback failed for email=${email}:`,
+            fallbackError?.message || fallbackError
+          );
+          throw fallbackError;
+        }
+      }
+
       console.error(`[AuthStorage] getUserByEmail failed for email=${email}:`, error.message);
       throw error;
     }
