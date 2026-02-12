@@ -3,7 +3,7 @@ import { Strategy, type VerifyFunction } from "openid-client/passport";
 
 import passport from "passport";
 import session from "express-session";
-import type { Express, RequestHandler } from "express";
+import type { Express, Request, RequestHandler, Response } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
@@ -196,6 +196,47 @@ async function upsertUser(claims: any) {
   }
 }
 
+const LEGACY_LOGOUT_FALLBACK_REDIRECT = "/";
+
+function resolvePostLogoutRedirectUri(req: Request): string {
+  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || req.get("host") || req.hostname;
+  if (!host) {
+    return LEGACY_LOGOUT_FALLBACK_REDIRECT;
+  }
+
+  const protocol = forwardedProto || req.protocol || "https";
+  return `${protocol}://${host}`;
+}
+
+function redirectAfterLegacyLogout(req: Request, res: Response, oidcConfig: any): void {
+  if (res.headersSent) {
+    return;
+  }
+
+  // Always clear local session cookie.
+  res.clearCookie("siragpt.sid");
+
+  try {
+    const replId = process.env.REPL_ID;
+    if (!replId || !oidcConfig) {
+      res.redirect(LEGACY_LOGOUT_FALLBACK_REDIRECT);
+      return;
+    }
+
+    const endSessionUrl = client.buildEndSessionUrl(oidcConfig, {
+      client_id: replId,
+      post_logout_redirect_uri: resolvePostLogoutRedirectUri(req),
+    });
+
+    res.redirect(endSessionUrl.href);
+  } catch (error) {
+    console.error("[Auth] Failed to build end-session URL, falling back to local redirect:", error);
+    res.redirect(LEGACY_LOGOUT_FALLBACK_REDIRECT);
+  }
+}
+
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
@@ -207,49 +248,16 @@ export async function setupAuth(app: Express) {
   // Legacy logout route kept for backward compatibility with older frontend builds.
   // This must stay available even when Replit OIDC is not configured.
   app.get("/api/logout", (req, res) => {
-    const fallbackRedirect = "/";
-
-    const redirectToEndSession = () => {
-      if (res.headersSent) {
-        return;
-      }
-
-      // Always clear local session cookie.
-      res.clearCookie("siragpt.sid");
-
-      try {
-        const replId = process.env.REPL_ID;
-        if (!replId || !oidcConfig) {
-          return res.redirect(fallbackRedirect);
-        }
-
-        const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
-        const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
-        const host = forwardedHost || req.get("host") || req.hostname;
-        const protocol = forwardedProto || req.protocol || "https";
-        const postLogoutRedirectUri = host ? `${protocol}://${host}` : fallbackRedirect;
-
-        const endSessionUrl = client.buildEndSessionUrl(oidcConfig, {
-          client_id: replId,
-          post_logout_redirect_uri: postLogoutRedirectUri,
-        });
-
-        return res.redirect(endSessionUrl.href);
-      } catch (error) {
-        console.error("[Auth] Failed to build end-session URL, falling back to local redirect:", error);
-        return res.redirect(fallbackRedirect);
-      }
-    };
-
-    const destroySessionAndRedirect = () => {
+    const destroySessionAndRedirect = (): void => {
       if (!req.session) {
-        return redirectToEndSession();
+        redirectAfterLegacyLogout(req, res, oidcConfig);
+        return;
       }
       req.session.destroy((sessionError: any) => {
         if (sessionError) {
           console.error("[Auth] Failed to destroy session during /api/logout:", sessionError);
         }
-        redirectToEndSession();
+        redirectAfterLegacyLogout(req, res, oidcConfig);
       });
     };
 

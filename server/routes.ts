@@ -91,6 +91,7 @@ import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { isModelEligibleForPublic } from "./services/modelIntegration";
+import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
@@ -130,6 +131,65 @@ import openClawRouter from "./routes/openClawRouter";
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+type PublicModelSummary = {
+  id: string;
+  name: string;
+  provider: string;
+  modelId: string;
+  description: string | null;
+  isEnabled: string;
+  enabledAt: Date | string | null;
+  displayOrder: number;
+  icon: string | null;
+  modelType: string;
+  contextWindow: number | null;
+};
+
+const PUBLIC_MODEL_FALLBACKS: ReadonlyArray<PublicModelSummary> = Object.freeze([
+  {
+    id: "fallback-gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    provider: "gemini",
+    modelId: GEMINI_MODELS_REGISTRY.FLASH_25,
+    description: "Modelo rapido y estable",
+    isEnabled: "true",
+    enabledAt: null,
+    displayOrder: 0,
+    icon: null,
+    modelType: "TEXT",
+    contextWindow: 1000000,
+  },
+  {
+    id: "fallback-grok-4.1-fast",
+    name: "Grok 4.1 Fast",
+    provider: "xai",
+    modelId: XAI_MODELS.GROK_4_1_FAST,
+    description: "Modelo rapido con contexto amplio",
+    isEnabled: "true",
+    enabledAt: null,
+    displayOrder: 1,
+    icon: null,
+    modelType: "TEXT",
+    contextWindow: 2000000,
+  },
+]);
+
+function toPublicModelSummary(model: any): PublicModelSummary {
+  return {
+    id: model.id,
+    name: model.name,
+    provider: model.provider,
+    modelId: model.modelId,
+    description: model.description,
+    isEnabled: model.isEnabled,
+    enabledAt: model.enabledAt,
+    displayOrder: model.displayOrder || 0,
+    icon: model.icon,
+    modelType: model.modelType,
+    contextWindow: model.contextWindow,
+  };
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -1077,57 +1137,17 @@ export async function registerRoutes(
       "Expires": "0"
     });
     try {
-	      const allModels = await storage.getAiModels();
-	      const models = allModels
-	        .filter((m: any) => isModelEligibleForPublic(m))
-	        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-	        .map((m: any) => ({
-	          id: m.id,
-	          name: m.name,
-          provider: m.provider,
-          modelId: m.modelId,
-          description: m.description,
-          isEnabled: m.isEnabled,
-          enabledAt: m.enabledAt,
-          displayOrder: m.displayOrder || 0,
-          icon: m.icon,
-          modelType: m.modelType,
-          contextWindow: m.contextWindow,
-        }));
+      const allModels = await storage.getAiModels();
+      const models = allModels
+        .filter((m: any) => isModelEligibleForPublic(m))
+        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+        .map((m: any) => toPublicModelSummary(m));
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
       // Defensive fallback for production when DB schema is temporarily behind code.
       // Keep app shell functional (especially after logout) instead of surfacing 500.
-      const fallbackModels = [
-        {
-          id: "fallback-gemini-2.5-flash",
-          name: "Gemini 2.5 Flash",
-          provider: "gemini",
-          modelId: "gemini-2.5-flash",
-          description: "Modelo rapido y estable",
-          isEnabled: "true",
-          enabledAt: null,
-          displayOrder: 0,
-          icon: null,
-          modelType: "TEXT",
-          contextWindow: 1000000,
-        },
-        {
-          id: "fallback-grok-4.1-fast",
-          name: "Grok 4.1 Fast",
-          provider: "xai",
-          modelId: "grok-4-1-fast-non-reasoning",
-          description: "Modelo rapido con contexto amplio",
-          isEnabled: "true",
-          enabledAt: null,
-          displayOrder: 1,
-          icon: null,
-          modelType: "TEXT",
-          contextWindow: 2000000,
-        },
-      ];
-      res.json({ models: fallbackModels });
+      res.json({ models: PUBLIC_MODEL_FALLBACKS });
     }
   });
 
