@@ -202,6 +202,70 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  let oidcConfig: any = null;
+
+  // Legacy logout route kept for backward compatibility with older frontend builds.
+  // This must stay available even when Replit OIDC is not configured.
+  app.get("/api/logout", (req, res) => {
+    const fallbackRedirect = "/";
+
+    const redirectToEndSession = () => {
+      if (res.headersSent) {
+        return;
+      }
+
+      // Always clear local session cookie.
+      res.clearCookie("siragpt.sid");
+
+      try {
+        const replId = process.env.REPL_ID;
+        if (!replId || !oidcConfig) {
+          return res.redirect(fallbackRedirect);
+        }
+
+        const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+        const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
+        const host = forwardedHost || req.get("host") || req.hostname;
+        const protocol = forwardedProto || req.protocol || "https";
+        const postLogoutRedirectUri = host ? `${protocol}://${host}` : fallbackRedirect;
+
+        const endSessionUrl = client.buildEndSessionUrl(oidcConfig, {
+          client_id: replId,
+          post_logout_redirect_uri: postLogoutRedirectUri,
+        });
+
+        return res.redirect(endSessionUrl.href);
+      } catch (error) {
+        console.error("[Auth] Failed to build end-session URL, falling back to local redirect:", error);
+        return res.redirect(fallbackRedirect);
+      }
+    };
+
+    const destroySessionAndRedirect = () => {
+      if (!req.session) {
+        return redirectToEndSession();
+      }
+      req.session.destroy((sessionError: any) => {
+        if (sessionError) {
+          console.error("[Auth] Failed to destroy session during /api/logout:", sessionError);
+        }
+        redirectToEndSession();
+      });
+    };
+
+    try {
+      req.logout((logoutError: any) => {
+        if (logoutError) {
+          console.error("[Auth] req.logout failed during /api/logout:", logoutError);
+        }
+        destroySessionAndRedirect();
+      });
+    } catch (error) {
+      console.error("[Auth] Unexpected /api/logout error:", error);
+      destroySessionAndRedirect();
+    }
+  });
+
   // In non-Replit production deployments (e.g., VPS), REPL_ID may be unset.
   // Do not crash the server if OIDC is not configured.
   if (!process.env.REPL_ID) {
@@ -209,7 +273,7 @@ export async function setupAuth(app: Express) {
     return;
   }
 
-  const config = await getOidcConfig();
+  oidcConfig = await getOidcConfig();
 
   const verify: VerifyFunction = async (
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
@@ -243,7 +307,7 @@ export async function setupAuth(app: Express) {
       const strategy = new Strategy(
         {
           name: strategyName,
-          config,
+          config: oidcConfig,
           scope: "openid email profile offline_access",
           callbackURL: `https://${domain}/api/callback`,
         },
@@ -417,16 +481,6 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/logout", (req, res) => {
-    req.logout(() => {
-      res.redirect(
-        client.buildEndSessionUrl(config, {
-          client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-        }).href
-      );
-    });
-  });
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {

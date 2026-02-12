@@ -1097,7 +1097,37 @@ export async function registerRoutes(
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
-      res.status(500).json({ error: error.message });
+      // Defensive fallback for production when DB schema is temporarily behind code.
+      // Keep app shell functional (especially after logout) instead of surfacing 500.
+      const fallbackModels = [
+        {
+          id: "fallback-gemini-2.5-flash",
+          name: "Gemini 2.5 Flash",
+          provider: "gemini",
+          modelId: "gemini-2.5-flash",
+          description: "Modelo rapido y estable",
+          isEnabled: "true",
+          enabledAt: null,
+          displayOrder: 0,
+          icon: null,
+          modelType: "TEXT",
+          contextWindow: 1000000,
+        },
+        {
+          id: "fallback-grok-4.1-fast",
+          name: "Grok 4.1 Fast",
+          provider: "xai",
+          modelId: "grok-4-1-fast-non-reasoning",
+          description: "Modelo rapido con contexto amplio",
+          isEnabled: "true",
+          enabledAt: null,
+          displayOrder: 1,
+          icon: null,
+          modelType: "TEXT",
+          contextWindow: 2000000,
+        },
+      ];
+      res.json({ models: fallbackModels });
     }
   });
 

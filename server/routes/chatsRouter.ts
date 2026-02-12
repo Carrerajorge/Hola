@@ -27,7 +27,10 @@ export function createChatsRouter() {
       const visibleChats = await storage.getActiveChats(userId);
       res.json(visibleChats);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      // Defensive fallback: if chat listing query fails (e.g., transient schema mismatch),
+      // do not break the app shell after logout/anonymous transitions.
+      console.error("[Chats] Failed to list chats, returning empty list fallback:", error);
+      res.json([]);
     }
   });
 
