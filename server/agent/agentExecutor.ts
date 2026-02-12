@@ -274,22 +274,37 @@ function extractReservationDetails(text: string): ReservationDetails {
     details.time = normalizeSpaces(timeMatch[1]);
   }
 
-  const restaurantByKeyword = source.match(
-    /\b(?:restaurante|restaurant)\s+(.+?)(?=\s+(?:para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+  // Pattern: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
+  const restaurantBeforeKeyword = source.match(
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)\s+(?:restaurante|restaurant)\b/i
   );
+  // Pattern: "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
+  const restaurantAfterKeyword = source.match(
+    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$)/i
+  );
+  // Pattern: "reserva en [Name]" — broader fallback
   const restaurantByReservePattern = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)(?=\s+(?:para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)(?=\s+(?:restaurante|restaurant|para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
   );
-  const restaurantRaw = restaurantByKeyword?.[1] || restaurantByReservePattern?.[1];
+  const restaurantRaw = restaurantBeforeKeyword?.[1] || restaurantAfterKeyword?.[1] || restaurantByReservePattern?.[1];
   if (restaurantRaw) {
     details.restaurant = normalizeSpaces(restaurantRaw.replace(/^en\s+/i, ""));
   }
 
-  const locationMatch = source.match(
+  // Prefer "restaurante en [City]" pattern over generic "en [City]"
+  const locationAfterRestaurant = source.match(
+    /\b(?:restaurante|restaurant)\s+(?:en|in|de)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})(?=\s+(?:para|for|el|on|a las|at)\b|$)/i
+  );
+  const locationGeneric = source.match(
     /\b(?:en|in)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})(?=\s+(?:para|for|el|on|a las|at)\b|$)/i
   );
+  const locationMatch = locationAfterRestaurant || locationGeneric;
   if (locationMatch?.[1]) {
-    details.location = normalizeSpaces(locationMatch[1]);
+    // Avoid setting location to the restaurant name itself
+    const loc = normalizeSpaces(locationMatch[1]);
+    if (loc.toLowerCase() !== (details.restaurant || "").toLowerCase()) {
+      details.location = loc;
+    }
   }
   if (!details.location && details.restaurant) {
     const cityFromRestaurant = details.restaurant.match(/\bde\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})$/i);
@@ -370,10 +385,21 @@ function buildReservationClarificationQuestion(
   details: ReservationDetails,
   missingFields: ReservationMissingField[]
 ): string {
-  const knownDetails = formatReservationDetails(details);
+  const knownParts: string[] = [];
+  if (details.restaurant) knownParts.push(`**Restaurante:** ${details.restaurant}`);
+  if (details.location) knownParts.push(`**Ciudad:** ${details.location}`);
+  if (details.date) knownParts.push(`**Fecha:** ${details.date}`);
+  if (details.time) knownParts.push(`**Hora:** ${details.time}`);
+  if (details.partySize) knownParts.push(`**Personas:** ${details.partySize}`);
+  if (details.contactName) knownParts.push(`**Nombre:** ${details.contactName}`);
+  if (details.phone) knownParts.push(`**Teléfono:** ${details.phone}`);
+  if (details.email) knownParts.push(`**Email:** ${details.email}`);
+
+  const knownBlock = knownParts.length > 0
+    ? `✅ **Datos detectados:**\n${knownParts.join("\n")}\n\n`
+    : "";
   const missingList = missingFields.map((field) => `- ${RESERVATION_FIELD_LABELS[field]}`).join("\n");
-  const knownBlock = knownDetails ? `Datos detectados: ${knownDetails}\n\n` : "";
-  return `${knownBlock}Para completar la reserva necesito estos datos:\n${missingList}\n\nCompartelos en un solo mensaje y continuo con la reserva real en la web.`;
+  return `${knownBlock}📋 **Para completar la reserva necesito estos datos:**\n${missingList}\n\nCompártelos en un solo mensaje y continúo con la reserva real en la web.`;
 }
 
 async function executeToolCall(
