@@ -38,7 +38,7 @@ export interface IAuthStorage {
 function mapAuthUserRow(row: any): User {
   const firstName = row.first_name ?? row.firstName ?? null;
   const lastName = row.last_name ?? row.lastName ?? null;
-  const fullName = row.full_name ?? row.fullName ?? [firstName, lastName].filter(Boolean).join(" ") || null;
+  const fullName = row.full_name ?? row.fullName ?? ([firstName, lastName].filter(Boolean).join(" ") || null);
 
   return {
     id: String(row.id),
