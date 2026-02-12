@@ -121,6 +121,8 @@ jobs:
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
             sleep 5
+            echo "▸ Running database migrations..."
+            compose run --rm --no-deps app node dist/migrate.cjs
 
             # ── Free app port from legacy/non-compose processes ──
             echo "▸ Ensuring port 5000 is free..."
@@ -265,6 +267,8 @@ jobs:
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
             sleep 5
+            echo "▸ Running database migrations..."
+            compose run --rm --no-deps app node dist/migrate.cjs
 
             echo "▸ Ensuring port 5000 is free..."
             docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true

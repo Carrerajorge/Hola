@@ -104,7 +104,7 @@ const __dirname = dirname(__filename);
   // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts", "server/worker.ts", "server/agent/sandboxRunner/index.ts"],
+    entryPoints: ["server/index.ts", "server/worker.ts", "server/migrate.ts", "server/agent/sandboxRunner/index.ts"],
     outdir: "dist",
     outExtension: { ".js": ".mjs" },
     splitting: true,
@@ -160,6 +160,17 @@ import(pathToFileURL(join(__dirname, "worker.mjs")).href).catch(err => {
 });
 `;
   await writeFile("dist/worker.cjs", workerWrapper, "utf-8");
+
+  const migrateWrapper = `#!/usr/bin/env node
+"use strict";
+const { pathToFileURL } = require("url");
+const { join } = require("path");
+import(pathToFileURL(join(__dirname, "migrate.mjs")).href).catch(err => {
+  console.error("Failed to run migrations:", err);
+  process.exit(1);
+});
+`;
+  await writeFile("dist/migrate.cjs", migrateWrapper, "utf-8");
 
   const sandboxRunnerWrapper = `#!/usr/bin/env node
 "use strict";

@@ -1,4 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import * as pkg from "pg";
 import type { PoolClient } from "pg";
 import * as schema from "../shared/schema";
@@ -60,6 +61,10 @@ export { pool, poolRead };
 
 export const db = drizzle(pool, { schema });
 export const dbRead = drizzle(poolRead, { schema });
+
+export async function runMigrations(): Promise<void> {
+  await migrate(db, { migrationsFolder: "./migrations" });
+}
 
 export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY';
 
