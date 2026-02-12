@@ -33,7 +33,7 @@ jobs:
   # ── CI Gate ─────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true }}
     uses: ./.github/workflows/ci.yml
 
   # ── Manual Deploy ───────────────────────────────────────
@@ -41,8 +41,8 @@ jobs:
     name: Deploy to VPS (Manual)
     runs-on: ubuntu-latest
     needs: [ci]
-    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_ci == 'true' || needs.ci.result == 'success') }}
-    timeout-minutes: 15
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && ((github.event.inputs.skip_ci == 'true' || github.event.inputs.skip_ci == true) || needs.ci.result == 'success') }}
+    timeout-minutes: 35
     # Resolve secrets at the job level (workflow-level `env` + reusable workflows can be finicky).
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -115,7 +115,7 @@ jobs:
 
             # ── Build new images ──
             echo "▸ Building Docker images..."
-            compose build --no-cache app worker sandbox-runner
+            compose build app worker sandbox-runner
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
@@ -179,7 +179,7 @@ jobs:
     name: Deploy to VPS (Auto)
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
@@ -246,7 +246,7 @@ jobs:
             }
 
             echo "▸ Building Docker images..."
-            compose build --no-cache app worker sandbox-runner
+            compose build app worker sandbox-runner
 
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
