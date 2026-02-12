@@ -63,6 +63,8 @@ export const db = drizzle(pool, { schema });
 export const dbRead = drizzle(poolRead, { schema });
 
 export async function runMigrations(): Promise<void> {
+  await pool.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+  await pool.query("CREATE EXTENSION IF NOT EXISTS vector;");
   await migrate(db, { migrationsFolder: "./migrations" });
 }
 
