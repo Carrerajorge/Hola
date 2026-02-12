@@ -28,6 +28,54 @@ export function getAuthMetrics() {
   return { ...AUTH_METRICS };
 }
 
+function createResilientPgSessionStore(sessionTtl: number) {
+  const pgStore = connectPg(session);
+  const store: any = new pgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: false,
+    ttl: sessionTtl,
+    tableName: "sessions",
+  });
+
+  // Guard against malformed/corrupted rows in the sessions table.
+  // Instead of failing the whole request with 500, drop the bad session
+  // and continue as anonymous.
+  const originalGet = typeof store.get === "function" ? store.get.bind(store) : null;
+  if (originalGet) {
+    store.get = (sid: string, cb: (err: any, sessionData?: any) => void) => {
+      originalGet(sid, (err: any, sessionData: any) => {
+        if (!err) {
+          cb(null, sessionData);
+          return;
+        }
+
+        console.error("[Auth] Session store get failed, clearing corrupt session:", {
+          sid,
+          error: err?.message || err,
+        });
+
+        const finish = () => cb(null, null);
+        if (typeof store.destroy === "function") {
+          store.destroy(sid, (destroyErr: any) => {
+            if (destroyErr) {
+              console.error("[Auth] Failed to destroy corrupt session row:", {
+                sid,
+                error: destroyErr?.message || destroyErr,
+              });
+            }
+            finish();
+          });
+          return;
+        }
+
+        finish();
+      });
+    };
+  }
+
+  return store;
+}
+
 const getOidcConfig = memoize(
   async () => {
     // Mock OIDC config for local development to prevent startup hang
@@ -95,15 +143,7 @@ export function getSession() {
   // Use the default MemoryStore in test env.
   const sessionStore = isTest
     ? undefined
-    : (() => {
-        const pgStore = connectPg(session);
-        return new pgStore({
-          conString: process.env.DATABASE_URL,
-          createTableIfMissing: false,
-          ttl: sessionTtl,
-          tableName: "sessions",
-        });
-      })();
+    : createResilientPgSessionStore(sessionTtl);
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
