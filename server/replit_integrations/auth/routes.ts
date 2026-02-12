@@ -16,7 +16,7 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 function isAdminConfigured(): boolean {
-  return !!(ADMIN_EMAIL && ADMIN_PASSWORD && ADMIN_PASSWORD.length >= 8);
+  return !!(ADMIN_EMAIL && ADMIN_PASSWORD);
 }
 
 // Sanitize user object to remove sensitive fields
@@ -169,9 +169,9 @@ export function registerAuthRoutes(app: Express): void {
         });
       }
 
-      // Find user in database by email
-      const allUsers = await storage.getAllUsers();
-      const dbUser = allUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      // Find user in database by email (case-insensitive).
+      // Avoid full-table scans (`getAllUsers`) to keep login path stable and fast.
+      const dbUser = await storage.getUserByEmail(email);
 
       if (!dbUser) {
         try {
@@ -323,12 +323,11 @@ export function registerAuthRoutes(app: Express): void {
           res.json({ success: true, user: sanitizeUser(dbUser) });
         });
       });
-    } catch (error) {
-      console.error("Login error:", error);
-      const fs = require('fs');
-      try {
-        fs.appendFileSync('login_debug.log', `[${new Date().toISOString()}] Login Error: ${error}\nStack: ${(error as any).stack}\n`);
-      } catch (e) { /* ignore */ }
+    } catch (error: any) {
+      console.error("Login error:", {
+        message: error?.message || String(error),
+        stack: error?.stack,
+      });
       res.status(500).json({ message: "Error al iniciar sesión" });
     }
   });
