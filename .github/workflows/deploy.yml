@@ -140,7 +140,7 @@ jobs:
 
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
-            compose up -d
+            compose up -d --force-recreate app worker sandbox-runner
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -281,7 +281,7 @@ jobs:
             fi
 
             echo "▸ Starting updated containers..."
-            compose up -d
+            compose up -d --force-recreate app worker sandbox-runner
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
