@@ -11,6 +11,10 @@ import { auditLog, AuditActions } from "../../services/auditLogger";
 import { buildSessionUserFromDbUser } from "../../lib/sessionUser";
 import { computeMfaForUser, startMfaLoginChallenge } from "../../services/mfaLogin";
 import { createLogger } from "../../lib/structuredLogger";
+import { getSettingValue } from "../../services/settingsConfigService";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
+import { randomUUID } from "crypto";
 
 const authLoginLogger = createLogger("auth-login");
 
@@ -350,6 +354,113 @@ export function registerAuthRoutes(app: Express): void {
         stack: error?.stack,
       });
       res.status(500).json({ message: "Error al iniciar sesión" });
+    }
+  });
+
+  // Self-service registration with email/password.
+  // Keeps compatibility with legacy schemas by using minimal SQL columns plus fallback.
+  app.post("/api/auth/register", authRateLimiter, async (req: any, res) => {
+    try {
+      const validation = loginSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          message: "Datos inválidos",
+          errors: validation.error.errors.map(e => ({ field: e.path.join('.'), message: e.message })),
+        });
+      }
+
+      const email = validation.data.email.toLowerCase().trim();
+      const password = validation.data.password;
+
+      if (password.length < 6) {
+        return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
+      }
+
+      const allowRegistration = await getSettingValue<boolean>("allow_registration", true);
+      if (!allowRegistration) {
+        return res.status(403).json({ message: "El registro está deshabilitado" });
+      }
+
+      const existing = await authStorage.getUserByEmail(email);
+      const hashedPassword = await hashPassword(password);
+
+      if (existing) {
+        if (existing.password) {
+          return res.status(409).json({ message: "El usuario ya existe" });
+        }
+
+        // Convert a previously passwordless account into email/password account.
+        try {
+          await db.execute(sql`
+            UPDATE users
+            SET password = ${hashedPassword},
+                status = 'active',
+                auth_provider = 'email',
+                email_verified = 'true',
+                updated_at = NOW()
+            WHERE id = ${existing.id}
+          `);
+        } catch (error: any) {
+          const sqlCode = error?.cause?.code || error?.code;
+          if (sqlCode === "42703") {
+            await db.execute(sql`
+              UPDATE users
+              SET password = ${hashedPassword},
+                  status = 'active'
+              WHERE id = ${existing.id}
+            `);
+          } else {
+            throw error;
+          }
+        }
+
+        return res.json({ success: true, message: "Cuenta activada correctamente" });
+      }
+
+      const newUserId = randomUUID();
+      const username = email.split("@")[0]?.slice(0, 80) || `user_${newUserId.slice(0, 8)}`;
+
+      try {
+        await db.execute(sql`
+          INSERT INTO users (
+            id, org_id, email, username, password, first_name, last_name,
+            role, plan, status, auth_provider, email_verified, created_at, updated_at
+          )
+          VALUES (
+            ${newUserId}, ${newUserId}, ${email}, ${username}, ${hashedPassword}, ${username}, '',
+            'team_admin', 'free', 'active', 'email', 'true', NOW(), NOW()
+          )
+          ON CONFLICT (email) DO NOTHING
+        `);
+      } catch (error: any) {
+        const sqlCode = error?.cause?.code || error?.code;
+        if (sqlCode === "42703") {
+          await db.execute(sql`
+            INSERT INTO users (id, email, username, password, role, status, created_at, updated_at)
+            VALUES (${newUserId}, ${email}, ${username}, ${hashedPassword}, 'user', 'active', NOW(), NOW())
+            ON CONFLICT (email) DO NOTHING
+          `);
+        } else {
+          throw error;
+        }
+      }
+
+      try {
+        await auditLog(req, {
+          action: AuditActions.AUTH_LOGIN,
+          resource: "auth",
+          details: { email, via: "self_register" },
+          category: "auth",
+          severity: "info",
+        });
+      } catch (auditError) {
+        console.error("Failed to create audit log:", auditError);
+      }
+
+      res.json({ success: true, message: "Cuenta creada correctamente" });
+    } catch (error) {
+      console.error("[Auth] Register error:", error);
+      res.status(500).json({ message: "Error al registrar usuario" });
     }
   });
 
