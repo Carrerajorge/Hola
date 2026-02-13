@@ -196,27 +196,20 @@ jobs:
               exit 1
             fi
 
-            extract_main_js_asset() {
-              # Prefer the main <script type="module" src="/assets/..."> tag (most stable across builds)
-              local html="$1"
-              local asset
-              asset="$(echo "${html}" | grep -oE 'src=\"/assets/[^\" ]+\\.m?js\"' | head -n1 | sed -E 's/^src=\"\\/(assets\\/[^\\\"]+)\"$/\\1/' || true)"
-              if [ -n "${asset}" ]; then
-                echo "${asset}"
-                return 0
-              fi
-              # Fallback: legacy pattern
-              echo "${html}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.m?js' | head -n1 || true
-            }
+	            extract_main_js_asset() {
+	              local html="$1"
+	              # Grab the first /assets/*.js reference (robust across Vite entry + preloads).
+	              echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	            }
 
             APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
             JS_ASSET="$(extract_main_js_asset "${APP_HTML}")"
-            if [ -z "${JS_ASSET}" ]; then
-              echo "✗ Could not find main JS asset in app HTML"
-              echo "▸ HTML (first 80 lines):"
-              echo "${APP_HTML}" | head -n 80
-              exit 1
-            fi
+	            if [ -z "${JS_ASSET}" ]; then
+	              echo "✗ Could not find JS asset reference in app HTML"
+	              echo "▸ HTML (first 80 lines):"
+	              echo "${APP_HTML}" | head -n 80
+	              exit 1
+	            fi
             echo "▸ Main JS asset: ${JS_ASSET}"
 
             if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
@@ -246,25 +239,19 @@ jobs:
             exit 1
           fi
 
-          extract_main_js_asset() {
-            local html="$1"
-            local asset
-            asset="$(echo "${html}" | grep -oE 'src=\"/assets/[^\" ]+\\.m?js\"' | head -n1 | sed -E 's/^src=\"\\/(assets\\/[^\\\"]+)\"$/\\1/' || true)"
-            if [ -n "${asset}" ]; then
-              echo "${asset}"
-              return 0
-            fi
-            echo "${html}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.m?js' | head -n1 || true
-          }
+		          extract_main_js_asset() {
+		            local html="$1"
+		            echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+		          }
 
           HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
           JS_ASSET="$(extract_main_js_asset "${HTML}")"
-          if [ -z "$JS_ASSET" ]; then
-            echo "❌ Could not find production main JS asset"
-            echo "▸ HTML (first 80 lines):"
-            echo "${HTML}" | head -n 80
-            exit 1
-          fi
+	          if [ -z "$JS_ASSET" ]; then
+	            echo "❌ Could not find production JS asset reference"
+	            echo "▸ HTML (first 80 lines):"
+	            echo "${HTML}" | head -n 80
+	            exit 1
+	          fi
           echo "▸ Production JS asset: $JS_ASSET"
 
           if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
@@ -425,25 +412,19 @@ jobs:
               exit 1
             fi
 
-            extract_main_js_asset() {
-              local html="$1"
-              local asset
-              asset="$(echo "${html}" | grep -oE 'src=\"/assets/[^\" ]+\\.m?js\"' | head -n1 | sed -E 's/^src=\"\\/(assets\\/[^\\\"]+)\"$/\\1/' || true)"
-              if [ -n "${asset}" ]; then
-                echo "${asset}"
-                return 0
-              fi
-              echo "${html}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.m?js' | head -n1 || true
-            }
+	            extract_main_js_asset() {
+	              local html="$1"
+	              echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	            }
 
             APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
             JS_ASSET="$(extract_main_js_asset "${APP_HTML}")"
-            if [ -z "${JS_ASSET}" ]; then
-              echo "✗ Could not find main JS asset in app HTML"
-              echo "▸ HTML (first 80 lines):"
-              echo "${APP_HTML}" | head -n 80
-              exit 1
-            fi
+	            if [ -z "${JS_ASSET}" ]; then
+	              echo "✗ Could not find JS asset reference in app HTML"
+	              echo "▸ HTML (first 80 lines):"
+	              echo "${APP_HTML}" | head -n 80
+	              exit 1
+	            fi
             echo "▸ Main JS asset: ${JS_ASSET}"
 
             if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
@@ -473,25 +454,19 @@ jobs:
             exit 1
           fi
 
-          extract_main_js_asset() {
-            local html="$1"
-            local asset
-            asset="$(echo "${html}" | grep -oE 'src=\"/assets/[^\" ]+\\.m?js\"' | head -n1 | sed -E 's/^src=\"\\/(assets\\/[^\\\"]+)\"$/\\1/' || true)"
-            if [ -n "${asset}" ]; then
-              echo "${asset}"
-              return 0
-            fi
-            echo "${html}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.m?js' | head -n1 || true
-          }
+	          extract_main_js_asset() {
+	            local html="$1"
+	            echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	          }
 
           HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
           JS_ASSET="$(extract_main_js_asset "${HTML}")"
-          if [ -z "$JS_ASSET" ]; then
-            echo "❌ Could not find production main JS asset"
-            echo "▸ HTML (first 80 lines):"
-            echo "${HTML}" | head -n 80
-            exit 1
-          fi
+	          if [ -z "$JS_ASSET" ]; then
+	            echo "❌ Could not find production JS asset reference"
+	            echo "▸ HTML (first 80 lines):"
+	            echo "${HTML}" | head -n 80
+	            exit 1
+	          fi
           echo "▸ Production JS asset: $JS_ASSET"
 
           if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
