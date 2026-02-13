@@ -1,6 +1,15 @@
 import { expect, test } from "@playwright/test";
 
-test("welcome landing renders and primary CTAs are available", async ({ page }) => {
+test("root (/) renders landing for new/unauthenticated visitors", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: /Tu mente/i })).toBeVisible();
+  await expect(page.getByTestId("button-header-login")).toBeVisible();
+  await expect(page.getByTestId("button-header-signup")).toBeVisible();
+  await expect(page.getByTestId("input-landing-search")).toBeVisible();
+});
+
+test("/welcome landing still renders and primary CTAs are available", async ({ page }) => {
   await page.goto("/welcome");
 
   await expect(page.getByRole("heading", { name: /Tu mente/i })).toBeVisible();

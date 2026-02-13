@@ -9,6 +9,17 @@ const ANON_USER_ID_KEY = "siragpt_anon_user_id";
 const ANON_TOKEN_KEY = "siragpt_anon_token";
 const FORCE_SIGNED_OUT_KEY = "siragpt_force_signed_out";
 
+function isAnonymousUser(user: User | null): boolean {
+  if (!user) return false;
+  const anyUser = user as any;
+  if (anyUser?.isAnonymous === true) return true;
+  if (typeof anyUser?.authProvider === "string" && anyUser.authProvider.toLowerCase() === "anonymous") return true;
+  if (typeof user.id === "string" && user.id.startsWith("anon_")) return true;
+  // Some backends surface anonymous users without a dedicated flag; treat known patterns as anon.
+  if (typeof anyUser?.username === "string" && anyUser.username.startsWith("Guest-")) return true;
+  return false;
+}
+
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
@@ -247,12 +258,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window === "undefined") return;
     const forced = localStorage.getItem("siragpt_force_signed_out") === "1";
     const pathname = window.location.pathname;
-    const publicAuthRoute = [
+    const publicAuthRoute =
+      pathname === "/" ||
+      [
       "/login",
       "/welcome",
       "/signup",
       "/terms",
       "/privacy-policy",
+      "/about",
+      "/learn",
+      "/pricing",
+      "/business",
+      "/download",
+      "/power",
     ].some((route) => pathname.startsWith(route));
     if (forced && !publicAuthRoute) {
       window.location.replace("/login?logged_out=1");
@@ -284,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: user ?? null,
       isLoading,
       isReady: isFetched,
-      isAuthenticated: !!user && !(user as any)?.isAnonymous,
+      isAuthenticated: !!user && !isAnonymousUser(user),
       login,
       logout,
       refreshAuth
