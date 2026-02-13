@@ -39,8 +39,10 @@ function RootRoute() {
   return isAuthenticated ? <Home /> : <LandingPage />;
 }
 
-function requireAuth<TProps extends Record<string, unknown>>(Component: ComponentType<TProps>) {
-  return function ProtectedRoute(props: TProps) {
+// Wouter passes RouteComponentProps to route components; pages typically ignore them.
+// Keep this permissive so protected routes type-check cleanly.
+function requireAuth(Component: ComponentType<any>) {
+  return function ProtectedRoute(props: any) {
     const { isReady, isAuthenticated } = useAuth();
     const [, setLocation] = useLocation();
 

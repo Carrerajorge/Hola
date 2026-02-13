@@ -1069,17 +1069,25 @@ export function ChatInterface({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const lastScrollTimeRef = useRef<number>(0);
-  const scrollThrottleMs = 300;
+  const scrollThrottleMs = 100; // Reduced from 300ms for snappier scroll-to-bottom during streaming
 
-  const scrollToBottom = useCallback((force = false) => {
+  const scrollToBottom = useCallback((force = false, instant = false) => {
     if (userHasScrolledUp && !force) return;
 
-    requestAnimationFrame(() => {
+    if (instant) {
+      // Instant scroll — no animation delay (used when user sends a message)
       messagesEndRef.current?.scrollIntoView({
-        behavior: 'smooth',
+        behavior: 'auto',
         block: 'end'
       });
-    });
+    } else {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'end'
+        });
+      });
+    }
   }, [userHasScrolledUp]);
 
   const isNearBottom = useCallback(() => {
@@ -1125,7 +1133,7 @@ export function ChatInterface({
 
     if (currentCount > prevCount) {
       setUserHasScrolledUp(false);
-      scrollToBottom(true);
+      scrollToBottom(true, true); // force + instant — no animation lag on new messages
     }
   }, [displayMessages.length, scrollToBottom]);
 

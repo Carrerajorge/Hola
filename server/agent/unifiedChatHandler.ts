@@ -311,6 +311,27 @@ export async function createUnifiedRun(
   const isUuid = (value?: string) => !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   const normalizedMessageId = isUuid(request.messageId) ? request.messageId : undefined;
 
+  // ── Intent Analysis: regex fast-path + LLM escalation for ambiguous cases ──
+  // Done in a best-effort way; on any error we fall back to regex-only detectIntent().
+  let analysisResult: import("./intentAnalysis").IntentAnalysisResult | null = null;
+  try {
+    const { analyzeIntent } = await import("./intentAnalysis");
+    analysisResult = await analyzeIntent({
+      rawMessage: lastUserMessage,
+      attachments: request.attachments,
+      sessionState,
+      conversationHistory: request.messages,
+      userId: request.userId,
+      chatId: request.chatId,
+      generateBrief: false,
+    });
+    console.log(
+      `[UnifiedChat] Intent analysis: ${analysisResult.source} -> ${analysisResult.intent} (${analysisResult.confidence.toFixed(2)}) [${analysisResult.latencyMs.toFixed(0)}ms]`,
+    );
+  } catch (err) {
+    console.error("[UnifiedChat] Intent analysis failed, falling back to regex-only:", (err as Error).message);
+  }
+
   const requestSpec = createRequestSpec({
     chatId: request.chatId,
     messageId: normalizedMessageId,
@@ -318,7 +339,39 @@ export async function createUnifiedRun(
     rawMessage: lastUserMessage,
     attachments: request.attachments,
     sessionState,
+    intentOverride: analysisResult?.intent,
+    confidenceOverride: analysisResult?.confidence,
   });
+
+  // ── Reservation follow-up detection ────────────────────────────────
+  // When the user provides contact details in a follow-up message after
+  // our reservation clarification, the current message alone may not match
+  // web_automation patterns. Detect the previous assistant asking for
+  // reservation details and override the intent.
+  if (requestSpec.intent !== "web_automation") {
+    const lastAssistantMsg =
+      [...request.messages].reverse().find((m) => m.role === "assistant")?.content || "";
+    const isReservationFollowUp =
+      /para completar la reserva/i.test(lastAssistantMsg) ||
+      /datos detectados.*restaurante/is.test(lastAssistantMsg) ||
+      /necesito estos datos/i.test(lastAssistantMsg);
+    if (isReservationFollowUp) {
+      const hasContactInfo =
+        /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/.test(lastUserMessage) ||
+        /\b\d{6,15}\b/.test(lastUserMessage) ||
+        /\b(nombre|name|llamo|soy)\b/i.test(lastUserMessage) ||
+        /\b(tel[eé]fono|phone|cel|movil|móvil|whatsapp)\b/i.test(lastUserMessage);
+      if (hasContactInfo) {
+        console.log(
+          `[UnifiedChat] Reservation follow-up detected - overriding intent from "${requestSpec.intent}" to "web_automation"`,
+        );
+        (requestSpec as any).intent = "web_automation";
+        (requestSpec as any).intentConfidence = 0.9;
+        (requestSpec as any).primaryAgent = "browser";
+        (requestSpec as any).targetAgents = ["browser", "research"];
+      }
+    }
+  }
 
   const runId = request.runId || randomUUID();
 

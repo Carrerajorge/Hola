@@ -234,7 +234,11 @@ function isRestaurantReservationRequest(text: string): boolean {
   if (!normalized) return false;
   const hasReservationVerb = /\b(reserva|reservar|reservacion|reservation|book|booking)\b/i.test(normalized);
   const hasRestaurantTerm = /\b(restaurante|restaurant|mesa|table)\b/i.test(normalized);
-  return hasReservationVerb && hasRestaurantTerm;
+  // Also match "reserva en Cala" (known restaurant) or "reserva en [Name] para X personas"
+  const hasReservaEnPattern = /\breserva(?:r)?\s+(?:en|at)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+/i.test(normalized);
+  // Match "reserva para X personas" (implies restaurant context)
+  const hasReservaParaPersonas = /\breserva(?:r|cion)?\b.*\b\d+\s*personas?\b/i.test(normalized);
+  return hasReservationVerb && (hasRestaurantTerm || hasReservaEnPattern || hasReservaParaPersonas);
 }
 
 function extractReservationDetails(text: string): ReservationDetails {
@@ -258,6 +262,7 @@ function extractReservationDetails(text: string): ReservationDetails {
     new RegExp(`\\b\\d{1,2}\\s+de\\s+(?:${monthEs})(?:\\s+de?\\s*\\d{4})?\\b`, "i"),
     new RegExp(`\\b(?:${monthEn})\\s+\\d{1,2}(?:,\\s*\\d{4})?\\b`, "i"),
     /\b(?:hoy|manana|mañana|today|tomorrow)\b/i,
+    /\b(?:d[ií]a|el)\s+(\d{1,2})\b/i,
   ];
   for (const pattern of datePatterns) {
     const match = source.match(pattern);
@@ -275,29 +280,36 @@ function extractReservationDetails(text: string): ReservationDetails {
     details.time = normalizeSpaces(timeMatch[1]);
   }
 
-  // Pattern: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
-  const restaurantBeforeKeyword = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)\s+(?:restaurante|restaurant)\b/i
-  );
-  // Pattern: "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
+  // Pattern 1 (highest priority): "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
   const restaurantAfterKeyword = source.match(
-    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$)/i
+    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
-  // Pattern: "reserva en [Name]" — broader fallback
+  // Pattern 2: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
+  // Skip articles (el, la, los, las, the) that may appear before "restaurante"
+  const restaurantBeforeKeyword = source.match(
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|los\s+|las\s+|the\s+)?(.+?)\s+(?:restaurante|restaurant)\b/i
+  );
+  // Pattern 3: "reserva en [Name]" — broader fallback (single token to avoid greediness)
   const restaurantByReservePattern = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)(?=\s+(?:restaurante|restaurant|para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|the\s+)?([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
-  const restaurantRaw = restaurantBeforeKeyword?.[1] || restaurantAfterKeyword?.[1] || restaurantByReservePattern?.[1];
+  // Priority: afterKeyword > beforeKeyword > byReservePattern
+  const restaurantRaw = restaurantAfterKeyword?.[1] || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
   if (restaurantRaw) {
-    details.restaurant = normalizeSpaces(restaurantRaw.replace(/^en\s+/i, ""));
+    // Clean up: remove leading articles and trailing punctuation
+    details.restaurant = normalizeSpaces(
+      restaurantRaw
+        .replace(/^(?:en|el|la|los|las|the)\s+/i, "")
+        .replace(/[,;.]$/, ""),
+    );
   }
 
-  // Prefer "restaurante en [City]" pattern over generic "en [City]"
+  // Prefer "restaurante en [City]" pattern — capture single word city name (no spaces to avoid greediness)
   const locationAfterRestaurant = source.match(
-    /\b(?:restaurante|restaurant)\s+(?:en|in|de)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})(?=\s+(?:para|for|el|on|a las|at)\b|$)/i
+    /\b(?:restaurante|restaurant)\s+(?:en|in|de)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|,|$)/i
   );
   const locationGeneric = source.match(
-    /\b(?:en|in)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,40})(?=\s+(?:para|for|el|on|a las|at)\b|$)/i
+    /\b(?:en|in)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)\s+(?:para|for|el|on|a las|at)\b/i
   );
   const locationMatch = locationAfterRestaurant || locationGeneric;
   if (locationMatch?.[1]) {
@@ -321,7 +333,7 @@ function extractReservationDetails(text: string): ReservationDetails {
 
   const sourceWithoutEmails = source.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, " ");
   const labeledPhoneMatch = sourceWithoutEmails.match(
-    /\b(?:telefono|tel[eé]fono|phone|cel|celular|whatsapp)\b\s*[:\-]?\s*(\+?\d[\d\s().-]{7,}\d)\b/i
+    /\b(?:telefono|tel[eé]fono|phone|cel|celular|whatsapp|n[uú]mero|mi\s+numero)\b\s*(?:es|de|:|\-)?\s*(\+?\d[\d\s().-]{7,}\d)\b/i
   );
   if (labeledPhoneMatch?.[1]) {
     const candidate = normalizeSpaces(labeledPhoneMatch[1]);
@@ -345,10 +357,10 @@ function extractReservationDetails(text: string): ReservationDetails {
   }
 
   const nameMatch = source.match(
-    /\b(?:a nombre de|nombre(?:\s+de)?|name(?:\s+is)?|my name is|soy)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,60})/i
+    /\b(?:a nombre de|(?:mi\s+)?nombre(?:\s+(?:de|es))?|name(?:\s+is)?|my name is|me llamo|soy)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ'\- ]{2,60})/i
   );
   if (nameMatch?.[1]) {
-    const cleaned = normalizeSpaces(nameMatch[1]).split(/\b(?:telefono|tel|phone|email|correo)\b/i)[0].trim();
+    const cleaned = normalizeSpaces(nameMatch[1]).split(/\b(?:telefono|tel|phone|email|correo|a\s+las|para|n[uú]mero|mi\s+numero|mi\s+correo|mi\s+tel)\b/i)[0].trim();
     if (cleaned.length >= 2) {
       details.contactName = cleaned;
     }
@@ -397,7 +409,7 @@ function buildReservationClarificationQuestion(
   if (details.email) knownParts.push(`**Email:** ${details.email}`);
 
   const knownBlock = knownParts.length > 0
-    ? `✅ **Datos detectados:**\n${knownParts.join("\n")}\n\n`
+    ? `✅ **Datos detectados:**  \n${knownParts.join("  \n")}\n\n`
     : "";
   const missingList = missingFields.map((field) => `- ${RESERVATION_FIELD_LABELS[field]}`).join("\n");
   return `${knownBlock}📋 **Para completar la reserva necesito estos datos:**\n${missingList}\n\nCompártelos en un solo mensaje y continúo con la reserva real en la web.`;
@@ -408,7 +420,8 @@ async function executeToolCall(
   args: Record<string, any>,
   context: ToolContext,
   runId: string,
-  sseRes?: Response
+  sseRes?: Response,
+  preExtractedReservation?: ReservationDetails
 ): Promise<{ result: any; artifact?: { type: string; url: string; name: string } }> {
   console.log(`[AgentExecutor] Executing tool: ${toolName}`, args);
 
@@ -469,7 +482,22 @@ async function executeToolCall(
           const isReservationGoal = /\b(reserv(a|ar|ation)|book(ing)?|mesa|restaurant|restaurante)\b/i.test(goalText);
           const normalizedGoal = goalText.toLowerCase();
           const isCalaReservation = isReservationGoal && /\bcala\b/i.test(normalizedGoal);
-          const reservationDetailsFromGoal = isReservationGoal ? extractReservationDetails(goalText) : undefined;
+          const goalDetails = isReservationGoal ? extractReservationDetails(goalText) : undefined;
+          // Merge: prefer pre-extracted details from user's original message, fill gaps from goal text
+          const reservationDetailsFromGoal = isReservationGoal
+            ? {
+                ...goalDetails,
+                ...(preExtractedReservation || {}),
+                // Keep goal details only where pre-extracted is empty
+                restaurant: preExtractedReservation?.restaurant || goalDetails?.restaurant,
+                date: preExtractedReservation?.date || goalDetails?.date,
+                time: preExtractedReservation?.time || goalDetails?.time,
+                partySize: preExtractedReservation?.partySize || goalDetails?.partySize,
+                contactName: preExtractedReservation?.contactName || goalDetails?.contactName,
+                email: preExtractedReservation?.email || goalDetails?.email,
+                phone: preExtractedReservation?.phone || goalDetails?.phone,
+              }
+            : undefined;
           const requestedUrl = String(args.url || "");
           const effectiveUrl = isCalaReservation
             ? "https://www.covermanager.com/reserve/module_restaurant/cala-restaurante/spanish"
@@ -522,6 +550,7 @@ async function executeToolCall(
             }
 
             // Real-time step callback: sends browser_step SSE events with screenshots
+            // Also sends browser_report events for inline chat display
             const onBrowserStep = (step: {
               stepNumber: number;
               totalSteps: number;
@@ -534,7 +563,7 @@ async function executeToolCall(
             }) => {
               try {
                 if (!sseRes) return;
-                // Emit browser_step event with screenshot for real-time UI
+                // Emit browser_step event with screenshot for real-time UI (VirtualComputer)
                 const r = sseRes as any;
                 if (!r.writableEnded && !r.destroyed) {
                   const sseData = {
@@ -544,11 +573,24 @@ async function executeToolCall(
                     action: step.action,
                     reasoning: step.reasoning,
                     goalProgress: step.goalProgress,
-                    screenshot: step.screenshot, // base64 PNG
+                    screenshot: step.screenshot, // base64 JPEG
                     url: step.url,
                     title: step.title,
                   };
                   sseRes.write(`event: browser_step\ndata: ${JSON.stringify(sseData)}\n\n`);
+                  // Also emit browser_report for inline chat step display
+                  // Emit for ALL steps (not just ones with screenshots) so user sees every action
+                  if (step.stepNumber > 0) {
+                    sseRes.write(`event: browser_report\ndata: ${JSON.stringify({
+                      runId,
+                      stepNumber: step.stepNumber,
+                      action: step.action,
+                      reasoning: step.reasoning,
+                      goalProgress: step.goalProgress,
+                      screenshot: step.screenshot || "",
+                      url: step.url,
+                    })}\n\n`);
+                  }
                   if (typeof (sseRes as any).flush === "function") {
                     (sseRes as any).flush();
                   }
@@ -587,7 +629,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 180000 }
+                  { maxRuntimeMs: 90000 }
                 );
               })()
               : await universalBrowserController.agenticNavigate(

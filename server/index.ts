@@ -59,8 +59,23 @@ app.use(requestLoggerMiddleware);
 // Canonical URL redirect (www -> non-www) - must be before CORS and sessions
 app.use(canonicalUrlMiddleware);
 
-// Compression middleware - should be early to compress all eligible responses
-app.use(compression());
+// Compression middleware - skip SSE streams (text/event-stream) to prevent buffering.
+// compression() buffers output to build compression blocks, which breaks real-time SSE.
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (
+        req.url?.includes("/chat/stream") ||
+        req.url?.includes("/super/stream") ||
+        req.headers.accept === "text/event-stream" ||
+        res.getHeader("Content-Type")?.toString().includes("text/event-stream")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 // CORS configuration - must be before other middleware
 app.use(corsMiddleware);
