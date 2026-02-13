@@ -76,7 +76,10 @@ jobs:
       - name: Deploy to VPS
         run: |
           TARGET_SHA="${{ github.sha }}"
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
+          # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
@@ -306,7 +309,10 @@ jobs:
       - name: Deploy to VPS
         run: |
           TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
+          # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
