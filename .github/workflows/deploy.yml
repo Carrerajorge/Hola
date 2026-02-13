@@ -63,6 +63,8 @@ jobs:
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
           DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
           echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}"
 
       - name: Setup SSH key
         run: |
@@ -78,7 +80,8 @@ jobs:
           TARGET_SHA="${{ github.sha }}"
           # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
             ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
@@ -199,24 +202,13 @@ jobs:
               exit 1
             fi
 
-              extract_main_js_asset() {
-                local html="$1"
-                # Grab the first /assets/*.js reference (robust across Vite entry + preloads).
-                  echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
-              }
-
-            APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
-            JS_ASSET="$(extract_main_js_asset "${APP_HTML}")"
-              if [ -z "${JS_ASSET}" ]; then
-                echo "✗ Could not find JS asset reference in app HTML"
-                echo "▸ HTML (first 80 lines):"
-                echo "${APP_HTML}" | head -n 80
-                exit 1
-              fi
-            echo "▸ Main JS asset: ${JS_ASSET}"
-
-            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
-              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+            # Verify the front-end was built with the same APP_VERSION.
+            # sw-cleanup.js is always included first on the landing HTML.
+            SW_CLEANUP="$(curl -sf --max-time 20 http://127.0.0.1:5000/sw-cleanup.js)"
+            if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
+              echo "✗ sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
+              echo "▸ sw-cleanup.js (first 30 lines):"
+              echo "${SW_CLEANUP}" | head -n 30
               exit 1
             fi
           DEPLOY_SCRIPT
@@ -242,27 +234,15 @@ jobs:
             exit 1
           fi
 
-              extract_main_js_asset() {
-                local html="$1"
-                echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
-              }
-
-          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
-          JS_ASSET="$(extract_main_js_asset "${HTML}")"
-            if [ -z "$JS_ASSET" ]; then
-              echo "❌ Could not find production JS asset reference"
-              echo "▸ HTML (first 80 lines):"
-              echo "${HTML}" | head -n 80
-              exit 1
-            fi
-          echo "▸ Production JS asset: $JS_ASSET"
-
-          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
-            echo "❌ Production JS does not contain logout hotfix marker"
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js)"
+          if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED_SHA}';"; then
+            echo "❌ Production sw-cleanup.js APP_VERSION mismatch (expected ${EXPECTED_SHA})"
+            echo "▸ sw-cleanup.js (first 30 lines):"
+            echo "${SW_CLEANUP}" | head -n 30
             exit 1
           fi
 
-          echo "✓ Production site is live with expected deploy version and logout fix"
+          echo "✓ Production site is live with expected deploy version"
 
       - name: Notify on failure
         if: failure()
@@ -298,6 +278,8 @@ jobs:
           echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
           DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
           echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}"
 
       - name: Setup SSH key
         run: |
@@ -311,7 +293,8 @@ jobs:
           TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
           # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
             ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
@@ -418,23 +401,12 @@ jobs:
               exit 1
             fi
 
-              extract_main_js_asset() {
-                local html="$1"
-                echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
-              }
-
-            APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
-            JS_ASSET="$(extract_main_js_asset "${APP_HTML}")"
-              if [ -z "${JS_ASSET}" ]; then
-                echo "✗ Could not find JS asset reference in app HTML"
-                echo "▸ HTML (first 80 lines):"
-                echo "${APP_HTML}" | head -n 80
-                exit 1
-              fi
-            echo "▸ Main JS asset: ${JS_ASSET}"
-
-            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
-              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+            # Verify the front-end was built with the same APP_VERSION.
+            SW_CLEANUP="$(curl -sf --max-time 20 http://127.0.0.1:5000/sw-cleanup.js)"
+            if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
+              echo "✗ sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
+              echo "▸ sw-cleanup.js (first 30 lines):"
+              echo "${SW_CLEANUP}" | head -n 30
               exit 1
             fi
           DEPLOY_SCRIPT
@@ -460,27 +432,15 @@ jobs:
             exit 1
           fi
 
-            extract_main_js_asset() {
-              local html="$1"
-              echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
-            }
-
-          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
-          JS_ASSET="$(extract_main_js_asset "${HTML}")"
-            if [ -z "$JS_ASSET" ]; then
-              echo "❌ Could not find production JS asset reference"
-              echo "▸ HTML (first 80 lines):"
-              echo "${HTML}" | head -n 80
-              exit 1
-            fi
-          echo "▸ Production JS asset: $JS_ASSET"
-
-          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
-            echo "❌ Production JS does not contain logout hotfix marker"
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js)"
+          if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED_SHA}';"; then
+            echo "❌ Production sw-cleanup.js APP_VERSION mismatch (expected ${EXPECTED_SHA})"
+            echo "▸ sw-cleanup.js (first 30 lines):"
+            echo "${SW_CLEANUP}" | head -n 30
             exit 1
           fi
 
-          echo "✓ Production site is live with expected deploy version and logout fix"
+          echo "✓ Production site is live with expected deploy version"
 
       - name: Notify on failure
         if: failure()

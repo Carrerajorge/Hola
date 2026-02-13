@@ -44,6 +44,11 @@ FROM node:22-alpine AS sandbox-runner
 
 WORKDIR /app
 
+# Bake APP_VERSION into the image so runtime can report the deployed commit SHA
+# even if docker-compose environment expansion is missing/misconfigured.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
 RUN apk add --no-cache docker-cli bash
 
@@ -64,6 +69,10 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 FROM node:22-alpine AS runner
 WORKDIR /app
+
+# Bake APP_VERSION into the image (source of truth for /api/health version).
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs \
