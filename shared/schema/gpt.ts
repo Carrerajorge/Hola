@@ -74,7 +74,7 @@ export const gpts = pgTable("gpts", {
     isPublished: text("is_published").default("false"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("gpts_category_idx").on(table.categoryId),
     index("gpts_creator_idx").on(table.creatorId),
     index("gpts_visibility_idx").on(table.visibility),
@@ -101,7 +101,7 @@ export const gptVersions = pgTable("gpt_versions", {
     changeNotes: text("change_notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     createdBy: varchar("created_by"),
-}, (table) => [
+}, (table: any) => [
     index("gpt_versions_gpt_idx").on(table.gptId),
 ]);
 
@@ -126,7 +126,7 @@ export const gptKnowledge = pgTable("gpt_knowledge", {
     isActive: text("is_active").default("true"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("gpt_knowledge_gpt_idx").on(table.gptId),
     index("gpt_knowledge_status_idx").on(table.embeddingStatus),
 ]);
@@ -158,7 +158,7 @@ export const gptActions = pgTable("gpt_actions", {
     usageCount: integer("usage_count").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("gpt_actions_gpt_idx").on(table.gptId),
     index("gpt_actions_type_idx").on(table.actionType),
 ]);
@@ -175,7 +175,7 @@ export const sidebarPinnedGpts = pgTable("sidebar_pinned_gpts", {
     gptId: varchar("gpt_id").references(() => gpts.id).notNull(),
     displayOrder: integer("display_order").default(0),
     pinnedAt: timestamp("pinned_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("sidebar_pinned_gpts_user_idx").on(table.userId),
     index("sidebar_pinned_gpts_gpt_idx").on(table.gptId),
 ]);
@@ -199,7 +199,7 @@ export const gptSessions = pgTable("gpt_sessions", {
     knowledgeContextIds: jsonb("knowledge_context_ids").$type<string[]>().default([]),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at"),
-}, (table) => [
+}, (table: any) => [
     index("gpt_sessions_chat_idx").on(table.chatId),
     index("gpt_sessions_gpt_idx").on(table.gptId),
 ]);

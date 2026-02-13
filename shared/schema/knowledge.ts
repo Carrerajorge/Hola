@@ -51,7 +51,7 @@ export const knowledgeNodes = pgTable("knowledge_nodes", {
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     isActive: boolean("is_active").default(true),
-}, (table) => [
+}, (table: any) => [
     index("knowledge_nodes_user_idx").on(table.userId),
     uniqueIndex("knowledge_nodes_user_zettel_idx").on(table.userId, table.zettelId),
     index("knowledge_nodes_type_idx").on(table.nodeType),
@@ -89,7 +89,7 @@ export const knowledgeEdges = pgTable("knowledge_edges", {
     weight: real("weight").default(1.0),
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("knowledge_edges_user_idx").on(table.userId),
     index("knowledge_edges_source_idx").on(table.sourceNodeId),
     index("knowledge_edges_target_idx").on(table.targetNodeId),

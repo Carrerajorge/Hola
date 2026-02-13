@@ -49,7 +49,7 @@ export const chatSchedules = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("chat_schedules_user_idx").on(table.userId),
     index("chat_schedules_chat_idx").on(table.chatId),
     index("chat_schedules_active_next_idx").on(table.isActive, table.nextRunAt),

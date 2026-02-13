@@ -14,7 +14,7 @@ export const workspaceGroups = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("workspace_groups_org_idx").on(table.orgId),
     index("workspace_groups_updated_idx").on(table.updatedAt),
     uniqueIndex("workspace_groups_org_name_unique").on(table.orgId, table.name),

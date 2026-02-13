@@ -19,7 +19,7 @@ export const files = pgTable("files", {
     totalChunks: integer("total_chunks"),
     uploadedChunks: integer("uploaded_chunks").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("files_user_created_idx").on(table.userId, table.createdAt),
     index("files_user_id_idx").on(table.userId),
     index("files_status_idx").on(table.status),
@@ -48,7 +48,7 @@ export const fileJobs = pgTable("file_jobs", {
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("file_jobs_file_id_idx").on(table.fileId),
     index("file_jobs_status_idx").on(table.status),
 ]);
@@ -69,7 +69,7 @@ export const fileChunks = pgTable("file_chunks", {
     pageNumber: integer("page_number"),
     chunkIndex: integer("chunk_index").notNull(),
     metadata: jsonb("metadata"),
-}, (table) => [
+}, (table: any) => [
     index("file_chunks_file_id_idx").on(table.fileId),
     index("file_chunks_embedding_idx").using("hnsw", sql`${table.embedding} vector_cosine_ops`),
 ]);
@@ -96,7 +96,7 @@ export const conversationDocuments = pgTable("conversation_documents", {
     extractedText: text("extracted_text"),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_documents_chat_idx").on(table.chatId),
     index("conversation_documents_created_idx").on(table.chatId, table.createdAt),
 ]);

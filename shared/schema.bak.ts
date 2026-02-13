@@ -34,7 +34,7 @@ export const magicLinks = pgTable("magic_links", {
   expiresAt: timestamp("expires_at").notNull(),
   used: boolean("used").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("magic_links_token_idx").on(table.token),
   index("magic_links_user_idx").on(table.userId),
 ]);
@@ -127,7 +127,7 @@ export const userSettings = pgTable("user_settings", {
   privacySettings: jsonb("privacy_settings").$type<z.infer<typeof privacySettingsSchema>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("user_settings_user_id_idx").on(table.userId),
 ]);
 
@@ -187,7 +187,7 @@ export const integrationAccounts = pgTable("integration_accounts", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("integration_accounts_user_id_idx").on(table.userId),
   index("integration_accounts_provider_idx").on(table.providerId),
 ]);
@@ -237,7 +237,7 @@ export const integrationPolicies = pgTable("integration_policies", {
   maxParallelCalls: integer("max_parallel_calls").default(3),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("integration_policies_user_id_idx").on(table.userId),
 ]);
 
@@ -264,7 +264,7 @@ export const sharedLinks = pgTable("shared_links", {
   accessCount: integer("access_count").default(0),
   isRevoked: text("is_revoked").default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("shared_links_user_idx").on(table.userId),
   index("shared_links_token_idx").on(table.token),
   index("shared_links_resource_idx").on(table.resourceType, table.resourceId),
@@ -290,7 +290,7 @@ export const consentLogs = pgTable("consent_logs", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("consent_logs_user_idx").on(table.userId),
 ]);
 
@@ -313,7 +313,7 @@ export const toolCallLogs = pgTable("tool_call_logs", {
   latencyMs: integer("latency_ms"),
   idempotencyKey: text("idempotency_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("tool_call_logs_user_id_idx").on(table.userId),
   index("tool_call_logs_tool_id_idx").on(table.toolId),
   index("tool_call_logs_created_at_idx").on(table.createdAt),
@@ -342,7 +342,7 @@ export const files = pgTable("files", {
   totalChunks: integer("total_chunks"),
   uploadedChunks: integer("uploaded_chunks").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("files_user_created_idx").on(table.userId, table.createdAt),
   index("files_user_id_idx").on(table.userId),
   index("files_status_idx").on(table.status),
@@ -371,7 +371,7 @@ export const fileJobs = pgTable("file_jobs", {
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("file_jobs_file_id_idx").on(table.fileId),
   index("file_jobs_status_idx").on(table.status),
 ]);
@@ -392,7 +392,7 @@ export const fileChunks = pgTable("file_chunks", {
   pageNumber: integer("page_number"),
   chunkIndex: integer("chunk_index").notNull(),
   metadata: jsonb("metadata"),
-}, (table) => [
+}, (table: any) => [
   index("file_chunks_file_id_idx").on(table.fileId),
 ]);
 
@@ -415,7 +415,7 @@ export const agentRuns = pgTable("agent_runs", {
   startedAt: timestamp("started_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
   error: text("error"),
-}, (table) => [
+}, (table: any) => [
   index("agent_runs_conversation_idx").on(table.conversationId),
   index("agent_runs_status_idx").on(table.status),
   index("agent_runs_conversation_started_idx").on(table.conversationId, table.startedAt),
@@ -441,7 +441,7 @@ export const agentSteps = pgTable("agent_steps", {
   success: text("success").default("pending"), // pending, success, failed
   error: text("error"),
   stepIndex: integer("step_index").notNull().default(0),
-}, (table) => [
+}, (table: any) => [
   index("agent_steps_run_idx").on(table.runId),
   index("agent_steps_run_step_idx").on(table.runId, table.stepIndex),
 ]);
@@ -463,7 +463,7 @@ export const agentAssets = pgTable("agent_assets", {
   content: text("content"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_assets_run_idx").on(table.runId),
 ]);
 
@@ -483,7 +483,7 @@ export const cachedPages = pgTable("cached_pages", {
   content: text("content"),
   fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at"),
-}, (table) => [
+}, (table: any) => [
   index("cached_pages_url_hash_idx").on(table.urlHash),
 ]);
 
@@ -532,7 +532,7 @@ export const chats = pgTable("chats", {
   endedAt: timestamp("ended_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("chats_user_idx").on(table.userId),
   index("chats_status_idx").on(table.conversationStatus),
   index("chats_flag_idx").on(table.flagStatus),
@@ -568,7 +568,7 @@ export const chatMessages = pgTable("chat_messages", {
   generatedImage: text("generated_image"), // Base64 or URL of generated image
   metadata: jsonb("metadata"), // Additional metadata for extensibility
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("chat_messages_chat_idx").on(table.chatId),
   index("chat_messages_request_idx").on(table.requestId),
   index("chat_messages_status_idx").on(table.status),
@@ -600,7 +600,7 @@ export const chatRuns = pgTable("chat_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   startedAt: timestamp("started_at"), // When processing started
   completedAt: timestamp("completed_at"), // When processing completed
-}, (table) => [
+}, (table: any) => [
   index("chat_runs_chat_idx").on(table.chatId),
   index("chat_runs_status_idx").on(table.status),
   uniqueIndex("chat_runs_client_request_unique").on(table.chatId, table.clientRequestId),
@@ -630,7 +630,7 @@ export const conversationDocuments = pgTable("conversation_documents", {
   extractedText: text("extracted_text"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_documents_chat_idx").on(table.chatId),
   index("conversation_documents_created_idx").on(table.chatId, table.createdAt),
 ]);
@@ -655,7 +655,7 @@ export const toolInvocations = pgTable("tool_invocations", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
   index("tool_invocations_run_idx").on(table.runId),
   uniqueIndex("tool_invocations_unique").on(table.runId, table.toolCallId),
   index("tool_invocations_run_created_idx").on(table.runId, table.createdAt),
@@ -681,7 +681,7 @@ export const chatShares = pgTable("chat_shares", {
   notificationSent: text("notification_sent").default("false"),
   acceptedAt: timestamp("accepted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("chat_shares_chat_idx").on(table.chatId),
   index("chat_shares_email_idx").on(table.email),
   index("chat_shares_recipient_idx").on(table.recipientUserId),
@@ -766,7 +766,7 @@ export const gpts = pgTable("gpts", {
   isPublished: text("is_published").default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("gpts_category_idx").on(table.categoryId),
   index("gpts_creator_idx").on(table.creatorId),
   index("gpts_visibility_idx").on(table.visibility),
@@ -798,7 +798,7 @@ export const gptVersions = pgTable("gpt_versions", {
   changeNotes: text("change_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   createdBy: varchar("created_by"),
-}, (table) => [
+}, (table: any) => [
   index("gpt_versions_gpt_idx").on(table.gptId),
 ]);
 
@@ -826,7 +826,7 @@ export const gptKnowledge = pgTable("gpt_knowledge", {
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("gpt_knowledge_gpt_idx").on(table.gptId),
   index("gpt_knowledge_status_idx").on(table.embeddingStatus),
 ]);
@@ -863,7 +863,7 @@ export const gptActions = pgTable("gpt_actions", {
   usageCount: integer("usage_count").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("gpt_actions_gpt_idx").on(table.gptId),
   index("gpt_actions_type_idx").on(table.actionType),
 ]);
@@ -886,7 +886,7 @@ export const sidebarPinnedGpts = pgTable("sidebar_pinned_gpts", {
   gptId: varchar("gpt_id").references(() => gpts.id).notNull(),
   displayOrder: integer("display_order").default(0),
   pinnedAt: timestamp("pinned_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("sidebar_pinned_gpts_user_idx").on(table.userId),
   index("sidebar_pinned_gpts_gpt_idx").on(table.gptId),
 ]);
@@ -913,7 +913,7 @@ export const gptSessions = pgTable("gpt_sessions", {
   knowledgeContextIds: jsonb("knowledge_context_ids").$type<string[]>().default([]),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at"),
-}, (table) => [
+}, (table: any) => [
   index("gpt_sessions_chat_idx").on(table.chatId),
   index("gpt_sessions_gpt_idx").on(table.gptId),
 ]);
@@ -958,7 +958,7 @@ export const aiModels = pgTable("ai_models", {
   displayOrder: integer("display_order").default(0),
   icon: text("icon"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("ai_models_provider_idx").on(table.provider),
   index("ai_models_model_type_idx").on(table.modelType),
   index("ai_models_status_idx").on(table.status),
@@ -984,7 +984,7 @@ export const payments = pgTable("payments", {
   description: text("description"),
   stripePaymentId: text("stripe_payment_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("payments_user_idx").on(table.userId),
 ]);
 
@@ -1009,7 +1009,7 @@ export const invoices = pgTable("invoices", {
   paidAt: timestamp("paid_at"),
   pdfPath: text("pdf_path"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("invoices_user_idx").on(table.userId),
 ]);
 
@@ -1050,7 +1050,7 @@ export const auditLogs = pgTable("audit_logs", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("audit_logs_user_idx").on(table.userId),
   index("audit_logs_action_idx").on(table.action),
 ]);
@@ -1115,7 +1115,7 @@ export const chatParticipants = pgTable("chat_participants", {
   invitedBy: varchar("invited_by"),
   invitedAt: timestamp("invited_at").defaultNow().notNull(),
   acceptedAt: timestamp("accepted_at"),
-}, (table) => [
+}, (table: any) => [
   index("chat_participants_chat_idx").on(table.chatId),
   index("chat_participants_email_idx").on(table.email),
   uniqueIndex("chat_participants_unique_idx").on(table.chatId, table.email),
@@ -1143,7 +1143,7 @@ export const libraryItems = pgTable("library_items", {
   metadata: jsonb("metadata"),
   sourceChatId: varchar("source_chat_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("library_items_user_idx").on(table.userId),
   index("library_items_type_idx").on(table.userId, table.mediaType),
 ]);
@@ -1168,7 +1168,7 @@ export const codeInterpreterRuns = pgTable("code_interpreter_runs", {
   stderr: text("stderr"),
   executionTimeMs: integer("execution_time_ms"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("code_runs_conversation_idx").on(table.conversationId),
   index("code_runs_user_idx").on(table.userId),
 ]);
@@ -1214,7 +1214,7 @@ export const notificationPreferences = pgTable("notification_preferences", {
   quietHoursEnd: text("quiet_hours_end"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("notification_prefs_user_idx").on(table.userId),
   uniqueIndex("notification_prefs_unique_idx").on(table.userId, table.eventTypeId),
 ]);
@@ -1242,7 +1242,7 @@ export const notificationLogs = pgTable("notification_logs", {
   sentAt: timestamp("sent_at"),
   deliveredAt: timestamp("delivered_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("notification_logs_user_idx").on(table.userId),
   index("notification_logs_event_idx").on(table.eventId),
   uniqueIndex("notification_logs_idempotency_idx").on(table.eventId, table.channel),
@@ -1265,7 +1265,7 @@ export const codeInterpreterArtifacts = pgTable("code_interpreter_artifacts", {
   data: text("data"), // base64 encoded for images, or text content
   mimeType: text("mime_type"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("code_artifacts_run_idx").on(table.runId),
 ]);
 
@@ -1290,7 +1290,7 @@ export const companyKnowledge = pgTable("company_knowledge", {
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("company_knowledge_user_idx").on(table.userId),
   index("company_knowledge_category_idx").on(table.category),
 ]);
@@ -1319,7 +1319,7 @@ export const responseQualityMetrics = pgTable("response_quality_metrics", {
   latencyMs: integer("latency_ms"),
   userId: varchar("user_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("response_quality_metrics_created_idx").on(table.createdAt),
   index("response_quality_metrics_provider_created_idx").on(table.provider, table.createdAt),
   index("response_quality_metrics_user_created_idx").on(table.userId, table.createdAt),
@@ -1346,7 +1346,7 @@ export const connectorUsageHourly = pgTable("connector_usage_hourly", {
   failureCount: integer("failure_count").default(0),
   totalLatencyMs: integer("total_latency_ms").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   uniqueIndex("connector_usage_hourly_connector_bucket_idx").on(table.connector, table.hourBucket),
   index("connector_usage_hourly_connector_created_idx").on(table.connector, table.createdAt),
 ]);
@@ -1374,7 +1374,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   syncedAt: timestamp("synced_at"),
-}, (table) => [
+}, (table: any) => [
   index("offline_message_queue_status_created_idx").on(table.status, table.createdAt),
   index("offline_message_queue_user_status_idx").on(table.userId, table.status),
 ]);
@@ -1402,7 +1402,7 @@ export const gmailOAuthTokens = pgTable("gmail_oauth_tokens", {
   scopes: text("scopes").array().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("gmail_oauth_user_idx").on(table.userId),
   uniqueIndex("gmail_oauth_user_email_idx").on(table.userId, table.accountEmail),
 ]);
@@ -1431,7 +1431,7 @@ export const adminAuditLogs = pgTable("admin_audit_logs", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("admin_audit_logs_admin_idx").on(table.adminId),
   index("admin_audit_logs_action_idx").on(table.action),
   index("admin_audit_logs_created_idx").on(table.createdAt),
@@ -1460,7 +1460,7 @@ export const aiModelUsage = pgTable("ai_model_usage", {
   success: text("success").default("true"),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("ai_model_usage_user_idx").on(table.userId),
   index("ai_model_usage_provider_idx").on(table.provider),
   index("ai_model_usage_created_idx").on(table.createdAt),
@@ -1487,7 +1487,7 @@ export const securityEvents = pgTable("security_events", {
   resolvedBy: varchar("resolved_by").references(() => users.id),
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("security_events_user_idx").on(table.userId),
   index("security_events_type_idx").on(table.eventType),
   index("security_events_severity_idx").on(table.severity),
@@ -1518,7 +1518,7 @@ export const adminReports = pgTable("admin_reports", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
   index("admin_reports_type_idx").on(table.type),
   index("admin_reports_status_idx").on(table.status),
   index("admin_reports_generated_by_idx").on(table.generatedBy),
@@ -1547,7 +1547,7 @@ export const scheduledReports = pgTable("scheduled_reports", {
   createdBy: varchar("created_by").notNull().references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("scheduled_reports_active_next_idx").on(table.isActive, table.nextRunAt),
 ]);
 
@@ -1569,7 +1569,7 @@ export const ipBlocklist = pgTable("ip_blocklist", {
   blockedBy: varchar("blocked_by").notNull().references(() => users.id),
   expiresAt: timestamp("expires_at"), // null = permanent
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("ip_blocklist_ip_idx").on(table.ipAddress),
   index("ip_blocklist_expires_idx").on(table.expiresAt),
 ]);
@@ -1595,7 +1595,7 @@ export const analyticsEvents = pgTable("analytics_events", {
   browser: text("browser"),
   country: text("country"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("analytics_events_user_idx").on(table.userId),
   index("analytics_events_event_idx").on(table.eventName),
   index("analytics_events_created_idx").on(table.createdAt),
@@ -1627,7 +1627,7 @@ export const providerMetrics = pgTable("provider_metrics", {
   tokensOut: integer("tokens_out").default(0),
   totalCost: text("total_cost").default("0.00"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("provider_metrics_provider_idx").on(table.provider),
   index("provider_metrics_window_idx").on(table.windowStart, table.windowEnd),
 ]);
@@ -1651,7 +1651,7 @@ export const costBudgets = pgTable("cost_budgets", {
   periodStart: timestamp("period_start").defaultNow().notNull(),
   periodEnd: timestamp("period_end"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("cost_budgets_provider_idx").on(table.provider),
 ]);
 
@@ -1681,7 +1681,7 @@ export const apiLogs = pgTable("api_logs", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("api_logs_user_idx").on(table.userId),
   index("api_logs_endpoint_idx").on(table.endpoint),
   index("api_logs_created_idx").on(table.createdAt),
@@ -1708,7 +1708,7 @@ export const kpiSnapshots = pgTable("kpi_snapshots", {
   avgLatencyMs: integer("avg_latency_ms").default(0),
   errorRatePercentage: text("error_rate_percentage").default("0.00"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("kpi_snapshots_created_idx").on(table.createdAt),
 ]);
 
@@ -1735,7 +1735,7 @@ export const securityPolicies = pgTable("security_policies", {
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("security_policies_type_idx").on(table.policyType),
   index("security_policies_enabled_idx").on(table.isEnabled),
   index("security_policies_applied_idx").on(table.appliedTo),
@@ -1766,7 +1766,7 @@ export const reportTemplates = pgTable("report_templates", {
   isSystem: text("is_system").default("false"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("report_templates_type_idx").on(table.type),
 ]);
 
@@ -1792,7 +1792,7 @@ export const generatedReports = pgTable("generated_reports", {
   generatedBy: varchar("generated_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
   index("generated_reports_status_idx").on(table.status),
   index("generated_reports_created_idx").on(table.createdAt),
 ]);
@@ -1820,7 +1820,7 @@ export const settingsConfig = pgTable("settings_config", {
   isSensitive: text("is_sensitive").default("false"),
   updatedBy: varchar("updated_by"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("settings_category_idx").on(table.category),
 ]);
 
@@ -1848,7 +1848,7 @@ export const agentGapLogs = pgTable("agent_gap_logs", {
   frequencyCount: integer("frequency_count").default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_gap_logs_status_idx").on(table.status),
   index("agent_gap_logs_created_idx").on(table.createdAt),
   index("agent_gap_logs_signature_idx").on(table.gapSignature),
@@ -1881,7 +1881,7 @@ export const excelDocuments = pgTable('excel_documents', {
   isTemplate: boolean('is_template').default(false),
   templateCategory: text('template_category'),
   version: integer('version').default(1)
-}, (table) => [
+}, (table: any) => [
   index("excel_documents_uuid_idx").on(table.uuid),
   index("excel_documents_created_idx").on(table.createdAt),
 ]);
@@ -1923,7 +1923,7 @@ export const libraryFolders = pgTable('library_folders', {
   isSystem: boolean('is_system').default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('library_folders_user_idx').on(table.userId),
   index('library_folders_parent_idx').on(table.parentId),
 ]);
@@ -1970,7 +1970,7 @@ export const libraryFiles = pgTable('library_files', {
   deletedAt: timestamp('deleted_at'),
   version: integer('version').default(1),
   parentVersionId: integer('parent_version_id'),
-}, (table) => [
+}, (table: any) => [
   index('library_files_user_idx').on(table.userId),
   index('library_files_type_idx').on(table.userId, table.type),
   index('library_files_folder_idx').on(table.folderId),
@@ -2007,7 +2007,7 @@ export const libraryCollections = pgTable('library_collections', {
   isPublic: boolean('is_public').default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('library_collections_user_idx').on(table.userId),
 ]);
 
@@ -2026,7 +2026,7 @@ export const libraryFileCollections = pgTable('library_file_collections', {
   collectionId: integer('collection_id').notNull(),
   order: integer('order').default(0),
   addedAt: timestamp('added_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('library_file_collections_file_idx').on(table.fileId),
   index('library_file_collections_collection_idx').on(table.collectionId),
 ]);
@@ -2040,7 +2040,7 @@ export const libraryActivity = pgTable('library_activity', {
   userId: varchar('user_id').notNull(),
   details: jsonb('details'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('library_activity_user_idx').on(table.userId),
   index('library_activity_file_idx').on(table.fileId),
   index('library_activity_created_idx').on(table.createdAt),
@@ -2059,7 +2059,7 @@ export const libraryStorage = pgTable('library_storage', {
   fileCount: integer('file_count').default(0),
   quotaBytes: bigint('quota_bytes', { mode: 'number' }).default(5368709120),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('library_storage_user_idx').on(table.userId),
 ]);
 
@@ -2088,7 +2088,7 @@ export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
   encoding: text('encoding'),
   pageCount: integer('page_count'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('spreadsheet_uploads_user_idx').on(table.userId),
   index('spreadsheet_uploads_status_idx').on(table.status),
 ]);
@@ -2119,7 +2119,7 @@ export const spreadsheetSheets = pgTable('spreadsheet_sheets', {
   columnTypes: jsonb('column_types').$type<z.infer<typeof columnTypeSchema>[]>(),
   previewData: jsonb('preview_data').$type<any[][]>(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('spreadsheet_sheets_upload_idx').on(table.uploadId),
 ]);
 
@@ -2165,7 +2165,7 @@ export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_session
   completedJobs: integer('completed_jobs').default(0),
   failedJobs: integer('failed_jobs').default(0),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('spreadsheet_analysis_user_idx').on(table.userId),
   index('spreadsheet_analysis_upload_idx').on(table.uploadId),
   index('spreadsheet_analysis_status_idx').on(table.status),
@@ -2192,7 +2192,7 @@ export const spreadsheetAnalysisJobs = pgTable('spreadsheet_analysis_jobs', {
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('spreadsheet_analysis_jobs_session_idx').on(table.sessionId),
   index('spreadsheet_analysis_jobs_status_idx').on(table.status),
 ]);
@@ -2216,7 +2216,7 @@ export const spreadsheetAnalysisOutputs = pgTable('spreadsheet_analysis_outputs'
   payload: jsonb('payload').notNull(),
   order: integer('order').default(0),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('spreadsheet_outputs_session_idx').on(table.sessionId),
 ]);
 
@@ -2241,7 +2241,7 @@ export const chatMessageAnalysis = pgTable('chat_message_analysis', {
   completedAt: timestamp('completed_at'),
   summary: text('summary'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index('chat_message_analysis_message_idx').on(table.messageId),
   index('chat_message_analysis_upload_idx').on(table.uploadId),
   index('chat_message_analysis_session_idx').on(table.sessionId),
@@ -2273,7 +2273,7 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   idempotencyKey: varchar("idempotency_key"),
-}, (table) => [
+}, (table: any) => [
   index("agent_mode_runs_chat_idx").on(table.chatId),
   index("agent_mode_runs_message_idx").on(table.messageId),
   index("agent_mode_runs_status_idx").on(table.status),
@@ -2302,7 +2302,7 @@ export const agentModeSteps = pgTable("agent_mode_steps", {
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_mode_steps_run_idx").on(table.runId),
   index("agent_mode_steps_status_idx").on(table.status),
 ]);
@@ -2329,7 +2329,7 @@ export const agentModeEvents = pgTable("agent_mode_events", {
   durationMs: integer("duration_ms"),
   errorCode: text("error_code"),
   retryCount: integer("retry_count").default(0),
-}, (table) => [
+}, (table: any) => [
   index("agent_mode_events_run_idx").on(table.runId),
   index("agent_mode_events_correlation_idx").on(table.correlationId),
   index("agent_mode_events_type_idx").on(table.eventType),
@@ -2353,7 +2353,7 @@ export const agentWorkspaces = pgTable("agent_workspaces", {
   metadata: jsonb("metadata"), // additional metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_workspaces_run_idx").on(table.runId),
   index("agent_workspaces_path_idx").on(table.runId, table.filePath),
 ]);
@@ -2381,7 +2381,7 @@ export const agentMemoryStore = pgTable("agent_memory_store", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_memory_store_chat_key_idx").on(table.chatId, table.memoryKey),
   index("agent_memory_store_user_idx").on(table.userId),
   index("agent_memory_store_type_idx").on(table.memoryType),
@@ -2409,7 +2409,7 @@ export const requestSpecHistory = pgTable("request_spec_history", {
   executionDurationMs: integer("execution_duration_ms"),
   status: text("status").default("pending"), // pending, completed, failed
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("request_spec_history_chat_created_idx").on(table.chatId, table.createdAt),
   index("request_spec_history_run_idx").on(table.runId),
   index("request_spec_history_intent_idx").on(table.intent),
@@ -2480,7 +2480,7 @@ export const customSkills = pgTable("custom_skills", {
   lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("custom_skills_user_id_idx").on(table.userId),
   index("custom_skills_category_idx").on(table.category),
   index("custom_skills_enabled_idx").on(table.enabled),
@@ -2701,7 +2701,7 @@ export const agentMemories = pgTable("agent_memories", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_memories_namespace_idx").on(table.namespace),
   index("agent_memories_created_at_idx").on(table.createdAt),
 ]);
@@ -2722,7 +2722,7 @@ export const agentContext = pgTable("agent_context", {
   tokenCount: integer("token_count").default(0),
   maxTokens: integer("max_tokens").default(128000),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_context_thread_id_idx").on(table.threadId),
   uniqueIndex("agent_context_thread_unique").on(table.threadId),
 ]);
@@ -2743,7 +2743,7 @@ export const agentSessionState = pgTable("agent_session_state", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("agent_session_state_session_idx").on(table.sessionId),
   uniqueIndex("agent_session_state_unique").on(table.sessionId, table.key),
 ]);
@@ -2772,7 +2772,7 @@ export const pareIdempotencyKeys = pgTable("pare_idempotency_keys", {
   status: text("status").$type<PareIdempotencyStatus>().notNull().default('processing'),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at").notNull().default(sql`NOW() + INTERVAL '24 hours'`),
-}, (table) => [
+}, (table: any) => [
   index("pare_idempotency_key_idx").on(table.idempotencyKey),
   index("pare_idempotency_expires_idx").on(table.expiresAt),
 ]);
@@ -2881,7 +2881,7 @@ export const conversationStates = pgTable("conversation_states", {
   isActive: text("is_active").default("true"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_states_chat_idx").on(table.chatId),
   index("conversation_states_user_idx").on(table.userId),
   index("conversation_states_version_idx").on(table.chatId, table.version),
@@ -2906,7 +2906,7 @@ export const conversationStateVersions = pgTable("conversation_state_versions", 
   changeDescription: text("change_description"),
   authorId: varchar("author_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_versions_state_idx").on(table.stateId),
   index("conversation_versions_version_idx").on(table.stateId, table.version),
 ]);
@@ -2934,7 +2934,7 @@ export const conversationMessages = pgTable("conversation_messages", {
   keywords: text("keywords").array().default([]),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_messages_state_idx").on(table.stateId),
   index("conversation_messages_sequence_idx").on(table.stateId, table.sequence),
   index("conversation_messages_created_idx").on(table.createdAt),
@@ -2963,7 +2963,7 @@ export const conversationArtifacts = pgTable("conversation_artifacts", {
   metadata: jsonb("metadata").$type<ArtifactMetadata>(),
   processingStatus: text("processing_status").default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_artifacts_state_idx").on(table.stateId),
   index("conversation_artifacts_message_idx").on(table.messageId),
   index("conversation_artifacts_type_idx").on(table.artifactType),
@@ -2995,7 +2995,7 @@ export const conversationImages = pgTable("conversation_images", {
   editHistory: jsonb("edit_history").$type<ImageEditHistory[]>().default([]),
   isLatest: text("is_latest").default("true"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_images_state_idx").on(table.stateId),
   index("conversation_images_message_idx").on(table.messageId),
   index("conversation_images_parent_idx").on(table.parentImageId),
@@ -3021,7 +3021,7 @@ export const conversationContexts = pgTable("conversation_contexts", {
   sentiment: text("sentiment"),
   lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("conversation_contexts_state_idx").on(table.stateId),
   uniqueIndex("conversation_contexts_state_unique").on(table.stateId),
 ]);
@@ -3047,7 +3047,7 @@ export const memoryFacts = pgTable("memory_facts", {
   validUntil: timestamp("valid_until", { withTimezone: true }),
   metadata: jsonb("metadata").default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("memory_facts_state_idx").on(table.stateId),
   index("memory_facts_type_idx").on(table.factType),
 ]);
@@ -3069,7 +3069,7 @@ export const runningSummaries = pgTable("running_summaries", {
   lastUpdatedAtTurn: integer("last_updated_at_turn").default(0),
   mainTopics: text("main_topics").array().default([]),
   lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("running_summaries_state_idx").on(table.stateId),
 ]);
 
@@ -3088,7 +3088,7 @@ export const processedRequests = pgTable("processed_requests", {
   stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
   messageId: varchar("message_id", { length: 100 }),
   processedAt: timestamp("processed_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("processed_requests_request_idx").on(table.requestId),
   index("processed_requests_state_idx").on(table.stateId),
 ]);
@@ -3174,7 +3174,7 @@ export const retrievalTelemetry = pgTable("retrieval_telemetry", {
   topScores: jsonb("top_scores").default([]),
   retrievalType: varchar("retrieval_type", { length: 50 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
   index("retrieval_telemetry_state_idx").on(table.stateId),
   index("retrieval_telemetry_request_idx").on(table.requestId),
   index("retrieval_telemetry_created_idx").on(table.createdAt),
