@@ -202,7 +202,7 @@ jobs:
               extract_main_js_asset() {
                 local html="$1"
                 # Grab the first /assets/*.js reference (robust across Vite entry + preloads).
-                echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	                echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
               }
 
             APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
@@ -244,7 +244,7 @@ jobs:
 
               extract_main_js_asset() {
                 local html="$1"
-                echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+		            echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
               }
 
           HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
@@ -420,7 +420,7 @@ jobs:
 
               extract_main_js_asset() {
                 local html="$1"
-                echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	              echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
               }
 
             APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/)"
@@ -462,7 +462,7 @@ jobs:
 
             extract_main_js_asset() {
               local html="$1"
-              echo "${html}" | grep -oE '/assets/[^" ]+\\.m?js' | head -n1 | sed 's#^/##' || true
+	            echo "${html}" | grep -oE '/assets/[^" ]+\.m?js' | head -n1 | sed 's#^/##' || true
             }
 
           HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
