@@ -243,11 +243,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Force refetch immediately
     await refetch();
   }, [refetch, queryClient]);
-   useEffect(() => {
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const forced = localStorage.getItem("siragpt_force_signed_out") === "1";
-    const isLogin = window.location.pathname.startsWith("/login");
-    if (forced && !isLogin) {
+    const pathname = window.location.pathname;
+    const publicAuthRoute = [
+      "/login",
+      "/welcome",
+      "/signup",
+      "/terms",
+      "/privacy-policy",
+    ].some((route) => pathname.startsWith(route));
+    if (forced && !publicAuthRoute) {
       window.location.replace("/login?logged_out=1");
     }
   }, []);

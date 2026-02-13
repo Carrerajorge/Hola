@@ -112,6 +112,7 @@ import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
@@ -544,6 +545,26 @@ export async function registerRoutes(
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
+  // Pre-execution intent guard for high-impact mutation endpoints.
+  // Mode is controlled by EXECUTION_INTENT_GUARD_MODE=off|monitor|enforce
+  // and defaults to enforce when SYSTEM_AUDIT_MODE is enabled.
+  const guardedExecutionPrefixes = [
+    "/api/agent",
+    "/api/orchestrator",
+    "/api/execution",
+    "/api/planning",
+    "/api/python-agent",
+    "/api/browser-control",
+    "/api/terminal",
+    "/api/workflows",
+    "/api/document-analysis",
+    "/api/word-pipeline",
+    "/api/openclaw",
+  ];
+  for (const prefix of guardedExecutionPrefixes) {
+    app.use(prefix, preExecutionIntentGuard);
+  }
+
 
   // ... existing imports ...
 
@@ -608,6 +629,10 @@ export async function registerRoutes(
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get("/api/audit/execution-guard/status", (_req: Request, res: Response) => {
+    res.json(getExecutionIntentGuardStatus());
   });
 
   // API Documentation

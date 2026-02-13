@@ -24,6 +24,7 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { isAdminUser } from "@/lib/admin";
 const MaintenancePage = lazy(() => import("@/pages/maintenance"));
+const LandingPage = lazy(() => import("@/pages/landing"));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -62,16 +63,6 @@ function ChatPageRedirect() {
   }, [params.id, setLocation]);
 
   return <Home />;
-}
-
-function WelcomeRedirect() {
-  const [, setLocation] = useLocation();
-
-  useEffect(() => {
-    setLocation("/", { replace: true });
-  }, [setLocation]);
-
-  return null;
 }
 
 const LoginPage = lazy(() => import("@/pages/login"));
@@ -221,7 +212,7 @@ function Router() {
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
             <Route path={HOME_ROUTE_REGEX} component={Home} />
-            <Route path="/welcome" component={WelcomeRedirect} />
+            <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
             <Route path="/login/approve" component={LoginApprovePage} />
             <Route path="/signup" component={SignupPage} />
@@ -258,8 +249,8 @@ function AppContent() {
   const { settings: platformSettings, isLoading: platformLoading } = usePlatformSettings();
   const { user } = useAuth();
 
-  const isLoginRoute = location.startsWith("/login");
-  const allowDuringMaintenance = isLoginRoute;
+  const publicMaintenanceRoutes = ["/welcome", "/login", "/signup", "/terms", "/privacy-policy"];
+  const allowDuringMaintenance = publicMaintenanceRoutes.some((route) => location.startsWith(route));
 
   if (!platformLoading && platformSettings.maintenance_mode && !isAdminUser(user) && !allowDuringMaintenance) {
     return (
