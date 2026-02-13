@@ -1172,21 +1172,57 @@ export class MemStorage implements IStorage {
 
   // Sidebar Pinned GPTs
   async getSidebarPinnedGpts(userId: string): Promise<any[]> {
-    const pinnedRecords = await dbRead.select()
-      .from(sidebarPinnedGpts)
-      .where(eq(sidebarPinnedGpts.userId, userId))
-      .orderBy(sidebarPinnedGpts.displayOrder);
+    try {
+      const pinnedRecords = await dbRead.select()
+        .from(sidebarPinnedGpts)
+        .where(eq(sidebarPinnedGpts.userId, userId))
+        .orderBy(sidebarPinnedGpts.displayOrder);
 
-    const gptDetails = await Promise.all(
-      pinnedRecords.map(async (record) => {
-        const gpt = await this.getGpt(record.gptId);
-        return gpt ? { ...record, gpt } : null;
-      })
-    );
+      const gptDetails = await Promise.all(
+        pinnedRecords.map(async (record) => {
+          const gpt = await this.getGpt(record.gptId);
+          return gpt ? { ...record, gpt } : null;
+        })
+      );
 
-    return gptDetails.filter(Boolean);
+      return gptDetails.filter(Boolean);
+    } catch (error) {
+      // Fallback to raw SQL in case Drizzle query compilation fails for this environment.
+      console.error("[storage] sidebarPinnedGpts query failed, falling back to raw SQL", error);
+      const result = await dbRead.execute(sql`
+        SELECT id, user_id, gpt_id, display_order, pinned_at
+        FROM sidebar_pinned_gpts
+        WHERE user_id = ${userId}
+        ORDER BY display_order`
+      );
+
+      const records = result.rows as Array<{
+        id: string;
+        user_id: string;
+        gpt_id: string;
+        display_order: number;
+        pinned_at: Date;
+      }>;
+
+      const gptDetails = await Promise.all(
+        records.map(async (record) => {
+          const gpt = await this.getGpt(record.gpt_id);
+          return gpt
+            ? {
+              id: record.id,
+              userId: record.user_id,
+              gptId: record.gpt_id,
+              displayOrder: record.display_order,
+              pinnedAt: record.pinned_at,
+              gpt,
+            }
+            : null;
+        })
+      );
+
+      return gptDetails.filter(Boolean);
+    }
   }
-
   async pinGptToSidebar(userId: string, gptId: string, displayOrder: number = 0): Promise<any> {
     const existing = await db.select()
       .from(sidebarPinnedGpts)
