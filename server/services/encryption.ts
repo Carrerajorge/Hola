@@ -109,7 +109,8 @@ export function hashWithSalt(password: string, salt?: string): { hash: string; s
  */
 export function verifyHash(password: string, hash: string, salt: string): boolean {
   const result = hashWithSalt(password, salt);
-  return result.hash === hash;
+  // Use constant-time comparison to prevent timing attacks
+  return secureCompare(result.hash, hash);
 }
 
 /**

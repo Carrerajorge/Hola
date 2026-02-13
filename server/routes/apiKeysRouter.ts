@@ -57,7 +57,8 @@ apiKeysRouter.get("/", async (req, res) => {
     
     res.json(result.rows || []);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API Keys] List error:", error);
+    res.status(500).json({ error: "Failed to list API keys" });
   }
 });
 
@@ -73,6 +74,17 @@ apiKeysRouter.post("/", async (req, res) => {
     
     if (!name) {
       return res.status(400).json({ error: "name is required" });
+    }
+
+    // Validate permissions against allowed values
+    const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"];
+    if (!Array.isArray(permissions) || !permissions.every(p => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p))) {
+      return res.status(400).json({ error: `Invalid permissions. Allowed values: ${ALLOWED_PERMISSIONS.join(', ')}` });
+    }
+
+    // Validate rateLimit
+    if (typeof rateLimit !== 'number' || rateLimit < 1 || rateLimit > 100000) {
+      return res.status(400).json({ error: "rateLimit must be a number between 1 and 100000" });
     }
     
     // Generate key
@@ -111,7 +123,8 @@ apiKeysRouter.post("/", async (req, res) => {
       message: "Save this key now. You won't be able to see it again."
     });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API Keys] Create error:", error);
+    res.status(500).json({ error: "Failed to create API key" });
   }
 });
 
@@ -125,6 +138,19 @@ apiKeysRouter.patch("/:id", async (req, res) => {
     
     const { name, permissions, rateLimit, isActive } = req.body;
     
+    // Validate permissions if provided
+    if (permissions !== undefined) {
+      const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"];
+      if (!Array.isArray(permissions) || !permissions.every((p: any) => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p))) {
+        return res.status(400).json({ error: `Invalid permissions. Allowed values: ${ALLOWED_PERMISSIONS.join(', ')}` });
+      }
+    }
+
+    // Validate rateLimit if provided
+    if (rateLimit !== undefined && (typeof rateLimit !== 'number' || rateLimit < 1 || rateLimit > 100000)) {
+      return res.status(400).json({ error: "rateLimit must be a number between 1 and 100000" });
+    }
+
     const result = await db.execute(sql`
       UPDATE api_keys SET
         name = COALESCE(${name}, name),
@@ -142,7 +168,8 @@ apiKeysRouter.patch("/:id", async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API Keys] Update error:", error);
+    res.status(500).json({ error: "Failed to update API key" });
   }
 });
 
@@ -174,7 +201,8 @@ apiKeysRouter.delete("/:id", async (req, res) => {
     
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API Keys] Delete error:", error);
+    res.status(500).json({ error: "Failed to delete API key" });
   }
 });
 
@@ -205,7 +233,7 @@ apiKeysRouter.post("/:id/rotate", async (req, res) => {
         key_hash = ${newHash},
         key_prefix = ${newPrefix},
         updated_at = NOW()
-      WHERE id = ${req.params.id}
+      WHERE id = ${req.params.id} AND user_id = ${userId}
     `);
     
     await auditLog(req, {
@@ -224,7 +252,8 @@ apiKeysRouter.post("/:id/rotate", async (req, res) => {
       message: "Key rotated. Save this new key now."
     });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error("[API Keys] Rotate error:", error);
+    res.status(500).json({ error: "Failed to rotate API key" });
   }
 });
 

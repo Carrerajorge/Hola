@@ -23,13 +23,35 @@ export class TheoryCalculator {
 
     solve(equation: string, variables: Record<string, number>): number {
         Logger.info(`[Theory] Solving: ${equation}`);
-        // In production: Use CAS (Computer Algebra System) like MathJS or SymPy
-        // Very basic evaluator for demo
         try {
-            const keys = Object.keys(variables);
-            const values = Object.values(variables);
-            const func = new Function(...keys, `return ${equation};`);
-            return func(...values);
+            let sanitized = equation.replace(/\s+/g, '');
+
+            // Replace variable names with their numeric values (longest names first to avoid partial replacements)
+            const sortedKeys = Object.keys(variables).sort((a, b) => b.length - a.length);
+            for (const key of sortedKeys) {
+                const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'g'), String(variables[key]));
+            }
+
+            // After variable substitution, only allow safe arithmetic:
+            // digits, decimal points, operators (+, -, *, /), parentheses, and scientific notation (e/E)
+            if (!/^[0-9+\-*/().eE]+$/.test(sanitized)) {
+                Logger.error(`[Theory] Unsafe equation rejected: ${equation}`);
+                return NaN;
+            }
+
+            // Validate balanced parentheses
+            let depth = 0;
+            for (const ch of sanitized) {
+                if (ch === '(') depth++;
+                if (ch === ')') depth--;
+                if (depth < 0) return NaN;
+            }
+            if (depth !== 0) return NaN;
+
+            // Safe to evaluate: expression contains only numeric arithmetic
+            const func = new Function(`"use strict"; return (${sanitized});`);
+            return func();
         } catch (e) {
             Logger.error(`[Theory] Calculation failed: ${e}`);
             return NaN;

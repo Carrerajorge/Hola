@@ -81,7 +81,26 @@ export const calculatorTool: ToolDefinition = {
                 expr = expr.replace(new RegExp(`\\b${name}\\b`, 'g'), value.toString());
             }
 
-            // Create safe evaluation context
+            // Security: after replacing constants, only allowed function names should remain
+            // Allow only: digits, operators, parentheses, commas, dots, and known math function names
+            const allowedFunctionNames = Object.keys(mathFunctions).join('|');
+            const safePattern = new RegExp(`^[0-9+\\-*/().,%eE]|(?:${allowedFunctionNames})`, 'g');
+            const stripped = expr.replace(new RegExp(`(?:${allowedFunctionNames})`, 'g'), '');
+            if (!/^[0-9+\-*/().,%eE]*$/.test(stripped)) {
+                throw new Error('Expression contains disallowed characters or keywords');
+            }
+
+            // Validate balanced parentheses
+            let depth = 0;
+            for (const ch of expr) {
+                if (ch === '(') depth++;
+                if (ch === ')') depth--;
+                if (depth < 0) throw new Error('Unbalanced parentheses');
+            }
+            if (depth !== 0) throw new Error('Unbalanced parentheses');
+
+            // Create safe evaluation context - expression is now validated to contain only
+            // numbers, arithmetic operators, and whitelisted math function calls
             const safeEval = new Function(
                 ...Object.keys(mathFunctions),
                 `"use strict"; return (${expr});`

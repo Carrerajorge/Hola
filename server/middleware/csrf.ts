@@ -64,6 +64,8 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
     ];
 
     // Also exempt chat API routes (session cookie is sufficient auth)
+    // Note: security-sensitive routes like /api/api-keys/, /api/security/, /api/settings/
+    // are NOT exempted and require CSRF tokens for state-changing requests.
     const CSRF_EXEMPT_PREFIXES_EXTENDED = [
         "/api/chat/",
         "/api/chat",
@@ -120,8 +122,6 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/session/",
         "/api/errors/",
         "/api/2fa/",
-        "/api/security/",
-        "/api/api-keys/",
         "/api/openclaw/",
         "/api/objects/",
         "/api/objects",
@@ -130,11 +130,8 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/local-files/",
         "/api/files",
         "/api/analyze",
-        "/api/settings/",
-        "/api/settings",
         "/api/library/",
         "/api/library",
-        "/api/integrations/",
     ];
     if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
         return next();
