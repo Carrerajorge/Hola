@@ -18,13 +18,21 @@ jobs:
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
-      VPS_PORT: ${{ secrets.VPS_PORT || '2222' }}
-      VPS_DIR: ${{ secrets.DEPLOY_PATH || '/root/ILIACODEX' }}
-      DEPLOY_BRANCH: ${{ inputs.branch || 'deploy/iliacodex-import' }}
+      DEPLOY_DIR: ${{ secrets.VPS_DIR || '/root/ILIACODEX' }}
+      DEPLOY_ATTEMPTS: '3'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Resolve branch
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.branch }}" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup SSH key
         run: |
@@ -35,45 +43,124 @@ jobs:
           fi
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${VPS_PORT} -H ${VPS_HOST} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Deploy to production VPS
+          echo "🔍 Preload host keys for both SSH ports"
+          for p in 2222 22; do
+            ssh-keyscan -p "$p" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          done
+
+      - name: Pick reachable SSH port
+        id: sshport
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p ${VPS_PORT} -o StrictHostKeyChecking=no ${VPS_USER}@${VPS_HOST} 'bash -s' <<'DEPLOY'
+          for p in 2222 22; do
+            echo "🔎 Testing ${{ env.VPS_HOST }}:$p"
+            if ssh -i ~/.ssh/deploy_key -p "$p" -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=6 \
+              "${VPS_USER}@${VPS_HOST}" "echo port-$p-ok" >/dev/null 2>&1; then
+              echo "port=$p" >> "$GITHUB_OUTPUT"
+              echo "✅ SSH port selected: $p"
+              exit 0
+            fi
+          done
+          echo "::error::No SSH access on ports 2222 and 22"
+          exit 1
+
+      - name: Deploy to production VPS
+        id: deploy
+        run: |
+          set -euo pipefail
+          SSH_PORT='${{ steps.sshport.outputs.port }}'
+          BRANCH='${{ steps.branch.outputs.branch }}'
+          TARGET_DIR='${{ env.DEPLOY_DIR }}'
+          REPO='https://github.com/Carrerajorge/Hola.git'
+
+          # Build a remote script to keep quoting clean and keep rollback logic centralized
+          cat > /tmp/deploy-remote.sh <<'REMOTE'
           set -euo pipefail
 
-          TARGET_DIR="${VPS_DIR}"
-          BRANCH="${DEPLOY_BRANCH}"
-          REPO="https://github.com/Carrerajorge/Hola.git"
+          TARGET_DIR="${TARGET_DIR}"
+          BRANCH="${BRANCH}"
+          REPO="${REPO}"
+          VPS_HOST="${VPS_HOST}"
 
-          if [ ! -d "$TARGET_DIR/.git" ]; then
-            mkdir -p "$(dirname "$TARGET_DIR")"
-            git clone "$REPO" "$TARGET_DIR"
-          fi
+          ensure_repo() {
+            if [ -d "$TARGET_DIR/.git" ]; then
+              cd "$TARGET_DIR"
+              git remote set-url origin "$REPO"
+            else
+              mkdir -p "$(dirname "$TARGET_DIR")"
+              git clone "$REPO" "$TARGET_DIR"
+              cd "$TARGET_DIR"
+            fi
+          }
 
-          cd "$TARGET_DIR"
+          rollback_if_needed() {
+            echo "⚠️ Deploy failed, trying rollback to previous SHA: $PREV_SHA"
+            git checkout "$PREV_SHA"
+            echo "▶ Restarting previous version"
+            ./deploy_direct.sh || true
+          }
+
+          ensure_repo
           git fetch origin
           git checkout "$BRANCH"
-          git pull origin "$BRANCH"
 
-          # Deploy directly on VPS (no rsync/remote loop)
+          # Capture last stable commit before pulling latest branch tip
+          PREV_SHA="$(git rev-parse HEAD)"
+          git pull --ff-only "origin" "$BRANCH"
+
+          # Deploy directly on VPS (no SSH loop)
           export LOCAL_DEPLOY=1
-          export VPS_PORT=${VPS_PORT}
+          export VPS_DIR="$TARGET_DIR"
           export DEPLOY_BRANCH="$BRANCH"
-          VPS_DIR="$TARGET_DIR"
-          ./deploy_direct.sh
 
-          # Quick smoke-check
-          if ! curl -fsS https://iliagpt.com/api/health >/dev/null; then
-            echo "Health check failed"
+          if ! ./deploy_direct.sh; then
+            rollback_if_needed
             exit 1
           fi
 
-          echo "✅ Deploy auto completado"
-          DEPLOY
+          # Health check with retries
+          APP_OK=0
+          for i in $(seq 1 25); do
+            if curl -fsS https://iliagpt.com/api/health >/dev/null 2>&1; then
+              APP_OK=1
+              break
+            fi
+            sleep 3
+          done
+
+          if [ "$APP_OK" -ne 1 ]; then
+            echo "❌ Health check failed"
+            rollback_if_needed
+            exit 1
+          fi
+
+          echo "✅ Deploy complete"
+REMOTE
+
+          chmod +x /tmp/deploy-remote.sh
+
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${VPS_USER}@${VPS_HOST} \
+            TARGET_DIR="$TARGET_DIR" BRANCH="$BRANCH" REPO="$REPO" VPS_HOST="${VPS_HOST}" bash -s < /tmp/deploy-remote.sh
+
+      - name: Verify production response
+        if: always()
+        run: |
+          echo "🌐 Verifying https://iliagpt.com/"
+          for i in $(seq 1 30); do
+            if curl -fsS https://iliagpt.com/api/health; then
+              echo "✅ production API healthy"
+              break
+            fi
+            echo "⌛ Retry $i/30"
+            sleep 2
+          done
 
       - name: Report
         if: always()
         run: |
-          echo "Done"
+          if [ "${{ steps.deploy.outcome }}" = "success" ]; then
+            echo "✅ Auto-deploy finished"
+          else
+            echo "❌ Auto-deploy failed"
+          fi
