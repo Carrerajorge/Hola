@@ -1788,17 +1788,20 @@ RULES:
       stepNumber += 1;
       const page = this.getActivePage(sessionId);
       let screenshot = "";
-      try {
-        screenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 85 });
-        screenshots.push(screenshot);
-      } catch {
-        // Best effort screenshot
+      // Only take screenshots for key milestones (navigate, done, wait) to reduce latency
+      // For rapid actions (select, click, type) skip screenshots — saves ~500ms per step
+      const isKeyMilestone = action === "navigate" || action === "done" || action === "wait";
+      if (isKeyMilestone) {
+        try {
+          screenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 60 });
+          screenshots.push(screenshot);
+        } catch {
+          // Best effort screenshot
+        }
       }
       let url = "";
-      let title = "";
       try {
         url = page.url();
-        title = await page.title();
       } catch {
         // Ignore page metadata errors
       }
@@ -1812,7 +1815,7 @@ RULES:
             goalProgress: progress,
             screenshot,
             url,
-            title,
+            title: "",
           });
         } catch {
           // Ignore callback errors
@@ -2159,11 +2162,13 @@ RULES:
         if (state.hasExtraStep || state.hasConfirmation || !state.hasStep2Form) {
           return state;
         }
-        if (!progressSent && Date.now() - started >= 7000) {
+        // Emit progress screenshot after 3s (reduced from 7s for faster feedback)
+        if (!progressSent && Date.now() - started >= 3000) {
           progressSent = true;
           await emitProgress("wait", waitReasoning, waitProgress);
         }
-        await page.waitForTimeout(500).catch(() => {});
+        // Poll every 250ms instead of 500ms for faster state detection
+        await page.waitForTimeout(250).catch(() => {});
         state = await readFlowState();
       }
       return state;
@@ -2193,49 +2198,49 @@ RULES:
         }
       };
       page.on("response", responseListener);
-      await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
-      await page.waitForTimeout(400).catch(() => {});
+      // Fast page load: only wait for DOM, not full load
+      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
       steps.push("Opened Cala reservation page.");
       await emitProgress("navigate", "Página de reserva abierta", "10%");
 
+      // ── VALIDATE INPUTS BEFORE INTERACTING ──
       const partySize = Number(reservation.partySize || 0);
       if (!Number.isFinite(partySize) || partySize <= 0) {
-        return {
-          success: false,
-          steps,
-          data: {
-            status: "needs_user_input",
-            missingFields: ["partySize"],
-            question: "Necesito la cantidad exacta de personas para continuar.",
-          },
-          screenshots,
-        };
+        return { success: false, steps, data: { status: "needs_user_input", missingFields: ["partySize"], question: "Necesito la cantidad exacta de personas para continuar." }, screenshots };
+      }
+      const day = parseDayFromDate(reservation.date);
+      if (!day || day < 1 || day > 31) {
+        return { success: false, steps, data: { status: "needs_user_input", missingFields: ["date"], question: "Necesito la fecha exacta (día/mes/año) para reservar en Cala." }, screenshots };
+      }
+      const timeText = normalizeTime(reservation.time);
+      if (!timeText) {
+        return { success: false, steps, data: { status: "needs_user_input", missingFields: ["time"], question: "Necesito la hora exacta para la reserva (ej. 20:00)." }, screenshots };
+      }
+      const fullName = String(reservation.contactName || "").trim();
+      const [firstName, ...rest] = fullName.split(/\s+/).filter(Boolean);
+      const lastName = rest.join(" ").trim();
+      const email = String(reservation.email || "").trim();
+      const phone = String(reservation.phone || "").replace(/[^\d+]/g, "").trim();
+      if (!firstName || !email || !phone) {
+        const missingFields: string[] = [];
+        if (!firstName) missingFields.push("contactName");
+        if (!email) missingFields.push("contactEmail");
+        if (!phone) missingFields.push("contactPhone");
+        return { success: false, steps, data: { status: "needs_user_input", missingFields, question: "Necesito nombre, email y teléfono para completar la reserva en Cala." }, screenshots };
       }
 
+      // ── TURBO BLOCK 1: Select party size + date + time in rapid succession ──
       ensureBudget();
+      // Party size
       const selectResult = await this.select(sessionId, "select", String(partySize)).catch(() => ({ success: false }));
       if (!(selectResult as any)?.success) {
-        // Fallback to visible select option by label
         await page.selectOption("select", { label: `${partySize} personas` }).catch(() => {});
       }
-      await page.waitForTimeout(350).catch(() => {});
+      await page.waitForTimeout(200).catch(() => {});
       steps.push(`Selected party size: ${partySize}.`);
       await emitProgress("select", `Seleccionadas ${partySize} personas`, "20%");
 
-      const day = parseDayFromDate(reservation.date);
-      if (!day || day < 1 || day > 31) {
-        return {
-          success: false,
-          steps,
-          data: {
-            status: "needs_user_input",
-            missingFields: ["date"],
-            question: "Necesito la fecha exacta (día/mes/año) para reservar en Cala.",
-          },
-          screenshots,
-        };
-      }
-
+      // Date — click calendar day
       ensureBudget();
       const dateClickedSelector = await clickFirstVisible([
         `span.date.disponibility_sm:has-text("${day}")`,
@@ -2244,142 +2249,101 @@ RULES:
         `a.ui-state-default:has-text("${day}")`,
       ]);
       if (!dateClickedSelector) {
-        return {
-          success: false,
-          steps,
-          data: {
-            status: "needs_user_input",
-            missingFields: ["date"],
-            question: `No pude seleccionar el día ${day} en el calendario. ¿Quieres que pruebe otra fecha?`,
-          },
-          screenshots,
-        };
+        return { success: false, steps, data: { status: "needs_user_input", missingFields: ["date"], question: `No pude seleccionar el día ${day} en el calendario. ¿Quieres que pruebe otra fecha?` }, screenshots };
       }
-      await page.waitForTimeout(500).catch(() => {});
+      await page.waitForTimeout(300).catch(() => {});
       steps.push(`Selected date day: ${day}.`);
       await emitProgress("click", `Fecha seleccionada (día ${day})`, "30%");
 
-      const timeText = normalizeTime(reservation.time);
-      if (!timeText) {
-        return {
-          success: false,
-          steps,
-          data: {
-            status: "needs_user_input",
-            missingFields: ["time"],
-            question: "Necesito la hora exacta para la reserva (ej. 20:00).",
-          },
-          screenshots,
-        };
-      }
-
+      // Time — find available times and click closest match
       ensureBudget();
       const availableTimes = await page.evaluate(() => {
         const set = new Set<string>();
         const regex = /\b([0-2]?\d:[0-5]\d)\b/g;
-        const nodes = Array.from(document.querySelectorAll("button, a, span, div")).slice(0, 3000);
-        for (const node of nodes) {
+        for (const node of Array.from(document.querySelectorAll("button, a, span, div")).slice(0, 2000)) {
           const text = (node.textContent || "").replace(/\s+/g, " ").trim();
           if (!text) continue;
-          const matches = text.match(regex) || [];
-          for (const match of matches) {
-            const parts = match.split(":");
-            const hh = Number(parts[0]);
-            const mm = Number(parts[1]);
-            if (Number.isFinite(hh) && Number.isFinite(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+          for (const match of text.match(regex) || []) {
+            const [hh, mm] = match.split(":").map(Number);
+            if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
               set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
             }
           }
         }
         return Array.from(set);
       });
-
       if (!Array.isArray(availableTimes) || availableTimes.length === 0) {
         const pageText = await page.evaluate(() => document.body?.innerText || "");
         if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText)) {
-          return {
-            success: false,
-            steps,
-            data: {
-              status: "needs_user_input",
-              missingFields: ["alternativeDateOrTime"],
-              question: "No hay disponibilidad web para esa fecha/hora. ¿Quieres que pruebe otro horario o fecha?",
-              reason: "no_web_availability",
-            },
-            screenshots,
-          };
+          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["alternativeDateOrTime"], question: "No hay disponibilidad web para esa fecha/hora. ¿Quieres que pruebe otro horario o fecha?", reason: "no_web_availability" }, screenshots };
         }
       }
-
       let selectedTime = timeText;
       if (!availableTimes.includes(selectedTime) && availableTimes.length > 0) {
         const targetMinutes = toMinutes(selectedTime);
-        selectedTime = availableTimes
-          .slice()
-          .sort((a, b) => Math.abs(toMinutes(a) - targetMinutes) - Math.abs(toMinutes(b) - targetMinutes))[0];
+        selectedTime = availableTimes.slice().sort((a, b) => Math.abs(toMinutes(a) - targetMinutes) - Math.abs(toMinutes(b) - targetMinutes))[0];
       }
-
       const clickedTime = await clickVisibleText(selectedTime);
       if (!clickedTime) {
         const fallbackClicked = availableTimes.length > 0 ? await clickVisibleText(availableTimes[0]) : false;
         if (!fallbackClicked) {
-          return {
-            success: false,
-            steps,
-            data: {
-              status: "needs_user_input",
-              missingFields: ["time"],
-              question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}.`,
-            },
-            screenshots,
-          };
+          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["time"], question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}.` }, screenshots };
         }
         selectedTime = availableTimes[0];
       }
-
-      await page.waitForTimeout(500).catch(() => {});
+      await page.waitForTimeout(200).catch(() => {});
       steps.push(`Selected time: ${selectedTime}.`);
       await emitProgress("click", `Hora seleccionada: ${selectedTime}`, "40%");
 
-      const fullName = String(reservation.contactName || "").trim();
-      const [firstName, ...rest] = fullName.split(/\s+/).filter(Boolean);
-      const lastName = rest.join(" ").trim();
-      const email = String(reservation.email || "").trim();
-      const phone = String(reservation.phone || "").replace(/[^\d+]/g, "").trim();
-
-      if (!firstName || !email || !phone) {
-        const missingFields: string[] = [];
-        if (!firstName) missingFields.push("contactName");
-        if (!email) missingFields.push("contactEmail");
-        if (!phone) missingFields.push("contactPhone");
-        return {
-          success: false,
-          steps,
-          data: {
-            status: "needs_user_input",
-            missingFields,
-            question: "Necesito nombre, email y teléfono para completar la reserva en Cala.",
-          },
-          screenshots,
+      // ── TURBO BLOCK 2: Fill ALL contact fields + checkboxes in a SINGLE page.evaluate() call ──
+      ensureBudget();
+      const fillResult = await page.evaluate(({ fn, ln, em, ph }) => {
+        const setVal = (sel: string, val: string) => {
+          const el = document.querySelector(sel) as HTMLInputElement | null;
+          if (!el) return false;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (nativeSetter) nativeSetter.call(el, val);
+          else el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         };
-      }
-
-      ensureBudget();
-      await quickType("#user_first_name", firstName);
-      await quickType("#user_last_name", lastName || "-");
-      await quickType("#user_email", email);
-      await quickType("#user_email2", email);
-      await quickType("#user_phone", phone);
-      await autofillVisibleRequiredFields({ firstName, lastName: lastName || "-", email, phone });
-      await page.waitForTimeout(300).catch(() => {});
-      steps.push("Filled reservation contact details.");
-      await emitProgress("type", "Datos de contacto completados", "55%");
-
-      ensureBudget();
-      await ensureInputChecked("#legal_ficha");
-      await ensureInputChecked("#consentimiento_legal");
-      steps.push("Accepted reservation terms.");
-      await emitProgress("click", "Condiciones legales aceptadas", "62%");
+        const setCheck = (sel: string) => {
+          const el = document.querySelector(sel) as HTMLInputElement | null;
+          if (!el || el.checked) return;
+          el.checked = true;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          try { el.click(); } catch {}
+        };
+        // Fill all text fields at once
+        const filled = {
+          firstName: setVal('#user_first_name', fn),
+          lastName: setVal('#user_last_name', ln),
+          email1: setVal('#user_email', em),
+          email2: setVal('#user_email2', em),
+          phone: setVal('#user_phone', ph),
+          comment: setVal('#comment_text', 'N/A'),
+          foodRestrictions: setVal('#food_restrictions', 'Sin alergias'),
+        };
+        // Check all checkboxes at once
+        setCheck('#legal_ficha');
+        setCheck('#consentimiento_legal');
+        setCheck('#no_food_restrictions_data');
+        // Also fill any visible required fields we might have missed
+        document.querySelectorAll('input[required]:not([type=checkbox]):not([type=radio]):not([type=hidden])').forEach((el: any) => {
+          if (!el.value && el.offsetParent !== null) {
+            const id = (el.id || '').toLowerCase();
+            if (id.includes('first') || id.includes('nombre')) setVal(`#${el.id}`, fn);
+            else if (id.includes('last') || id.includes('apellid')) setVal(`#${el.id}`, ln);
+            else if (id.includes('email') || id.includes('correo')) setVal(`#${el.id}`, em);
+            else if (id.includes('phone') || id.includes('tel')) setVal(`#${el.id}`, ph);
+          }
+        });
+        return filled;
+      }, { fn: firstName, ln: lastName || "-", em: email, ph: phone });
+      steps.push("Filled all contact details + accepted terms (turbo block).");
+      await emitProgress("type", "Datos de contacto y términos completados", "62%");
 
       ensureBudget();
       const step2Submit = await clickSubmitButton([
@@ -2400,9 +2364,9 @@ RULES:
           screenshots,
         };
       }
-      await page.waitForTimeout(400).catch(() => {});
+      await page.waitForTimeout(200).catch(() => {});
       let flowState = await waitForFlowTransition(
-        12000,
+        8000,
         "Esperando respuesta del sitio tras enviar formulario",
         "72%"
       );
@@ -2427,9 +2391,9 @@ RULES:
           "input[value='Reservar']",
         ]);
         if (retrySubmit) {
-          await page.waitForTimeout(800).catch(() => {});
+          await page.waitForTimeout(300).catch(() => {});
           flowState = await waitForFlowTransition(
-            15000,
+            8000,
             "Reintentando envio del formulario",
             "75%"
           );

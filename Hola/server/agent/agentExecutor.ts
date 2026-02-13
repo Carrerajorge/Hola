@@ -617,7 +617,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 180000 }
+                  { maxRuntimeMs: 60000 } // Reduced from 180s — turbo block filling is much faster
                 );
               })()
               : await universalBrowserController.agenticNavigate(
