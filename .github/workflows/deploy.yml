@@ -64,7 +64,8 @@ jobs:
           DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
           echo "▸ iliagpt.com resolves to: ${DNS_IP}"
           echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
-          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}"
+          # Best-effort only: some hosts firewall/drop probes even when SSH works.
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Setup SSH key
         run: |
@@ -285,7 +286,8 @@ jobs:
           DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
           echo "▸ iliagpt.com resolves to: ${DNS_IP}"
           echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
-          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}"
+          # Best-effort only: some hosts firewall/drop probes even when SSH works.
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Setup SSH key
         run: |
