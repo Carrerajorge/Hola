@@ -11,6 +11,8 @@ import { auditLog } from "../services/auditLogger";
 
 export const apiKeysRouter = Router();
 
+const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"] as const;
+
 // Ensure table exists
 const ensureTable = async () => {
   try {
@@ -77,8 +79,7 @@ apiKeysRouter.post("/", async (req, res) => {
     }
 
     // Validate permissions against allowed values
-    const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"];
-    if (!Array.isArray(permissions) || !permissions.every(p => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p))) {
+    if (!Array.isArray(permissions) || !permissions.every(p => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p as any))) {
       return res.status(400).json({ error: `Invalid permissions. Allowed values: ${ALLOWED_PERMISSIONS.join(', ')}` });
     }
 
@@ -140,8 +141,7 @@ apiKeysRouter.patch("/:id", async (req, res) => {
     
     // Validate permissions if provided
     if (permissions !== undefined) {
-      const ALLOWED_PERMISSIONS = ["read", "write", "delete", "admin"];
-      if (!Array.isArray(permissions) || !permissions.every((p: any) => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p))) {
+      if (!Array.isArray(permissions) || !permissions.every((p: any) => typeof p === 'string' && ALLOWED_PERMISSIONS.includes(p as any))) {
         return res.status(400).json({ error: `Invalid permissions. Allowed values: ${ALLOWED_PERMISSIONS.join(', ')}` });
       }
     }

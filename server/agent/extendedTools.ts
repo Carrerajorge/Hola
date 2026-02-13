@@ -84,7 +84,6 @@ export const calculatorTool: ToolDefinition = {
             // Security: after replacing constants, only allowed function names should remain
             // Allow only: digits, operators, parentheses, commas, dots, and known math function names
             const allowedFunctionNames = Object.keys(mathFunctions).join('|');
-            const safePattern = new RegExp(`^[0-9+\\-*/().,%eE]|(?:${allowedFunctionNames})`, 'g');
             const stripped = expr.replace(new RegExp(`(?:${allowedFunctionNames})`, 'g'), '');
             if (!/^[0-9+\-*/().,%eE]*$/.test(stripped)) {
                 throw new Error('Expression contains disallowed characters or keywords');
