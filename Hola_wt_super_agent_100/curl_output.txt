@@ -1,0 +1,96 @@
+event: production_start
+data: {"runId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68","intent":"CREATE_DOCUMENT","topic":"permiso para viajar en word","deliverables":["word"],"timestamp":1768708530073}
+
+event: production_event
+data: {"type":"progress","stage":"intake","progress":0,"message":"Validating work order...","timestamp":"2026-01-18T03:55:30.080Z"}
+
+event: production_event
+data: {"type":"progress","stage":"intake","progress":50,"message":"Enriching work order...","timestamp":"2026-01-18T03:55:30.080Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"intake","progress":100,"message":"Work order processed","timestamp":"2026-01-18T03:55:32.087Z"}
+
+event: production_event
+data: {"type":"progress","stage":"blueprint","progress":0,"message":"Designing document structure...","timestamp":"2026-01-18T03:55:32.087Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"blueprint","progress":100,"message":"Document structure designed","timestamp":"2026-01-18T03:55:43.679Z"}
+
+event: production_event
+data: {"type":"progress","stage":"research","progress":0,"message":"Researching topic...","timestamp":"2026-01-18T03:55:43.679Z"}
+
+event: production_event
+data: {"type":"progress","stage":"research","progress":80,"message":"Processing research results...","timestamp":"2026-01-18T03:55:59.700Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"research","progress":100,"message":"Found 0 sources","timestamp":"2026-01-18T03:55:59.700Z"}
+
+event: production_event
+data: {"type":"progress","stage":"analysis","progress":0,"message":"Analyzing evidence...","timestamp":"2026-01-18T03:55:59.700Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"analysis","progress":100,"message":"Analysis complete","timestamp":"2026-01-18T03:56:18.601Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":0,"message":"Drafting content...","timestamp":"2026-01-18T03:56:18.603Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":0,"message":"Writing: Section...","timestamp":"2026-01-18T03:56:18.603Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":14,"message":"Writing: Section...","timestamp":"2026-01-18T03:56:25.290Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":29,"message":"Writing: Section...","timestamp":"2026-01-18T03:56:32.766Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":43,"message":"Writing: Section...","timestamp":"2026-01-18T03:56:40.329Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":57,"message":"Writing: Section...","timestamp":"2026-01-18T03:56:56.130Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":71,"message":"Writing: Section...","timestamp":"2026-01-18T03:57:07.072Z"}
+
+event: production_event
+data: {"type":"progress","stage":"writing","progress":86,"message":"Writing: Section...","timestamp":"2026-01-18T03:57:13.332Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"writing","progress":100,"message":"Drafted 7 sections","timestamp":"2026-01-18T03:57:21.278Z"}
+
+event: production_event
+data: {"type":"progress","stage":"data","progress":100,"message":"Excel not requested","timestamp":"2026-01-18T03:57:21.279Z"}
+
+event: production_event
+data: {"type":"progress","stage":"slides","progress":100,"message":"PPT not requested","timestamp":"2026-01-18T03:57:21.279Z"}
+
+event: production_event
+data: {"type":"progress","stage":"qa","progress":0,"message":"Running quality checks...","timestamp":"2026-01-18T03:57:21.280Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"qa","progress":100,"message":"QA Score: 0/100","timestamp":"2026-01-18T03:57:23.123Z"}
+
+event: production_event
+data: {"type":"progress","stage":"consistency","progress":0,"message":"Checking cross-document consistency...","timestamp":"2026-01-18T03:57:23.124Z"}
+
+event: production_event
+data: {"type":"stage_complete","stage":"consistency","progress":100,"message":"Consistency verified","timestamp":"2026-01-18T03:57:23.125Z"}
+
+event: production_event
+data: {"type":"progress","stage":"render","progress":0,"message":"Generating final documents...","timestamp":"2026-01-18T03:57:23.125Z"}
+
+event: production_event
+data: {"type":"progress","stage":"render","progress":0,"message":"Generating Word document...","timestamp":"2026-01-18T03:57:23.125Z"}
+
+event: production_event
+data: {"type":"stage_error","stage":"render","progress":0,"message":"ensureMathJaxReady is not defined","timestamp":"2026-01-18T03:57:23.128Z"}
+
+event: production_complete
+data: {"runId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68","success":true,"artifactsCount":0,"qaScore":0,"summary":"## Producción Completada\n\n**Tema:** Solicitud formal de permiso para viajar\n**Entregables:** Ninguno\n**Fuentes consultadas:** 0\n**Calidad (QA):** 0/100","timestamp":1768708643133}
+
+event: chunk
+data: {"content":"## 📄 Documentos Generados\n\n\n\n\n**Calidad:** 0/100 ✅\n\n---\n\n## Producción Completada\n\n**Tema:** Solicitud formal de permiso para viajar\n**Entregables:** Ninguno\n**Fuentes consultadas:** 0\n**Calidad (QA):** 0/100\n\n> 💡 *Los archivos están listos para descargar. Haz clic en cada enlace para obtenerlos.*","sequenceId":1,"requestId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68","runId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68"}
+
+event: done
+data: {"sequenceId":2,"requestId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68","runId":"c88c8d8c-7846-4e1a-bcd3-51cde64feb68","timestamp":1768708643135}
+

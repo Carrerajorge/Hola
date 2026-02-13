@@ -1,0 +1,6203 @@
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { SkeletonChatMessages } from "@/components/skeletons";
+import { useDraft } from "@/hooks/use-draft";
+import { useStreamingTransition } from "@/hooks/use-streaming-transition";
+import { useStreamChat } from "@/hooks/use-stream-chat";
+import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { WelcomeAnimation } from "@/components/welcome-animation-simple";
+import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
+import {
+  Plus,
+  ArrowUp,
+  Mic,
+  MicOff,
+  ChevronDown,
+  ChevronRight,
+  Globe,
+  FileText,
+  FileSpreadsheet,
+  FileIcon,
+  Check,
+  CheckCircle2,
+  Loader2,
+  MoreHorizontal,
+  PanelLeftOpen,
+  X,
+  RefreshCw,
+  ArrowLeft,
+  ArrowRight,
+  Maximize2,
+  Minimize2,
+  Copy,
+  Pencil,
+  Send,
+  ThumbsUp,
+  ThumbsDown,
+  Share2,
+  Volume2,
+  VolumeX,
+  Flag,
+  MessageSquare,
+  Square,
+  Download,
+  GripVertical,
+  Pause,
+  Play,
+  Trash2,
+  Circle,
+  Info,
+  EyeOff,
+  Eye,
+  Pin,
+  Link,
+  Star,
+  Settings,
+  Archive,
+  Folder,
+  FolderPlus
+} from "lucide-react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { chatLogger } from "@/lib/logger";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
+import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
+import { motion } from "framer-motion";
+
+import { ActiveGpt } from "@/types/chat";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, getLastGeneratedImage, storeLastGeneratedImageInfo, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
+import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
+import { useAgent } from "@/hooks/use-agent";
+import { useBrowserSession } from "@/hooks/use-browser-session";
+import { AgentObserver } from "@/components/agent-observer";
+import { VirtualComputer } from "@/components/virtual-computer";
+import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
+import { usePptStreaming } from "@/hooks/usePptStreaming";
+import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
+import { ETLDialog } from "@/components/etl-dialog";
+import { FigmaBlock } from "@/components/figma-block";
+import { CodeExecutionBlock } from "@/components/code-execution-block";
+import { IliaGPTLogo } from "@/components/iliagpt-logo";
+import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
+import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
+import { GoogleFormsDialog } from "@/components/google-forms-dialog";
+import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
+import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
+import { markdownToTipTap } from "@/lib/markdownToHtml";
+import { detectGmailIntent } from "@/lib/gmailIntentDetector";
+import { shouldAutoActivateAgent } from "@/lib/complexityDetector";
+import { shouldUseSuperAgent } from "@/lib/superAgentDetector";
+import { useImageState, fetchImageAsBase64 } from "@/hooks/use-image-state";
+import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
+import { useSuperAgentStore } from "@/stores/super-agent-store";
+import { useSuperAgentStream, type SuperAgentState, type SuperAgentArtifact, type SuperAgentFinal } from "@/hooks/use-super-agent";
+import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
+import { useStreamingStore } from "@/stores/streamingStore";
+import { DocumentPreviewPanel, type DocumentPreviewArtifact } from "@/components/document-preview-panel";
+import { InlineGmailPreview } from "@/components/inline-gmail-preview";
+import { VoiceChatMode } from "@/components/voice-chat-mode";
+import { RecordingPanel } from "@/components/recording-panel";
+import { Composer } from "@/components/composer";
+import { parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
+import { ChatMessageList, ChatMessageListProps } from "@/components/chat/ChatMessageList";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+import { useChatStore } from "@/stores/chatStore";
+import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
+import { PromptSuggestions } from "@/components/prompt-suggestions";
+import { MessageFeedback } from "@/components/message-feedback";
+import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
+// AgentPanel removed - progress is shown inline in chat messages
+import { useAuth } from "@/hooks/use-auth";
+import { useConversationState } from "@/hooks/use-conversation-state";
+import { useAgentMode } from "@/hooks/use-agent-mode";
+import { Database, Sparkles, AudioLines } from "lucide-react";
+import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
+import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import {
+  dataImageUrlToFile,
+  extractBareUrlsFromText,
+  extractFilesFromDataTransfer,
+  extractImageUrlsFromHtml,
+  extractLinkUrlsFromHtml,
+  extractUrlsFromUriList,
+  isDataImageUrl,
+  normalizeFileForUpload,
+  normalizeHttpUrl,
+  uniq,
+} from "@/lib/attachmentIngest";
+import { useChats } from "@/hooks/use-chats";
+import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
+import { useProjects } from "@/hooks/use-projects";
+import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
+import { UniversalExecutionConsole } from "./universal-execution-console";
+import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
+import { LiveExecutionConsole } from "./live-execution-console";
+import { PricingModal } from "./pricing-modal";
+
+import { SyncStatusIndicator } from "./sync-status-indicator";
+import { ProductionProgress } from "@/components/production-progress";
+import { AiProcessStep } from "./chat-interface/types";
+import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
+import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
+import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
+import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
+import { extractTextFromChildren, isNumericValue } from "./chat-interface/utils";
+
+function AvatarWithFallback({
+  src,
+  alt,
+  fallback
+}: {
+  src: string;
+  alt: string;
+  fallback: React.ReactNode;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return (
+      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
+        {fallback}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-full rounded-2xl object-cover"
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
+
+// Heuristic function to detect uncertainty in AI responses
+function detectUncertainty(content: string): { confidence: 'high' | 'medium' | 'low'; reason?: string } {
+  const lowConfidencePatterns = [
+    /no (estoy|está) seguro/i,
+    /no (puedo|logro|he podido) confirmar/i,
+    /falta información/i,
+    /información (insuficiente|limitada)/i,
+    /no (se menciona|se especifica|aparece|encontré)/i,
+    /podría ser/i,
+    /es probable que/i,
+    /sin certeza/i,
+    /no garantiza/i,
+    /difícil determinar/i
+  ];
+
+  const mediumConfidencePatterns = [
+    /parece indicar/i,
+    /sugiere que/i,
+    /aparentemente/i,
+    /posiblemente/i,
+    /en principio/i,
+    /según el contexto/i
+  ];
+
+  for (const pattern of lowConfidencePatterns) {
+    if (pattern.test(content)) {
+      return {
+        confidence: 'low',
+        reason: 'La respuesta contiene expresiones de duda o falta de información.'
+      };
+    }
+  }
+
+  for (const pattern of mediumConfidencePatterns) {
+    if (pattern.test(content)) {
+      return {
+        confidence: 'medium',
+        reason: 'La respuesta se basa en inferencias o indicaciones no explícitas.'
+      };
+    }
+  }
+
+  return { confidence: 'high' };
+}
+
+
+
+
+
+type AiState = "idle" | "thinking" | "responding" | "agent_working";
+
+
+interface ChatInterfaceProps {
+  messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  onSendMessage: (message: Message) => Promise<{ run?: { id: string; chatId: string; userMessageId: string; status: string }; deduplicated?: boolean } | undefined>;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+  onCloseSidebar?: () => void;
+  activeGpt?: ActiveGpt | null;
+  aiState: AiState;
+  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
+  aiStateChatId?: string | null;
+  aiProcessSteps: AiProcessStep[];
+  setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
+  chatId?: string | null;
+  onOpenApps?: () => void;
+  onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
+  onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
+  onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
+  onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
+  onNewChat?: () => void;
+  onEditGpt?: (gpt: ActiveGpt) => void;
+  onHideGptFromSidebar?: (gptId: string) => void;
+  onPinGptToSidebar?: (gptId: string) => void;
+  isGptPinned?: (gptId: string) => boolean;
+  onAboutGpt?: (gpt: ActiveGpt) => void;
+  onPinChat?: (id: string, e: React.MouseEvent) => void;
+  onArchiveChat?: (id: string, e: React.MouseEvent) => void;
+  onHideChat?: (id: string, e: React.MouseEvent) => void;
+  onDeleteChat?: (id: string, e: React.MouseEvent) => void;
+  onDownloadChat?: (id: string, e: React.MouseEvent) => void;
+  onEditChatTitle?: (id: string, newTitle: string) => void;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  folders?: Array<{ id: string; name: string; color: string; chatIds: string[] }>;
+  onMoveToFolder?: (chatId: string, folderId: string | null) => void;
+  onCreateFolder?: (name: string) => void;
+  currentFolderId?: string | null;
+  // Super Agent UI state - kept in parent to survive ChatInterface key changes
+  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
+  setUiPhase?: React.Dispatch<React.SetStateAction<'idle' | 'thinking' | 'console' | 'done'>>;
+  activeRunId?: string | null;
+  setActiveRunId?: React.Dispatch<React.SetStateAction<string | null>>;
+  selectedProjectId?: string | null;
+}
+
+interface UploadedFile {
+  id?: string;
+  name: string;
+  type: string;
+  mimeType?: string;
+  size: number;
+  dataUrl?: string;
+  storagePath?: string;
+  status?: string;
+  content?: string;
+  analysisId?: string;
+  spreadsheetData?: {
+    uploadId: string;
+    sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+    previewData?: { headers: string[]; data: any[][] };
+  };
+}
+
+function isAnalyzableFile(filename: string): boolean {
+  const ext = filename.toLowerCase().split('.').pop();
+  return ['xlsx', 'xls', 'csv', 'pdf', 'doc', 'docx'].includes(ext || '');
+}
+
+async function triggerDocumentAnalysis(
+  uploadId: string,
+  filename: string,
+  onAnalysisStarted: (analysisId: string) => void
+): Promise<void> {
+  if (!isAnalyzableFile(filename)) return;
+
+  try {
+    const response = await fetch(`/api/chat/uploads/${uploadId}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'all' })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.sessionId || data.analysisId) {
+        onAnalysisStarted(data.sessionId || data.analysisId);
+      }
+    }
+  } catch (err) {
+    console.error('Analysis failed to start:', err);
+  }
+}
+
+export function ChatInterface({
+  messages,
+  setMessages,
+  onSendMessage,
+  isSidebarOpen = true,
+  onToggleSidebar,
+  onCloseSidebar,
+  activeGpt,
+  aiState,
+  setAiState,
+  aiStateChatId,
+  aiProcessSteps,
+  setAiProcessSteps,
+  chatId,
+  onOpenApps,
+  onUpdateMessageAttachments,
+  onEditMessageAndTruncate,
+  onTruncateAndReplaceMessage,
+  onTruncateMessagesAt,
+  onNewChat,
+  onEditGpt,
+  onHideGptFromSidebar,
+  onPinGptToSidebar,
+  isGptPinned,
+  onAboutGpt,
+  onPinChat,
+  onArchiveChat,
+  onHideChat,
+  onDeleteChat,
+  onDownloadChat,
+  onEditChatTitle,
+  isPinned = false,
+  isArchived = false,
+  folders = [],
+  onMoveToFolder,
+  onCreateFolder,
+  currentFolderId,
+  // Super Agent UI state from parent to survive key changes
+  uiPhase: uiPhaseProp,
+  setUiPhase: setUiPhaseProp,
+  activeRunId: activeRunIdProp,
+  setActiveRunId: setActiveRunIdProp,
+  selectedProjectId
+}: ChatInterfaceProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const {
+    projects,
+    getProject
+  } = useProjects();
+
+  const selectedProject = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return getProject(selectedProjectId) || projects.find((p: any) => p.id === selectedProjectId);
+  }, [selectedProjectId, projects, getProject]);
+
+  const { user } = useAuth();
+  const { toast } = useToast();
+  
+  // First visit explosion
+  const { showExplosion, completeWelcome } = useFirstVisit();
+
+  const userPlanInfo = useMemo(() => {
+    if (!user) return null;
+    const plan = user.plan || 'free';
+    const isAdmin = Boolean((user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'));
+    // isPaid = true only if plan is NOT 'free' AND status is 'active'
+    const isPaid = Boolean(plan && plan !== 'free' && (user?.status === 'active'));
+    return { plan, isAdmin, isPaid };
+  }, [user]);
+
+  // Upgrade prompt for free users after 3rd query
+  const {
+    showPrompt: showUpgradePrompt,
+    queryCount,
+    incrementQuery,
+    closePrompt: closeUpgradePrompt,
+    isFreeUser,
+  } = useUpgradePrompt(user?.plan ?? undefined);
+  
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+
+  // Sync with chat store for future full migration
+  const { setInput: setStoreInput } = useChatStore();
+
+  const {
+    state: conversationState,
+    isLoading: isConversationStateLoading,
+    error: conversationStateError,
+    refreshState: refreshConversationState,
+    addImage: addImageToState,
+    addArtifact: addArtifactToState,
+    getLatestImage: getLatestImageFromServer,
+  } = useConversationState(chatId);
+
+  useEffect(() => {
+    if (conversationState) {
+      console.log(`[ChatInterface] Conversation state loaded for chat ${chatId}:`, {
+        messagesCount: conversationState.messages?.length || 0,
+        imagesCount: conversationState.images?.length || 0,
+        artifactsCount: conversationState.artifacts?.length || 0,
+      });
+    }
+    if (conversationStateError) {
+      console.warn(`[ChatInterface] Failed to load conversation state for chat ${chatId}:`, conversationStateError);
+    }
+  }, [chatId, conversationState, conversationStateError]);
+
+  const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
+  const [input, setInputRaw] = useState(initialDraft);
+
+  const setInput = useCallback((value: string | ((prev: string) => string)) => {
+    setInputRaw((prev: string) => {
+      const newValue = typeof value === "function" ? value(prev) : value;
+      currentTextRef.current = newValue;
+      if (chatId) {
+        saveDraftDebounced(chatId, newValue);
+      }
+      return newValue;
+    });
+  }, [chatId, saveDraftDebounced, currentTextRef]);
+  const [streamingContent, setStreamingContent] = useState("");
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
+  const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
+  const [uploadedFiles, setUploadedFilesState] = useState<UploadedFile[]>([]);
+  // uploadedFiles is mutated by async upload/polling code; keep a ref so helpers can read the latest state.
+  const uploadedFilesRef = useRef<UploadedFile[]>([]);
+  const setUploadedFiles = useCallback((value: React.SetStateAction<UploadedFile[]>) => {
+    setUploadedFilesState((prev: UploadedFile[]) => {
+      const next =
+        typeof value === "function"
+          ? (value as (p: UploadedFile[]) => UploadedFile[])(prev)
+          : value;
+      uploadedFilesRef.current = next;
+      return next;
+    });
+  }, []);
+  const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
+  const [gptSessionId, setGptSessionId] = useState<string | null>(null);
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
+  const [editedDocumentContent, setEditedDocumentContent] = useState<string>("");
+  const [documentPreviewArtifact, setDocumentPreviewArtifact] = useState<DocumentPreviewArtifact | null>(null);
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [editingSelectionText, setEditingSelectionText] = useState<string>("");
+  const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
+  const [selectedDocText, setSelectedDocText] = useState<string>("");
+  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
+  const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
+  const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
+  // DOCX Generation State - for blank page with progress overlay
+  const [docGenerationState, setDocGenerationState] = useState<{
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
+  const [figmaTokenInput, setFigmaTokenInput] = useState("");
+  const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
+  const [isFigmaConnected, setIsFigmaConnected] = useState(false);
+  const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
+  const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
+  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
+  const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
+  // isAgentPanelOpen removed - agent progress is shown inline in chat
+  const modelSelectorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fetchUserPlanInfo = async () => {
+      try {
+        const response = await fetch("/api/user/usage", { credentials: "include" });
+        if (response.ok) {
+          const data = await response.json();
+          setUserPlanState({
+            plan: data.plan,
+            isAdmin: data.isAdmin,
+            isPaid: data.plan !== "free"
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch user plan info:", error);
+      }
+    };
+    fetchUserPlanInfo();
+  }, [user?.id]);
+
+  const agentMode = useAgentMode(chatId || "");
+
+  // Agent store for persisting agent runs across remounts
+  const agentStore = useAgentStore();
+  const { startRun: startAgentRun } = useStartAgentRun();
+  const { cancel: cancelAgentRun } = useCancelAgentRun();
+
+  // Track the current agent message ID for this chat session
+  const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
+
+  // Track active run ID for Live Execution Console
+  // Use props from parent to survive key changes, with local state as fallback
+  const [activeRunIdLocal, setActiveRunIdLocal] = useState<string | null>(null);
+  const activeRunId = activeRunIdProp !== undefined ? activeRunIdProp : activeRunIdLocal;
+  const setActiveRunId = setActiveRunIdProp || setActiveRunIdLocal;
+
+  // uiPhase: single source of truth for UI state during Super Agent runs
+  // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
+  const [uiPhaseLocal, setUiPhaseLocal] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const uiPhase = uiPhaseProp !== undefined ? uiPhaseProp : uiPhaseLocal;
+  const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
+
+  const uiPhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Execution stream client for UniversalExecutionConsole - DISABLED
+  // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
+  // LiveExecutionConsole has its own RunStreamClient that handles streaming correctly.
+  const [executionClient, setExecutionClient] = useState<ExecutionStreamClient | null>(null);
+  const [executionRunState, setExecutionRunState] = useState<FlatRunState | null>(null);
+
+  // DISABLED: ExecutionStreamClient was connecting to /stream endpoint and causing re-renders
+  // that unmounted/remounted the LiveExecutionConsole in a loop.
+  // The LiveExecutionConsole in MessageList now handles all SSE streaming via RunStreamClient.
+  // useEffect(() => {
+  //   if (uiPhase === 'console' && activeRunId) {
+  //     const client = new ExecutionStreamClient(activeRunId);
+  //     const unsubscribe = client.subscribe((state) => {
+  //       setExecutionRunState(state);
+  //       if (state.status === 'completed') {
+  //         setUiPhase('done');
+  //       }
+  //     });
+  //     client.connect();
+  //     setExecutionClient(client);
+  //     return () => {
+  //       unsubscribe();
+  //       client.destroy();
+  //       setExecutionClient(null);
+  //       setExecutionRunState(null);
+  //     };
+  //   } else {
+  //     if (executionClient) {
+  //       executionClient.destroy();
+  //       setExecutionClient(null);
+  //       setExecutionRunState(null);
+  //     }
+  //   }
+  // }, [uiPhase, activeRunId]);
+
+  // Optimistic messages - shown immediately before they appear in props
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+
+  // Clean up optimistic messages once they appear in props.messages
+  useEffect(() => {
+    if (optimisticMessages.length > 0 && messages.length > 0) {
+      const propsMessageIds = new Set(messages.map(m => m.id));
+      setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !propsMessageIds.has(m.id)));
+    }
+  }, [messages, optimisticMessages.length]);
+
+  // Track previous chatId for optimistic message cleanup - separate from the stream reset tracking
+  const prevChatIdForOptimisticRef = useRef<string | null | undefined>(undefined);
+
+  // Clear optimistic messages only when switching between existing chats
+  // NOT when transitioning from null to a new pending chat (which happens during message send)
+  useEffect(() => {
+    const prevChatId = prevChatIdForOptimisticRef.current;
+    const isInitialRender = prevChatId === undefined;
+    const isNewChatCreation = prevChatId === null && chatId?.startsWith('pending-');
+    const isSameChatTransition = prevChatId?.startsWith('pending-') && chatId && !chatId.startsWith('pending-');
+
+    chatLogger.debug("optimistic chatId effect:", {
+      prevChatId,
+      chatId,
+      isInitialRender,
+      isNewChatCreation,
+      isSameChatTransition
+    });
+
+    // Only clear optimistic messages when:
+    // 1. Not initial render
+    // 2. Not transitioning from null to pending (new chat creation)
+    // 3. Not transitioning from pending to confirmed chatId (same chat)
+    if (!isInitialRender && !isNewChatCreation && !isSameChatTransition) {
+      // This is a real chat switch - clear optimistic messages
+      chatLogger.debug("Clearing optimistic messages (real chat switch)");
+      setOptimisticMessages([]);
+    } else {
+      chatLogger.debug("Keeping optimistic messages");
+    }
+
+    prevChatIdForOptimisticRef.current = chatId;
+  }, [chatId]); // Only depend on chatId - don't run effect on every optimistic message change
+
+  // Reset GPT session ID when activeGpt or chatId changes (new chat or GPT switch)
+  useEffect(() => {
+    setGptSessionId(null);
+  }, [activeGpt?.id, chatId]);
+
+  // Use the store-based polling hook for the active agent run (only when valid messageId exists)
+  useAgentPolling(currentAgentMessageId);
+
+  // Get store runs reactively to trigger re-render when store updates
+  const allAgentRuns = useAgentStore((state: any) => state.runs);
+
+  // Get the active run from the store for the current chat (use reactive allAgentRuns)
+  const activeAgentRun = useMemo(() => {
+    if (currentAgentMessageId) {
+      return allAgentRuns[currentAgentMessageId] || null;
+    }
+    // Also check if there's an active run for this chatId from the store
+    const runs = Object.values(allAgentRuns);
+    return runs.find((r: any) => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
+  }, [currentAgentMessageId, allAgentRuns, chatId]);
+
+  // Combined messages: prop messages + optimistic messages + agent runs from store
+  const displayMessages = useMemo(() => {
+    // Start with optimistic messages, then merge prop messages (prop messages take priority)
+    const msgMap = new Map(optimisticMessages.map((m: any) => [m.id, m]));
+    // Override with prop messages (they are the source of truth once available)
+    messages.forEach((m: any) => msgMap.set(m.id, m));
+
+    // Merge agent runs from the store into messages (use reactive allAgentRuns)
+    Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
+      // Only include runs for the current chat
+      if (runState.chatId === chatId || (!chatId && runState.chatId)) {
+        const existingMsg = msgMap.get(messageId);
+        if (existingMsg) {
+          // Update existing message with agent run data
+          msgMap.set(messageId, {
+            ...existingMsg,
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            }
+          });
+        } else {
+          // Create new message for agent run
+          msgMap.set(messageId, {
+            id: messageId,
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date(runState.createdAt),
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            }
+          });
+        }
+      }
+    });
+
+    return Array.from(msgMap.values()).sort((a: any, b: any) =>
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [messages, optimisticMessages, allAgentRuns, chatId]);
+
+  // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
+  useEffect(() => {
+    // Find if there's an active run for this chat
+    const matchingRun = Object.entries(allAgentRuns).find(
+      ([_, run]: [string, any]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
+    );
+
+    if (matchingRun) {
+      const [msgId] = matchingRun;
+      setCurrentAgentMessageId(msgId);
+      // Polling auto-starts in useAgentPolling when runId and active status are present
+    } else {
+      setCurrentAgentMessageId(null);
+    }
+  }, [chatId, allAgentRuns]);
+
+  // Toast notifications for agent mode
+  const prevAgentStatusRef = useRef<string | null>(null);
+
+  // Watch for agent run status changes and trigger appropriate toasts
+  useEffect(() => {
+    const currentStatus = activeAgentRun?.status || null;
+    const prevStatus = prevAgentStatusRef.current;
+
+    // Only trigger toasts on status changes
+    if (currentStatus && currentStatus !== prevStatus) {
+      switch (currentStatus) {
+        case 'running':
+        case 'planning':
+          if (prevStatus === 'starting' || prevStatus === 'queued' || prevStatus === null) {
+            toast({
+              description: "Agente iniciado",
+              duration: 3000,
+            });
+          }
+          break;
+        case 'completed':
+          toast({
+            description: "Agente completó la tarea",
+            duration: 3000,
+          });
+          break;
+        case 'failed':
+          toast({
+            variant: "destructive",
+            description: `Error: ${activeAgentRun?.error || 'Error desconocido'}`,
+            duration: 5000,
+          });
+          break;
+        case 'cancelled':
+          toast({
+            description: "Ejecución cancelada",
+            duration: 3000,
+          });
+          break;
+      }
+    }
+
+    prevAgentStatusRef.current = currentStatus;
+  }, [activeAgentRun?.status, activeAgentRun?.error, toast]);
+
+  // Compute whether agent is actively running (for stop button)
+  const isAgentRunning = useMemo(() => {
+    const status = activeAgentRun?.status;
+    return status === 'starting' || status === 'queued' || status === 'planning' || status === 'running' || status === 'replanning';
+  }, [activeAgentRun?.status]);
+
+  // Handle stopping the agent
+  const handleAgentStop = useCallback(async () => {
+    if (activeAgentRun && currentAgentMessageId) {
+      // If runId is available, cancel via API
+      if (activeAgentRun.runId) {
+        try {
+          await cancelAgentRun(currentAgentMessageId, activeAgentRun.runId);
+          toast({ description: "Agente detenido", duration: 3000 });
+        } catch (error) {
+          console.error("Failed to stop agent:", error);
+          toast({ title: "Error", description: "No se pudo detener el agente", variant: "destructive" });
+        }
+      } else {
+        // If still in starting/queued state without runId, abort the pending request and cancel locally
+        abortPendingAgentStart(currentAgentMessageId);
+        useAgentStore.getState().cancelRun(currentAgentMessageId);
+        toast({ description: "Agente cancelado", duration: 3000 });
+      }
+    }
+  }, [activeAgentRun, currentAgentMessageId, cancelAgentRun, toast]);
+
+  const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
+
+  const selectedModelData = useMemo(() => {
+    // If user selected a model, use that
+    if (selectedModelId) {
+      const found = availableModels.find((m: any) => m.id === selectedModelId || m.modelId === selectedModelId);
+      if (found) return found;
+    }
+    // Default: prefer Gemini models over others (Perplexity has no API key)
+    const preferredModel = availableModels.find((m: any) => 
+      m.provider === 'google' && m.modelId?.includes('gemini')
+    );
+    return preferredModel || availableModels[0] || null;
+  }, [selectedModelId, availableModels]);
+
+  const selectedProvider = selectedModelData?.provider || "gemini";
+  const selectedModel = selectedModelData?.modelId || "gemini-3-flash-preview";
+
+  const modelsByProvider = useMemo(() => {
+    const grouped: Record<string, AvailableModel[]> = {};
+    availableModels.forEach((model: any) => {
+      if (!grouped[model.provider]) {
+        grouped[model.provider] = [];
+      }
+      grouped[model.provider].push(model);
+    });
+    return grouped;
+  }, [availableModels]);
+  const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
+  const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
+  const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
+  const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
+  const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
+  const [isGmailActive, setIsGmailActive] = useState(true);
+  const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
+  const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{ messageId: string; imageData: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [previewUploadedImage, setPreviewUploadedImage] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [previewFileAttachment, setPreviewFileAttachment] = useState<{
+    name: string;
+    type: string;
+    mimeType?: string;
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+    content?: string;
+    isLoading?: boolean;
+    isProcessing?: boolean;
+  } | null>(null);
+  const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const latestGeneratedImageRef = useRef<{ messageId: string; imageData: string } | null>(null);
+  const dragCounterRef = useRef(0);
+  const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const previewDocumentRef = useRef<DocumentBlock | null>(null);
+  const orchestratorRef = useRef<{ runOrchestrator: (prompt: string) => Promise<void> } | null>(null);
+  const editedDocumentContentRef = useRef<string>("");
+  const chatIdRef = useRef<string | null>(null);
+  const streamingChatIdRef = useRef<string | null>(null);
+  const prevAiStateRef = useRef<AiState>("idle");
+
+  // Access streaming store actions
+  const { startRun, updateStatus, completeRun, failRun, abortRun, appendContent, clearRun } = useStreamingStore();
+
+  // Keep refs in sync with state for cleanup function access
+  useEffect(() => {
+    editedDocumentContentRef.current = editedDocumentContent;
+  }, [editedDocumentContent]);
+
+  useEffect(() => {
+    chatIdRef.current = chatId || null;
+  }, [chatId]);
+
+  // Agent progress is now shown inline in chat messages, no panel needed
+
+  // Update streaming store when aiState changes
+  // This allows tracking of chats processing in background after component unmounts
+  useEffect(() => {
+    const prevState = prevAiStateRef.current;
+    prevAiStateRef.current = aiState;
+    const currentChatId = chatId || null;
+
+    // Start run when streaming begins
+    if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
+      streamingChatIdRef.current = currentChatId;
+      if (currentChatId) {
+        startRun(currentChatId);
+      }
+    }
+
+    // Update to streaming status
+    if (prevState === "thinking" && aiState === "responding") {
+      if (streamingChatIdRef.current) {
+        updateStatus(streamingChatIdRef.current, 'streaming');
+      }
+    }
+
+    // Complete run when streaming ends
+    if ((prevState === "thinking" || prevState === "responding") && aiState === "idle") {
+      const completedChatId = streamingChatIdRef.current;
+      if (completedChatId) {
+        // Get the active chat ID from the current prop (may have changed if user switched chats)
+        completeRun(completedChatId, currentChatId);
+        streamingChatIdRef.current = null;
+      }
+    }
+  }, [aiState, chatId, startRun, updateStatus, completeRun]);
+
+  // Reset streaming state when chatId changes (switching chats)
+  // This ensures the new chat starts clean without interference from previous chat
+  // NOTE: We do NOT reset aiState here - let it complete naturally for background streaming
+  // The aiStateChatId check in the indicator condition prevents bleed-through
+  const prevChatIdRef = useRef<string | null | undefined>(chatId);
+  useEffect(() => {
+    if (prevChatIdRef.current !== chatId) {
+      console.debug(`[ChatInterface] Chat switched from ${prevChatIdRef.current} to ${chatId}`);
+
+      // NOTE: Do NOT abort streaming when switching chats!
+      // Streaming continues in background and completes in the streamingStore.
+      // Only clear local UI state for the new active chat.
+
+      // Clear LOCAL streaming content only - actual content is preserved in store per-chat
+      setStreamingContent("");
+      streamingContentRef.current = "";
+
+      prevChatIdRef.current = chatId;
+    }
+  }, [chatId]);
+
+  const validateStreamingChatId = useCallback(() => {
+    return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;
+  }, [chatId]);
+
+  // Auto-save document when component unmounts (chat switch, new chat, etc.)
+  useEffect(() => {
+    return () => {
+      const currentDoc = activeDocEditorRef.current;
+      const currentContent = editedDocumentContentRef.current;
+      const currentChatId = chatIdRef.current;
+
+      if (!currentDoc || !currentContent || !currentChatId) return;
+
+      const realChatId = resolveRealChatId(currentChatId);
+      if (realChatId.startsWith("pending-")) return;
+
+      const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+      const plainText = stripHtml(currentContent);
+      const placeholderPhrases = [
+        "comienza a escribir tu documento aquí",
+        "generación inteligente de documentos",
+        "escribe tu solicitud en el chat",
+        "título de la presentación",
+        "haz clic para agregar"
+      ];
+      const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+
+      if (!isPlaceholder && plainText.length > 20) {
+        // Use sendBeacon for reliable save on unmount
+        const data = JSON.stringify({
+          type: currentDoc.type,
+          title: currentDoc.title,
+          content: currentContent
+        });
+        navigator.sendBeacon(`/api/chats/${realChatId}/documents`, new Blob([data], { type: 'application/json' }));
+      }
+    };
+  }, []);
+
+  // PPT streaming integration
+  const pptStreaming = usePptStreaming();
+  const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
+  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean | 'html') => Promise<void> | void) | null>(null);
+  const speechRecognitionRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const lastScrollTimeRef = useRef<number>(0);
+  const scrollThrottleMs = 300;
+
+  const scrollToBottom = useCallback((force = false) => {
+    if (userHasScrolledUp && !force) return;
+
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'end'
+      });
+    });
+  }, [userHasScrolledUp]);
+
+  const isNearBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 150;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+    const nearBottom = distanceFromBottom < 150;
+    setShowScrollButton(!nearBottom);
+
+    if (distanceFromBottom > 200) {
+      setUserHasScrolledUp(true);
+    } else if (distanceFromBottom < 50) {
+      setUserHasScrolledUp(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (aiState === "idle" && !streamingContent) return;
+    if (userHasScrolledUp) return;
+
+    const now = Date.now();
+    if (now - lastScrollTimeRef.current < scrollThrottleMs) return;
+    lastScrollTimeRef.current = now;
+
+    scrollToBottom();
+  }, [aiState, streamingContent, userHasScrolledUp, scrollToBottom]);
+
+  const prevMessageCountRef = useRef(displayMessages.length);
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current;
+    const currentCount = displayMessages.length;
+    prevMessageCountRef.current = currentCount;
+
+    if (currentCount > prevCount) {
+      setUserHasScrolledUp(false);
+      scrollToBottom(true);
+    }
+  }, [displayMessages.length, scrollToBottom]);
+
+  useEffect(() => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+        speechRecognitionRef.current = null;
+      }
+    };
+  }, []);
+
+  // Click-outside handler for model selector dropdown
+  useEffect(() => {
+    if (!isModelSelectorOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(e.target as Node)) {
+        setIsModelSelectorOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isModelSelectorOpen]);
+
+  // Callback to close model selector when textarea receives focus
+  const handleCloseModelSelector = useCallback(() => {
+    setIsModelSelectorOpen(false);
+  }, []);
+
+  // Recording timer effect
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((prev: number) => prev + 1);
+      }, 1000);
+    } else {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, [isRecording, isPaused]);
+
+  // Close file attachment preview on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && previewFileAttachment) {
+        setPreviewFileAttachment(null);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [previewFileAttachment]);
+
+  // Global keyboard shortcuts for accessibility
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // Ctrl+/ or Cmd+/ to show keyboard shortcuts dialog
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setIsKeyboardShortcutsOpen(true);
+      }
+
+      // Escape to cancel streaming (only when actively streaming)
+      if (e.key === "Escape" && aiState !== "idle") {
+        e.preventDefault();
+        handleStopChatRef.current?.();
+        setScreenReaderAnnouncement("Generación cancelada");
+      }
+    };
+
+    document.addEventListener("keydown", handleGlobalShortcuts);
+    return () => document.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [aiState]);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    activeDocEditorRef.current = activeDocEditor;
+  }, [activeDocEditor]);
+
+  useEffect(() => {
+    previewDocumentRef.current = previewDocument;
+  }, [previewDocument]);
+
+  const isComplexExcelPrompt = (prompt: string): boolean => {
+    return /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook|crea.*gr[aá]fic|genera.*gr[aá]fic|insert.*chart/i.test(prompt.toLowerCase());
+  };
+
+  // Document editor is now only opened manually by the user clicking the buttons
+  // Removed auto-open behavior to prevent unwanted document creation
+
+  // Check Figma connection status and handle OAuth callback
+  useEffect(() => {
+    const checkFigmaStatus = async () => {
+      try {
+        const response = await fetch("/api/figma/status");
+        const data = await response.json();
+        setIsFigmaConnected(data.connected);
+      } catch (error) {
+        console.error("Error checking Figma status:", error);
+      }
+    };
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('figma_connected') === 'true') {
+      setIsFigmaConnected(true);
+      setIsFigmaConnecting(false);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (urlParams.get('figma_error')) {
+      setIsFigmaConnecting(false);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    checkFigmaStatus();
+  }, []);
+
+  // Figma connection handler - OAuth flow
+  const handleFigmaConnect = () => {
+    setIsFigmaConnecting(true);
+    window.location.href = "/api/auth/figma";
+  };
+
+  const handleFigmaDisconnect = async () => {
+    try {
+      await fetch("/api/figma/disconnect", { method: "POST" });
+      setIsFigmaConnected(false);
+    } catch (error) {
+      console.error("Error disconnecting from Figma:", error);
+    }
+  };
+
+  // Function to open blank document editor - preserves existing messages
+  const openBlankDocEditor = (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => {
+    const titles = {
+      word: "Nuevo Documento Word",
+      excel: "Nueva Hoja de Cálculo",
+      ppt: "Nueva Presentación"
+    };
+    const templates = {
+      word: "", // Blank canvas - content will stream in real-time
+      excel: "",
+      ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
+    };
+
+    // Only update document editor state - DO NOT clear messages
+    setSelectedDocTool(type);
+    setActiveDocEditor({
+      type,
+      title: titles[type],
+      content: templates[type],
+      showInstructions: options?.showInstructions
+    });
+    setEditedDocumentContent(templates[type]);
+
+    // Close sidebar when opening a document tool
+    onCloseSidebar?.();
+  };
+
+  const closeDocEditor = async () => {
+    const currentDoc = activeDocEditor;
+    const currentContent = editedDocumentContent;
+
+    console.log("[closeDocEditor] Starting save process", {
+      hasChatId: !!chatId,
+      chatId,
+      hasDoc: !!currentDoc,
+      contentLength: currentContent?.length || 0
+    });
+
+    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+    const plainText = stripHtml(currentContent);
+    const placeholderPhrases = [
+      "comienza a escribir tu documento aquí",
+      "generación inteligente de documentos",
+      "escribe tu solicitud en el chat",
+      "título de la presentación",
+      "haz clic para agregar"
+    ];
+    const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+
+    console.log("[closeDocEditor] Validation", {
+      plainTextLength: plainText.length,
+      isPlaceholder,
+      willSave: !!(chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20)
+    });
+
+    if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
+      let realChatId = resolveRealChatId(chatId);
+
+      if (isPendingChat(chatId)) {
+        let attempts = 0;
+        const maxAttempts = 10;
+        while (isPendingChat(chatId) && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          realChatId = resolveRealChatId(chatId);
+          attempts++;
+        }
+      }
+
+      if (!isPendingChat(chatId) && !realChatId.startsWith("pending-")) {
+        try {
+          const response = await fetch(`/api/chats/${realChatId}/documents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: currentDoc.type,
+              title: currentDoc.title,
+              content: currentContent
+            })
+          });
+          if (response.ok) {
+            const updatedMessage = await response.json();
+            if (updatedMessage && updatedMessage.id && updatedMessage.attachments && onUpdateMessageAttachments) {
+              const newMessage: Message = {
+                id: updatedMessage.id,
+                role: updatedMessage.role || "system",
+                content: updatedMessage.content || "",
+                timestamp: new Date(updatedMessage.createdAt || Date.now()),
+                attachments: updatedMessage.attachments
+              };
+              onUpdateMessageAttachments(realChatId, updatedMessage.id, updatedMessage.attachments, newMessage);
+            }
+          } else {
+            console.error("Error saving document: server returned", response.status);
+          }
+        } catch (err) {
+          console.error("Error saving document:", err);
+        }
+      } else {
+        console.log("Chat creation timed out, document not saved");
+      }
+    }
+
+    setActiveDocEditor(null);
+    setSelectedDocTool(null);
+    setEditedDocumentContent("");
+    docInsertContentRef.current = null;
+  };
+
+  const handleReopenDocument = (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => {
+    setSelectedDocTool(doc.type);
+    setActiveDocEditor({
+      type: doc.type,
+      title: doc.title,
+      content: doc.content
+    });
+    setEditedDocumentContent(doc.content);
+    setMinimizedDocument(null);
+    onCloseSidebar?.();
+  };
+
+  const minimizeDocEditor = () => {
+    if (!activeDocEditor) return;
+
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
+
+    setMinimizedDocument({
+      type: activeDocEditor.type,
+      title: activeDocEditor.title,
+      content: editedDocumentContent || activeDocEditor.content,
+      messageId: lastAssistantMessage?.id
+    });
+    setActiveDocEditor(null);
+    setSelectedDocTool(null);
+  };
+
+  const restoreDocEditor = () => {
+    if (!minimizedDocument) return;
+
+    setActiveDocEditor({
+      type: minimizedDocument.type,
+      title: minimizedDocument.title,
+      content: minimizedDocument.content
+    });
+    setSelectedDocTool(minimizedDocument.type);
+    setEditedDocumentContent(minimizedDocument.content);
+    setMinimizedDocument(null);
+    onCloseSidebar?.();
+  };
+
+  // Handle new chat - reset all document state before calling parent handler
+  const handleNewChat = useCallback(() => {
+    // Reset document tool selection
+    setSelectedDocTool(null);
+    setActiveDocEditor(null);
+    setMinimizedDocument(null);
+    setEditedDocumentContent('');
+    // Reset document generation state
+    setDocGenerationState({
+      status: 'idle',
+      progress: 0,
+      stage: '',
+      downloadUrl: null,
+      fileName: null,
+      fileSize: null
+    });
+    // Call original onNewChat
+    onNewChat?.();
+  }, [onNewChat]);
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const analysisAbortControllerRef = useRef<AbortController | null>(null);
+  const streamIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamingContentRef = useRef<string>("");
+  const aiStateRef = useRef<AiState>("idle");
+  const composerRef = useRef<HTMLDivElement>(null);
+  const handleStopChatRef = useRef<(() => void) | null>(null);
+
+  // Centralized streaming→message transition manager.
+  // Guarantees the message is visible in the DOM before streaming is cleared.
+  const streamTransition = useStreamingTransition({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
+  // All-in-one streaming hook: fetch + SSE parse + RAF throttle + atomic finalize
+  const streamChat = useStreamChat({
+    setOptimisticMessages,
+    onSendMessage,
+    setStreamingContent,
+    streamingContentRef,
+    setAiState,
+    setAiProcessSteps,
+  });
+
+  // Measure composer height and set CSS variable for proper layout
+  useEffect(() => {
+    const updateComposerHeight = () => {
+      if (composerRef.current) {
+        const h = composerRef.current.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--composer-height', `${h}px`);
+      }
+    };
+
+    updateComposerHeight();
+    window.addEventListener('resize', updateComposerHeight);
+    window.addEventListener('orientationchange', updateComposerHeight);
+
+    return () => {
+      window.removeEventListener('resize', updateComposerHeight);
+      window.removeEventListener('orientationchange', updateComposerHeight);
+    };
+  }, []);
+
+  // Keep aiStateRef in sync with aiState for reliable access
+  useEffect(() => {
+    aiStateRef.current = aiState;
+  }, [aiState]);
+
+  // Announce AI state changes for screen readers
+  useEffect(() => {
+    if (aiState === "thinking") {
+      setScreenReaderAnnouncement("Procesando tu mensaje...");
+    } else if (aiState === "responding") {
+      setScreenReaderAnnouncement("Generando respuesta...");
+    } else if (aiState === "idle" && screenReaderAnnouncement && !screenReaderAnnouncement.includes("cancelada")) {
+      setScreenReaderAnnouncement("Respuesta completada");
+    }
+  }, [aiState]);
+
+  // Note: We intentionally do NOT abort requests on unmount
+  // This allows streaming to continue in background when user switches chats
+  // The streaming will complete and update the correct chat via onSendMessage
+
+  const agent = useAgent();
+  const browserSession = useBrowserSession();
+
+  useEffect(() => {
+    if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
+      browserSession.subscribeToSession(agent.state.browserSessionId, agent.state.objective || "Navegando web");
+    }
+  }, [agent.state.browserSessionId, agent.state.objective, browserSession.state.sessionId]);
+
+  const handleStopChat = () => {
+    // Abort any ongoing fetch request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // Abort any ongoing document analysis request
+    if (analysisAbortControllerRef.current) {
+      analysisAbortControllerRef.current.abort();
+      analysisAbortControllerRef.current = null;
+    }
+
+    // Clear any streaming interval
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+
+    // Clean up PPT streaming if active
+    if (pptStreaming.isStreaming) {
+      pptStreaming.stopStreaming();
+    }
+
+    // Save the partial content as a message if there's any (use ref for latest value)
+    const currentContent = streamingContentRef.current;
+    if (currentContent && currentContent.trim()) {
+      streamTransition.finalize({
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: currentContent + "\n\n*[Respuesta detenida por el usuario]*",
+        timestamp: new Date(),
+      });
+    } else {
+      streamTransition.finalize({
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "*[Solicitud cancelada por el usuario]*",
+        timestamp: new Date(),
+      });
+    }
+  };
+
+  // Keep handleStopChatRef in sync for keyboard shortcut access
+  useEffect(() => {
+    handleStopChatRef.current = handleStopChat;
+  });
+
+  const handleCopyMessage = useCallback((content: string, msgId?: string) => {
+    navigator.clipboard.writeText(content);
+    if (msgId) {
+      setCopiedMessageId(msgId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  }, []);
+
+  const startVoiceRecording = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'es-ES';
+
+    let finalTranscript = '';
+    let interimTranscript = '';
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setRecordingTime(0);
+      setIsPaused(false);
+      finalTranscript = input;
+    };
+
+    recognition.onresult = (event: any) => {
+      interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+        } else {
+          interimTranscript = transcript;
+        }
+      }
+      setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+      setRecordingTime(0);
+      setIsPaused(false);
+      speechRecognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      // Don't auto-reset if paused - user might resume
+      if (!isPaused) {
+        setIsRecording(false);
+        speechRecognitionRef.current = null;
+      }
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const toggleVoiceRecording = () => {
+    if (isRecording) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
+  const pauseVoiceRecording = () => {
+    if (speechRecognitionRef.current && isRecording) {
+      speechRecognitionRef.current.stop();
+      setIsPaused(true);
+    }
+  };
+
+  const resumeVoiceRecording = () => {
+    if (isPaused) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'es-ES';
+
+      let currentInput = input;
+
+      recognition.onstart = () => {
+        setIsPaused(false);
+      };
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            currentInput += (currentInput ? ' ' : '') + transcript;
+          } else {
+            interimTranscript = transcript;
+          }
+        }
+        setInput(currentInput + (interimTranscript ? ' ' + interimTranscript : ''));
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsRecording(false);
+        setRecordingTime(0);
+        setIsPaused(false);
+        speechRecognitionRef.current = null;
+      };
+
+      recognition.onend = () => {
+        if (!isPaused) {
+          setIsRecording(false);
+          speechRecognitionRef.current = null;
+        }
+      };
+
+      speechRecognitionRef.current = recognition;
+      recognition.start();
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      speechRecognitionRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingTime(0);
+    setIsPaused(false);
+  };
+
+  const discardVoiceRecording = () => {
+    stopVoiceRecording();
+    setInput("");
+  };
+
+  const sendVoiceRecording = () => {
+    stopVoiceRecording();
+    if (input.trim() || uploadedFiles.length > 0) {
+      handleSubmit();
+    }
+  };
+
+  const handleOpenDocumentPreview = useCallback((doc: DocumentBlock) => {
+    setPreviewDocument(doc);
+    setEditedDocumentContent(doc.content);
+  }, []);
+
+  const handleCloseDocumentPreview = useCallback(() => {
+    setPreviewDocument(null);
+    setEditedDocumentContent("");
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+  }, []);
+
+  const handleSelectionChange = (selection: TextSelection | null) => {
+    if (selection && selection.text.trim()) {
+      setTextSelection(selection);
+      setEditingSelectionText(selection.text);
+      setOriginalSelectionText(selection.text);
+    }
+  };
+
+  const handleApplySelectionEdit = () => {
+    if (!textSelection || !editedDocumentContent) return;
+
+    const before = editedDocumentContent.substring(0, textSelection.startIndex);
+    const after = editedDocumentContent.substring(textSelection.endIndex);
+    const newContent = before + editingSelectionText + after;
+
+    setEditedDocumentContent(newContent);
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleCancelSelectionEdit = () => {
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleRevertSelectionEdit = () => {
+    setEditingSelectionText(originalSelectionText);
+  };
+
+  const handleDocTextSelect = (text: string, applyRewrite: (newText: string) => void) => {
+    setSelectedDocText(text);
+    applyRewriteRef.current = applyRewrite;
+  };
+
+  const handleDocTextDeselect = () => {
+    setSelectedDocText("");
+    applyRewriteRef.current = null;
+  };
+
+  const handleDownloadDocument = useCallback(async (doc: DocumentBlock) => {
+    try {
+      const documentToDownload = {
+        ...doc,
+        content: editedDocumentContent || doc.content
+      };
+      const response = await fetch("/api/documents/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(documentToDownload),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate document");
+      }
+
+      const blob = await response.blob();
+      const ext = doc.type === "word" ? "docx" : doc.type === "excel" ? "xlsx" : "pptx";
+      const filename = `${doc.title.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Document download error:", error);
+    }
+  }, [editedDocumentContent]);
+
+  const handleDownloadImage = useCallback((imageData: string) => {
+    const link = document.createElement("a");
+    link.href = imageData;
+    link.download = `imagen-generada-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
+
+  const handleOpenFileAttachmentPreview = useCallback(async (att: {
+    type: string;
+    name: string;
+    mimeType?: string;
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+  }) => {
+    if (att.type === "image" && att.imageUrl) {
+      setLightboxImage(att.imageUrl);
+      return;
+    }
+
+    if (att.type === "image" && att.storagePath) {
+      setLightboxImage(att.storagePath);
+      return;
+    }
+
+    setPreviewFileAttachment({
+      ...att,
+      isLoading: true,
+      isProcessing: false,
+      content: undefined,
+    });
+
+    if (att.fileId) {
+      try {
+        const response = await fetch(`/api/files/${att.fileId}/content`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === "ready" && data.content) {
+            setPreviewFileAttachment((prev: any) => prev ? {
+              ...prev,
+              content: data.content,
+              isLoading: false,
+              isProcessing: false,
+            } : null);
+            return;
+          } else if (data.status === "processing" || data.status === "queued") {
+            setPreviewFileAttachment((prev: any) => prev ? {
+              ...prev,
+              isLoading: false,
+              isProcessing: true,
+              content: undefined,
+            } : null);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching file content:", error);
+      }
+    }
+
+    setPreviewFileAttachment((prev: any) => prev ? {
+      ...prev,
+      isLoading: false,
+      isProcessing: false,
+      content: "No se pudo cargar el contenido del archivo.",
+    } : null);
+  }, []);
+
+  const handleCopyAttachmentContent = async () => {
+    if (previewFileAttachment?.content) {
+      await navigator.clipboard.writeText(previewFileAttachment.content);
+      setCopiedAttachmentContent(true);
+      setTimeout(() => setCopiedAttachmentContent(false), 2000);
+    }
+  };
+
+  const handleDownloadFileAttachment = async () => {
+    if (!previewFileAttachment?.storagePath) return;
+    try {
+      const response = await fetch(previewFileAttachment.storagePath);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = previewFileAttachment.name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
+  };
+
+  const handleFeedback = useCallback((msgId: string, value: "up" | "down") => {
+    setMessageFeedback((prev: any) => ({
+      ...prev,
+      [msgId]: prev[msgId] === value ? null : value
+    }));
+  }, []);
+
+  const handleShare = useCallback(async (content: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "ILIAGPT Response",
+          text: content
+        });
+      } catch (e) {
+        navigator.clipboard.writeText(content);
+      }
+    } else {
+      navigator.clipboard.writeText(content);
+    }
+  }, []);
+
+  const handleReadAloud = useCallback((msgId: string, content: string) => {
+    if (speakingMessageId === msgId) {
+      speechSynthesis.cancel();
+      setSpeakingMessageId(null);
+    } else {
+      speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(content);
+      utterance.onend = () => setSpeakingMessageId(null);
+      utterance.onerror = () => setSpeakingMessageId(null);
+      speechSynthesis.speak(utterance);
+      setSpeakingMessageId(msgId);
+    }
+  }, [speakingMessageId]);
+
+  const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
+    const prevMessages = messages.slice(0, msgIndex);
+    const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
+    if (lastUserMsgIndex === -1) return;
+
+    const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
+
+    if (chatId && onTruncateMessagesAt) {
+      onTruncateMessagesAt(chatId, msgIndex);
+    }
+
+    setRegeneratingMsgIndex(null);
+
+    let chatHistory = contextUpToUser.map(m => ({ role: m.role, content: m.content }));
+    if (instruction) {
+      chatHistory = [...chatHistory, { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }];
+    }
+
+    await streamChat.stream("/api/chat/stream", {
+      chatId,
+      body: {
+        messages: chatHistory,
+        chatId,
+        conversationId: chatId,
+        provider: selectedProvider,
+        model: selectedModel,
+      },
+      onEvent: (eventType, data) => {
+        if (eventType === "production_start") {
+          setAiState("agent_working");
+          setAiProcessSteps([{
+            id: "init", step: "init",
+            title: `Iniciando producción: ${data.topic || "Documento"}`,
+            status: "pending",
+            description: `Generando ${data.deliverables?.join(", ") || "archivos"}`,
+          }]);
+        } else if (eventType === "production_event") {
+          setAiProcessSteps((prev: any[]) => {
+            const newSteps = [...prev];
+            const lastStep = newSteps[newSteps.length - 1];
+            if (lastStep?.status === "pending" && data.message) {
+              lastStep.title = data.message;
+            } else {
+              newSteps.push({ id: `step-${Date.now()}`, title: data.message || "Procesando...", status: "pending", description: data.stage });
+            }
+            return newSteps;
+          });
+        } else if (eventType === "production_complete") {
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+        }
+      },
+      buildFinalMessage: (content, data, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
+        role: "assistant",
+        content,
+        timestamp: new Date(),
+        requestId: data?.requestId || generateRequestId(),
+        webSources: data?.webSources,
+        artifact: data?.artifact,
+      }),
+      buildErrorMessage: (error, messageId) => ({
+        id: messageId || (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      }),
+    });
+  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
+
+  const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
+    try {
+      if (runId) {
+        // Cancel via API when we have a runId
+        await cancelAgentRun(messageId, runId);
+      } else {
+        // Cancel locally when no runId yet (starting/queued state)
+        abortPendingAgentStart(messageId);
+        useAgentStore.getState().cancelRun(messageId);
+      }
+      toast({ title: "Cancelado", description: "La ejecución del agente ha sido cancelada" });
+    } catch (error) {
+      console.error("Failed to cancel agent run:", error);
+      toast({ title: "Error", description: "No se pudo cancelar la ejecución", variant: "destructive" });
+    }
+  }, [cancelAgentRun, toast]);
+
+  const handleAgentRetry = useCallback((messageId: string, userMessage: string) => {
+    window.dispatchEvent(new CustomEvent("retry-agent-run", {
+      detail: { messageId, userMessage }
+    }));
+  }, []);
+
+  const handleSuperAgentCancel = useCallback((messageId: string) => {
+    const { updateState } = useSuperAgentStore.getState();
+    updateState(messageId, {
+      error: "Cancelado por el usuario",
+      phase: "error",
+      isRunning: false,
+    });
+    toast({ title: "Cancelado", description: "La investigación ha sido cancelada" });
+  }, [toast]);
+
+  const handleSuperAgentRetry = useCallback((messageId: string) => {
+    const run = useSuperAgentStore.getState().runs[messageId];
+    if (run?.contract?.original_prompt) {
+      useSuperAgentStore.getState().clearRun(messageId);
+      setInput(run.contract.original_prompt);
+      toast({ title: "Reintentar", description: "Envía el mensaje de nuevo para reintentar" });
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    const handleRetryAgentRun = async (event: CustomEvent<{ messageId: string; userMessage: string }>) => {
+      const { messageId, userMessage } = event.detail;
+      if (!userMessage) {
+        toast({ title: "Error", description: "No se puede reintentar sin el mensaje original", variant: "destructive" });
+        return;
+      }
+
+      agentStore.clearRun(messageId);
+
+      const newMessageId = `agent-${Date.now()}`;
+      setCurrentAgentMessageId(newMessageId);
+
+      try {
+        const result = await startAgentRun(
+          chatId || "",
+          userMessage,
+          newMessageId,
+          []
+        );
+
+        if (result?.chatId && (!chatId || chatId.startsWith("pending-"))) {
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+        }
+      } catch (error) {
+        console.error("Failed to retry agent run:", error);
+        toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
+      }
+    };
+
+    window.addEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
+    return () => {
+      window.removeEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
+    };
+  }, [chatId, agentStore, startAgentRun, toast]);
+
+  const handleStartEdit = useCallback((msg: Message) => {
+    setEditingMessageId(msg.id);
+    setEditContent(msg.content);
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditContent("");
+  }, []);
+
+  const handleSendEdit = useCallback(async (msgId: string) => {
+    if (!editContent.trim()) return;
+
+    const msgIndex = messages.findIndex(m => m.id === msgId);
+    if (msgIndex === -1) return;
+
+    const editedContent = editContent.trim();
+    setEditingMessageId(null);
+    setEditContent("");
+
+    if (chatId && onEditMessageAndTruncate) {
+      onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
+    }
+
+    setAiState("thinking");
+    streamingContentRef.current = "";
+    setStreamingContent("");
+
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const historyUpToEdit = messages.slice(0, msgIndex).map(m => ({
+        role: m.role as "user" | "assistant",
+        content: m.content
+      }));
+      historyUpToEdit.push({ role: "user", content: editedContent });
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
+        body: JSON.stringify({
+          messages: historyUpToEdit,
+          provider: selectedProvider,
+          model: selectedModel
+        }),
+        signal: abortControllerRef.current.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.content) {
+        const aiMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: data.content,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          webSources: data.webSources,
+        };
+        onSendMessage(aiMsg);
+      }
+
+      setAiState("idle");
+      abortControllerRef.current = null;
+
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        setAiState("idle");
+        return;
+      }
+      console.error("Edit regenerate error:", error);
+
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Lo siento, hubo un error al procesar tu mensaje editado. Por favor intenta de nuevo.",
+        timestamp: new Date(),
+      };
+      onSendMessage(errorMsg);
+      setAiState("idle");
+      abortControllerRef.current = null;
+    }
+  }, [editContent, messages, chatId, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    await processFilesForUpload(Array.from(files));
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const pollFileStatus = async (fileId: string, trackingId: string) => {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    const checkStatus = async () => {
+      try {
+        const contentRes = await fetch(`/api/files/${fileId}/content`);
+
+        if (!contentRes.ok && contentRes.status !== 202) {
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        const contentData = await contentRes.json();
+
+        if (contentData.status === "ready") {
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId
+              ? { ...f, id: fileId, status: "ready", content: contentData.content }
+              : f))
+          );
+          return;
+        } else if (contentData.status === "error") {
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        attempts++;
+        if (attempts >= maxAttempts) {
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+          );
+          console.warn(`File ${fileId} processing timed out`);
+          return;
+        }
+        setTimeout(checkStatus, 2000);
+      } catch (error) {
+        console.error("Error polling file status:", error);
+        // Fix: add type to prev
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+      }
+    };
+
+    setTimeout(checkStatus, 2000);
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
+  };
+
+  const ALLOWED_TYPES = [
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/html",
+    "application/json",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-powerpoint",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+    "image/tiff",
+  ];
+
+  const MAX_FILE_SIZE_MB = 100;
+  const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+  const MAX_IMAGE_PREVIEW_BYTES = 15 * 1024 * 1024;
+
+  const processFilesForUpload = async (files: File[]) => {
+    const normalizedFiles = files.map(normalizeFileForUpload);
+
+    // De-dupe within the same ingest action to avoid accidental duplicates.
+    const seen = new Set<string>();
+    const dedupedFiles: File[] = [];
+    for (const f of normalizedFiles) {
+      const key = `${f.name}::${f.size}::${f.type || ""}::${(f as any).lastModified || 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedupedFiles.push(f);
+    }
+
+    const oversizedFiles = dedupedFiles.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+    const invalidTypeFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      if (t.startsWith("image/")) return false;
+      return !ALLOWED_TYPES.includes(t);
+    });
+
+    if (oversizedFiles.length > 0) {
+      const names = oversizedFiles.map(f => f.name).join(", ");
+      const sizes = oversizedFiles.map(f => `${(f.size / (1024 * 1024)).toFixed(1)}MB`).join(", ");
+      toast({
+        title: "Archivo demasiado grande",
+        description: `El archivo "${names}" (${sizes}) excede el límite de ${MAX_FILE_SIZE_MB}MB.`,
+        variant: "destructive",
+      });
+    }
+
+    if (invalidTypeFiles.length > 0) {
+      const names = invalidTypeFiles.map(f => f.name).join(", ");
+      toast({
+        title: "Tipo de archivo no soportado",
+        description: `El archivo "${names}" no es un tipo de archivo permitido.`,
+        variant: "destructive",
+      });
+    }
+
+    const validFiles = dedupedFiles.filter(file => {
+      const t = file.type || "";
+      const typeOk = t.startsWith("image/") || ALLOWED_TYPES.includes(t);
+      return typeOk && file.size <= MAX_FILE_SIZE_BYTES;
+    });
+
+    if (validFiles.length === 0) return;
+
+    for (const file of validFiles) {
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+      const isImage = file.type.startsWith("image/");
+      const isExcel = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/csv'
+      ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
+
+      let dataUrl: string | undefined;
+      if (isImage && file.size <= MAX_IMAGE_PREVIEW_BYTES) {
+        dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const tempFile: UploadedFile = {
+        id: tempId,
+        name: file.name,
+        type: file.type,
+        mimeType: file.type,
+        size: file.size,
+        status: "uploading",
+        dataUrl,
+      };
+      setUploadedFiles((prev: any) => [...prev, tempFile]);
+
+      const doUpload = async (): Promise<void> => {
+        try {
+          const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+          const { uploadURL, storagePath } = await urlRes.json();
+          if (!uploadURL || !storagePath) throw new Error("No upload URL received");
+
+          const uploadRes = await fetch(uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file,
+          });
+          if (!uploadRes.ok) throw new Error("Upload failed");
+
+          let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
+
+          if (isExcel) {
+            try {
+              const formData = new FormData();
+              formData.append('file', file);
+
+              const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
+                method: 'POST',
+                body: formData,
+              });
+
+              if (spreadsheetRes.ok) {
+                const spreadsheetResult = await spreadsheetRes.json();
+                const uploadId = spreadsheetResult.id;
+                const sheetDetails = spreadsheetResult.sheetDetails || [];
+                const sheets = sheetDetails.map((s: any) => ({
+                  name: s.name,
+                  rowCount: s.rowCount,
+                  columnCount: s.columnCount,
+                }));
+
+                spreadsheetData = {
+                  uploadId,
+                  sheets,
+                };
+
+                if (spreadsheetResult.firstSheetPreview) {
+                  spreadsheetData.previewData = {
+                    headers: spreadsheetResult.firstSheetPreview.headers || [],
+                    data: spreadsheetResult.firstSheetPreview.data || [],
+                  };
+                }
+
+                triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
+                  setUploadedFiles((prev: any[]) =>
+                    prev.map((f: any) => f.id === tempId ? { ...f, analysisId } : f)
+                  );
+                });
+              }
+            } catch (spreadsheetError) {
+              console.warn("Failed to parse spreadsheet:", spreadsheetError);
+            }
+          }
+
+          if (isImage) {
+            const registerRes = await fetch("/api/files/quick", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+            });
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
+
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
+            );
+          } else {
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+            );
+
+            const registerRes = await fetch("/api/files", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+            });
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
+
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+            );
+
+            pollFileStatusFast(registeredFile.id, tempId);
+
+            if (isAnalyzableFile(file.name) && !isExcel) {
+              triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
+                setUploadedFiles((prev: any[]) =>
+                  prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
+                );
+              });
+            }
+          }
+        } catch (error) {
+          console.error("File upload error:", error);
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error" } : f))
+          );
+        }
+      };
+
+      const uploadPromise = doUpload();
+      pendingUploadsRef.current.set(tempId, uploadPromise);
+      uploadPromise.finally(() => {
+        pendingUploadsRef.current.delete(tempId);
+      });
+    }
+  };
+
+  const waitForPendingUploads = async (): Promise<void> => {
+    const promises = Array.from(pendingUploadsRef.current.values());
+    if (promises.length > 0) {
+      console.log("[waitForPendingUploads] Waiting for", promises.length, "uploads to complete");
+      await Promise.all(promises);
+      console.log("[waitForPendingUploads] All uploads complete");
+    }
+  };
+
+  const pollFileStatusFast = async (fileId: string, trackingId: string) => {
+    const maxTime = 5000;
+    const pollInterval = 250;
+    const startTime = Date.now();
+
+    const checkStatus = async (): Promise<void> => {
+      const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+      if (!stillTracked) return;
+
+      if (Date.now() - startTime > maxTime) {
+        // Fall back to slower polling. Do NOT mark as ready prematurely, as that
+        // causes "attached but empty" docs and broken analysis.
+        pollFileStatus(fileId, trackingId);
+        return;
+      }
+
+      try {
+        const contentRes = await fetch(`/api/files/${fileId}/content`);
+
+        if (!contentRes.ok && contentRes.status !== 202) {
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        const contentData = await contentRes.json();
+
+        if (contentData.status === "ready") {
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId
+              ? { ...f, id: fileId, status: "ready", content: contentData.content }
+              : f))
+          );
+          return;
+        } else if (contentData.status === "error") {
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        setTimeout(checkStatus, pollInterval);
+      } catch (error) {
+        console.error("Polling error:", error);
+        // Network hiccup: fall back to slower polling instead of lying about readiness.
+        pollFileStatus(fileId, trackingId);
+      }
+    };
+
+    checkStatus();
+  };
+
+  const fetchUrlAsDataUrl = async (url: string, maxBytes: number): Promise<string | null> => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (blob.size > maxBytes) return null;
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Failed to read blob"));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const importUrlsForUpload = (urls: string[]) => {
+    const normalized = uniq(
+      urls
+        .map((u) => normalizeHttpUrl(u) || null)
+        .filter((u): u is string => !!u)
+    ).slice(0, 10);
+    if (normalized.length === 0) return;
+
+    for (const u of normalized) {
+      const trackingId = `temp-url-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const tempFile: UploadedFile = {
+        id: trackingId,
+        name: u,
+        type: "application/octet-stream",
+        mimeType: "application/octet-stream",
+        size: 0,
+        status: "uploading",
+      };
+
+      setUploadedFiles((prev: UploadedFile[]) => [...prev, tempFile]);
+
+      const doImport = async (): Promise<void> => {
+        const response = await fetch("/api/files/import-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: u }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error || `No se pudo importar (${response.status})`);
+        }
+
+        const importedType: string = data.type || data.mimeType || "application/octet-stream";
+        const importedId: string | undefined = data.id;
+        const importedName: string = data.name || u;
+        const importedSize: number = typeof data.size === "number" ? data.size : 0;
+        const importedStoragePath: string | undefined = data.storagePath;
+        const importedStatus: string =
+          data.status || (importedType.startsWith("image/") ? "ready" : "processing");
+
+        // For images, generate a data URL from same-origin storage so vision works reliably.
+        let dataUrl: string | undefined;
+        if (importedType.startsWith("image/")) {
+          if (typeof data.dataUrl === "string" && data.dataUrl.startsWith("data:")) {
+            dataUrl = data.dataUrl;
+          } else if (importedStoragePath) {
+            const preview = await fetchUrlAsDataUrl(importedStoragePath, 15 * 1024 * 1024);
+            if (preview) dataUrl = preview;
+          }
+        }
+
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => {
+            if (f.id !== trackingId) return f;
+            return {
+              ...f,
+              id: importedId || f.id,
+              name: importedName,
+              type: importedType,
+              mimeType: importedType,
+              size: importedSize || f.size,
+              storagePath: importedStoragePath,
+              status: importedStatus,
+              dataUrl: dataUrl || f.dataUrl,
+            };
+          })
+        );
+
+        if (!importedType.startsWith("image/") && importedId && importedStatus === "processing") {
+          pollFileStatusFast(importedId, trackingId);
+        }
+      };
+
+      const promise = doImport().catch((error: any) => {
+        console.error("URL import error:", error);
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => (f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+        toast({
+          title: "No se pudo importar el enlace",
+          description: error?.message || "Error desconocido",
+          variant: "destructive",
+        });
+      });
+
+      pendingUploadsRef.current.set(trackingId, promise);
+      promise.finally(() => {
+        pendingUploadsRef.current.delete(trackingId);
+      });
+    }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const clipboard = e.clipboardData;
+    const items = clipboard?.items;
+    if (!clipboard) return;
+
+    const filesToUpload: File[] = [];
+
+    const itemsArray = items ? (Array.from(items) as any[]) : [];
+    for (const item of itemsArray) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile?.();
+      if (!file) continue;
+
+      const originalName = (file.name || "").trim();
+      const declaredType = (file.type || item.type || "").trim();
+
+      const isGenericImageName = !originalName || originalName === "image.png" || originalName === "image.jpg";
+      const subtype = declaredType.includes("/") ? declaredType.split("/")[1] : "";
+      const cleanedSubtype = subtype.split("+")[0].split(".")[0];
+      const safeExt = declaredType.startsWith("image/") ? (cleanedSubtype || "png") : "bin";
+      const fileName = isGenericImageName ? `pasted-${Date.now()}.${safeExt}` : originalName;
+
+      const normalized = normalizeFileForUpload(new File([file], fileName, { type: declaredType || file.type }));
+      filesToUpload.push(normalized);
+    }
+
+    // Some browsers expose pasted files via clipboardData.files instead of items.
+    if (clipboard.files && clipboard.files.length > 0) {
+      for (const f of Array.from(clipboard.files)) {
+        filesToUpload.push(normalizeFileForUpload(f));
+      }
+    }
+
+    if (filesToUpload.length > 0) {
+      e.preventDefault();
+      await processFilesForUpload(filesToUpload);
+      return;
+    }
+
+    // Smart paste: if the clipboard content is one or more bare URLs, import them as attachments.
+    const uriList = clipboard.getData("text/uri-list");
+    const html = clipboard.getData("text/html");
+    const text = clipboard.getData("text/plain");
+
+    // Support pasting base64-encoded images (data URLs).
+    if (isDataImageUrl(text)) {
+      const mimeMatch = text.match(/^data:([^;]+);base64,/i);
+      const mime = (mimeMatch?.[1] || "image/png").toLowerCase();
+      const ext =
+        mime === "image/jpeg" || mime === "image/jpg" ? "jpg" :
+          mime === "image/webp" ? "webp" :
+            mime === "image/gif" ? "gif" :
+              mime === "image/bmp" ? "bmp" :
+                mime === "image/tiff" ? "tiff" :
+                  mime === "image/svg+xml" ? "svg" :
+                    "png";
+      const f = dataImageUrlToFile(text, `pasted-${Date.now()}.${ext}`);
+      if (f) {
+        e.preventDefault();
+        await processFilesForUpload([normalizeFileForUpload(f)]);
+        return;
+      }
+    }
+
+    const urlsFromUriList = extractUrlsFromUriList(uriList);
+    const urlsFromBareText = extractBareUrlsFromText(text);
+
+    const urls = uniq([...urlsFromUriList, ...urlsFromBareText]);
+    if (urls.length > 0) {
+      e.preventDefault();
+      importUrlsForUpload(urls);
+      return;
+    }
+
+    // HTML-only: allow importing a single copied image (common in browsers), but avoid mass-importing links
+    // when pasting rich text.
+    const htmlImageUrls = extractImageUrlsFromHtml(html);
+    if (htmlImageUrls.length === 1) {
+      const normalizedText = normalizeHttpUrl(text);
+      if (!text.trim() || normalizedText === htmlImageUrls[0]) {
+        e.preventDefault();
+        importUrlsForUpload([htmlImageUrls[0]]);
+      }
+    }
+  };
+
+  const isFileOrUrlDragEvent = (dt: DataTransfer | null | undefined): boolean => {
+    if (!dt) return false;
+    const types = Array.from(dt.types || []);
+    if (types.includes("Files") || types.includes("application/x-moz-file")) return true;
+    if (types.includes("text/uri-list") || types.includes("text/html")) return true;
+    if (dt.items && Array.from(dt.items).some((it) => (it as any).kind === "file")) return true;
+    if (dt.files && dt.files.length > 0) return true;
+    return false;
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
+    e.preventDefault();
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(e.dataTransfer);
+    if (!isFileOrUrlDrag) return;
+    e.preventDefault();
+    dragCounterRef.current++;
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!isDraggingOver) return;
+    e.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    const dt = e.dataTransfer;
+    const isFileOrUrlDrag = isFileOrUrlDragEvent(dt);
+    if (!isFileOrUrlDrag) return;
+
+    e.preventDefault();
+
+    const droppedFiles = await extractFilesFromDataTransfer(dt, { maxFiles: 200 });
+    if (droppedFiles.length > 0) {
+      await processFilesForUpload(droppedFiles);
+      return;
+    }
+
+    // Drop-to-import for links/images dragged from the browser.
+    const uriList = dt?.getData?.("text/uri-list") || "";
+    const html = dt?.getData?.("text/html") || "";
+    const text = dt?.getData?.("text/plain") || "";
+
+    const candidateTextUrl = normalizeHttpUrl(text);
+    const urls = uniq([
+      ...(candidateTextUrl ? [candidateTextUrl] : []),
+      ...extractUrlsFromUriList(uriList),
+      ...extractImageUrlsFromHtml(html),
+      ...extractLinkUrlsFromHtml(html),
+    ]);
+
+    if (urls.length > 0) {
+      importUrlsForUpload(urls);
+    }
+  };
+
+  const getFileIcon = (type: string, fileName?: string) => {
+    const theme = getFileTheme(fileName, type);
+    const category = getFileCategory(fileName, type);
+
+    if (category === "excel") {
+      return <FileSpreadsheet className={`h-4 w-4 ${theme.textColor}`} />;
+    }
+    if (category === "image") {
+      return <Image className={`h-4 w-4 ${theme.textColor}`} />;
+    }
+    return <FileText className={`h-4 w-4 ${theme.textColor}`} />;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  };
+
+  const adjustTextareaHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  };
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input]);
+
+  const handleSubmit = async () => {
+    // EMERGENCY DEBUG - REMOVE AFTER FIX
+    console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
+    
+    // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
+    if (input.trim().startsWith("!")) {
+      const cleanInput = input.trim().substring(1);
+      setInput("");
+
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+        },
+        buildFinalMessage: (content, _lastEvent, messageId) => ({
+          id: messageId || `emergency-${Date.now()}`,
+          role: "assistant",
+          content: content || "No response received",
+          timestamp: new Date(),
+        }),
+      });
+      return;
+    }
+    
+    // MOCK CITATION TRIGGER FOR VERIFICATION
+    if (input.trim() === "/test-citation") {
+      const mockMsg: Message = {
+        id: `mock-${Date.now()}`,
+        role: "assistant",
+        content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
+        timestamp: new Date(),
+        webSources: [
+          {
+            source: { name: "Documento de Diseño", domain: "example.com" },
+            url: "http://example.com/doc.pdf",
+            title: "Especificación Técnica",
+            domain: "example.com",
+            metadata: {
+              pageNumber: 42,
+              section: "3.5 Arquitectura",
+              totalPages: 100
+            } as any
+          }
+        ]
+      };
+      onSendMessage(mockMsg);
+      setInput("");
+      return;
+    }
+
+    console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
+
+    // Wait for any pending uploads to complete before proceeding
+    if (pendingUploadsRef.current.size > 0) {
+      console.log("[handleSubmit] Waiting for", pendingUploadsRef.current.size, "pending uploads...");
+      await waitForPendingUploads();
+      console.log("[handleSubmit] All uploads complete");
+    }
+
+    // Don't submit if files are still uploading/processing (double-check state after waiting)
+    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
+    if (filesStillLoading) {
+      console.log("[handleSubmit] files still loading after wait, returning");
+      return;
+    }
+
+    // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
+    const hasInput = input.trim().length > 0;
+    const hasFiles = uploadedFilesRef.current.length > 0;
+    const hasSelectionWithInstruction = selectedDocText && input.trim();
+
+    console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
+    if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
+      console.log("[handleSubmit] no content to submit, returning");
+      return;
+    }
+
+    // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
+    // This bypasses all the complex chat creation logic that's failing
+    // Also handle web search tool here
+    if (hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
+      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
+      const userInput = input.trim();
+      setInput("");
+      
+      // Track query for free users (upgrade prompt)
+      incrementQuery();
+      
+      // Clear the web tool after use
+      if (selectedTool === "web") {
+        setSelectedTool(null);
+      }
+      
+      // Show user message immediately
+      const userMsgId = `user-${Date.now()}`;
+      const userMessage: Message = {
+        id: userMsgId,
+        role: "user",
+        content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
+        timestamp: new Date(),
+        requestId: `req_${Date.now()}`
+      };
+      onSendMessage(userMessage);
+      
+      // Stream the response using the all-in-one hook
+      // Handles: fetch + SSE parsing + RAF-throttled updates + atomic finalize
+      const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+      const cleanInput = userInput.replace(/^🌐\s*/, "");
+
+      const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
+
+      await streamChat.stream("/api/chat/stream", {
+        chatId: effectiveChatIdForStream,
+        body: {
+          messages: [{ role: "user", content: cleanInput }],
+          chatId: effectiveChatIdForStream,
+          conversationId: effectiveChatIdForStream,
+          model: selectedModel || "grok-3",
+          forceWebSearch: isWebSearch,
+          webSearchAuto: isWebSearch,
+        },
+        buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
+          id: messageId || `assistant-${Date.now()}`,
+          role: "assistant",
+          content: fullContent || "No se recibió respuesta del servidor.",
+          timestamp: new Date(),
+          userMessageId: userMsgId,
+        }),
+        buildErrorMessage: (_error, messageId) => ({
+          id: messageId || `error-${Date.now()}`,
+          role: "assistant",
+          content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
+          timestamp: new Date(),
+        }),
+      });
+      return;
+    }
+
+    // Handle Agent mode - show in chat, not side panel
+    if (selectedTool === "agent") {
+      try {
+        const userMessageContent = input;
+        const readyFiles = uploadedFilesRef.current.filter((f: any) => f.status === "ready");
+
+        // Agent runner expects rich attachment metadata; include storagePath as both `storagePath` and `path`.
+        const attachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            mimeType: f.type,
+            type: f.type,
+            storagePath: f.storagePath,
+            path: f.storagePath,
+            size: f.size,
+            metadata: {
+              spreadsheetData: f.spreadsheetData,
+              analysisId: f.analysisId,
+            },
+          }));
+
+        const messageAttachments = readyFiles
+          .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+          .map((f: any) => ({
+            type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+            name: f.name,
+            documentType: (() => {
+              if (f.type.startsWith("image/")) return undefined;
+              if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+              if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+              if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+              return "word";
+            })() as "word" | "excel" | "ppt" | "pdf",
+            mimeType: f.type,
+            imageUrl: f.type.startsWith("image/") ? f.storagePath : undefined,
+            storagePath: f.storagePath,
+            fileId: f.id,
+            spreadsheetData: f.spreadsheetData,
+          }));
+
+        // Generate a unique message ID for tracking in the store
+        const agentMessageId = `agent-${Date.now()}`;
+        setCurrentAgentMessageId(agentMessageId);
+
+        // Add user message to chat via the callback
+        const userMessage: Message = {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: userMessageContent,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          skipRun: true, // Agent mode: persist message but don't create a normal chat run
+          attachments: messageAttachments.length > 0 ? messageAttachments : undefined,
+        };
+        // Show message immediately (optimistic update)
+        setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
+        onSendMessage(userMessage);
+
+        // Clear input IMMEDIATELY after capturing the value to prevent duplicates
+        setInput("");
+        setUploadedFiles([]);
+
+        console.log("[Agent Mode] Starting run with input:", userMessageContent);
+
+        // Use the store-based approach for starting the run
+        // This will create the run in the store and start polling automatically
+        const result = await startAgentRun(
+          chatId || "",
+          userMessageContent,
+          agentMessageId,
+          attachments
+        );
+
+        console.log("[Agent Mode] Run result:", result);
+
+        if (result) {
+          // Tool already cleared above; now clear selected tool
+          setSelectedTool(null);
+
+          // Navigate to new chat if created
+          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+            console.log("[Agent Mode] Navigating to chat:", result.chatId);
+            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+          }
+          // Polling is handled automatically by useAgentPolling hook
+        } else {
+          // Show error when agent run fails to start
+          console.error("[Agent Mode] Failed to start run, result is null");
+          // Remove the optimistic message since the agent failed to start
+          setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
+          toast({
+            title: "Error",
+            description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        console.error("Failed to start agent run:", error);
+        // Remove the optimistic message since the agent failed to start
+        setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
+        toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
+      }
+      return;
+    }
+
+    // If there's selected text from document, rewrite it
+    if (selectedDocText && applyRewriteRef.current && input.trim()) {
+      const rewritePrompt = input.trim();
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+      setAiState("thinking");
+
+      try {
+        abortControllerRef.current = new AbortController();
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
+          body: JSON.stringify({
+            messages: [{
+              role: "user",
+              content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
+            }],
+            provider: selectedProvider,
+            model: selectedModel
+          }),
+          signal: abortControllerRef.current.signal
+        });
+
+        const data = await response.json();
+        if (response.ok && data.content) {
+          applyRewriteRef.current(data.content.trim());
+        }
+
+        setSelectedDocText("");
+        applyRewriteRef.current = null;
+        setAiState("idle");
+        abortControllerRef.current = null;
+        return;
+      } catch (error: any) {
+        if (error.name !== "AbortError") {
+          console.error("Rewrite error:", error);
+        }
+        setAiState("idle");
+        abortControllerRef.current = null;
+        return;
+      }
+    }
+
+    // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
+    // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
+    const generationPatterns = [
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
+      /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
+    ];
+
+    const imageEditPatterns = [
+      // Spanish - explicit image reference
+      /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
+      /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
+      /\bpon(le|er)?\s+/i,
+      /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+      /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+
+      // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
+      /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
+      /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
+      /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
+      /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
+      /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
+      /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
+      /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
+      /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
+
+      // English - explicit
+      /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+
+      // English - implicit edit commands
+      /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
+      /\bput\s+[A-Z]/i,                             // "put Messi"
+      /\bremove\s+[A-Z]/i,                          // "remove the person"
+      /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
+      /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
+    ];
+
+    const isGenerationRequest = generationPatterns.some(p => p.test(input));
+    const hasEditPattern = imageEditPatterns.some(p => p.test(input));
+
+    // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
+    // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
+    // which triggers production mode directly on the backend
+    const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
+
+    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected) {
+      console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
+
+      // Set thinking state
+      setAiState("thinking");
+      setAiProcessSteps([
+        { step: "Procesando tu solicitud", status: "active" },
+        { step: "Generando contenido", status: "pending" }
+      ]);
+
+      const generationInput = input;
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+
+      // Add user message to chat
+      const userMsgId = Date.now().toString();
+      const userMsg: Message = {
+        id: userMsgId,
+        role: "user",
+        content: generationInput,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      };
+      // Show message immediately (optimistic update)
+      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+      onSendMessage(userMsg);
+
+      try {
+        // Only fetch image context if we have an edit pattern (not for generation-only requests)
+        // This prevents misrouting generation requests like "agrega una conclusión" to image edit
+        let lastImageBase64: string | null = null;
+        let lastImageId: string | null = null;
+        let isImageEditRequest = false;
+
+        if (hasEditPattern) {
+          console.log("[handleSubmit] Edit pattern detected - checking for image context...");
+
+          // Strategy 1: Check local memory cache first (fastest)
+          const lastImage = getLastGeneratedImage();
+          if (lastImage?.base64) {
+            lastImageBase64 = lastImage.base64;
+            lastImageId = lastImage.artifactId || lastImage.messageId;
+            console.log("[handleSubmit] Found last image in local memory:", lastImageId);
+          } else if (lastImage?.previewUrl) {
+            lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
+            lastImageId = lastImage.artifactId || lastImage.messageId;
+            console.log("[handleSubmit] Fetched last image base64 from local memory:", lastImageId);
+          } else {
+            // Strategy 2: Search visible messages for image artifacts (works after refresh)
+            const messagesWithImages = messages.filter(m => m.artifact?.type === "image" && (m.artifact.previewUrl || m.artifact.downloadUrl));
+            if (messagesWithImages.length > 0) {
+              const lastImageMsg = messagesWithImages[messagesWithImages.length - 1];
+              const imageUrl = lastImageMsg.artifact?.previewUrl || lastImageMsg.artifact?.downloadUrl;
+              if (imageUrl) {
+                console.log("[handleSubmit] Found image in chat messages, fetching from URL:", imageUrl);
+                try {
+                  lastImageBase64 = await fetchImageAsBase64(imageUrl);
+                  lastImageId = lastImageMsg.artifact?.artifactId || lastImageMsg.id;
+                  console.log("[handleSubmit] Fetched last image base64 from chat messages:", lastImageId);
+                } catch (fetchError) {
+                  console.warn("[handleSubmit] Failed to fetch image from chat messages:", fetchError);
+                }
+              }
+            }
+
+            // Strategy 3: Try server memory system (last resort)
+            if (!lastImageBase64) {
+              console.log("[handleSubmit] No local image, checking server memory...");
+              try {
+                const serverImage = await getLatestImageFromServer();
+                if (serverImage?.base64Preview) {
+                  lastImageBase64 = serverImage.base64Preview;
+                  lastImageId = serverImage.id;
+                  console.log("[handleSubmit] Found last image from server memory:", lastImageId);
+                } else if (serverImage?.imageUrl) {
+                  lastImageBase64 = await fetchImageAsBase64(serverImage.imageUrl);
+                  lastImageId = serverImage.id;
+                  console.log("[handleSubmit] Fetched last image base64 from server:", lastImageId);
+                } else {
+                  console.log("[handleSubmit] No images found in server memory");
+                }
+              } catch (serverError) {
+                console.warn("[handleSubmit] Failed to get image from server:", serverError);
+              }
+            }
+          }
+
+          // Determine if this is an edit request based on whether we found an image
+          const hasImageContext = !!lastImageBase64;
+          isImageEditRequest = hasImageContext;
+
+          // If we retrieved an image from server, persist it to local cache for future use
+          if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
+            console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
+            storeLastGeneratedImageInfo({
+              messageId: lastImageId,
+              base64: lastImageBase64,
+              artifactId: lastImageId,
+            });
+          }
+
+        }
+
+        if (isImageEditRequest) {
+          console.log("[handleSubmit] Image edit request confirmed with image context");
+          // Update UI to reflect edit mode
+          setAiProcessSteps([
+            { step: "Procesando edición de imagen", status: "active" },
+            { step: "Editando imagen", status: "pending" }
+          ]);
+        }
+
+        // Direct call to /api/chat/stream for generation - REAL-TIME SSE
+        console.log("[handleSubmit] ⚡ Starting standard chat stream...");
+        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
+          i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
+        ));
+
+        // Ensure abort controller is active
+        if (!abortControllerRef.current) {
+          abortControllerRef.current = new AbortController();
+        }
+
+        try {
+          const response = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+              chatId,
+              conversationId: chatId,
+              provider: selectedProvider,
+              model: selectedModel,
+              lastImageBase64,
+              lastImageId
+            }),
+            signal: abortControllerRef.current.signal
+          });
+
+          if (!response.ok) {
+            if (response.status === 402) {
+              const errorData = await response.json();
+              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
+                setQuotaInfo(errorData.quota);
+                setShowPricingModal(true);
+                setAiState("idle");
+                setAiProcessSteps([]);
+                return;
+              }
+            }
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Error ${response.status}`);
+          }
+
+          setAiState("responding");
+
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error("No response body");
+
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let fullContent = "";
+          let currentEventType = "chunk"; // Default start
+          let streamComplete = false;
+
+          while (!streamComplete) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (!trimmedLine) continue;
+
+              if (trimmedLine.startsWith("event: ")) {
+                currentEventType = trimmedLine.slice(7).trim();
+              } else if (trimmedLine.startsWith("data: ")) {
+                const dataStr = trimmedLine.slice(6);
+                if (dataStr === "[DONE]") {
+                  streamComplete = true;
+                  continue;
+                }
+
+                try {
+                  const data = JSON.parse(dataStr);
+
+                  if (currentEventType === "chunk" || currentEventType === "text") {
+                    const content = data.content || "";
+                    if (content) {
+                      fullContent += content;
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    }
+                  } else if (currentEventType === "production_start") {
+                    setAiState("agent_working");
+                    setAiProcessSteps([{
+                      id: "init",
+                      step: "init",
+                      title: `Iniciando producción: ${data.topic || "Documento"}`,
+                      status: "pending",
+                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+                    }]);
+                  } else if (currentEventType === "production_event") {
+                    setAiProcessSteps((prev: any[]) => {
+                      const newSteps = [...prev];
+                      const lastStep = newSteps[newSteps.length - 1];
+                      if (lastStep && lastStep.status === "pending" && data.message) {
+                        // Update generic pending step
+                        lastStep.title = data.message;
+                      } else {
+                        // Add new step log
+                        newSteps.push({
+                          id: `step-${Date.now()}`,
+                          title: data.message || "Procesando...",
+                          status: "pending",
+                          description: data.stage
+                        });
+                      }
+                      return newSteps;
+                    });
+                  } else if (currentEventType === "production_complete") {
+                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+                  } else if (currentEventType === "done" || currentEventType === "finish") {
+                    streamComplete = true;
+                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+
+                    streamTransition.finalize({
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: data.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                      artifact: data.artifact,
+                      webSources: data.webSources,
+                    });
+                  } else if (currentEventType === "error" || currentEventType === "production_error") {
+                    throw new Error(data.message || data.error || "Stream error");
+                  }
+                } catch (parseError) {
+                  console.warn("SSE parse error:", parseError);
+                }
+              }
+            }
+          }
+
+        } catch (error: any) {
+          if (error.name === "AbortError") return;
+          console.error("[Generation] Stream Error:", error);
+          streamTransition.finalize({
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          });
+        }
+      } catch (error) {
+        console.error("[handleSubmit] Top-level error:", error);
+        setAiState("idle");
+      }
+    } // Close if ((isGenerationRequest ...
+
+
+    // Check if this is a Super Agent research request with sources
+    const superAgentCheck = shouldUseSuperAgent(input);
+    if (superAgentCheck.use) {
+      console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
+
+      const userInput = input;
+      const superAgentMessageId = `super-agent-${Date.now()}`;
+
+      // Clear input immediately
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+      setUploadedFiles([]);
+
+      // Create user message
+      const userMsgId = Date.now().toString();
+      const userMessage: Message = {
+        id: userMsgId,
+        role: "user",
+        content: userInput,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      };
+
+      // Show user message immediately
+      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
+      onSendMessage(userMessage);
+
+      // Create assistant message placeholder for Super Agent display
+      const assistantMessage: Message = {
+        id: superAgentMessageId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: userMsgId,
+        isThinking: true,
+      };
+
+      // Add assistant message that will show SuperAgentDisplay
+      setOptimisticMessages((prev: Message[]) => [...prev, assistantMessage]);
+
+      // Start Super Agent run in store
+      const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
+      startRun(superAgentMessageId);
+
+      // Generate run ID on frontend to enable immediate LiveExecutionConsole display
+      const frontendRunId = `run_${crypto.randomUUID()}`;
+      console.log('[uiPhase] runId created, uiPhase=console (immediate)', { runId: frontendRunId });
+
+      // Set uiPhase to 'console' IMMEDIATELY (no grace window)
+      // This ensures LiveExecutionConsole connects to SSE as soon as possible
+      // to receive all events from the backend
+      setUiPhase('console');
+
+      setActiveRunId(frontendRunId);
+
+      // Set up SSE stream by making POST request
+      setAiState("thinking");
+
+      try {
+        const response = await fetch("/api/super/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: userInput,
+            session_id: superAgentMessageId,
+            run_id: frontendRunId,
+            options: {
+              enforce_min_sources: true,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          setActiveRunId(null);
+          throw new Error(`Super Agent request failed: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body reader");
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalResult: SuperAgentFinal | null = null;
+        let currentEventType = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const jsonStr = line.slice(6);
+              if (jsonStr === "[DONE]") continue;
+
+              try {
+                const eventData = JSON.parse(jsonStr);
+                const eventType = currentEventType || eventData.type;
+
+                // Update store based on event type
+                const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
+                if (currentState) {
+                  let updates: Partial<SuperAgentState> = {};
+
+                  switch (eventType) {
+                    case "contract":
+                      updates = {
+                        contract: eventData,
+                        sourcesTarget: eventData.requirements?.min_sources || 100,
+                        phase: "planning",
+                      };
+                      break;
+                    case "production_start":
+                      updates = {
+                        phase: "planning",
+                        contract: {
+                          contract_id: eventData.runId,
+                          intent: eventData.intent,
+                          requirements: {
+                            min_sources: 0,
+                            must_create: eventData.deliverables || ["word"],
+                            language: "es"
+                          },
+                          plan: [],
+                          original_prompt: eventData.topic || ""
+                        }
+                      };
+                      // DOCX Generation: Set blank page with generating status
+                      if (selectedDocTool === "word" && eventData.deliverables?.includes("word")) {
+                        setDocGenerationState({
+                          status: 'generating',
+                          progress: 0,
+                          stage: 'Iniciando generación...',
+                          downloadUrl: null,
+                          fileName: null,
+                          fileSize: null
+                        });
+                        // Clear editor content to show blank page
+                        setEditedDocumentContent('');
+                      }
+                      break;
+                    case "progress":
+                      updates = {
+                        phase: eventData.phase || currentState.phase,
+                        progress: eventData,
+                      };
+                      break;
+                    case "production_event":
+                      const stageMap: Record<string, any> = {
+                        init: "planning",
+                        blueprint: "planning",
+                        research: "signals",
+                        writing: "creating",
+                        review: "verifying",
+                        render: "creating",
+                        final: "finalizing"
+                      };
+                      const mappedPhase = stageMap[eventData.stage] || currentState.phase;
+                      updates = {
+                        phase: mappedPhase,
+                        progress: {
+                          phase: mappedPhase,
+                          status: eventData.message,
+                          collected: eventData.progress,
+                          target: 100
+                        }
+                      };
+
+                      // DOCX Generation: Update progress state (no HTML injection)
+                      if (selectedDocTool === "word") {
+                        const stageLabels: Record<string, string> = {
+                          intake: "Procesando solicitud...",
+                          blueprint: "Diseñando estructura...",
+                          research: "Investigando contenido...",
+                          analysis: "Analizando información...",
+                          writing: "Redactando documento...",
+                          qa: "Verificando calidad...",
+                          consistency: "Validando consistencia...",
+                          render: "Generando documento final..."
+                        };
+                        const progress = eventData.progress || 0;
+                        setDocGenerationState((prev: any) => ({
+                          ...prev,
+                          status: 'generating',
+                          progress,
+                          stage: stageLabels[eventData.stage] || eventData.message || prev.stage
+                        }));
+                      }
+                      break;
+                    case "source_signal":
+                      const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                      if (existingIdx >= 0) {
+                        const newSources = [...currentState.sources];
+                        newSources[existingIdx] = eventData;
+                        updates = { sources: newSources };
+                      } else {
+                        updates = { sources: [...currentState.sources, eventData] };
+                      }
+                      break;
+                    case "source_deep":
+                      const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
+                      if (deepIdx >= 0) {
+                        const newSources = [...currentState.sources];
+                        newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
+                        updates = { sources: newSources };
+                      }
+                      break;
+                    case "artifact":
+                      const artifactObj = {
+                        id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: eventData.type,
+                        name: eventData.name || eventData.filename || "Documento",
+                        downloadUrl: eventData.downloadUrl,
+                        size: eventData.size
+                      };
+                      updates = {
+                        artifacts: [...currentState.artifacts, artifactObj],
+                        phase: "creating"
+                      };
+
+                      // DOCX Generation: Set ready status with download info
+                      if (selectedDocTool === "word" && eventData.type === "word") {
+                        setDocGenerationState({
+                          status: 'ready',
+                          progress: 100,
+                          stage: '¡Documento listo!',
+                          downloadUrl: eventData.downloadUrl || null,
+                          fileName: eventData.filename || eventData.name || "Documento.docx",
+                          fileSize: eventData.size || null
+                        });
+                      }
+                      break;
+                    case "verify":
+                      updates = { verify: eventData, phase: "verifying" };
+                      break;
+                    case "final":
+                      finalResult = eventData;
+                      updates = {
+                        final: eventData,
+                        phase: "completed",
+                        isRunning: false,
+                      };
+                      break;
+                    case "production_complete":
+                      const finalObj = {
+                        response: eventData.summary,
+                        sources_count: 0,
+                        artifacts: currentState.artifacts,
+                        duration_ms: 0,
+                        iterations: 1
+                      };
+                      finalResult = finalObj;
+                      updates = {
+                        final: finalObj,
+                        phase: "completed",
+                        isRunning: false
+                      };
+                      break;
+                    case "error":
+                      updates = {
+                        error: eventData.message || "Error en Super Agent",
+                        phase: "error",
+                        isRunning: false,
+                      };
+                      break;
+                    case "production_error":
+                      updates = {
+                        error: eventData.error,
+                        phase: "error",
+                        isRunning: false
+                      };
+                      break;
+                  }
+
+                  if (Object.keys(updates).length > 0) {
+                    updateState(superAgentMessageId, updates);
+                  }
+                }
+              } catch (parseError) {
+                console.warn("[Super Agent] Failed to parse SSE event:", parseError);
+              }
+            }
+          }
+        }
+
+        // Stream completed - update assistant message with final content
+        if (finalResult) {
+          const finalAssistantMessage: Message = {
+            id: superAgentMessageId,
+            role: "assistant",
+            content: finalResult.response,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+
+          // Update optimistic message
+          setOptimisticMessages((prev: Message[]) =>
+            prev.map((m: Message) => m.id === superAgentMessageId ? finalAssistantMessage : m)
+          );
+          onSendMessage(finalAssistantMessage);
+
+          completeRun(superAgentMessageId, finalResult);
+          setActiveRunId(null);
+        }
+
+      } catch (error) {
+        console.error("[Super Agent] Stream error:", error);
+        updateState(superAgentMessageId, {
+          error: error instanceof Error ? error.message : "Error de conexión",
+          phase: "error",
+          isRunning: false,
+        });
+
+        const errorMessage: Message = {
+          id: superAgentMessageId,
+          role: "assistant",
+          content: "Error al procesar la investigación. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+        };
+
+        setOptimisticMessages((prev: Message[]) =>
+          prev.map((m: Message) => m.id === superAgentMessageId ? errorMessage : m)
+        );
+        onSendMessage(errorMessage);
+        setActiveRunId(null);
+      }
+
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
+    // -------------------------------------------------------------------------
+    // Capture state immediately
+    const userInput = input;
+    const currentUploadedFiles = [...uploadedFilesRef.current];
+    const userMsgId = Date.now().toString();
+
+    // Reset UI state immediately
+    setInput("");
+    if (chatId) clearDraft(chatId);
+    setUploadedFiles([]);
+
+    // Process attachments for message construction
+    const attachments = currentUploadedFiles
+      .filter((f: any) => f.status === "ready" || f.status === "processing")
+      .map((f: any) => ({
+        type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+        name: f.name,
+        documentType: (() => {
+          if (f.type.startsWith("image/")) return undefined;
+          if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+          if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+          if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+          return "word"; // default to word for text/docs
+        })() as "word" | "excel" | "ppt" | "pdf",
+        mimeType: f.type,
+        imageUrl: f.dataUrl,
+        storagePath: f.storagePath,
+        fileId: f.id,
+        spreadsheetData: f.spreadsheetData,
+      }));
+
+    // Construct the User Message object
+    const userMsg: Message = {
+      id: userMsgId,
+      role: "user",
+      content: userInput,
+      timestamp: new Date(),
+      requestId: generateRequestId(),
+      clientRequestId: generateClientRequestId(),
+      status: 'pending',
+      attachments: attachments.length > 0 ? attachments : undefined,
+    };
+
+    // Apply Optimistic Update IMMEDIATELY
+    setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+
+    // Set initial AI state
+    setAiState("thinking");
+    streamingContentRef.current = "";
+    setStreamingContent("");
+
+    // -------------------------------------------------------------------------
+    // 2. ASYNC LOGIC (Agent Mode / Server Request)
+    // -------------------------------------------------------------------------
+
+    // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
+    // Use captured state (userInput, currentUploadedFiles) not component state
+    const hasAttachedFiles = currentUploadedFiles.length > 0;
+    const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
+
+    if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
+
+
+      const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
+      const agentAttachments = readyFiles
+        .filter((f: any) => typeof f.id === "string" && f.id.length > 0 && !f.id.startsWith("temp-"))
+        .map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          mimeType: f.type,
+          type: f.type,
+          storagePath: f.storagePath,
+          path: f.storagePath,
+          size: f.size,
+          metadata: {
+            spreadsheetData: f.spreadsheetData,
+            analysisId: f.analysisId,
+          },
+        }));
+
+      const agentMessageId = `agent-${Date.now()}`;
+      setCurrentAgentMessageId(agentMessageId);
+
+      try {
+        const result = await startAgentRun(
+          chatId || "",
+          userInput,
+          agentMessageId,
+          agentAttachments
+        );
+
+        if (result) {
+          toast({
+            title: "Modo Agente activado",
+            description: complexityCheck.agent_reason || "Tarea compleja detectada",
+            duration: 4000,
+          });
+
+          // Optimistic message already added above! just notify parent/server if needed
+          onSendMessage({ ...userMsg, skipRun: true });
+
+          setSelectedTool(null);
+          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+          }
+        } else {
+          // Agent failed - Fall through to normal chat processing
+
+          // No need to reset input/files, as message is already "sent" optimistically. 
+          // Just ensure onSendMessage runs below for the normal path.
+          setCurrentAgentMessageId(null);
+        }
+      } catch (error) {
+        console.error("Failed to auto-start agent run:", error);
+        setCurrentAgentMessageId(null);
+        // Fall through to normal chat
+      }
+
+      // Only return if agent succeeded (result is truthy)
+      if (useAgentStore.getState().runs[agentMessageId]?.runId) {
+        return;
+      }
+    }
+
+
+    // Regular Chat Flow (or fallback from failed Agent Mode)
+    // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
+    if (uiPhase !== 'idle') {
+
+      setUiPhase('idle');
+    }
+    // Clear any pending uiPhase timer
+    if (uiPhaseTimerRef.current) {
+      clearTimeout(uiPhaseTimerRef.current);
+      uiPhaseTimerRef.current = null;
+    }
+
+    // Initialize process steps based on context (reuse hasAttachedFiles from above)
+    const initialSteps: { step: string; status: "pending" | "active" | "done" }[] = [];
+    if (hasAttachedFiles) {
+      initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
+    }
+    initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
+    initialSteps.push({ step: "Buscando información relevante", status: "pending" });
+    initialSteps.push({ step: "Generando respuesta", status: "pending" });
+    setAiProcessSteps(initialSteps);
+
+    // NOTE: Input/Files already reset and UserMessage already constructed above.
+
+    console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
+    // Optimistic update ALREAD done. just send to parent/server.
+    // onSendMessage calls useChats.addMessage which handles server request
+
+
+    // DATA_MODE: Pre-check if we have document attachments that need analysis
+    // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
+    const isDocumentFileLegacyPrecheck = (mimeType: string, fileName: string, type?: string): boolean => {
+      const lowerMime = (mimeType || "").toLowerCase();
+      const lowerName = (fileName || "").toLowerCase();
+      const lowerType = (type || "").toLowerCase();
+
+      if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
+
+      const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
+      if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+
+      const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
+      if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+
+      if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+
+      if (!lowerMime || lowerMime === "application/octet-stream") {
+        const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+        return !hasImageExt;
+      }
+
+      return false;
+    };
+
+    const hasDocumentAttachmentsPrecheck = attachments.some((a: any) => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
+
+    // Store pre-fetched analysis result to use later (prevents race condition)
+    let preFetchedAnalysisResult: {
+      answer_text?: string;
+      ui_components?: any[];
+      documentModel?: any;
+      insights?: string[];
+      suggestedQuestions?: string[];
+    } | null = null;
+
+    // If we have document attachments, execute analysis BEFORE calling onSendMessage
+    // This prevents race condition where chat navigation interrupts the fetch
+    // The result is stored and used later in the legacy flow
+    // Use a DEDICATED controller for pre-fetch to not interfere with main abortControllerRef
+    if (hasDocumentAttachmentsPrecheck) {
+      console.log("[handleSubmit] DATA_MODE (Pre-send): Executing document analysis BEFORE chat navigation");
+
+      // Create a dedicated abort controller for the pre-fetch, stored in shared ref for cancellation
+      analysisAbortControllerRef.current = new AbortController();
+
+      try {
+        // Clean attachments for server
+        const cleanedAttachments = attachments.map((att: any) => {
+          const { spreadsheetData, previewData, ...rest } = att;
+          const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.())
+            ? 'document'
+            : (rest.type === 'image' ? 'image' : 'document');
+          return { ...rest, type: normalizedType };
+        });
+
+        const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        const finalChatHistoryPrecheck = [
+          ...messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          { role: "user", content: userInput }
+        ];
+
+        console.log("[handleSubmit] Pre-send: Fetching /api/analyze with attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath })));
+
+        const analyzeResponse = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: finalChatHistoryPrecheck,
+            attachments: cleanedAttachments,
+            conversationId: effectiveConversationId
+          }),
+          signal: analysisAbortControllerRef.current.signal
+        });
+
+        console.log("[handleSubmit] Pre-send: Analyze response status:", analyzeResponse.status);
+
+        if (analyzeResponse.ok) {
+          preFetchedAnalysisResult = await analyzeResponse.json();
+          console.log("[handleSubmit] Pre-send: Analysis successful, stored for later use");
+        } else {
+          const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+          console.error("[handleSubmit] Pre-send: Analyze error:", analyzeResponse.status, errorData);
+          // Fall through to normal flow if analysis fails
+        }
+      } catch (analyzeError: any) {
+        if (analyzeError?.name === "AbortError") {
+          console.log("[handleSubmit] Pre-send: Analysis was cancelled by user");
+          setAiState("idle");
+          setAiProcessSteps([]);
+          analysisAbortControllerRef.current = null;
+          return; // User cancelled, don't continue
+        } else {
+          console.error("[handleSubmit] Pre-send: Analysis failed:", analyzeError?.message || analyzeError);
+        }
+        // Fall through to normal flow
+      } finally {
+        analysisAbortControllerRef.current = null; // Clear the ref after analysis completes
+      }
+    }
+
+    // Send user message — fire-and-forget (don't block stream start)
+    try {
+      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+
+      // Fire-and-forget: persist user message in background.
+      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
+      onSendMessage(userMsg);
+
+      // Start image detection early (runs in parallel with intent checks below).
+      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+      const isImageTool = selectedTool === "image";
+      const imageDetectPromise: Promise<boolean> = (
+        !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles
+      )
+        ? fetch("/api/image/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userInput })
+          })
+            .then(r => r.json())
+            .then(d => !!d.isImageRequest)
+            .catch(() => false)
+        : Promise.resolve(!!isImageTool);
+
+      // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
+      const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
+      const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
+
+      // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
+      if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
+        // Create file context from uploaded files
+        if (currentUploadedFiles.length > 0) {
+          // Add file context if files are present
+          const fileContext = currentUploadedFiles
+            .filter(f => f.content && f.status === "ready")
+            .map(f => ({
+              name: f.name,
+              content: f.content || "",
+              type: f.type
+            }));
+
+          // Create assistant message with inline form preview
+          const formPreviewMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "Creando formulario en base a tu solicitud...",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+            googleFormPreview: {
+              prompt: cleanPrompt,
+              fileContext: fileContext.length > 0 ? fileContext : undefined,
+              autoStart: true
+            }
+          };
+
+          onSendMessage(formPreviewMsg);
+          // Note: markRequestComplete is called inside addMessage after persistence
+          setAiState("idle");
+          setAiProcessSteps([]);
+          return;
+        }
+      }
+
+      // Check for Gmail intent
+      const hasGmailMention = userInput.toLowerCase().includes('@gmail');
+      const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
+
+      if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
+        setAiState("thinking");
+        setAiProcessSteps([
+          { step: "Buscando en tu correo electrónico", status: "active" },
+          { step: "Analizando correos encontrados", status: "pending" },
+          { step: "Generando respuesta inteligente", status: "pending" }
+        ]);
+
+        try {
+          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+          fullMessages.push({ role: "user", content: cleanPrompt });
+
+          const chatResponse = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              messages: fullMessages,
+              conversationId: chatId,
+              useRag: true
+            })
+          });
+
+          setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
+            i === 0 ? { ...s, status: "done" as const } :
+              i === 1 ? { ...s, status: "active" as const } : s
+          ));
+
+          if (chatResponse.ok) {
+            const data = await chatResponse.json();
+
+            setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+
+            const gmailResponseMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: data.content || "No se pudo obtener una respuesta.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+              webSources: data.webSources,
+            };
+            onSendMessage(gmailResponseMsg);
+          } else {
+            const gmailErrorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId
+            };
+            onSendMessage(gmailErrorMsg);
+          }
+        } catch (error) {
+          console.error("Gmail chat error:", error);
+          const gmailErrorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId
+          };
+          onSendMessage(gmailErrorMsg);
+        }
+
+        setAiState("idle");
+        setAiProcessSteps([]);
+        return;
+      }
+
+      // Check if Excel is open and prompt is complex - route through orchestrator
+      const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+      if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
+        setAiState("thinking");
+        setAiProcessSteps([
+          { step: "Analizando estructura del workbook", status: "active" },
+          { step: "Creando hojas y datos", status: "pending" },
+          { step: "Aplicando fórmulas y gráficos", status: "pending" }
+        ]);
+
+        try {
+          await orchestratorRef.current.runOrchestrator(cleanPrompt);
+
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+
+          const orchestratorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId
+          };
+          onSendMessage(orchestratorMsg);
+        } catch (err) {
+          console.error("[Orchestrator] Error:", err);
+          const errorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId
+          };
+          onSendMessage(errorMsg);
+        }
+
+        setAiState("idle");
+        setAiProcessSteps([]);
+        return;
+      }
+
+      try {
+        abortControllerRef.current = new AbortController();
+
+        // Await the image detection that was started in parallel above.
+        // By now it has had time to run during intent checks (~0ms extra wait).
+        let shouldGenerateImage = await imageDetectPromise;
+
+        // If files are attached, log that we're skipping image detection
+        if (hasAttachedFiles && !isImageTool) {
+          console.log(`[ChatInterface] Files attached (${currentUploadedFiles.length}), skipping image auto-detection - will process as document analysis`);
+        }
+
+        // Generate image if needed
+        if (shouldGenerateImage) {
+          setIsGeneratingImage(true);
+          setAiProcessSteps([
+            { step: "Analizando tu petición", status: "done" },
+            { step: "Generando imagen con IA", status: "active" },
+            { step: "Procesando resultado", status: "pending" }
+          ]);
+
+          try {
+            const imageRes = await fetch("/api/image/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prompt: userInput }),
+              signal: abortControllerRef.current.signal
+            });
+
+            const imageData = await imageRes.json();
+
+            if (imageRes.ok && imageData.success) {
+              setAiProcessSteps((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })));
+
+              const msgId = (Date.now() + 1).toString();
+
+              // Store image in separate memory store to prevent loss during localStorage sync
+              storeGeneratedImage(msgId, imageData.imageData);
+
+              // Track last generated image for edit operations
+              storeLastGeneratedImageInfo({
+                messageId: msgId,
+                base64: imageData.imageData,
+                artifactId: imageData.artifactId || null,
+                previewUrl: imageData.previewUrl,
+              });
+
+              // Save generated image to user's library (fire and forget)
+              if (user) {
+                fetch("/api/library", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({
+                    mediaType: "image",
+                    title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
+                    description: userInput.slice(0, 200),
+                    storagePath: imageData.imageData,
+                    mimeType: "image/png",
+                    sourceChatId: chatId || null,
+                    metadata: { prompt: userInput }
+                  })
+                }).catch(err => console.error("Failed to save image to library:", err));
+              }
+
+              // Also store in local component state and ref for persistence across remounts
+              const pendingImage = { messageId: msgId, imageData: imageData.imageData };
+              setPendingGeneratedImage(pendingImage);
+              latestGeneratedImageRef.current = pendingImage;
+
+              const aiMsg: Message = {
+                id: msgId,
+                role: "assistant",
+                content: "Aquí está la imagen que generé basada en tu descripción:",
+                generatedImage: imageData.imageData,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              onSendMessage(aiMsg);
+
+              setIsGeneratingImage(false);
+              setAiState("idle");
+              setAiProcessSteps([]);
+              setSelectedTool(null);
+              abortControllerRef.current = null;
+              return;
+            } else {
+              throw new Error(imageData.error || "Error al generar imagen");
+            }
+          } catch (imgError: any) {
+            setIsGeneratingImage(false);
+            if (imgError.name === "AbortError") {
+              setAiState("idle");
+              setAiProcessSteps([]);
+              abortControllerRef.current = null;
+              return;
+            }
+            // If image generation fails, continue with normal chat to explain
+            console.error("Image generation failed:", imgError);
+          }
+          const fileContents = currentUploadedFiles
+            .filter(f => f.content && f.status === "ready")
+            .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
+            .join("\n\n");
+
+          const messageWithFiles = fileContents
+            ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
+            : userInput;
+
+          const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
+            role: m.role,
+            content: m.content
+          }));
+
+          // Extract image data URLs from current files
+          const imageDataUrls = currentUploadedFiles
+            .filter(f => f.type.startsWith("image/") && f.dataUrl)
+            .map(f => f.dataUrl as string);
+
+          // Determine if we're in document mode for special AI behavior
+          // Check both activeDocEditor and previewDocument for Excel mode
+          const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current;
+          const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || null;
+          const isFigmaMode = selectedDocTool === "figma";
+          const isPptMode = documentType === "ppt";
+          const isWordMode = documentType === "word";
+          const isExcelMode = documentType === "excel";
+
+          console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
+
+          // Check if document has existing content (not just placeholder)
+          const currentDocContent = editedDocumentContent || "";
+          const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+          const plainTextContent = stripHtml(currentDocContent);
+          const placeholderPhrases = [
+            "comienza a escribir tu documento aquí",
+            "comienza a escribir",
+            "escribe aquí"
+          ];
+          const isPlaceholder = placeholderPhrases.some(p =>
+            plainTextContent.toLowerCase().includes(p)
+          );
+          // Any non-empty, non-placeholder content should be preserved
+          const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
+
+          // Build system prompt for Word document mode (cumulative - each response adds to document)
+          let wordSystemPrompt = "";
+          if (isWordMode) {
+            if (hasExistingContent) {
+              wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento con contenido previo y quiere AÑADIR más contenido.
+
+CONTEXTO DEL DOCUMENTO EXISTENTE (para referencia):
+${plainTextContent.slice(0, 500)}${plainTextContent.length > 500 ? '...' : ''}
+
+INSTRUCCIONES IMPORTANTES:
+1. Genera SOLO el nuevo contenido que el usuario solicita
+2. NO repitas ni incluyas el contenido existente del documento
+3. Tu respuesta se AÑADIRÁ automáticamente al final del documento existente
+4. Responde SOLO con el nuevo contenido en formato Markdown, sin explicaciones adicionales`;
+            } else {
+              wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
+Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
+            }
+          }
+
+          // Build Excel system prompt for direct streaming to spreadsheet
+          const excelSystemPrompt = `Eres un asistente de hojas de cálculo Excel. Genera datos estructurados en formato CSV.
+
+FORMATO DE RESPUESTA:
+- Para crear una nueva hoja: [NUEVA_HOJA:Nombre de la hoja]
+- Datos en formato CSV con comas como separador
+- Primera fila como encabezados
+- Sin explicaciones, solo datos
+
+EJEMPLO:
+[NUEVA_HOJA:Ventas 2024]
+Mes,Ventas,Crecimiento
+Enero,15000,5%
+Febrero,18000,20%
+Marzo,22000,22%
+
+IMPORTANTE:
+- Responde SOLO con datos CSV, sin texto explicativo
+- Usa comas como separador de columnas
+- Cada fila en una línea separada
+- Los datos numéricos sin formato de moneda (solo números)`;
+
+          // Build chat history with appropriate system prompt
+          let finalChatHistory: Array<{ role: string; content: string }> = chatHistory;
+          if (isPptMode) {
+            finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
+          } else if (isExcelMode) {
+            finalChatHistory = [{ role: "system", content: excelSystemPrompt }, ...chatHistory];
+          } else if (isWordMode) {
+            finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
+          }
+
+          // Capture document mode state NOW using ref (avoids closure issues)
+          // For Excel, also check previewDocument since Excel can be opened via preview
+          const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
+
+          // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
+          // Note: currentDocContent is HTML from the editor
+          const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
+          const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
+
+          // Always use SSE streaming — generate an effective chatId if needed.
+          // Previously gated on `runInfo && chatId` which required awaiting onSendMessage.
+          const effectiveStreamChatId = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+          if (effectiveStreamChatId) {
+            // SSE streaming mode - real-time streaming from server
+            setAiState("responding");
+
+            // Update steps: mark processing done, searching active
+            setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
+              // Guard against undefined step or s
+              if (!s || !s.step) return s;
+
+              if (s.step.includes("Analizando")) return { ...s, status: "done" };
+              if (s.step.includes("Procesando")) return { ...s, status: "done" };
+              if (s.step.includes("Buscando")) return { ...s, status: "active" };
+              return s;
+            }));
+
+            let fullContent = "";
+            let sseError: Error | null = null;
+
+            // try {
+            // Helper function to robustly detect if a file is a document (not an image)
+            // Uses mimeType AND file extension for reliable detection
+            const isDocumentFile = (mimeType: string, fileName: string): boolean => {
+              const lowerMime = (mimeType || "").toLowerCase();
+              const lowerName = (fileName || "").toLowerCase();
+
+              // Check for explicit image MIME types first
+              if (lowerMime.startsWith("image/")) return false;
+
+              // Document MIME types
+              const docMimePatterns = [
+                "pdf", "word", "document", "sheet", "excel",
+                "spreadsheet", "presentation", "powerpoint", "csv",
+                "text/plain", "text/csv", "application/json"
+              ];
+              if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+
+              // Document file extensions
+              const docExtensions = [
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+                ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
+              ];
+              if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+
+              // If mimeType is empty/unknown and has no extension, treat as document (safer)
+              if (!lowerMime || lowerMime === "application/octet-stream") return true;
+
+              return false;
+            };
+
+            // Build attachments array for streaming endpoint
+            const streamAttachments = currentUploadedFiles
+              .filter(f => f.status === "ready" || f.status === "processing")
+              .map(f => ({
+                type: f.type.startsWith("image/") ? "image" as const :
+                  f.type.includes("pdf") ? "pdf" as const :
+                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
+                      f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
+                        f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
+                          "document" as const,
+                name: f.name,
+                mimeType: f.type,
+                storagePath: f.storagePath,
+                fileId: f.id,
+                content: f.content,
+              }));
+
+            // Robust document detection using both mimeType AND file extension
+            const hasDocumentAttachments = currentUploadedFiles
+              .filter(f => f.status === "ready" || f.status === "processing")
+              .some(f => isDocumentFile(f.type, f.name));
+
+            // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
+            if (hasDocumentAttachments) {
+              console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
+              const analyzeResponse = await fetch("/api/analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  messages: finalChatHistory,
+                  attachments: streamAttachments,
+                  conversationId: chatId
+                }),
+                signal: abortControllerRef.current?.signal
+              });
+
+              if (!analyzeResponse.ok) {
+                const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+                throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+              }
+
+              const analyzeResult = await analyzeResponse.json();
+
+              // Create assistant message with analysis results
+              const analysisMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                ui_components: analyzeResult.ui_components || [],
+                documentAnalysis: analyzeResult.documentModel ? {
+                  documentModel: analyzeResult.documentModel,
+                  insights: analyzeResult.insights || [],
+                  suggestedQuestions: analyzeResult.suggestedQuestions || [],
+                } : undefined,
+              };
+              onSendMessage(analysisMsg);
+
+              setAiState("idle");
+              setAiProcessSteps([]);
+              abortControllerRef.current = null;
+              return;
+            }
+
+            // DEBUG: Log selectedDocTool value before making request
+            console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
+
+            const response = await fetch("/api/chat/stream", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
+              body: JSON.stringify({
+                messages: finalChatHistory,
+                conversationId: effectiveStreamChatId,
+                chatId: effectiveStreamChatId,
+                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                // Send selected doc tool for production mode activation
+                docTool: selectedDocTool || null
+              }),
+              signal: abortControllerRef.current?.signal
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+              throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
+            }
+
+            // Check if response indicates already processed (not SSE)
+            const contentType = response.headers.get("Content-Type") || "";
+            if (contentType.includes("application/json")) {
+              const jsonData = await response.json();
+              if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
+                // Run was already processed, skip streaming
+                console.log("[SSE] Run already processed, skipping streaming");
+                setAiState("idle");
+                setAiProcessSteps([]);
+                agent.complete();
+                abortControllerRef.current = null;
+                return;
+              }
+            }
+
+            // Update steps: mark searching done, generating active
+            setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
+              if (!s || !s.step) return s;
+              if (s.step.includes("Buscando")) return { ...s, status: "done" };
+              if (s.step.includes("Generando")) return { ...s, status: "active" };
+              return { ...s, status: s.status === "pending" ? "pending" : "done" };
+            }));
+
+            // Start PPT streaming if in PPT mode
+            if (isPptMode && shouldWriteToDoc) {
+              pptStreaming.startStreaming();
+              streamingContentRef.current = "";
+              setStreamingContent("");
+            }
+
+            // Process SSE stream
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let lastSeq = -1; // Track last processed sequence for ordering
+            let currentEventType = "chunk"; // Track current event type
+            let streamComplete = false;
+            let streamWebSources: any[] | undefined = undefined; // Capture webSources from done event
+
+            if (!reader) {
+              throw new Error("No response body for SSE streaming");
+            }
+
+            while (!streamComplete) {
+              const { done, value } = await reader.read();
+
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+
+              // Parse SSE events from buffer
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+              for (const line of lines) {
+                // Track event type for the next data line
+                if (line.startsWith("event: ")) {
+                  currentEventType = line.slice(7).trim();
+                  continue;
+                }
+
+                if (line.startsWith("data: ")) {
+                  let data: any;
+                  try {
+                    data = JSON.parse(line.slice(6));
+                  } catch (parseErr) {
+                    // Ignore parse errors for heartbeat or malformed data
+                    console.debug('[SSE] Parse error, skipping line:', line);
+                    continue;
+                  }
+
+                  // Skip out-of-order sequences for deduplication
+                  if (typeof data.sequenceId === 'number') {
+                    if (data.sequenceId <= lastSeq) {
+                      console.debug(`[SSE] Skipping out-of-order seq ${data.sequenceId} (lastSeq: ${lastSeq})`);
+                      continue;
+                    }
+                    lastSeq = data.sequenceId;
+                  }
+
+                  // Handle completion events (done or complete)
+                  if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
+                    console.debug('[SSE] Stream complete event received');
+                    // Capture webSources from done event
+                    if (data.webSources && Array.isArray(data.webSources)) {
+                      streamWebSources = data.webSources;
+                      console.debug('[SSE] Captured webSources:', streamWebSources ? streamWebSources.length : 0);
+                    }
+                    streamComplete = true;
+                    break;
+                  }
+
+                  // Handle error events
+                  if (currentEventType === 'error') {
+                    throw new Error(data.error || 'SSE stream error');
+                  }
+
+                  // Handle chunk events with content
+                  if (currentEventType === 'chunk' && data.content) {
+                    fullContent += data.content;
+
+                    // Update UI based on mode
+                    if (isPptMode && shouldWriteToDoc) {
+                      pptStreaming.processChunk(data.content);
+                    } else if (isExcelMode && shouldWriteToDoc) {
+                      // Excel mode: show streaming indicator in chat, data goes to Excel at end
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+                      try {
+                        // Word mode: Cumulative HTML mode
+                        const newContentHTML = markdownToTipTap(fullContent);
+                        const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                        docInsertContentRef.current(cumulativeHTML, 'html');
+                        setEditedDocumentContent(cumulativeHTML);
+                      } catch (err) {
+                        console.error('[ChatInterface] Error streaming to document:', err);
+                      }
+                    } else {
+                      // Normal chat mode - update streaming content
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    }
+                  }
+
+                  // Reset event type after processing data
+                  currentEventType = "chunk";
+                }
+              }
+            }
+
+
+            // Handle completion
+            if (sseError) {
+              throw sseError;
+            }
+
+            // Finalize based on mode
+            console.log('[ChatInterface] Finalize check:', { isPptMode, isExcelMode, isWordMode, shouldWriteToDoc, hasInsertFn: !!docInsertContentRef.current, fullContentLength: fullContent.length });
+            if (isPptMode && shouldWriteToDoc) {
+              pptStreaming.stopStreaming();
+
+              const confirmMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "✓ Presentación generada correctamente",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              await onSendMessage(confirmMsg);
+            } else if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current) {
+              // Excel mode: send raw CSV data to Excel editor for cell-by-cell streaming
+              try {
+                console.log('[ChatInterface] Excel streaming: sending', fullContent.length, 'chars to Excel');
+                // Clear streaming content first
+                streamingContentRef.current = "";
+                setStreamingContent("");
+                // Send raw CSV data to Excel - insertContentFn will handle the streaming animation
+                await docInsertContentRef.current(fullContent);
+              } catch (err) {
+                console.error('[ChatInterface] Error streaming to Excel:', err);
+              }
+
+              const confirmMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "✓ Datos generados en la hoja de cálculo",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              await onSendMessage(confirmMsg);
+            } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+              try {
+                // Word mode: Cumulative HTML mode
+                const newContentHTML = markdownToTipTap(fullContent);
+                const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                docInsertContentRef.current(cumulativeHTML, 'html');
+                setEditedDocumentContent(cumulativeHTML);
+              } catch (err) {
+                console.error('[ChatInterface] Error finalizing document:', err);
+              }
+
+              streamTransition.finalize({
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "✓ Documento generado correctamente",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              });
+            } else {
+              // Normal chat mode - create final assistant message
+              const uncertainty = detectUncertainty(fullContent);
+              streamTransition.finalize({
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                confidence: uncertainty.confidence,
+                uncertaintyReason: uncertainty.reason,
+                webSources: streamWebSources,
+              });
+            }
+
+            agent.complete();
+            abortControllerRef.current = null;
+
+          } else {
+            // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
+            // DATA_MODE: Robust detection using mimeType and file extension (reuse same logic)
+            const isDocumentFileLegacy = (mimeType: string, fileName: string, type?: string): boolean => {
+              const lowerMime = (mimeType || "").toLowerCase();
+              const lowerName = (fileName || "").toLowerCase();
+              const lowerType = (type || "").toLowerCase();
+
+              if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
+
+              const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
+              if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+
+              const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
+              if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+
+              if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+
+              if (!lowerMime || lowerMime === "application/octet-stream") {
+                const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+                return !hasImageExt;
+              }
+
+              return false;
+            };
+
+            const hasDocumentAttachments = attachments.some((a: any) => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
+
+            // Use pre-fetched result if available (prevents race condition)
+            // Note: We send the analysis result and then continue with normal flow (no early return)
+            if (hasDocumentAttachments && preFetchedAnalysisResult) {
+              console.log("[handleSubmit] DATA_MODE (Legacy): Using pre-fetched analysis result");
+
+              // Send analysis result as assistant message
+              const analysisMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: preFetchedAnalysisResult.answer_text || "Análisis del documento completado.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                ui_components: preFetchedAnalysisResult.ui_components || [],
+                documentAnalysis: preFetchedAnalysisResult.documentModel ? {
+                  documentModel: preFetchedAnalysisResult.documentModel,
+                  insights: preFetchedAnalysisResult.insights || [],
+                  suggestedQuestions: preFetchedAnalysisResult.suggestedQuestions || [],
+                } : undefined,
+              };
+              onSendMessage(analysisMsg);
+
+              // Complete the flow and return - document analysis is a complete response
+              setAiState("idle");
+              setAiProcessSteps([]);
+              abortControllerRef.current = null;
+              return;
+            } else if (hasDocumentAttachments && !preFetchedAnalysisResult) {
+              // Pre-fetch failed, try again (fallback - shouldn't normally happen)
+              console.log("[handleSubmit] DATA_MODE (Legacy): Pre-fetch failed, falling back to /api/analyze fetch");
+
+              const cleanedAttachments = attachments.map((att: any) => {
+                const { spreadsheetData, previewData, ...rest } = att;
+                const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.())
+                  ? 'document'
+                  : (rest.type === 'image' ? 'image' : 'document');
+                return { ...rest, type: normalizedType };
+              });
+
+              const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+              // Create a new AbortController for the fallback fetch (stored in shared ref for cancellation)
+              analysisAbortControllerRef.current = new AbortController();
+
+              try {
+                const analyzeResponse = await fetch("/api/analyze", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    messages: finalChatHistory,
+                    attachments: cleanedAttachments,
+                    conversationId: effectiveConversationId
+                  }),
+                  signal: analysisAbortControllerRef.current.signal
+                });
+
+                if (analyzeResponse.ok) {
+                  const analyzeResult = await analyzeResponse.json();
+
+                  const analysisMsg: Message = {
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: analyzeResult.answer_text || "Análisis del documento completado.",
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                    ui_components: analyzeResult.ui_components || [],
+                    documentAnalysis: analyzeResult.documentModel ? {
+                      documentModel: analyzeResult.documentModel,
+                      insights: analyzeResult.insights || [],
+                      suggestedQuestions: analyzeResult.suggestedQuestions || [],
+                    } : undefined,
+                  };
+                  onSendMessage(analysisMsg);
+
+                  setAiState("idle");
+                  setAiProcessSteps([]);
+                  analysisAbortControllerRef.current = null;
+                  return;
+                } else {
+                  const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+                  const errorMessage = errorData?.error?.message || errorData?.message || errorData?.error || `Analysis failed: ${analyzeResponse.status}`;
+                  throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+                }
+              } catch (fetchError: any) {
+                if (fetchError?.name === "AbortError") {
+                  console.log("[handleSubmit] Fallback fetch was aborted by user");
+                  setAiState("idle");
+                  setAiProcessSteps([]);
+                  analysisAbortControllerRef.current = null;
+                  return;
+                }
+                throw fetchError;
+              } finally {
+                analysisAbortControllerRef.current = null;
+              }
+            }
+
+
+            const response = await fetch("/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
+              body: JSON.stringify({
+                messages: finalChatHistory,
+                images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+                documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
+                figmaMode: isFigmaMode,
+                pptMode: isPptMode,
+                provider: selectedProvider,
+                model: selectedModel,
+                attachments: attachments.length > 0 ? attachments : undefined,
+                gptId: activeGpt?.id,
+                session_id: gptSessionId
+              }),
+              signal: abortControllerRef.current?.signal
+            });
+
+            // Update steps: mark processing done, searching active
+            setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
+              if (!s || !s.step) return s;
+              if (s.step.includes("Analizando")) return { ...s, status: "done" };
+              if (s.step.includes("Procesando")) return { ...s, status: "done" };
+              if (s.step.includes("Buscando")) return { ...s, status: "active" };
+              return s;
+            }));
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to get response");
+            }
+
+            // Save and log GPT session metadata from server
+            if (data.session_id) {
+              setGptSessionId(data.session_id);
+              console.log('[Chat] Using GPT session:', {
+                sessionId: data.session_id,
+                gptId: data.gpt_id,
+                configVersion: data.config_version,
+                toolPermissions: data.tool_permissions
+              });
+            }
+
+            // Update steps: mark searching done, generating active
+            setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
+              if (!s || !s.step) return s;
+              if (s.step.includes("Buscando")) return { ...s, status: "done" };
+              if (s.step.includes("Generando")) return { ...s, status: "active" };
+              return { ...s, status: s.status === "pending" ? "pending" : "done" };
+            }));
+
+            const fullContent = data.content;
+            const responseSources = data.sources || [];
+            const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+            const responseArtifact = data.artifact;
+            const responseWebSources = data.webSources;
+
+            // If Figma diagram was generated, add it to chat with simulated streaming
+            if (figmaDiagram) {
+              setAiState("responding");
+
+              let currentIndex = 0;
+              streamIntervalRef.current = setInterval(() => {
+                if (currentIndex < fullContent.length) {
+                  const chunkSize = Math.floor(Math.random() * 5) + 3;
+                  currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+                  streamingContentRef.current = fullContent.slice(0, currentIndex);
+                  setStreamingContent(fullContent.slice(0, currentIndex));
+                } else {
+                  if (streamIntervalRef.current) {
+                    clearInterval(streamIntervalRef.current);
+                    streamIntervalRef.current = null;
+                  }
+
+                  const uncertainty = detectUncertainty(fullContent);
+                  streamTransition.finalize({
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: fullContent,
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                    figmaDiagram,
+                    webSources: responseWebSources,
+                    confidence: uncertainty.confidence,
+                    uncertaintyReason: uncertainty.reason,
+                  });
+                  // Only reset doc tool if there's no active document editor
+                  if (!activeDocEditorRef.current) {
+                    setSelectedDocTool(null);
+                  }
+                  agent.complete();
+                  abortControllerRef.current = null;
+                }
+              }, 10);
+              return;
+            }
+
+            // Legacy simulated streaming for other cases
+            setAiState("responding");
+
+            // Check document modes
+            const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+            const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
+            const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
+
+            console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
+
+            // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
+            if (isExcelModeLegacy && docInsertContentRef.current) {
+              console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
+              try {
+                await docInsertContentRef.current(fullContent);
+                streamTransition.finalize({
+                  id: (Date.now() + 1).toString(),
+                  role: "assistant",
+                  content: "✓ Datos generados en la hoja de cálculo",
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                });
+              } catch (err) {
+                console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
+                streamTransition.finalize({
+                  id: (Date.now() + 1).toString(),
+                  role: "assistant",
+                  content: fullContent,
+                  timestamp: new Date(),
+                  requestId: generateRequestId(),
+                  userMessageId: userMsgId,
+                });
+              }
+              agent.complete();
+              abortControllerRef.current = null;
+              return;
+            }
+
+            // Word mode or normal chat: use progressive streaming
+            let currentIndex = 0;
+
+            streamIntervalRef.current = setInterval(() => {
+              if (currentIndex < fullContent.length) {
+                const chunkSize = Math.floor(Math.random() * 3) + 1;
+                const newContent = fullContent.slice(0, currentIndex + chunkSize);
+
+                // Write to document if in document mode (cumulative)
+                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                  try {
+                    const newContentHTML = markdownToTipTap(newContent);
+                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                    docInsertContentRef.current(cumulativeHTML, 'html');
+                    // Update state so subsequent instructions have the current content
+                    setEditedDocumentContent(cumulativeHTML);
+                  } catch (err) {
+                    console.error('[ChatInterface] Error streaming to document (legacy):', err);
+                  }
+                } else {
+                  // Store content in streaming store for conversation affinity
+                  const originalChatId = streamingChatIdRef.current;
+                  if (originalChatId) {
+                    appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
+                  }
+                  streamingContentRef.current = newContent;
+                  setStreamingContent(newContent);
+                }
+                currentIndex += chunkSize;
+              } else {
+                if (streamIntervalRef.current) {
+                  clearInterval(streamIntervalRef.current);
+                  streamIntervalRef.current = null;
+                }
+
+                // Finalize document or create message (cumulative)
+                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                  try {
+                    const newContentHTML = markdownToTipTap(fullContent);
+                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                    docInsertContentRef.current(cumulativeHTML, 'html');
+                    // Update state so subsequent instructions have the current content
+                    setEditedDocumentContent(cumulativeHTML);
+                  } catch (err) {
+                    console.error('[ChatInterface] Error finalizing document (legacy):', err);
+                  }
+
+                  streamTransition.finalize({
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: "✓ Documento generado correctamente",
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                  });
+                } else {
+                  const uncertainty = detectUncertainty(fullContent);
+                  streamTransition.finalize({
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: fullContent,
+                    timestamp: new Date(),
+                    requestId: generateRequestId(),
+                    userMessageId: userMsgId,
+                    sources: responseSources.length > 0 ? responseSources : undefined,
+                    artifact: responseArtifact,
+                    webSources: responseWebSources,
+                    confidence: uncertainty.confidence,
+                    uncertaintyReason: uncertainty.reason,
+                  });
+                }
+
+                agent.complete();
+                abortControllerRef.current = null;
+              }
+            }, 15);
+
+          }
+        }
+
+
+        //   if (error?.name === "AbortError") {
+        //     return;
+        //   }
+
+        //   const errorMessage = error?.message || "Error desconocido";
+        //   console.error("Chat error:", error);
+
+        //   const errorMsg: Message = {
+        //     id: (Date.now() + 1).toString(),
+        //     role: "assistant",
+        //     content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
+        //     timestamp: new Date(),
+        //     requestId: generateRequestId(),
+        //     userMessageId: userMsgId,
+        //   };
+
+        //   onSendMessage(errorMsg);
+        //   setAiState("idle");
+        //   setAiProcessSteps([]);
+        //   abortControllerRef.current = null;
+        // }
+      } catch (error: any) {
+        console.error("[handleSubmit] Error:", error);
+        setAiState("idle");
+        setAiProcessSteps([]);
+        abortControllerRef.current = null;
+      }
+    } catch (outerError: any) {
+      console.error("[handleSubmit] Outer error:", outerError);
+      setAiState("idle");
+      setAiProcessSteps([]);
+    }
+  };
+
+  const hasMessages = displayMessages.length > 0;
+
+  return (
+    <>
+      {/* Welcome Explosion for first-time visitors */}
+      {showExplosion && (
+        <WelcomeExplosion onComplete={completeWelcome} />
+      )}
+      
+    <div className="flex h-full flex-col bg-transparent relative">
+      {/* Header */}
+      <ChatHeader
+        chatId={chatId || null}
+        activeGpt={activeGpt || {
+          id: 'default',
+          name: 'ILIAGPT',
+          description: 'Asistente IA',
+          systemPrompt: '',
+          model: 'gpt-4o',
+          temperature: 0.7,
+          maxTokens: 4096,
+          topP: 1,
+          frequencyPenalty: 0,
+          presencePenalty: 0,
+          isPublic: false,
+          userId: 'system',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          welcomeMessage: '',
+          conversationStarters: [],
+          avatar: ''
+        }}
+        messages={displayMessages}
+        folders={folders}
+        currentFolderId={currentFolderId}
+        isPinned={isPinned}
+        isArchived={isArchived}
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={onToggleSidebar || (() => { })}
+        onNewChat={onNewChat}
+        onEditGpt={onEditGpt}
+        onHideGptFromSidebar={onHideGptFromSidebar}
+        onPinGptToSidebar={onPinGptToSidebar}
+        isGptPinned={isGptPinned}
+        onAboutGpt={onAboutGpt}
+        onPinChat={onPinChat}
+        onArchiveChat={onArchiveChat}
+        onHideChat={onHideChat}
+        onDeleteChat={onDeleteChat}
+        onDownloadChat={onDownloadChat}
+        onEditChatTitle={onEditChatTitle}
+        onMoveToFolder={onMoveToFolder}
+        onCreateFolder={onCreateFolder}
+        userPlanInfo={userPlanInfo}
+      />
+      {/* Main Content Area with Side Panel */}
+      {(previewDocument || activeDocEditor) ? (
+        <PanelGroup direction="horizontal" className="flex-1">
+          {/* Left Panel: Minimized Chat for Document Mode */}
+          <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
+            <div className="flex flex-col min-w-0 h-full bg-background/50">
+              {/* Compact Header for Document Mode */}
+              {activeDocEditor && (
+                <div className="p-3 border-b border-border/50 bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center",
+                      activeDocEditor.type === "word" && "bg-blue-600",
+                      activeDocEditor.type === "excel" && "bg-green-600",
+                      activeDocEditor.type === "ppt" && "bg-orange-500"
+                    )}>
+                      <span className="text-white text-sm font-bold">
+                        {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">Instrucciones</p>
+                      <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages Area - Compact for document mode */}
+              {isConversationStateLoading ? (
+                <div
+                  className={cn(
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                  )}
+                >
+                  <SkeletonChatMessages count={3} />
+                </div>
+              ) : hasMessages && (
+                <div
+                  className={cn(
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                  )}
+                >
+                  <ChatMessageList
+                    messages={displayMessages}
+                    variant={activeDocEditor ? "compact" : "default"}
+                    editingMessageId={editingMessageId}
+                    editContent={editContent}
+                    setEditContent={setEditContent}
+                    copiedMessageId={copiedMessageId}
+                    messageFeedback={messageFeedback}
+                    speakingMessageId={speakingMessageId}
+                    isGeneratingImage={isGeneratingImage}
+                    pendingGeneratedImage={pendingGeneratedImage}
+                    latestGeneratedImageRef={latestGeneratedImageRef}
+                    streamingContent={streamingContent}
+                    streamingMsgId={streamChat.nextMessageIdRef.current}
+                    aiState={aiState}
+                    regeneratingMsgIndex={regeneratingMsgIndex}
+                    handleCopyMessage={handleCopyMessage}
+                    handleStartEdit={handleStartEdit}
+                    handleCancelEdit={handleCancelEdit}
+                    handleSendEdit={handleSendEdit}
+                    handleFeedback={handleFeedback}
+                    handleRegenerate={handleRegenerate}
+                    handleShare={handleShare}
+                    handleReadAloud={handleReadAloud}
+                    handleOpenDocumentPreview={handleOpenDocumentPreview}
+                    handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                    handleDownloadImage={handleDownloadImage}
+                    setLightboxImage={setLightboxImage}
+                    handleReopenDocument={handleReopenDocument}
+                    minimizedDocument={minimizedDocument}
+                    onRestoreDocument={restoreDocEditor}
+                    onSelectSuggestedReply={(text) => setInput(text)}
+                    onAgentCancel={handleAgentCancel}
+                    onAgentRetry={handleAgentRetry}
+                    onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                    onSuperAgentCancel={handleSuperAgentCancel}
+                    onSuperAgentRetry={handleSuperAgentRetry}
+                    onQuestionClick={(text) => setInput(text)}
+                    activeRunId={activeRunId}
+                    onRunComplete={() => {
+                      console.log('[uiPhase] Run completed, uiPhase=done');
+                      setUiPhase('done');
+                      setActiveRunId(null);
+                    }}
+                    uiPhase={uiPhase}
+                    aiProcessSteps={aiProcessSteps}
+                  />
+
+                  {/* Agent Observer - Show when agent is running */}
+                  {agent.state.status !== "idle" && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                      <AgentObserver
+                        steps={agent.state.steps}
+                        objective={agent.state.objective}
+                        status={agent.state.status}
+                        onCancel={agent.cancel}
+                      />
+                    </div>
+                  )}
+
+                  {/* Production Mode Progress */}
+                  {aiState === "agent_working" && aiProcessSteps.length > 0 && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+                      <ProductionProgress steps={aiProcessSteps} />
+                    </div>
+                  )}
+
+                  {/* Image Generation Loading Skeleton */}
+                  {isGeneratingImage && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                      <div className="flex flex-col gap-2 items-start">
+                        <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Generando imagen...</span>
+                          </div>
+                        </div>
+                        <div className="px-4">
+                          <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                            <Image className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+                  {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
+                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                      {/* Streaming Indicator with cancel button */}
+                      <StreamingIndicator
+                        aiState={aiState}
+                        streamingContent={streamingContent}
+                        onCancel={handleStopChat}
+                        uiPhase={uiPhase}
+                      />
+
+                      {/* Streaming content with fade-in animation */}
+                      {aiState === "responding" && streamingContent && (
+                        <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                          <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                            <MarkdownRenderer
+                              content={streamingContent}
+                              customComponents={{ ...CleanDataTableComponents }}
+                            />
+                          </MarkdownErrorBoundary>
+                          <span className="typing-cursor">|</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                  {uiPhase === 'console' && activeRunId && (
+                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                      {executionRunState ? (
+                        <UniversalExecutionConsole
+                          runState={executionRunState as any}
+                          className="mb-4"
+                        />
+                      ) : (
+                        <LiveExecutionConsole
+                          runId={activeRunId}
+                          forceShow={true}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  <div ref={bottomRef} />
+                </div>
+              )}
+
+              {/* Centered content when no messages - Futuristic Welcome */}
+              {!hasMessages && (
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  {activeGpt ? (
+                    <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                      <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                        {activeGpt.avatar ? (
+                          <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                        ) : (
+                          <Bot className="h-8 w-8 text-muted-foreground" />
+                        )}
+                      </div>
+                      <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                      <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                      {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                          {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setInput(starter)}
+                              className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                            >
+                              {starter}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <WelcomeAnimation />
+                  )}
+                </div>
+              )}
+
+              <Composer
+                input={input}
+                setInput={setInput}
+                textareaRef={textareaRef}
+                composerRef={composerRef}
+                fileInputRef={fileInputRef}
+                uploadedFiles={uploadedFiles}
+                removeFile={removeFile}
+                handleSubmit={handleSubmit}
+                handleFileUpload={handleFileUpload}
+                handlePaste={handlePaste}
+                handleDragOver={handleDragOver}
+                handleDragEnter={handleDragEnter}
+                handleDragLeave={handleDragLeave}
+                handleDrop={handleDrop}
+                isDraggingOver={isDraggingOver}
+                selectedTool={selectedTool}
+                setSelectedTool={setSelectedTool}
+                selectedDocTool={selectedDocTool}
+                setSelectedDocTool={setSelectedDocTool}
+                closeDocEditor={closeDocEditor}
+                openBlankDocEditor={openBlankDocEditor}
+                aiState={aiState}
+                isRecording={isRecording}
+                isPaused={isPaused}
+                recordingTime={recordingTime}
+                toggleVoiceRecording={toggleVoiceRecording}
+                discardVoiceRecording={discardVoiceRecording}
+                pauseVoiceRecording={pauseVoiceRecording}
+                resumeVoiceRecording={resumeVoiceRecording}
+                sendVoiceRecording={sendVoiceRecording}
+                handleStopChat={handleStopChat}
+                isAgentRunning={isAgentRunning}
+                handleAgentStop={handleAgentStop}
+                setIsVoiceChatOpen={setIsVoiceChatOpen}
+                browserSession={browserSession}
+                isBrowserOpen={isBrowserOpen}
+                setIsBrowserOpen={setIsBrowserOpen}
+                isBrowserMaximized={isBrowserMaximized}
+                setIsBrowserMaximized={setIsBrowserMaximized}
+                browserUrl={browserUrl}
+                variant="document"
+                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+                selectedDocText={selectedDocText}
+                handleDocTextDeselect={handleDocTextDeselect}
+                onTextareaFocus={handleCloseModelSelector}
+                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+              />
+            </div>
+          </Panel>
+
+          {/* Resize Handle */}
+          <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
+            <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+          </PanelResizeHandle>
+
+          {/* Right: Document Editor Panel */}
+          <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
+            <div className="h-full animate-in slide-in-from-right duration-300">
+              {(activeDocEditor?.type === "ppt") ? (
+                <PPTEditorShellLazy
+                  onClose={closeDocEditor}
+                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                  initialShowInstructions={activeDocEditor?.showInstructions}
+                  initialContent={activeDocEditor?.content}
+                />
+              ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+                <SpreadsheetEditorLazy
+                  key="excel-editor-stable"
+                  title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                  content={editedDocumentContent}
+                  onChange={setEditedDocumentContent}
+                  onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                  onDownload={() => {
+                    if (activeDocEditor) {
+                      handleDownloadDocument({
+                        type: activeDocEditor.type,
+                        title: activeDocEditor.title,
+                        content: editedDocumentContent
+                      });
+                    } else if (previewDocument) {
+                      handleDownloadDocument(previewDocument);
+                    }
+                  }}
+                  onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                  onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
+                />
+              ) : (
+                <div className="relative h-full">
+                  {/* Document Generation Overlay - shows on top of blank editor */}
+                  {selectedDocTool === "word" && docGenerationState.status !== 'idle' && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
+                      <div className="max-w-md w-full mx-8 text-center">
+                        {docGenerationState.status === 'generating' && (
+                          <div className="space-y-6">
+                            {/* Spinner */}
+                            <div className="w-16 h-16 mx-auto border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+
+                            {/* Stage */}
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                                🚀 Generando Documento
+                              </h3>
+                              <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                {docGenerationState.stage}
+                              </p>
+                            </div>
+
+                            {/* Progress Bar */}
+                            <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out w-[var(--gen-prog)]"
+                                style={{ '--gen-prog': `${docGenerationState.progress}%` } as React.CSSProperties}
+                              />
+                            </div>
+                            <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>
+
+                            {/* Code Preview */}
+                            <div className="bg-slate-900 rounded-lg p-4 text-left font-mono text-xs text-slate-300">
+                              <div className="text-green-400 mb-1">// Generando código docx...</div>
+                              <span className="text-blue-300">const</span> doc = <span className="text-yellow-300">new</span> Document({"{"}<br />
+                              <span className="text-gray-500">  {"  "}sections: [{"{ children: [...] }"}]</span><br />
+                              {"}"});
+                            </div>
+                          </div>
+                        )}
+
+                        {docGenerationState.status === 'ready' && (
+                          <div className="space-y-6">
+                            {/* Success Icon */}
+                            <div className="text-6xl">✅</div>
+
+                            <div>
+                              <h3 className="text-xl font-bold text-green-600 dark:text-green-400 mb-2">
+                                ¡Documento Generado!
+                              </h3>
+                              <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                Tu documento está listo para descargar
+                              </p>
+                            </div>
+
+                            {/* File Info Card */}
+                            <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-700 rounded-xl p-5">
+                              <div className="flex items-center gap-4">
+                                <div className="bg-white dark:bg-slate-800 rounded-lg p-3 shadow-sm">
+                                  <span className="text-3xl">📄</span>
+                                </div>
+                                <div className="flex-1 text-left">
+                                  <div className="font-semibold text-gray-900 dark:text-white">
+                                    {docGenerationState.fileName}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {docGenerationState.fileSize ? `${(docGenerationState.fileSize / 1024).toFixed(1)} KB` : 'Listo'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Download Button */}
+                              {docGenerationState.downloadUrl && (
+                                <a
+                                  href={docGenerationState.downloadUrl}
+                                  download={docGenerationState.fileName || 'documento.docx'}
+                                  className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                                >
+                                  <span>⬇️</span> Descargar Documento
+                                </a>
+                              )}
+                            </div>
+
+                            {/* Reset Button */}
+                            <button
+                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+                            >
+                              Generar otro documento
+                            </button>
+                          </div>
+                        )}
+
+                        {docGenerationState.status === 'error' && (
+                          <div className="space-y-4">
+                            <div className="text-5xl">❌</div>
+                            <h3 className="text-lg font-semibold text-red-600">Error en generación</h3>
+                            <p className="text-sm text-gray-600">{docGenerationState.error || 'Ocurrió un error al generar el documento'}</p>
+                            <button
+                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                              className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
+                            >
+                              Reintentar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <EnhancedDocumentEditorLazy
+                    key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                    title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                    content={editedDocumentContent}
+                    onChange={setEditedDocumentContent}
+                    onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
+                    onDownload={() => {
+                      if (activeDocEditor) {
+                        handleDownloadDocument({
+                          type: activeDocEditor.type,
+                          title: activeDocEditor.title,
+                          content: editedDocumentContent
+                        });
+                      } else if (previewDocument) {
+                        handleDownloadDocument(previewDocument);
+                      }
+                    }}
+                    onTextSelect={handleDocTextSelect}
+                    onTextDeselect={handleDocTextDeselect}
+                    onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                  />
+                </div>
+              )}
+            </div>
+          </Panel>
+        </PanelGroup>
+      ) : (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
+          {/* Content Area - conditional based on whether we have messages */}
+          {isConversationStateLoading ? (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+              <SkeletonChatMessages count={3} />
+            </div>
+          ) : hasMessages ? (
+            <>
+              {/* Scrollable messages container */}
+              <div
+                ref={messagesContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
+              >
+                <ChatMessageList
+                  messages={displayMessages}
+                  variant="default"
+                  editingMessageId={editingMessageId}
+                  editContent={editContent}
+                  setEditContent={setEditContent}
+                  copiedMessageId={copiedMessageId}
+                  messageFeedback={messageFeedback}
+                  speakingMessageId={speakingMessageId}
+                  isGeneratingImage={isGeneratingImage}
+                  pendingGeneratedImage={pendingGeneratedImage}
+                  latestGeneratedImageRef={latestGeneratedImageRef}
+                  streamingContent={streamingContent}
+                  aiState={aiState}
+                  regeneratingMsgIndex={regeneratingMsgIndex}
+                  handleCopyMessage={handleCopyMessage}
+                  handleStartEdit={handleStartEdit}
+                  handleCancelEdit={handleCancelEdit}
+                  handleSendEdit={handleSendEdit}
+                  handleFeedback={handleFeedback}
+                  handleRegenerate={handleRegenerate}
+                  handleShare={handleShare}
+                  handleReadAloud={handleReadAloud}
+                  handleOpenDocumentPreview={handleOpenDocumentPreview}
+                  handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                  handleDownloadImage={handleDownloadImage}
+                  setLightboxImage={setLightboxImage}
+                  handleReopenDocument={handleReopenDocument}
+                  minimizedDocument={minimizedDocument}
+                  onRestoreDocument={restoreDocEditor}
+                  onSelectSuggestedReply={(text) => setInput(text)}
+                  onAgentCancel={handleAgentCancel}
+                  onAgentRetry={handleAgentRetry}
+                  onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                  onSuperAgentCancel={handleSuperAgentCancel}
+                  onSuperAgentRetry={handleSuperAgentRetry}
+                  onQuestionClick={(text) => setInput(text)}
+                  activeRunId={activeRunId}
+                  onRunComplete={() => {
+                    console.log('[uiPhase] Run completed, uiPhase=done');
+                    setUiPhase('done');
+                    setActiveRunId(null);
+                  }}
+                  uiPhase={uiPhase}
+                  aiProcessSteps={aiProcessSteps}
+                />
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Scroll to bottom button */}
+              {showScrollButton && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                  onClick={() => {
+                    setUserHasScrolledUp(false);
+                    scrollToBottom();
+                  }}
+                  className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+                  data-testid="button-scroll-to-bottom"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  <span className="text-sm font-medium">Ir al final</span>
+                </motion.button>
+              )}
+            </>
+          ) : (
+            /* No messages - center content vertically */
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
+              {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
+                /* Processing indicators when AI is working */
+                <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
+                  <StreamingIndicator
+                    aiState={aiState}
+                    streamingContent={streamingContent}
+                    onCancel={handleStopChat}
+                    uiPhase={uiPhase}
+                  />
+                  {streamingContent && (
+                    <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                      <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
+                        <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                          <MarkdownRenderer
+                            content={streamingContent}
+                            customComponents={{ ...CleanDataTableComponents }}
+                          />
+                        </MarkdownErrorBoundary>
+                        <span className="typing-cursor">|</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Welcome Screen */
+                <>
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className="mb-8"
+                  >
+                    {activeGpt?.avatar ? (
+                      <AvatarWithFallback
+                        src={activeGpt.avatar}
+                        alt={activeGpt.name}
+                        fallback={<Bot className="h-10 w-10 text-white" />}
+                      />
+                    ) : (
+                      <IliaGPTLogo size={80} />
+                    )}
+                  </motion.div>
+                  <motion.h1
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.2 }}
+                    className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
+                  >
+                    {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
+                  </motion.h1>
+                  <motion.p
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.3 }}
+                    className="text-muted-foreground text-center max-w-md text-base"
+                  >
+                    {activeGpt
+                      ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
+                      : selectedProject
+                        ? (
+                          <span>
+                            <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                          </span>
+                        )
+                        : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                    }
+                  </motion.p>
+                  {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                    <motion.div
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.5, delay: 0.4 }}
+                      className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                    >
+                      {activeGpt.conversationStarters
+                        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+                        .map((starter, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setInput(starter)}
+                            className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                            data-testid={`button-starter-${idx}`}
+                          >
+                            {starter}
+                          </button>
+                        ))}
+                    </motion.div>
+                  )}
+                  {/* Show PromptSuggestions when no conversation starters available */}
+                  {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
+                    <PromptSuggestions
+                      onSelect={(action) => setInput(action)}
+                      hasAttachment={uploadedFiles.length > 0}
+                      className="mt-6 justify-center max-w-xl"
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Input Bar - flex shrink-0, stays at bottom */}
+          {/* Sync Status Indicator */}
+          <div className="flex justify-end px-4 py-1">
+            <SyncStatusIndicator />
+          </div>
+          <Composer
+            input={input}
+            setInput={setInput}
+            textareaRef={textareaRef}
+            composerRef={composerRef}
+            fileInputRef={fileInputRef}
+            uploadedFiles={uploadedFiles}
+            removeFile={removeFile}
+            handleSubmit={handleSubmit}
+            handleFileUpload={handleFileUpload}
+            handlePaste={handlePaste}
+            handleDragOver={handleDragOver}
+            handleDragEnter={handleDragEnter}
+            handleDragLeave={handleDragLeave}
+            handleDrop={handleDrop}
+            isDraggingOver={isDraggingOver}
+            selectedTool={selectedTool}
+            setSelectedTool={setSelectedTool}
+            selectedDocTool={selectedDocTool}
+            setSelectedDocTool={setSelectedDocTool}
+            closeDocEditor={closeDocEditor}
+            openBlankDocEditor={openBlankDocEditor}
+            aiState={aiState}
+            isRecording={isRecording}
+            isPaused={isPaused}
+            recordingTime={recordingTime}
+            toggleVoiceRecording={toggleVoiceRecording}
+            discardVoiceRecording={discardVoiceRecording}
+            pauseVoiceRecording={pauseVoiceRecording}
+            resumeVoiceRecording={resumeVoiceRecording}
+            sendVoiceRecording={sendVoiceRecording}
+            handleStopChat={handleStopChat}
+            isAgentRunning={isAgentRunning}
+            handleAgentStop={handleAgentStop}
+            setIsVoiceChatOpen={setIsVoiceChatOpen}
+            browserSession={browserSession}
+            isBrowserOpen={isBrowserOpen}
+            setIsBrowserOpen={setIsBrowserOpen}
+            isBrowserMaximized={isBrowserMaximized}
+            setIsBrowserMaximized={setIsBrowserMaximized}
+            browserUrl={browserUrl}
+            variant="default"
+            placeholder="Escribe tu mensaje aquí..."
+            onCloseSidebar={onCloseSidebar}
+            setPreviewUploadedImage={setPreviewUploadedImage}
+            isFigmaConnected={isFigmaConnected}
+            isFigmaConnecting={isFigmaConnecting}
+            handleFigmaConnect={handleFigmaConnect}
+            handleFigmaDisconnect={handleFigmaDisconnect}
+            onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
+            onOpenApps={onOpenApps}
+            isGoogleFormsActive={isGoogleFormsActive}
+            setIsGoogleFormsActive={setIsGoogleFormsActive}
+            onTextareaFocus={handleCloseModelSelector}
+            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+          />
+        </div>
+      )}
+      <ETLDialog
+        open={isETLDialogOpen}
+        onClose={() => setIsETLDialogOpen(false)}
+        onComplete={(summary) => {
+          onSendMessage({
+            id: `etl-${Date.now()}`,
+            role: "assistant",
+            content: `ETL Agent completed. ${summary}`,
+            timestamp: new Date()
+          });
+        }}
+      />
+      <DocumentGeneratorDialog
+        open={isDocGeneratorOpen}
+        onClose={() => setIsDocGeneratorOpen(false)}
+        documentType={docGeneratorType}
+        onComplete={(message) => {
+          onSendMessage({
+            id: `doc-gen-${Date.now()}`,
+            role: "assistant",
+            content: message,
+            timestamp: new Date()
+          });
+        }}
+      />
+      <GoogleFormsDialog
+        open={isGoogleFormsOpen}
+        onClose={() => {
+          setIsGoogleFormsOpen(false);
+          setGoogleFormsPrompt("");
+        }}
+        initialPrompt={googleFormsPrompt}
+        onComplete={(message, formUrl) => {
+          onSendMessage({
+            id: `forms-gen-${Date.now()}`,
+            role: "assistant",
+            content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
+            timestamp: new Date()
+          });
+        }}
+      />
+      {/* Voice Chat Mode - Fullscreen conversation with Grok */}
+      <VoiceChatMode
+        open={isVoiceChatOpen}
+        onClose={() => setIsVoiceChatOpen(false)}
+      />
+      {/* Image Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh]">
+            <img
+              src={lightboxImage}
+              alt="Imagen ampliada"
+              className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            />
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+              onClick={() => setLightboxImage(null)}
+              data-testid="button-close-lightbox"
+              aria-label="Cerrar imagen"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+              data-testid="button-download-lightbox"
+              aria-label="Descargar imagen"
+            >
+              <Download className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* File Attachment Preview Modal */}
+      {previewFileAttachment && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewFileAttachment(null)}
+          data-testid="file-attachment-preview-overlay"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
+                  return (
+                    <motion.div
+                      initial={{ scale: 0.8 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.1, duration: 0.2 }}
+                      className={cn(
+                        "flex items-center justify-center w-10 h-10 rounded-lg",
+                        attTheme.bgColor
+                      )}
+                    >
+                      <span className="text-white text-sm font-bold">
+                        {attTheme.icon}
+                      </span>
+                    </motion.div>
+                  );
+                })()}
+                <div>
+                  <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
+                    {previewFileAttachment.name}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {previewFileAttachment.mimeType || "Archivo"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyAttachmentContent}
+                        data-testid="button-copy-attachment-content"
+                      >
+                        {copiedAttachmentContent ? (
+                          <>
+                            <Check className="h-4 w-4 mr-2 text-green-500" />
+                            Copiado
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar
+                          </>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
+                  </Tooltip>
+                )}
+                {previewFileAttachment.storagePath && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadFileAttachment}
+                    data-testid="button-download-attachment"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Descargar
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setPreviewFileAttachment(null)}
+                  data-testid="button-close-attachment-preview"
+                  aria-label="Cerrar vista previa"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-6">
+              {previewFileAttachment.isLoading ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center justify-center h-64"
+                >
+                  <div className="flex flex-col items-center gap-3">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Loader2 className="h-8 w-8 text-primary" />
+                    </motion.div>
+                    <motion.p
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2 }}
+                      className="text-muted-foreground"
+                    >
+                      Cargando contenido...
+                    </motion.p>
+                  </div>
+                </motion.div>
+              ) : previewFileAttachment.isProcessing ? (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center justify-center h-64"
+                >
+                  <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                    <motion.div
+                      animate={{
+                        scale: [1, 1.1, 1],
+                        rotate: [0, 5, -5, 0]
+                      }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    >
+                      <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
+                    </motion.div>
+                    <div className="text-center">
+                      <p className="font-medium text-amber-800 dark:text-amber-200">
+                        Procesando archivo...
+                      </p>
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                        El contenido estará disponible en breve
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : previewFileAttachment.content ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                >
+                  <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                    <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
+                      <MarkdownRenderer content={previewFileAttachment.content} />
+                    </MarkdownErrorBoundary>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex flex-col items-center justify-center h-64 text-center"
+                >
+                  <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <p className="text-muted-foreground">
+                    La vista previa no está disponible para este tipo de archivo.
+                  </p>
+                  {previewFileAttachment.storagePath && (
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={handleDownloadFileAttachment}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Descargar archivo
+                    </Button>
+                  )}
+                </motion.div>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      {/* Uploaded Image Preview Modal */}
+      {previewUploadedImage && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewUploadedImage(null)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <img
+              src={previewUploadedImage.dataUrl}
+              alt={previewUploadedImage.name}
+              className="max-w-full max-h-[90vh] object-contain"
+            />
+            <button
+              onClick={() => setPreviewUploadedImage(null)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
+              data-testid="button-close-image-preview"
+              aria-label="Cerrar vista previa de imagen"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
+              <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Screen reader announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {screenReaderAnnouncement}
+      </div>
+
+      {/* Keyboard shortcuts dialog */}
+      <KeyboardShortcutsDialog
+        open={isKeyboardShortcutsOpen}
+        onOpenChange={setIsKeyboardShortcutsOpen}
+      />
+
+      {/* Upgrade Plan Dialog */}
+      <UpgradePlanDialog
+        open={isUpgradeDialogOpen}
+        onOpenChange={setIsUpgradeDialogOpen}
+      />
+
+      {/* Document Preview Panel for agent-generated documents */}
+      <DocumentPreviewPanel
+        isOpen={!!documentPreviewArtifact}
+        onClose={() => setDocumentPreviewArtifact(null)}
+        artifact={documentPreviewArtifact}
+        onDownload={(artifact: any) => {
+          if (artifact.data?.base64) {
+            const byteCharacters = atob(artifact.data.base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = artifact.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+        }}
+      />
+
+      {/* Pricing Modal for quota exceeded */}
+      <PricingModal
+        open={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
+      />
+
+      {/* Upgrade Prompt Modal for free users after 3rd query */}
+      <UpgradePromptModal
+        isOpen={showUpgradePrompt}
+        onClose={closeUpgradePrompt}
+        onUpgrade={() => {
+          closeUpgradePrompt();
+          setShowUpgradeDialog(true);
+        }}
+        queryCount={queryCount}
+      />
+
+      {/* Upgrade Dialog triggered from prompt */}
+      <UpgradePlanDialog
+        open={showUpgradeDialog}
+        onOpenChange={setShowUpgradeDialog}
+      />
+
+      {/* Agent Panel removed - progress is shown inline in chat messages */}
+    </div>
+    </>
+  );
+}
+
+function BotIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+    </svg>
+  );
+}

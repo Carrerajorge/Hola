@@ -1,15 +1,24 @@
-node_modules
-dist
 .DS_Store
+.DS_Store?
+node_modules/
+/dist/
 server/public
 vite.config.ts.*
 *.tar.gz
+npm-debug.log*
+.pnpm-debug.log*
+.vscode/
+.idea/
 
-# =============================================================================
-# REPO HYGIENE: Keep runtime/generated data out of git
-# =============================================================================
+# Environment files
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+!.env.production.example
 
-# Runtime data (uploads, generated artifacts, temp)
+# Runtime/generated data
 artifacts/
 uploads/
 Downloads/
@@ -29,36 +38,20 @@ test_fixtures/large-10k-rows.xlsx
 test_output.docx
 test_excel_output.xlsx
 
-# Generated logs captured during local debugging
+# Logs / debug
+verify_tokens
 tsc_*.log
 curl_*.txt
 user_router_errors.log
 verify.log
 
-# =============================================================================
-# SECURITY: Aggressive patterns to prevent secret leaks
-# =============================================================================
-
-# Replit / sandbox / estado (may contain environment dumps)
-sandbox_workspace/
-attached_assets/
-**/.state/
-sandbox_workspace/.state/
-**/session*.json
-**/secrets*.json
-
-# WhatsApp Web auth state (Baileys multi-file sessions)
-data/whatsapp-web/
-data/whatsapp-web/**
-
-# Environment files
-.env
-.env.*
-.env.local
-.env.*.local
-!.env.example
-!.env.production.example
-
+# Security / secret patterns
+**/credentials*.json
+**/service-account*.json
+**/*secret*.json
+**/*token*.json
+**/*session*.json
+**/*secrets*.json
 
 # Keys and certificates
 *.key
@@ -68,22 +61,20 @@ data/whatsapp-web/**
 *.crt
 *.cer
 
-# Common secret/credential patterns
-**/credentials*.json
-**/service-account*.json
-**/*secret*.json
-**/*token*.json
-
-# Dumps de sesión/secretos
-**/*session*.json
-**/*secrets*.json
-
 # Compiled Python
 **/__pycache__/
 **/*.pyc
 **/*.pyo
 
-# Ignore test artifacts
+# WhatsApp auth state
+data/whatsapp-web/
+data/whatsapp-web/**
+sandbox_workspace/
+attached_assets/
+**/.state/
+sandbox_workspace/.state/
+
+# Ignore extra artifact noise
 artifacts/node_modules_backup/
 artifacts/Test_*.txt
 artifacts/*.log

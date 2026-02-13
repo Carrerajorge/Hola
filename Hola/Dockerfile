@@ -1,0 +1,96 @@
+# ILIAGPT Dockerfile - Optimized
+# Multi-stage build for production
+
+# ============================================
+# Stage 1: Dependencies (All)
+# ============================================
+FROM node:22-alpine AS deps
+WORKDIR /app
+RUN apk add --no-cache libc6-compat python3 make g++
+COPY package.json package-lock.json ./
+# `npm ci` runs `postinstall`, so ensure any referenced scripts exist in this stage.
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+RUN npm ci
+
+# ============================================
+# Stage 2: Build
+# ============================================
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ARG APP_VERSION=dev
+ENV NODE_ENV=production
+ENV VITE_APP_VERSION=$APP_VERSION
+# Build client and server
+RUN npm run build
+
+# ============================================
+# Stage 3: Production Dependencies
+# ============================================
+FROM node:22-alpine AS prod-deps
+WORKDIR /app
+# Install build tools for native modules (node-pty, etc.)
+RUN apk add --no-cache libc6-compat python3 make g++
+COPY package.json package-lock.json ./
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+# Install production dependencies WITH scripts so native modules (e.g. node-pty) build correctly.
+RUN npm ci --omit=dev
+
+# ============================================
+# Stage 4: Sandbox Runner
+# ============================================
+FROM node:22-alpine AS sandbox-runner
+
+WORKDIR /app
+
+# docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
+RUN apk add --no-cache docker-cli bash
+
+ENV NODE_ENV=production
+ENV SANDBOX_RUNNER_PORT=8080
+
+# Prod deps + built artifacts
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 8080
+
+CMD ["node", "dist/sandbox-runner.cjs"]
+
+# ============================================
+# Stage 5: Production Runner
+# ============================================
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 iliagpt
+
+ENV NODE_ENV=production
+ENV PORT=5000
+
+# Copy prod dependencies only (with ownership)
+COPY --chown=iliagpt:nodejs --from=prod-deps /app/node_modules ./node_modules
+# Copy built artifacts
+COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
+COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
+COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
+COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
+
+# Create temp directories for uploads/sandbox with correct permissions
+# (We only need to chown these specific dirs, files are already owned via COPY)
+RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data \
+  && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data
+
+USER iliagpt
+
+EXPOSE 5000
+
+# Health check (use IPv4 to avoid localhost -> ::1 issues)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:5000/api/health >/dev/null 2>&1 || exit 1
+
+CMD ["node", "dist/index.cjs"]
