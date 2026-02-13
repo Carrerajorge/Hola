@@ -4,6 +4,7 @@ set -e
 # Configuration
 VPS_HOST="69.62.98.126"
 VPS_USER="root"
+VPS_PORT="${VPS_PORT:-8022}"
 LOCAL_NGINX_CONF="nginx.conf"
 REMOTE_NGINX_PATH="/etc/nginx/sites-available/iliagpt"
 
@@ -17,11 +18,11 @@ fi
 
 # Upload file
 echo "📤 Uploading configuration..."
-scp "$LOCAL_NGINX_CONF" "$VPS_USER@$VPS_HOST:/tmp/iliagpt_nginx_new"
+scp -P "$VPS_PORT" "$LOCAL_NGINX_CONF" "$VPS_USER@$VPS_HOST:/tmp/iliagpt_nginx_new"
 
 # Apply configuration
 echo "🔄 Applying configuration and testing..."
-ssh "$VPS_USER@$VPS_HOST" "
+ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
     echo 'Backup existing config...'
     cp $REMOTE_NGINX_PATH ${REMOTE_NGINX_PATH}.bak_$(date +%s)
     

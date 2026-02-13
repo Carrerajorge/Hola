@@ -7,6 +7,7 @@ import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifac
 import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
+import { requestUnderstandingAgent } from "./requestUnderstanding";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -935,6 +936,80 @@ export async function executeAgentLoop(
   let fullResponse = "";
 
   const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
+
+  const requestBrief = await requestUnderstandingAgent.buildBrief({
+    text: recentUserText || requestSpec.rawMessage || "",
+    conversationHistory: messages
+      .slice(-6)
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content || "") })),
+    availableTools: tools.map((tool) => tool.name),
+    userId,
+    chatId,
+    requestId: runId,
+    userPlan: "free",
+  });
+
+  writeSse(res, "brief", {
+    runId,
+    brief: requestBrief,
+  });
+
+  if (requestBrief.blocker?.is_blocked) {
+    const question =
+      normalizeSpaces(requestBrief.blocker.question || "") ||
+      "Necesito una aclaración para ejecutar la solicitud con seguridad.";
+    fullResponse = question;
+
+    writeSse(res, "clarification", {
+      runId,
+      question,
+      blocker: "intent_requirements",
+    });
+
+    const chunks = question.match(/.{1,100}/g) || [question];
+    for (let i = 0; i < chunks.length; i++) {
+      writeSse(res, "chunk", {
+        content: chunks[i],
+        sequence: i + 1,
+        runId,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    await emitTraceEvent(runId, "progress_update", {
+      progress: {
+        current: 0,
+        total: maxIterations,
+        message: "Waiting for required clarification before tool execution",
+      },
+    });
+    await emitTraceEvent(runId, "agent_completed", {
+      agent: {
+        name: requestSpec.primaryAgent,
+        role: "primary",
+        status: "completed",
+      },
+      iterations: 0,
+      artifactsGenerated: 0,
+    });
+
+    return fullResponse;
+  }
+
+  conversationHistory.unshift({
+    role: "system",
+    content: `Execution brief:
+- Objective: ${requestBrief.objective}
+- Scope(in): ${requestBrief.scope.in_scope.join("; ") || "n/a"}
+- Required inputs: ${requestBrief.required_inputs.filter((entry) => entry.required).map((entry) => entry.input).join("; ") || "none"}
+- Expected output: ${requestBrief.expected_output.format} :: ${requestBrief.expected_output.description}
+- Definition of done: ${requestBrief.definition_of_done.join("; ") || "n/a"}
+- Suggested tools: ${requestBrief.tool_routing.suggested_tools.join(", ") || "none"}
+- Blocked tools: ${requestBrief.tool_routing.blocked_tools.join(", ") || "none"}
+- Guardrails flags: ${requestBrief.guardrails.flags.join(", ") || "none"}`,
+  });
+
   const isReservationRequest =
     requestSpec.intent === "web_automation" && isRestaurantReservationRequest(recentUserText);
   const reservationDetails = isReservationRequest ? extractReservationDetails(recentUserText) : undefined;

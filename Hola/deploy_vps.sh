@@ -1,27 +1,9 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "🚀 Iniciando despliegue a VPS..."
-
-# 1. Push changes
-echo "📤 Subiendo cambios a GitHub..."
-git push origin main
-
-# 2. Deploy on VPS
-echo "🔄 Conectando al VPS para actualizar..."
-ssh root@69.62.98.126 "cd /var/www/michat && \
-echo '⬇️  Bajando cambios...' && \
-git pull origin main && \
-echo '📦 Instalando dependencias...' && \
-npm ci --include=dev && \
-echo '🏗️  Compilando...' && \
-npm run build && \
-echo '🗄️  Sincronizando base de datos...' && \
-npm run db:push && \
-echo '🔑 Actualizando credenciales de admin...' && \
-npx tsx server/scripts/set_admin_credentials.ts &&  echo '🌱 Sembrando modelos AI...' && \
-  npx tsx server/scripts/seed_models.ts && \
-  echo '🚀 Reiniciando servidor...' && \
-  pm2 restart michat --update-env"
-
-echo "✅ Despliegue completado con éxito."
+echo "[DEPRECATED] This script targets the legacy PM2 stack (/var/www/michat) and is disabled."
+echo "Use the canonical Docker deploy flow instead:"
+echo "  bash scripts/deploy-prod.sh"
+echo "For incident recovery, follow:"
+echo "  OPS-DEPLOY-CHECKLIST.md"
+exit 1

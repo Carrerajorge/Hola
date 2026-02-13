@@ -7,10 +7,10 @@ set -euo pipefail
 # Override with env vars if needed:
 #   VPS_HOST, VPS_PORT, VPS_USER, DEPLOY_PATH, COMPOSE_PROJECT, COMPOSE_FILE
 
-VPS_HOST="${VPS_HOST:-100.93.79.71}"     # Tailscale IP (preferred)
-# If `VPS_PORT` is unset, try 22 first, then `VPS_PORT_FALLBACK` (default: 2222).
-VPS_PORT="${VPS_PORT:-}"
-VPS_PORT_FALLBACK="${VPS_PORT_FALLBACK:-2222}"
+VPS_HOST="${VPS_HOST:-69.62.98.126}"
+# Public SSH port used in production. Fallback can be customized if needed.
+VPS_PORT="${VPS_PORT:-8022}"
+VPS_PORT_FALLBACK="${VPS_PORT_FALLBACK:-22}"
 VPS_USER="${VPS_USER:-root}"
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-iliagpt}"
@@ -21,11 +21,9 @@ echo "  ILIAGPT Production Deploy"
 echo "  $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "═══════════════════════════════════════════"
 
-PORTS=()
-if [ -n "${VPS_PORT}" ]; then
-  PORTS=("$VPS_PORT")
-else
-  PORTS=(22 "$VPS_PORT_FALLBACK")
+PORTS=("$VPS_PORT")
+if [ -n "${VPS_PORT_FALLBACK}" ] && [ "${VPS_PORT_FALLBACK}" != "${VPS_PORT}" ]; then
+  PORTS+=("$VPS_PORT_FALLBACK")
 fi
 
 SELECTED_PORT=""
@@ -44,7 +42,8 @@ fi
 
 echo "▸ Using SSH port: $SELECTED_PORT"
 
-ssh -p "$SELECTED_PORT" "${VPS_USER}@${VPS_HOST}" <<'DEPLOY'
+ssh -p "$SELECTED_PORT" "${VPS_USER}@${VPS_HOST}" \
+  "DEPLOY_PATH='${DEPLOY_PATH}' COMPOSE_PROJECT='${COMPOSE_PROJECT}' COMPOSE_FILE='${COMPOSE_FILE}' bash -s" <<'DEPLOY'
 set -euo pipefail
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -124,6 +123,6 @@ DEPLOY
 
 echo ""
 echo "▸ Verifying public health..."
-curl -sS https://iliagpt.com/health || true
+curl -sS https://iliagpt.com/api/health || true
 echo ""
 echo "✓ Deploy finished"

@@ -14,7 +14,7 @@ User → iliagpt.com → Nginx (SSL) → Docker Compose
 ## Prerequisites
 
 - VPS: Ubuntu 22.04+ (min 2GB RAM, 20GB disk)
-- Domain: iliagpt.com pointing to VPS IP (100.93.79.71)
+- Domain: iliagpt.com pointing to VPS IP (69.62.98.126)
 - GitHub repo: Carrerajorge/Hola
 - At least one LLM API key (Anthropic, OpenAI, Google, xAI, or DeepSeek)
 
@@ -44,7 +44,7 @@ gh auth login
 ### Step 2: Setup the VPS
 
 ```bash
-ssh root@100.93.79.71 'bash -s' < scripts/vps-setup.sh
+ssh -p 8022 root@69.62.98.126 'bash -s' < scripts/vps-setup.sh
 ```
 
 This installs Docker, Nginx, SSL (Let's Encrypt), clones the repo, creates `.env.production`, and starts the application.
@@ -52,7 +52,7 @@ This installs Docker, Nginx, SSL (Let's Encrypt), clones the repo, creates `.env
 ### Step 3: Configure API Keys
 
 ```bash
-ssh root@100.93.79.71
+ssh -p 8022 root@69.62.98.126
 nano /opt/hola/.env.production
 ```
 
@@ -95,7 +95,7 @@ gh workflow run deploy.yml
 gh workflow run deploy.yml -f skip_ci=true
 
 # Option 3: Direct SSH deploy
-ssh root@100.93.79.71 << 'EOF'
+ssh -p 8022 root@69.62.98.126 << 'EOF'
 cd /opt/hola
 git pull origin main
 docker compose -p iliagpt -f docker-compose.prod.yml build app worker
@@ -109,27 +109,27 @@ EOF
 
 ### View logs
 ```bash
-ssh root@100.93.79.71 'cd /opt/hola && docker compose -p iliagpt -f docker-compose.prod.yml logs -f app'
+ssh -p 8022 root@69.62.98.126 'cd /opt/hola && docker compose -p iliagpt -f docker-compose.prod.yml logs -f app'
 ```
 
 ### Check health
 ```bash
-curl https://iliagpt.com/health
+curl https://iliagpt.com/api/health
 ```
 
 ### Restart services
 ```bash
-ssh root@100.93.79.71 'cd /opt/hola && docker compose -p iliagpt -f docker-compose.prod.yml restart app worker'
+ssh -p 8022 root@69.62.98.126 'cd /opt/hola && docker compose -p iliagpt -f docker-compose.prod.yml restart app worker'
 ```
 
 ### Database backup
 ```bash
-ssh root@100.93.79.71 'docker exec iliagpt-postgres-1 pg_dump -U postgres iliagpt | gzip > /opt/backups/iliagpt_$(date +%Y%m%d).sql.gz'
+ssh -p 8022 root@69.62.98.126 'docker exec iliagpt-postgres-1 pg_dump -U postgres iliagpt | gzip > /opt/backups/iliagpt_$(date +%Y%m%d).sql.gz'
 ```
 
 ### Rollback
 ```bash
-ssh root@100.93.79.71 << 'EOF'
+ssh -p 8022 root@69.62.98.126 << 'EOF'
 cd /opt/hola
 git checkout HEAD~1
 docker compose -p iliagpt -f docker-compose.prod.yml up -d --build

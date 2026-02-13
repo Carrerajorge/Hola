@@ -1,21 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Script de actualización automática para VPS
-# Servidor: 69.62.98.126
-# Usuario: root
-
-echo "🚀 Iniciando despliegue a VPS (69.62.98.126)..."
-
-ssh root@69.62.98.126 "cd /var/www/michat && \
-git pull origin main && \
-echo '📦 Instalando dependencias...' && \
-npm install && \
-echo '🗄️ Actualizando base de datos...' && \
-npm run db:push && \
-echo '🏗️ Construyendo aplicación...' && \
-npm run build && \
-echo '🔄 Reiniciando servicios...' && \
-pm2 restart michat --update-env && \
-pm2 save"
-
-echo "✅ Despliegue completado."
+echo "[DEPRECATED] This script targets the legacy PM2 stack (/var/www/michat) and is disabled."
+echo "Use the canonical Docker deploy flow instead:"
+echo "  bash scripts/deploy-prod.sh"
+echo "For incident recovery, follow:"
+echo "  OPS-DEPLOY-CHECKLIST.md"
+exit 1

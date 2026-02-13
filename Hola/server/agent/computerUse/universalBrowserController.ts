@@ -1700,6 +1700,16 @@ RULES:
       }
     };
 
+    const MONTHS_ES: Record<string, number> = {
+      enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+      julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10,
+      noviembre: 11, diciembre: 12,
+    };
+    const MONTHS_EN: Record<string, number> = {
+      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    };
+
     const parseDayFromDate = (raw: string | undefined): number | null => {
       if (!raw) return null;
       const source = String(raw).trim().toLowerCase();
@@ -1727,6 +1737,33 @@ RULES:
         return d.getDate();
       }
       return null;
+    };
+
+    /** Parse target month (1-12) from the reservation date string */
+    const parseMonthFromDate = (raw: string | undefined): number | null => {
+      if (!raw) return null;
+      const source = String(raw).trim().toLowerCase();
+      // ISO: 2026-02-15
+      const iso = source.match(/\b\d{4}-(\d{2})-\d{2}\b/);
+      if (iso?.[1]) return Number(iso[1]);
+      // DD/MM or DD-MM-YYYY
+      const slash = source.match(/\b\d{1,2}[\/-](\d{1,2})(?:[\/-]\d{2,4})?\b/);
+      if (slash?.[1]) { const m = Number(slash[1]); if (m >= 1 && m <= 12) return m; }
+      // "15 de febrero"
+      for (const [name, num] of Object.entries(MONTHS_ES)) {
+        if (source.includes(name)) return num;
+      }
+      // "February 15"
+      for (const [name, num] of Object.entries(MONTHS_EN)) {
+        if (source.includes(name)) return num;
+      }
+      // "hoy" / "mañana" — use current or next-day month
+      if (/\b(hoy|today)\b/i.test(source)) return new Date().getMonth() + 1;
+      if (/\b(mañana|manana|tomorrow)\b/i.test(source)) {
+        const d = new Date(); d.setDate(d.getDate() + 1);
+        return d.getMonth() + 1;
+      }
+      return null; // no month info — assume current month
     };
 
     const normalizeTime = (raw: string | undefined): string | null => {
@@ -1840,11 +1877,14 @@ RULES:
     } | null => {
       const validate = backendSignals.validate;
       const changeDay = backendSignals.changeDay;
+      const comprove = backendSignals.comprove;
       const possibleMessages = [
         validate?.error_text,
         validate?.message,
         validate?.not_avaible,
         changeDay?.not_avaible,
+        comprove?.error_text,
+        comprove?.message,
       ]
         .map((value) => String(value || "").trim())
         .filter(Boolean);
@@ -1852,18 +1892,20 @@ RULES:
 
       if (!merged) return null;
 
-      if (/ya hemos registrado una reserva|duplicad|already.*reserv/i.test(merged)) {
+      // Duplicate reservation
+      if (/ya hemos registrado una reserva|duplicad|already.*reserv|ya tienes? una reserva/i.test(merged)) {
         return {
           status: "needs_user_input",
           reason: "duplicate_reservation_detected",
           question:
-            "CoverManager indicó que ya existe una reserva para esos datos ese mismo día. ¿Quieres que intente con otro horario, otro nombre/teléfono o editar la reserva existente?",
+            "Ya existe una reserva para esos datos ese mismo día. ¿Quieres que intente con otro horario, otro nombre/teléfono o editar la reserva existente?",
           missingFields: ["alternativeDateOrTimeOrContact"],
           backendMessage: possibleMessages[0],
         };
       }
 
-      if (/reservas?\s+completas?\s+por\s+web|no hay disponibilidad|no\s+availability|lista de espera/i.test(merged)) {
+      // No availability
+      if (/reservas?\s+completas?\s+por\s+web|no hay disponibilidad|no\s+availability|lista de espera|completas? online|sin disponibilidad/i.test(merged)) {
         return {
           status: "needs_user_input",
           reason: "no_web_availability",
@@ -1874,6 +1916,31 @@ RULES:
         };
       }
 
+      // Restaurant closed or outside hours
+      if (/cerrado|closed|fuera de horario|outside.*hours/i.test(merged)) {
+        return {
+          status: "needs_user_input",
+          reason: "restaurant_closed",
+          question:
+            "El restaurante está cerrado o fuera de horario para esa fecha. ¿Quieres que pruebe otro día?",
+          missingFields: ["alternativeDateOrTime"],
+          backendMessage: possibleMessages[0],
+        };
+      }
+
+      // Invalid contact data
+      if (/email.*inv[aá]lid|tel[eé]fono.*inv[aá]lid|correo.*incorrect|phone.*invalid/i.test(merged)) {
+        return {
+          status: "needs_user_input",
+          reason: "invalid_contact_data",
+          question:
+            "El sitio indica que algún dato de contacto es inválido. ¿Puedes verificar email y teléfono?",
+          missingFields: ["contactEmail", "contactPhone"],
+          backendMessage: possibleMessages[0],
+        };
+      }
+
+      // Generic validation failure
       if (validate && Number(validate?.resp) === 0) {
         return {
           status: "needs_user_input",
@@ -2129,7 +2196,9 @@ RULES:
           .count()
           .catch(() => 0)) > 0;
       const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
-      const hasConfirmation = /reserva confirmada|solicitud confirmada|lista de espera confirmada|solicitud recibida/i.test(pageText);
+      const hasConfirmation =
+        /reserva confirmada|solicitud confirmada|lista de espera confirmada|solicitud recibida|su reserva ha sido|your reservation has been/i.test(pageText) ||
+        (backendSignals.comprove && Number(backendSignals.comprove?.resp) === 1);
       return { hasStep2Form, hasExtraStep, hasConfirmation, pageText };
     };
 
@@ -2162,13 +2231,18 @@ RULES:
         if (state.hasExtraStep || state.hasConfirmation || !state.hasStep2Form) {
           return state;
         }
+        // Early exit if backend signals indicate block (duplicate, no availability)
+        const earlyBlock = detectBackendReservationBlock();
+        if (earlyBlock) {
+          return state; // Return current state, caller will check backend signals
+        }
         // Emit progress screenshot after 3s (reduced from 7s for faster feedback)
         if (!progressSent && Date.now() - started >= 3000) {
           progressSent = true;
           await emitProgress("wait", waitReasoning, waitProgress);
         }
-        // Poll every 250ms instead of 500ms for faster state detection
-        await page.waitForTimeout(250).catch(() => {});
+        // Poll every 200ms for faster state detection
+        await page.waitForTimeout(200).catch(() => {});
         state = await readFlowState();
       }
       return state;
@@ -2231,17 +2305,77 @@ RULES:
 
       // ── TURBO BLOCK 1: Select party size + date + time in rapid succession ──
       ensureBudget();
-      // Party size
+      // Party size — select by value first, fallback to label
       const selectResult = await this.select(sessionId, "select", String(partySize)).catch(() => ({ success: false }));
       if (!(selectResult as any)?.success) {
         await page.selectOption("select", { label: `${partySize} personas` }).catch(() => {});
       }
-      await page.waitForTimeout(200).catch(() => {});
+      // Brief wait for calendar to update after party size change
+      // CoverManager fires an AJAX call; calendar days are usually already visible.
+      // Use a short fixed wait rather than polling to avoid getting stuck on wrong selectors.
+      await page.waitForTimeout(800).catch(() => {});
       steps.push(`Selected party size: ${partySize}.`);
       await emitProgress("select", `Seleccionadas ${partySize} personas`, "20%");
 
+      // ── Calendar month navigation — navigate forward/backward if target month differs ──
+      ensureBudget();
+      const targetMonth = parseMonthFromDate(reservation.date);
+      if (targetMonth) {
+        // Detect current calendar month from the visible header (e.g., "Febrero 2026")
+        const currentCalMonth = await page.evaluate(() => {
+          const MONTH_MAP: Record<string, number> = {
+            enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+            julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10,
+            noviembre: 11, diciembre: 12,
+            january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+            july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+          };
+          // CoverManager uses ui-datepicker-title or similar headers
+          const headers = document.querySelectorAll('.ui-datepicker-title, .calendar-header, .month-title, h3, h4');
+          for (const h of headers) {
+            const text = (h.textContent || '').toLowerCase().trim();
+            for (const [name, num] of Object.entries(MONTH_MAP)) {
+              if (text.includes(name)) return num;
+            }
+          }
+          // Fallback: try the entire page for a month name near a year
+          const bodyText = (document.body?.innerText || '').toLowerCase();
+          for (const [name, num] of Object.entries(MONTH_MAP)) {
+            const re = new RegExp(`\\b${name}\\b\\s*\\d{4}`, 'i');
+            if (re.test(bodyText)) return num;
+          }
+          return null;
+        }).catch(() => null);
+
+        if (currentCalMonth !== null && currentCalMonth !== targetMonth) {
+          // Calculate how many months to navigate (positive = forward, negative = backward)
+          let diff = targetMonth - currentCalMonth;
+          if (diff > 6) diff -= 12; // wrap around year boundary
+          if (diff < -6) diff += 12;
+          const direction = diff > 0 ? "forward" : "backward";
+          const clicks = Math.abs(diff);
+          const navSelector = direction === "forward"
+            ? [".ui-datepicker-next", "a.ui-datepicker-next", ".next-month", "[title='Sig']", "[title='Next']"]
+            : [".ui-datepicker-prev", "a.ui-datepicker-prev", ".prev-month", "[title='Ant']", "[title='Prev']"];
+
+          for (let i = 0; i < clicks; i++) {
+            ensureBudget();
+            const navClicked = await clickFirstVisible(navSelector);
+            if (!navClicked) break;
+            await page.waitForTimeout(400).catch(() => {}); // Wait for calendar to re-render
+          }
+          if (clicks > 0) {
+            steps.push(`Navigated calendar ${direction} ${clicks} month(s).`);
+            // Wait for calendar to fully update after navigation
+            await page.waitForTimeout(300).catch(() => {});
+          }
+        }
+      }
+
       // Date — click calendar day
       ensureBudget();
+      // Reset changeDay signal BEFORE clicking so we can detect the fresh AJAX response
+      backendSignals.changeDay = null;
       const dateClickedSelector = await clickFirstVisible([
         `span.date.disponibility_sm:has-text("${day}")`,
         `span.date:has-text("${day}")`,
@@ -2251,33 +2385,56 @@ RULES:
       if (!dateClickedSelector) {
         return { success: false, steps, data: { status: "needs_user_input", missingFields: ["date"], question: `No pude seleccionar el día ${day} en el calendario. ¿Quieres que pruebe otra fecha?` }, screenshots };
       }
-      await page.waitForTimeout(300).catch(() => {});
       steps.push(`Selected date day: ${day}.`);
       await emitProgress("click", `Fecha seleccionada (día ${day})`, "30%");
 
-      // Time — find available times and click closest match
+      // ── POLL for time slots to load after date click (AJAX response) ──
+      // CoverManager fires /reserve/change_day/ which returns available hours.
+      // We poll the DOM for time-like text to appear, with a 5s hard limit.
       ensureBudget();
-      const availableTimes = await page.evaluate(() => {
-        const set = new Set<string>();
-        const regex = /\b([0-2]?\d:[0-5]\d)\b/g;
-        for (const node of Array.from(document.querySelectorAll("button, a, span, div")).slice(0, 2000)) {
-          const text = (node.textContent || "").replace(/\s+/g, " ").trim();
-          if (!text) continue;
-          for (const match of text.match(regex) || []) {
-            const [hh, mm] = match.split(":").map(Number);
-            if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
-              set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+      const scanAvailableTimes = async (): Promise<string[]> => {
+        return page.evaluate(() => {
+          const set = new Set<string>();
+          const regex = /\b([0-2]?\d:[0-5]\d)\b/g;
+          for (const node of Array.from(document.querySelectorAll("button, a, span, div")).slice(0, 2000)) {
+            const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+            if (!text) continue;
+            for (const match of text.match(regex) || []) {
+              const [hh, mm] = match.split(":").map(Number);
+              if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+                set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+              }
             }
           }
-        }
-        return Array.from(set);
-      });
-      if (!Array.isArray(availableTimes) || availableTimes.length === 0) {
-        const pageText = await page.evaluate(() => document.body?.innerText || "");
-        if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText)) {
-          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["alternativeDateOrTime"], question: "No hay disponibilidad web para esa fecha/hora. ¿Quieres que pruebe otro horario o fecha?", reason: "no_web_availability" }, screenshots };
-        }
+          return Array.from(set);
+        });
+      };
+
+      let availableTimes: string[] = [];
+      const timePollStart = Date.now();
+      const timePollMaxMs = 5000; // 5 seconds max wait for time slots
+      for (let poll = 0; poll < 25; poll++) { // 25 * 200ms = 5s
+        await page.waitForTimeout(200).catch(() => {});
+        availableTimes = await scanAvailableTimes();
+        if (availableTimes.length > 0) break;
+        // Also check if changeDay AJAX returned a "no availability" signal
+        if (backendSignals.changeDay?.not_avaible) break;
+        if (Date.now() - timePollStart > timePollMaxMs) break;
       }
+
+      if (!Array.isArray(availableTimes) || availableTimes.length === 0) {
+        // Check both page text and backend signals for no-availability
+        const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+        const changeDayNotAvail = backendSignals.changeDay?.not_avaible;
+        if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText) || changeDayNotAvail) {
+          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["alternativeDateOrTime"], question: `No hay disponibilidad web para el día ${day}. ¿Quieres que pruebe otro día u horario?`, reason: "no_web_availability", backendMessage: changeDayNotAvail || undefined }, screenshots };
+        }
+        // Time slots may exist in a non-standard format or the page is slow — try once more with longer wait
+        await page.waitForTimeout(1000).catch(() => {});
+        availableTimes = await scanAvailableTimes();
+      }
+
+      // Time — select closest match from available times
       let selectedTime = timeText;
       if (!availableTimes.includes(selectedTime) && availableTimes.length > 0) {
         const targetMinutes = toMinutes(selectedTime);
@@ -2287,13 +2444,25 @@ RULES:
       if (!clickedTime) {
         const fallbackClicked = availableTimes.length > 0 ? await clickVisibleText(availableTimes[0]) : false;
         if (!fallbackClicked) {
-          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["time"], question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}.` }, screenshots };
+          return { success: false, steps, data: { status: "needs_user_input", missingFields: ["time"], question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}. ¿Otra hora?` }, screenshots };
         }
         selectedTime = availableTimes[0];
       }
-      await page.waitForTimeout(200).catch(() => {});
+      await page.waitForTimeout(150).catch(() => {});
       steps.push(`Selected time: ${selectedTime}.`);
       await emitProgress("click", `Hora seleccionada: ${selectedTime}`, "40%");
+
+      // ── Wait for contact form to appear after time selection ──
+      // CoverManager may animate/load the contact form — poll for #user_first_name
+      ensureBudget();
+      for (let i = 0; i < 15; i++) { // up to 3s (15 * 200ms)
+        const formReady = await page.evaluate(() => {
+          const el = document.querySelector('#user_first_name') as HTMLInputElement | null;
+          return !!(el && el.offsetParent !== null);
+        }).catch(() => false);
+        if (formReady) break;
+        await page.waitForTimeout(200).catch(() => {});
+      }
 
       // ── TURBO BLOCK 2: Fill ALL contact fields + checkboxes in a SINGLE page.evaluate() call ──
       ensureBudget();
@@ -2530,7 +2699,10 @@ RULES:
         };
       });
 
-      const confirmed = /reserva confirmada|solicitud confirmada|lista de espera confirmada|solicitud recibida/i.test(finalState.text);
+      const confirmedByPage = /reserva confirmada|solicitud confirmada|lista de espera confirmada|solicitud recibida|su reserva ha sido|your reservation has been/i.test(finalState.text);
+      // Also check backend comprove_message signal (resp=1 = success)
+      const confirmedByBackend = backendSignals.comprove && Number(backendSignals.comprove?.resp) === 1;
+      const confirmed = confirmedByPage || confirmedByBackend;
       const noAvailability = /reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(finalState.text);
       const backendBlock = detectBackendReservationBlock();
 

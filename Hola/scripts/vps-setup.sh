@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # ILIAGPT - VPS Initial Setup Script
 # Run this ONCE on a fresh Ubuntu 22.04+ VPS
-# Usage: ssh -i ~/.ssh/iliagpt_deploy root@100.93.79.71 'bash -s' < scripts/vps-setup.sh
+# Usage: ssh -i ~/.ssh/iliagpt_deploy -p 8022 root@69.62.98.126 'bash -s' < scripts/vps-setup.sh
 # ═══════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -77,7 +77,8 @@ fi
 log "Configuring firewall..."
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow 22/tcp    # SSH
+ufw allow 22/tcp    # SSH (fallback)
+ufw allow 8022/tcp  # SSH (public)
 ufw allow 80/tcp    # HTTP
 ufw allow 443/tcp   # HTTPS
 echo "y" | ufw enable

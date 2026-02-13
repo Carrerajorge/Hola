@@ -233,7 +233,11 @@ function isRestaurantReservationRequest(text: string): boolean {
   if (!normalized) return false;
   const hasReservationVerb = /\b(reserva|reservar|reservacion|reservation|book|booking)\b/i.test(normalized);
   const hasRestaurantTerm = /\b(restaurante|restaurant|mesa|table)\b/i.test(normalized);
-  return hasReservationVerb && hasRestaurantTerm;
+  // Also match "reserva en Cala" (known restaurant) or "reserva en [Name] para X personas"
+  const hasReservaEnPattern = /\breserva(?:r)?\s+(?:en|at)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+/i.test(normalized);
+  // Match "reserva para X personas" (implies restaurant context)
+  const hasReservaParaPersonas = /\breserva(?:r|cion)?\b.*\b\d+\s*personas?\b/i.test(normalized);
+  return hasReservationVerb && (hasRestaurantTerm || hasReservaEnPattern || hasReservaParaPersonas);
 }
 
 function extractReservationDetails(text: string): ReservationDetails {
@@ -275,21 +279,24 @@ function extractReservationDetails(text: string): ReservationDetails {
     details.time = normalizeSpaces(timeMatch[1]);
   }
 
-  // Pattern: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
-  const restaurantBeforeKeyword = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)\s+(?:restaurante|restaurant)\b/i
-  );
-  // Pattern: "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
+  // Pattern 1 (highest priority): "restaurante [Name]" — name comes AFTER "restaurante" (e.g., "restaurante Cala")
   const restaurantAfterKeyword = source.match(
-    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$)/i
+    /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
-  // Pattern: "reserva en [Name]" — broader fallback
+  // Pattern 2: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
+  // Skip articles (el, la, los, las, the) that may appear before "restaurante"
+  const restaurantBeforeKeyword = source.match(
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|los\s+|las\s+|the\s+)?(.+?)\s+(?:restaurante|restaurant)\b/i
+  );
+  // Pattern 3: "reserva en [Name]" — broader fallback (name after "en" not followed by common stopwords)
   const restaurantByReservePattern = source.match(
-    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(.+?)(?=\s+(?:restaurante|restaurant|para|for|el|on|a las|at|hoy|manana|mañana|today|tomorrow)\b|$)/i
+    /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|the\s+)?([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
-  const restaurantRaw = restaurantBeforeKeyword?.[1] || restaurantAfterKeyword?.[1] || restaurantByReservePattern?.[1];
+  // Priority: afterKeyword > beforeKeyword > byReservePattern
+  const restaurantRaw = restaurantAfterKeyword?.[1] || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
   if (restaurantRaw) {
-    details.restaurant = normalizeSpaces(restaurantRaw.replace(/^en\s+/i, ""));
+    // Clean up: remove leading articles and trailing punctuation
+    details.restaurant = normalizeSpaces(restaurantRaw.replace(/^(?:en|el|la|los|las|the)\s+/i, "").replace(/[,;.]$/, ""));
   }
 
   // Prefer "restaurante en [City]" pattern — capture single word city name (no spaces to avoid greediness)
@@ -567,15 +574,15 @@ async function executeToolCall(
                   };
                   sseRes.write(`event: browser_step\ndata: ${JSON.stringify(sseData)}\n\n`);
                   // Also emit browser_report for inline chat step display
-                  // Only emit for meaningful steps (skip step 0 initial navigate)
-                  if (step.stepNumber > 0 && step.screenshot) {
+                  // Emit for ALL steps (not just ones with screenshots) so user sees every action
+                  if (step.stepNumber > 0) {
                     sseRes.write(`event: browser_report\ndata: ${JSON.stringify({
                       runId,
                       stepNumber: step.stepNumber,
                       action: step.action,
                       reasoning: step.reasoning,
                       goalProgress: step.goalProgress,
-                      screenshot: step.screenshot,
+                      screenshot: step.screenshot || "",
                       url: step.url,
                     })}\n\n`);
                   }
@@ -617,7 +624,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 60000 } // Reduced from 180s — turbo block filling is much faster
+                  { maxRuntimeMs: 90000 } // 90s: turbo block is fast but browser launch + page load take 15-25s
                 );
               })()
               : await universalBrowserController.agenticNavigate(

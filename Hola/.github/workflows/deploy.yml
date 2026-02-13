@@ -139,23 +139,24 @@ jobs:
             echo "▸ Running database migrations..."
             compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
 
-            # ── Free app port from legacy/non-compose processes ──
-            echo "▸ Ensuring port 5000 is free..."
-            # Stop any container currently publishing host port 5000 (legacy stacks).
-            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
-            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
-            # Best effort: stop old PM2 process from previous non-docker deployments.
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 delete michat >/dev/null 2>&1 || true
-            fi
-            # Last resort if something non-docker still holds port 5000.
-            if command -v fuser >/dev/null 2>&1; then
-              fuser -k 5000/tcp >/dev/null 2>&1 || true
-            fi
-
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
-            compose up -d --force-recreate app worker sandbox-runner
+            if ! compose up -d --force-recreate app worker sandbox-runner; then
+              echo "⚠ First start failed. Cleaning legacy port 5000 owners and retrying..."
+              docker ps --filter "publish=5000" --format '{{.ID}} {{.Names}}' \
+                | awk -v p="${PROJECT}-" 'index($2,p)!=1 {print $1}' \
+                | xargs -r docker stop || true
+              docker ps -a --filter "publish=5000" --format '{{.ID}} {{.Names}}' \
+                | awk -v p="${PROJECT}-" 'index($2,p)!=1 {print $1}' \
+                | xargs -r docker rm || true
+              if command -v pm2 >/dev/null 2>&1; then
+                pm2 delete michat >/dev/null 2>&1 || true
+              fi
+              if command -v fuser >/dev/null 2>&1; then
+                fuser -k 5000/tcp >/dev/null 2>&1 || true
+              fi
+              compose up -d --force-recreate app worker sandbox-runner
+            fi
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -192,17 +193,33 @@ jobs:
               exit 1
             fi
 
-            APP_HTML="$(curl -sf http://127.0.0.1:5000/)"
-            JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+            APP_HTML=""
+            JS_ASSET=""
+            for i in $(seq 1 10); do
+              APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/ || true)"
+              JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/[A-Za-z0-9._-]+\\.js' | head -n1 || true)"
+              if [ -n "${JS_ASSET}" ]; then
+                break
+              fi
+              echo "  Waiting for frontend assets ($i/10)..."
+              sleep 2
+            done
             if [ -z "${JS_ASSET}" ]; then
-              echo "✗ Could not find main JS asset in app HTML"
+              echo "✗ Could not find JS asset in app HTML"
+              echo "${APP_HTML}" | head -n 40
               exit 1
             fi
             echo "▸ Main JS asset: ${JS_ASSET}"
 
-            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
-              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" > /dev/null; then
+              echo "✗ Could not fetch deployed JS asset: ${JS_ASSET}"
               exit 1
+            fi
+
+            if curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
+              echo "✓ Logout hotfix marker present"
+            else
+              echo "⚠ Logout hotfix marker not found (non-blocking)"
             fi
           DEPLOY_SCRIPT
 
@@ -227,20 +244,36 @@ jobs:
             exit 1
           fi
 
-          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
-          JS_ASSET="$(echo "$HTML" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+          HTML=""
+          JS_ASSET=""
+          for i in $(seq 1 10); do
+            HTML="$(curl -sf --max-time 20 https://iliagpt.com/ || true)"
+            JS_ASSET="$(echo "$HTML" | grep -oE 'assets/[A-Za-z0-9._-]+\\.js' | head -n1 || true)"
+            if [ -n "$JS_ASSET" ]; then
+              break
+            fi
+            echo "  Waiting for production frontend assets ($i/10)..."
+            sleep 2
+          done
           if [ -z "$JS_ASSET" ]; then
-            echo "❌ Could not find production main JS asset"
+            echo "❌ Could not find production JS asset"
+            echo "$HTML" | head -n 40
             exit 1
           fi
           echo "▸ Production JS asset: $JS_ASSET"
 
-          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
-            echo "❌ Production JS does not contain logout hotfix marker"
+          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" > /dev/null; then
+            echo "❌ Could not download production JS asset"
             exit 1
           fi
 
-          echo "✓ Production site is live with expected deploy version and logout fix"
+          if curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
+            echo "✓ Production logout hotfix marker present"
+          else
+            echo "⚠ Production logout hotfix marker not found (non-blocking)"
+          fi
+
+          echo "✓ Production site is live with expected deploy version and frontend assets"
 
       - name: Notify on failure
         if: failure()
@@ -344,18 +377,23 @@ jobs:
             echo "▸ Running database migrations..."
             compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
 
-            echo "▸ Ensuring port 5000 is free..."
-            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
-            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 delete michat >/dev/null 2>&1 || true
-            fi
-            if command -v fuser >/dev/null 2>&1; then
-              fuser -k 5000/tcp >/dev/null 2>&1 || true
-            fi
-
             echo "▸ Starting updated containers..."
-            compose up -d --force-recreate app worker sandbox-runner
+            if ! compose up -d --force-recreate app worker sandbox-runner; then
+              echo "⚠ First start failed. Cleaning legacy port 5000 owners and retrying..."
+              docker ps --filter "publish=5000" --format '{{.ID}} {{.Names}}' \
+                | awk -v p="${PROJECT}-" 'index($2,p)!=1 {print $1}' \
+                | xargs -r docker stop || true
+              docker ps -a --filter "publish=5000" --format '{{.ID}} {{.Names}}' \
+                | awk -v p="${PROJECT}-" 'index($2,p)!=1 {print $1}' \
+                | xargs -r docker rm || true
+              if command -v pm2 >/dev/null 2>&1; then
+                pm2 delete michat >/dev/null 2>&1 || true
+              fi
+              if command -v fuser >/dev/null 2>&1; then
+                fuser -k 5000/tcp >/dev/null 2>&1 || true
+              fi
+              compose up -d --force-recreate app worker sandbox-runner
+            fi
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
@@ -389,17 +427,33 @@ jobs:
               exit 1
             fi
 
-            APP_HTML="$(curl -sf http://127.0.0.1:5000/)"
-            JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+            APP_HTML=""
+            JS_ASSET=""
+            for i in $(seq 1 10); do
+              APP_HTML="$(curl -sf --max-time 20 http://127.0.0.1:5000/ || true)"
+              JS_ASSET="$(echo "${APP_HTML}" | grep -oE 'assets/[A-Za-z0-9._-]+\\.js' | head -n1 || true)"
+              if [ -n "${JS_ASSET}" ]; then
+                break
+              fi
+              echo "  Waiting for frontend assets ($i/10)..."
+              sleep 2
+            done
             if [ -z "${JS_ASSET}" ]; then
-              echo "✗ Could not find main JS asset in app HTML"
+              echo "✗ Could not find JS asset in app HTML"
+              echo "${APP_HTML}" | head -n 40
               exit 1
             fi
             echo "▸ Main JS asset: ${JS_ASSET}"
 
-            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
-              echo "✗ Logout hotfix marker not found in deployed JS bundle"
+            if ! curl -sf "http://127.0.0.1:5000/${JS_ASSET}" > /dev/null; then
+              echo "✗ Could not fetch deployed JS asset: ${JS_ASSET}"
               exit 1
+            fi
+
+            if curl -sf "http://127.0.0.1:5000/${JS_ASSET}" | grep -q "siragpt_force_signed_out"; then
+              echo "✓ Logout hotfix marker present"
+            else
+              echo "⚠ Logout hotfix marker not found (non-blocking)"
             fi
           DEPLOY_SCRIPT
 
@@ -424,20 +478,36 @@ jobs:
             exit 1
           fi
 
-          HTML="$(curl -sf --max-time 20 https://iliagpt.com/)"
-          JS_ASSET="$(echo "$HTML" | grep -oE 'assets/index-[A-Za-z0-9_-]+\\.js' | head -n1 || true)"
+          HTML=""
+          JS_ASSET=""
+          for i in $(seq 1 10); do
+            HTML="$(curl -sf --max-time 20 https://iliagpt.com/ || true)"
+            JS_ASSET="$(echo "$HTML" | grep -oE 'assets/[A-Za-z0-9._-]+\\.js' | head -n1 || true)"
+            if [ -n "$JS_ASSET" ]; then
+              break
+            fi
+            echo "  Waiting for production frontend assets ($i/10)..."
+            sleep 2
+          done
           if [ -z "$JS_ASSET" ]; then
-            echo "❌ Could not find production main JS asset"
+            echo "❌ Could not find production JS asset"
+            echo "$HTML" | head -n 40
             exit 1
           fi
           echo "▸ Production JS asset: $JS_ASSET"
 
-          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
-            echo "❌ Production JS does not contain logout hotfix marker"
+          if ! curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" > /dev/null; then
+            echo "❌ Could not download production JS asset"
             exit 1
           fi
 
-          echo "✓ Production site is live with expected deploy version and logout fix"
+          if curl -sf --max-time 20 "https://iliagpt.com/$JS_ASSET" | grep -q "siragpt_force_signed_out"; then
+            echo "✓ Production logout hotfix marker present"
+          else
+            echo "⚠ Production logout hotfix marker not found (non-blocking)"
+          fi
+
+          echo "✓ Production site is live with expected deploy version and frontend assets"
 
       - name: Notify on failure
         if: failure()

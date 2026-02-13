@@ -185,6 +185,7 @@ test.describe('Document Analysis Flow - Mocked API', () => {
   test('should render document analysis results card with mocked data', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(250);
 
     await page.evaluate((mockData) => {
       const event = new CustomEvent('mock-analysis-complete', { detail: mockData });
@@ -585,31 +586,29 @@ test.describe('PARE System E2E Tests - Document Routing', () => {
 
 test.describe('Document Analysis Component Tests', () => {
   test('should verify DocumentAnalysisResults renders correctly with test data', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('domcontentloaded');
-
-    await page.evaluate(() => {
-      const container = document.createElement('div');
-      container.id = 'test-analysis-container';
-      container.setAttribute('data-testid', 'document-analysis-results');
-      container.innerHTML = `
-        <div data-testid="analysis-results-title">Analysis Complete: multi-sheet.xlsx</div>
-        <div data-testid="tab-summary">Summary</div>
-        <div data-testid="tab-sheet-Sales">Sales</div>
-        <div data-testid="tab-sheet-Employees">Employees</div>
-        <div data-testid="tab-sheet-Summary">Summary</div>
-        <div data-testid="content-summary">Cross-sheet summary content</div>
-        <div data-testid="toggle-code-Sales">Generated Code</div>
-        <div data-testid="code-block-Sales" style="display:none;">import pandas</div>
-        <div data-testid="metrics-Sales">
-          <div>Total Sales: $15,450</div>
-        </div>
-        <div data-testid="preview-Sales">
-          <table><tr><th>Product</th></tr></table>
-        </div>
-      `;
-      document.body.appendChild(container);
-    });
+    await page.setContent(`
+      <!doctype html>
+      <html>
+        <body>
+          <div id="test-analysis-container" data-testid="document-analysis-results">
+            <div data-testid="analysis-results-title">Analysis Complete: multi-sheet.xlsx</div>
+            <div data-testid="tab-summary">Summary</div>
+            <div data-testid="tab-sheet-Sales">Sales</div>
+            <div data-testid="tab-sheet-Employees">Employees</div>
+            <div data-testid="tab-sheet-Summary">Summary</div>
+            <div data-testid="content-summary">Cross-sheet summary content</div>
+            <div data-testid="toggle-code-Sales">Generated Code</div>
+            <div data-testid="code-block-Sales" style="display:none;">import pandas</div>
+            <div data-testid="metrics-Sales">
+              <div>Total Sales: $15,450</div>
+            </div>
+            <div data-testid="preview-Sales">
+              <table><tr><th>Product</th></tr></table>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
 
     const resultsCard = page.locator('[data-testid="document-analysis-results"]');
     await expect(resultsCard).toBeVisible();
@@ -634,23 +633,21 @@ test.describe('Document Analysis Component Tests', () => {
   });
 
   test('should verify progress card renders with sheet statuses', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('domcontentloaded');
-
-    await page.evaluate(() => {
-      const container = document.createElement('div');
-      container.id = 'test-progress-container';
-      container.setAttribute('data-testid', 'document-analysis-progress');
-      container.innerHTML = `
-        <div data-testid="analysis-filename">multi-sheet.xlsx</div>
-        <div data-testid="analysis-status-text">Analyzing sheet 2 of 3</div>
-        <div data-testid="analysis-progress-bar" role="progressbar" aria-valuenow="66"></div>
-        <div data-testid="sheet-status-Sales">Sales ✓</div>
-        <div data-testid="sheet-status-Employees">Employees ⟳</div>
-        <div data-testid="sheet-status-Summary">Summary ○</div>
-      `;
-      document.body.appendChild(container);
-    });
+    await page.setContent(`
+      <!doctype html>
+      <html>
+        <body>
+          <div id="test-progress-container" data-testid="document-analysis-progress">
+            <div data-testid="analysis-filename">multi-sheet.xlsx</div>
+            <div data-testid="analysis-status-text">Analyzing sheet 2 of 3</div>
+            <div data-testid="analysis-progress-bar" role="progressbar" aria-valuenow="66"></div>
+            <div data-testid="sheet-status-Sales">Sales ✓</div>
+            <div data-testid="sheet-status-Employees">Employees ⟳</div>
+            <div data-testid="sheet-status-Summary">Summary ○</div>
+          </div>
+        </body>
+      </html>
+    `);
 
     const progressCard = page.locator('[data-testid="document-analysis-progress"]');
     await expect(progressCard).toBeVisible();

@@ -13,7 +13,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 REPO="Carrerajorge/Hola"
-VPS_IP="100.93.79.71"
+VPS_IP="69.62.98.126"
+VPS_PORT="8022"
 
 echo "═══════════════════════════════════════════"
 echo "  ILIAGPT - GitHub Secrets Setup"
@@ -35,12 +36,12 @@ fi
 echo ""
 echo -e "${GREEN}Step 2: Copying public key to VPS...${NC}"
 echo -e "${YELLOW}You may be asked for your VPS root password.${NC}"
-ssh-copy-id -i "$SSH_KEY_PATH.pub" root@$VPS_IP
+ssh-copy-id -p "$VPS_PORT" -i "$SSH_KEY_PATH.pub" root@$VPS_IP
 
 # ── Step 3: Test SSH connection ──
 echo ""
 echo -e "${GREEN}Step 3: Testing SSH connection...${NC}"
-ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no root@$VPS_IP "echo '✓ SSH connection successful!'"
+ssh -i "$SSH_KEY_PATH" -p "$VPS_PORT" -o StrictHostKeyChecking=no root@$VPS_IP "echo '✓ SSH connection successful!'"
 
 # ── Step 4: Add secret to GitHub ──
 echo ""
@@ -48,7 +49,10 @@ echo -e "${GREEN}Step 4: Adding SSH key to GitHub secrets...${NC}"
 
 if command -v gh &>/dev/null; then
   gh secret set VPS_SSH_KEY --repo "$REPO" < "$SSH_KEY_PATH"
-  echo -e "${GREEN}✓ Secret VPS_SSH_KEY added to GitHub repo!${NC}"
+  gh secret set VPS_HOST --repo "$REPO" --body "$VPS_IP"
+  gh secret set VPS_PORT --repo "$REPO" --body "$VPS_PORT"
+  gh secret set VPS_USER --repo "$REPO" --body "root"
+  echo -e "${GREEN}✓ Secrets VPS_SSH_KEY, VPS_HOST, VPS_PORT, VPS_USER added to GitHub repo!${NC}"
 else
   echo -e "${YELLOW}⚠ GitHub CLI not found. Install it with: brew install gh${NC}"
   echo ""
@@ -57,6 +61,9 @@ else
   echo "  2. Click 'New repository secret'"
   echo "  3. Name: VPS_SSH_KEY"
   echo "  4. Value: paste the contents of $SSH_KEY_PATH"
+  echo "  5. Name: VPS_HOST    Value: $VPS_IP"
+  echo "  6. Name: VPS_PORT    Value: $VPS_PORT"
+  echo "  7. Name: VPS_USER    Value: root"
   echo ""
   echo "To copy the key to clipboard:"
   echo "  cat $SSH_KEY_PATH | pbcopy"
