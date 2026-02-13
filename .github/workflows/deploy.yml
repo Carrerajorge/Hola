@@ -130,13 +130,19 @@ jobs:
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
             compose() {
-              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+              # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
+              # where stage outputs (deps:/app/node_modules) are not found when multiple
+              # targets build concurrently on the VPS.
+              COMPOSE_BAKE=0 APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
                 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
             }
 
             # ── Build new images ──
             echo "▸ Building Docker images (no cache)..."
-            compose build --no-cache app worker sandbox-runner
+            # Build sequentially for stability (avoids cross-target stage sharing bugs).
+            compose build --no-cache app
+            compose build --no-cache worker
+            compose build --no-cache sandbox-runner
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
@@ -339,12 +345,18 @@ jobs:
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
             compose() {
-              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+              # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
+              # where stage outputs (deps:/app/node_modules) are not found when multiple
+              # targets build concurrently on the VPS.
+              COMPOSE_BAKE=0 APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
                 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
             }
 
             echo "▸ Building Docker images (no cache)..."
-            compose build --no-cache app worker sandbox-runner
+            # Build sequentially for stability (avoids cross-target stage sharing bugs).
+            compose build --no-cache app
+            compose build --no-cache worker
+            compose build --no-cache sandbox-runner
 
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
