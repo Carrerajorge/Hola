@@ -222,7 +222,7 @@ export function formatArticleForDisplay(article: ScientificArticle): {
 } {
   return {
     title: article.title,
-    authors: article.authors.map((a: any) => a.fullName || `${a.firstName} ${a.lastName}`).join(", "),
+    authors: article.authors.map((a: Author) => a.fullName || `${a.firstName} ${a.lastName}`).join(", "),
     journal: article.journal?.title || "N/A",
     year: article.year?.toString() || "N/A",
     citationCount: article.citationCount?.toString() || "N/A",
