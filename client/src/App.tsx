@@ -56,7 +56,6 @@ function requireAuth(Component: ComponentType<any>) {
     return <Component {...props} />;
   };
 }
-
 function WorkspaceAnalyticsTracker() {
   const [location] = useLocation();
   const { user, isReady } = useAuth();
