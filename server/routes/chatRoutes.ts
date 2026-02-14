@@ -48,6 +48,14 @@ const agentRunRequestSchema = z.object({
   planHint: z.array(z.string()).optional().default([]),
 });
 
+const escalationCheckSchema = z.object({
+  response: z.string().min(1, "Response string required"),
+});
+
+const intentAnalyzeSchema = z.object({
+  message: z.string().min(1, "Message is required"),
+});
+
 export function createChatRoutes(): Router {
   const router = Router();
 
@@ -73,7 +81,7 @@ export function createChatRoutes(): Router {
       });
     } catch (error: any) {
       console.error("[ChatRoutes] Complexity analysis error:", error);
-      res.status(500).json({ error: error.message || "Failed to analyze complexity" });
+      res.status(500).json({ error: "Failed to analyze complexity" });
     }
   });
 
@@ -129,7 +137,7 @@ export function createChatRoutes(): Router {
       res.json({
         route: "chat",
         confidence: 0.5,
-        reasons: ["Router fallback due to error: " + errorMsg],
+        reasons: ["Router fallback due to error"],
         toolNeeds: [],
         planHint: [],
         tool_needs: [],
@@ -175,9 +183,9 @@ export function createChatRoutes(): Router {
       });
     } catch (error: any) {
       const errorMsg = error.message || "Failed to run agent";
-      console.error("[ChatRoutes] Agent run error:", JSON.stringify({ error: errorMsg, stack: error.stack?.slice(0, 500) }));
+      console.error("[ChatRoutes] Agent run error:", JSON.stringify({ error: errorMsg }));
       res.status(500).json({
-        error: errorMsg,
+        error: "Failed to run agent",
         code: "AGENT_RUN_ERROR",
         suggestion: "Check server logs for details. If LLM is unavailable, heuristic fallback should apply."
       });
@@ -186,16 +194,17 @@ export function createChatRoutes(): Router {
 
   router.post("/escalation-check", async (req: Request, res: Response) => {
     try {
-      const { response } = req.body;
-      if (!response || typeof response !== "string") {
+      const validation = escalationCheckSchema.safeParse(req.body);
+      if (!validation.success) {
         return res.status(400).json({ error: "Response string required" });
       }
 
+      const { response } = validation.data;
       const result = checkDynamicEscalation(response);
       res.json(result);
     } catch (error: any) {
       console.error("[ChatRoutes] Escalation check error:", error);
-      res.status(500).json({ error: error.message || "Failed to check escalation" });
+      res.status(500).json({ error: "Failed to check escalation" });
     }
   });
 
@@ -226,7 +235,8 @@ export function createChatRoutes(): Router {
     } catch (error: any) {
       console.error("[ChatRoutes] Start analysis error:", error);
       const statusCode = error.message === "Upload not found" ? 404 : 500;
-      res.status(statusCode).json({ error: error.message || "Failed to start analysis" });
+      const safeMsg = error.message === "Upload not found" ? "Upload not found" : "Failed to start analysis";
+      res.status(statusCode).json({ error: safeMsg });
     }
   });
 
@@ -238,7 +248,8 @@ export function createChatRoutes(): Router {
     } catch (error: any) {
       console.error("[ChatRoutes] Get analysis error:", error);
       const statusCode = error.message === "Analysis not found for this upload" ? 404 : 500;
-      res.status(statusCode).json({ error: error.message || "Failed to get analysis" });
+      const safeMsg = error.message === "Analysis not found for this upload" ? "Analysis not found for this upload" : "Failed to get analysis";
+      res.status(statusCode).json({ error: safeMsg });
     }
   });
 
@@ -282,17 +293,18 @@ export function createChatRoutes(): Router {
       });
     } catch (error: any) {
       console.error("[ChatRoutes] Intent engine error:", error);
-      res.status(500).json({ error: error.message || "Failed to process intent" });
+      res.status(500).json({ error: "Failed to process intent" });
     }
   });
 
   router.post("/intent/analyze", async (req: Request, res: Response) => {
     try {
-      const { message } = req.body;
-      if (!message || typeof message !== 'string') {
+      const validation = intentAnalyzeSchema.safeParse(req.body);
+      if (!validation.success) {
         return res.status(400).json({ error: "Message is required" });
       }
 
+      const { message } = validation.data;
       const analysis = await intentEnginePipeline.analyzeOnly(message);
 
       res.json({
@@ -306,7 +318,7 @@ export function createChatRoutes(): Router {
       });
     } catch (error: any) {
       console.error("[ChatRoutes] Intent analysis error:", error);
-      res.status(500).json({ error: error.message || "Failed to analyze intent" });
+      res.status(500).json({ error: "Failed to analyze intent" });
     }
   });
 
@@ -329,7 +341,7 @@ export function createChatRoutes(): Router {
       });
     } catch (error: any) {
       console.error("[ChatRoutes] Get session error:", error);
-      res.status(500).json({ error: error.message || "Failed to get session" });
+      res.status(500).json({ error: "Failed to get session" });
     }
   });
 
@@ -340,7 +352,7 @@ export function createChatRoutes(): Router {
       res.json({ success: true, message: "Session reset" });
     } catch (error: any) {
       console.error("[ChatRoutes] Reset session error:", error);
-      res.status(500).json({ error: error.message || "Failed to reset session" });
+      res.status(500).json({ error: "Failed to reset session" });
     }
   });
 

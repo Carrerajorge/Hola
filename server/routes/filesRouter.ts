@@ -58,8 +58,13 @@ function isValidObjectId(objectId: string): boolean {
   if (objectId.includes("..") || objectId.includes("//")) return false;
   if (objectId.includes("\0") || objectId.includes("%00")) return false;
   if (objectId.includes("%2e%2e") || objectId.includes("%2E%2E")) return false;
+  // Block leading slashes to prevent absolute path references
+  if (objectId.startsWith("/")) return false;
   // Only allow safe characters: alphanumeric, dash, underscore, dot, forward slash
   if (!/^[a-zA-Z0-9._\-\/]+$/.test(objectId)) return false;
+  // Verify the normalized path doesn't escape the base directory
+  const normalized = path.normalize(objectId);
+  if (normalized.startsWith("..") || normalized.startsWith("/")) return false;
   return true;
 }
 
