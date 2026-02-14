@@ -117,6 +117,11 @@ jobs:
             # ── Checkout exact commit for deterministic deploys ──
             echo "▸ Fetching repository and checking out target SHA..."
             echo "▸ TARGET_SHA: ${TARGET_SHA}"
+            # Stale lock files can be left behind by interrupted deploys.
+            if [ -f .git/index.lock ]; then
+              echo "⚠️ Removing stale git lock: .git/index.lock"
+              rm -f .git/index.lock
+            fi
             git fetch origin main
             git checkout --force "${TARGET_SHA}"
 
@@ -366,6 +371,10 @@ jobs:
 
             echo "▸ Fetching repository and checking out target SHA..."
             echo "▸ TARGET_SHA: ${TARGET_SHA}"
+            if [ -f .git/index.lock ]; then
+              echo "⚠️ Removing stale git lock: .git/index.lock"
+              rm -f .git/index.lock
+            fi
             git fetch origin main
             git checkout --force "${TARGET_SHA}"
 
