@@ -65,7 +65,7 @@ export default defineConfig(async () => {
           runtimeCaching: [
             {
               urlPattern: /^\/api\//,
-              handler: 'NetworkOnly',
+              handler: "NetworkOnly",
             },
           ],
           // Force new SW on every build
@@ -118,8 +118,8 @@ export default defineConfig(async () => {
       },
     },
     server: {
-      // Use localhost in dev so the session cookie host matches and login persists.
-      host: "localhost",
+      // Bind to 0.0.0.0 on Replit/remote dev; use localhost locally so cookies persist across reloads.
+      host: isReplit ? "0.0.0.0" : "localhost",
       allowedHosts: true,
       fs: {
         strict: true,
