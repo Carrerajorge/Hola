@@ -66,7 +66,10 @@ services:
 
       disable: true
 
-    mem_limit: 1g
+    mem_limit: 2g
+
+    # Chromium (Playwright) needs /dev/shm > 64MB to avoid crashes
+    shm_size: 256m
 
 
 
