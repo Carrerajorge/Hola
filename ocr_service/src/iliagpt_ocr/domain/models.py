@@ -22,6 +22,8 @@ class TextBlock:
 @dataclass(frozen=True)
 class OcrPageResult:
     page_index: int
+    engine: str
+    engine_lang: str
     text: str
     blocks: list[TextBlock]
     avg_confidence: float | None
@@ -35,4 +37,3 @@ class OcrResult:
     text: str
     avg_confidence: float | None
     timings_ms: dict[str, float]
-

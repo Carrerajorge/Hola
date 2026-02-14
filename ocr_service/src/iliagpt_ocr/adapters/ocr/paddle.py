@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
 
 import numpy as np
 
@@ -17,6 +18,7 @@ except Exception:  # pragma: no cover
 class PaddleOcrEngine:
     use_angle_cls: bool = True
     _instances: dict[str, object] = field(default_factory=dict, init=False, repr=False)
+    _lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @property
     def name(self) -> str:
@@ -28,10 +30,17 @@ class PaddleOcrEngine:
 
         # PaddleOCR initialization is expensive; cache per-language.
         inst = self._instances.get(lang)
-        if inst is None:
-            inst = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=lang, show_log=False)
-            self._instances[lang] = inst
-        return inst
+        if inst is not None:
+            return inst
+        with self._lock:
+            inst = self._instances.get(lang)
+            if inst is None:
+                inst = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=lang, show_log=False)
+                self._instances[lang] = inst
+            return inst
+
+    def is_available(self) -> bool:
+        return PaddleOCR is not None
 
     def recognize(self, image_bgr: np.ndarray, *, lang: str, page_index: int) -> OcrPageResult:
         try:
@@ -65,5 +74,11 @@ class PaddleOcrEngine:
 
         text_out = "\n".join(lines_text).strip()
         avg_conf = (sum(confidences) / len(confidences)) if confidences else None
-        return OcrPageResult(page_index=page_index, text=text_out, blocks=blocks, avg_confidence=avg_conf)
-
+        return OcrPageResult(
+            page_index=page_index,
+            engine=self.name,
+            engine_lang=lang,
+            text=text_out,
+            blocks=blocks,
+            avg_confidence=avg_conf,
+        )

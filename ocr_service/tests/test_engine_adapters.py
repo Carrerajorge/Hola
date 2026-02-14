@@ -33,6 +33,7 @@ def test_paddle_adapter_parses_blocks(monkeypatch):
     monkeypatch.setattr(paddle_mod, "PaddleOCR", FakePaddleOCR)
 
     eng = PaddleOcrEngine(use_angle_cls=True)
+    assert eng.is_available() is True
     img = np.zeros((60, 60, 3), dtype=np.uint8)
     res = eng.recognize(img, lang="en", page_index=0)
     assert res.text == "HELLO\nWORLD"
@@ -40,6 +41,10 @@ def test_paddle_adapter_parses_blocks(monkeypatch):
     assert res.avg_confidence > 0.9
     assert len(res.blocks) == 2
     assert res.blocks[0].bbox is not None
+
+    # Call again to cover instance cache fast-path.
+    res2 = eng.recognize(img, lang="en", page_index=1)
+    assert res2.engine == "paddle"
 
 
 def test_tesseract_adapter_parses_blocks(monkeypatch):
@@ -71,6 +76,10 @@ def test_tesseract_adapter_parses_blocks(monkeypatch):
     assert res.avg_confidence is not None
     assert 0.8 <= res.avg_confidence <= 1.0
     assert len(res.blocks) == 2
+
+    # Availability check should be truthy when version call works.
+    fake.get_tesseract_version = lambda: "5.0.0"
+    assert eng.is_available() is True
 
 
 def test_tesseract_adapter_skips_empty_and_invalid_tokens(monkeypatch):
@@ -108,6 +117,21 @@ def test_tesseract_adapter_engine_unavailable_when_pytesseract_missing(monkeypat
     img = np.zeros((10, 10, 3), dtype=np.uint8)
     with pytest.raises(EngineUnavailableError):
         eng.recognize(img, lang="eng", page_index=0)
+
+    assert eng.is_available() is False
+
+
+def test_tesseract_is_available_false_when_binary_missing(monkeypatch):
+    class Tnf(Exception):
+        pass
+
+    fake = types.SimpleNamespace()
+    fake.TesseractNotFoundError = Tnf
+    fake.get_tesseract_version = lambda: (_ for _ in ()).throw(Tnf("missing"))
+
+    monkeypatch.setattr(tess_mod, "pytesseract", fake)
+    eng = TesseractOcrEngine()
+    assert eng.is_available() is False
 
 
 def test_tesseract_adapter_propagates_engine_unavailable(monkeypatch):

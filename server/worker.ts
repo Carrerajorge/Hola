@@ -101,8 +101,12 @@ const processors: Record<TaskType, (data: any) => Promise<any>> = {
                 url.searchParams.set("engine", "auto");
                 url.searchParams.set("lang", "eng");
 
+                const isPdf = buffer.subarray(0, 4).toString("ascii") === "%PDF";
+                const filename = isPdf ? "upload.pdf" : "upload.png";
+                const mime = isPdf ? "application/pdf" : "image/png";
+
                 const form = new FormData();
-                form.append("file", new Blob([buffer]), "upload.png");
+                form.append("file", new Blob([buffer], { type: mime }), filename);
 
                 const resp = await fetch(url.toString(), { method: "POST", body: form });
                 if (resp.ok) {

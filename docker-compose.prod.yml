@@ -234,6 +234,12 @@ services:
 
       OCR_MAX_FILE_SIZE_MB: ${OCR_MAX_FILE_SIZE_MB:-15}
 
+      OCR_MAX_CONCURRENT_REQUESTS: ${OCR_MAX_CONCURRENT_REQUESTS:-4}
+
+      OCR_API_KEY: ${OCR_API_KEY:-}
+
+      OCR_LOG_LEVEL: ${OCR_LOG_LEVEL:-INFO}
+
     expose:
 
       - "8000"

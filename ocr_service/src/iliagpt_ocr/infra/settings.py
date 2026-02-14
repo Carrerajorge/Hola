@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     max_pages: int = Field(default=10, ge=1, le=100)
     max_file_size_mb: int = Field(default=15, ge=1, le=200)
     dpi: int = Field(default=300, ge=72, le=600)
+    max_concurrent_requests: int = Field(default=4, ge=1, le=64)
 
     # Preprocessing toggles
     enable_deskew: bool = Field(default=True)
@@ -35,8 +36,13 @@ class Settings(BaseSettings):
     # Paddle
     paddle_use_angle_cls: bool = Field(default=True)
 
+    # Optional auth (internal deployments typically run on a private Docker network).
+    api_key: str | None = Field(default=None)
+
+    # Logging
+    log_level: str = Field(default="INFO")
+
 
 def get_settings() -> Settings:
     # Kept as a function to make it easy to override in tests.
     return Settings()
-

@@ -30,9 +30,16 @@ All settings are prefixed with `OCR_`:
 - `OCR_DPI` (default: `300`)
 - `OCR_MAX_PAGES` (default: `10`)
 - `OCR_MAX_FILE_SIZE_MB` (default: `15`)
+- `OCR_MAX_CONCURRENT_REQUESTS` (default: `4`)
 - `OCR_ENABLE_DESKEW` (default: `true`)
 - `OCR_ENABLE_DENOISE` (default: `true`)
 - `OCR_ENABLE_REGION_DETECT` (default: `true`)
+- `OCR_API_KEY` (optional; if set, require `Authorization: Bearer ...` or `X-API-Key`)
+- `OCR_LOG_LEVEL` (default: `INFO`)
+
+Notes:
+
+- `lang` is mapped per engine (`eng` -> Paddle `en`, Tesseract `eng`; `spa` -> Paddle `latin`, Tesseract `spa`).
 
 ## Local Dev
 

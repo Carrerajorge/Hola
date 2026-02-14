@@ -24,6 +24,18 @@ class TesseractOcrEngine:
     def name(self) -> str:
         return "tesseract"
 
+    def is_available(self) -> bool:
+        if pytesseract is None:
+            return False
+        try:
+            pytesseract.get_tesseract_version()  # type: ignore[attr-defined]
+            return True
+        except getattr(pytesseract, "TesseractNotFoundError", ()):
+            return False
+        except Exception:
+            # If version check fails for an unexpected reason, assume unavailable.
+            return False
+
     def recognize(self, image_bgr: np.ndarray, *, lang: str, page_index: int) -> OcrPageResult:
         if pytesseract is None:
             raise EngineUnavailableError("pytesseract is not installed")
@@ -73,6 +85,8 @@ class TesseractOcrEngine:
         avg_conf = (sum(confs) / len(confs)) if confs else None
         return OcrPageResult(
             page_index=page_index,
+            engine=self.name,
+            engine_lang=lang,
             text=str(text_out).strip(),
             blocks=blocks,
             avg_confidence=avg_conf,

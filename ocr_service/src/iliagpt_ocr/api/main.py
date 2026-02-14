@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import time
 import uuid
+from enum import Enum
 
-from fastapi import FastAPI, File, Query, Request, UploadFile
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse, Response
+import anyio
+from fastapi import FastAPI, File, Query, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from iliagpt_ocr.adapters.loaders.document_loader import PyMuPdfDocumentLoader
@@ -26,6 +28,28 @@ from iliagpt_ocr.infra.metrics import OCR_REQUEST_DURATION_SECONDS, OCR_REQUESTS
 from iliagpt_ocr.infra.settings import get_settings
 from iliagpt_ocr.infra.version import __version__
 
+_READ_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_upload_limited(file: UploadFile, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise FileTooLargeError(f"File too large: {total} bytes (max {max_bytes})")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+class EngineParam(str, Enum):
+    auto = "auto"
+    paddle = "paddle"
+    tesseract = "tesseract"
+
 
 def _to_response(result) -> OcrResponse:
     pages: list[OcrPageOut] = []
@@ -36,7 +60,16 @@ def _to_response(result) -> OcrResponse:
             if b.bbox is not None:
                 bbox_out = BoundingBoxOut(x1=b.bbox.x1, y1=b.bbox.y1, x2=b.bbox.x2, y2=b.bbox.y2)
             blocks.append(TextBlockOut(text=b.text, confidence=b.confidence, bbox=bbox_out))
-        pages.append(OcrPageOut(page_index=p.page_index, text=p.text, avg_confidence=p.avg_confidence, blocks=blocks))
+        pages.append(
+            OcrPageOut(
+                page_index=p.page_index,
+                engine=p.engine,
+                engine_lang=p.engine_lang,
+                text=p.text,
+                avg_confidence=p.avg_confidence,
+                blocks=blocks,
+            )
+        )
 
     return OcrResponse(
         engine=result.engine,
@@ -50,7 +83,7 @@ def _to_response(result) -> OcrResponse:
 
 def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
     settings = get_settings()
-    configure_logging()
+    configure_logging(log_level=settings.log_level)
     log = get_logger(service="iliagpt-ocr", version=__version__)
 
     loader = PyMuPdfDocumentLoader(dpi=settings.dpi, max_pages=settings.max_pages)
@@ -68,6 +101,7 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
         fallback_engine=fallback,
         prefer_engine=settings.prefer_engine,
     )
+    limiter = anyio.CapacityLimiter(settings.max_concurrent_requests)
 
     app = FastAPI(title="ILIAGPT OCR Service", version=__version__)
 
@@ -76,10 +110,30 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         request.state.request_id = request_id
         bind_contextvars(request_id=request_id)
+        start = time.perf_counter()
         try:
-            with OCR_REQUEST_DURATION_SECONDS.labels(endpoint=request.url.path, method=request.method).time():
-                resp = await call_next(request)
+            resp = await call_next(request)
         finally:
+            duration = time.perf_counter() - start
+            OCR_REQUEST_DURATION_SECONDS.labels(endpoint=request.url.path, method=request.method).observe(duration)
+
+            engine = getattr(resp, "headers", {}).get("x-ocr-engine", "n/a") if "resp" in locals() else "n/a"
+            status_code = getattr(resp, "status_code", 500) if "resp" in locals() else 500
+            OCR_REQUESTS_TOTAL.labels(
+                endpoint=request.url.path,
+                method=request.method,
+                status_code=str(status_code),
+                engine=str(engine),
+            ).inc()
+
+            log.info(
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status=int(status_code),
+                engine=str(engine),
+                duration_ms=round(duration * 1000.0, 2),
+            )
             clear_contextvars()
 
         resp.headers["x-request-id"] = request_id
@@ -101,13 +155,6 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
         elif isinstance(exc, (OcrFailedError,)):
             status = 500
 
-        OCR_REQUESTS_TOTAL.labels(
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=str(status),
-            engine="n/a",
-        ).inc()
-
         log.warning("ocr_error", path=request.url.path, method=request.method, status=status, err=str(exc))
         return JSONResponse(
             status_code=status,
@@ -118,12 +165,6 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
     async def unhandled_error_handler(request: Request, exc: Exception):
         request_id = getattr(request.state, "request_id", None)
         status = 500
-        OCR_REQUESTS_TOTAL.labels(
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=str(status),
-            engine="n/a",
-        ).inc()
         log.error("unhandled_error", path=request.url.path, method=request.method, status=status, err=str(exc))
         return JSONResponse(
             status_code=status,
@@ -134,6 +175,24 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
     async def healthz():
         return {"ok": True, "service": "iliagpt-ocr", "version": __version__}
 
+    @app.get("/readyz")
+    async def readyz():
+        engines = {
+            primary.name: bool(getattr(primary, "is_available", lambda: False)()),
+            fallback.name: bool(getattr(fallback, "is_available", lambda: False)()),
+        }
+        ok = any(engines.values())
+        status = 200 if ok else 503
+        return JSONResponse(status_code=status, content={"ok": ok, "service": "iliagpt-ocr", "version": __version__, "engines": engines})
+
+    @app.get("/v1/engines")
+    async def engines():
+        engines = {
+            primary.name: {"available": bool(getattr(primary, "is_available", lambda: False)())},
+            fallback.name: {"available": bool(getattr(fallback, "is_available", lambda: False)())},
+        }
+        return {"engines": engines}
+
     @app.get("/metrics")
     async def metrics():
         body, content_type = render_prometheus()
@@ -142,33 +201,42 @@ def create_app(*, use_case_override: OcrUseCase | None = None) -> FastAPI:
     @app.post("/v1/ocr", response_model=OcrResponse)
     async def ocr(
         request: Request,
+        response: Response,
         file: UploadFile = File(...),
         lang: str | None = Query(default=None, description="Engine language (e.g., eng, spa, latin)"),
-        engine: str = Query(default="auto", description="auto|paddle|tesseract"),
+        engine: EngineParam = Query(default=EngineParam.auto, description="auto|paddle|tesseract"),
     ):
-        content = await file.read()
         max_bytes = int(settings.max_file_size_mb) * 1024 * 1024
-        if len(content) > max_bytes:
-            raise FileTooLargeError(f"File too large: {len(content)} bytes (max {max_bytes})")
+        if settings.api_key:
+            auth = request.headers.get("authorization", "")
+            token = ""
+            if auth.lower().startswith("bearer "):
+                token = auth.split(" ", 1)[1].strip()
+            token = token or request.headers.get("x-api-key", "")
+            if token != settings.api_key:
+                return JSONResponse(
+                    status_code=401,
+                    content=ErrorResponse(
+                        error="Unauthorized",
+                        detail="Missing or invalid API key",
+                        request_id=getattr(request.state, "request_id", None),
+                    ).model_dump(),
+                    headers={"x-request-id": getattr(request.state, "request_id", "")},
+                )
+
+        content = await _read_upload_limited(file, max_bytes=max_bytes)
 
         req = OcrRequest(
             content=content,
             filename=file.filename,
             content_type=file.content_type,
             lang=(lang or settings.default_lang),
-            engine=engine,
+            engine=str(engine.value),
             dpi=settings.dpi,
         )
 
-        result = await run_in_threadpool(use_case.run, req)
-
-        OCR_REQUESTS_TOTAL.labels(
-            endpoint=request.url.path,
-            method=request.method,
-            status_code="200",
-            engine=result.engine,
-        ).inc()
-
+        result = await anyio.to_thread.run_sync(use_case.run, req, limiter=limiter)
+        response.headers["x-ocr-engine"] = result.engine
         return _to_response(result)
 
     log.info("app_ready", host=settings.host, port=settings.port)

@@ -23,6 +23,8 @@ class _StubUseCase:
     def run(self, req: OcrRequest) -> OcrResult:
         page = OcrPageResult(
             page_index=0,
+            engine="paddle",
+            engine_lang=req.lang,
             text="hello",
             blocks=[TextBlock(text="hello", confidence=0.99, bbox=BoundingBox(1, 2, 3, 4))],
             avg_confidence=0.99,

@@ -16,6 +16,7 @@ def client() -> TestClient:
     os.environ.setdefault("OCR_MAX_PAGES", "5")
     os.environ.setdefault("OCR_DEFAULT_LANG", "eng")
     os.environ.setdefault("OCR_PREFER_ENGINE", "auto")
+    os.environ.setdefault("OCR_LOG_LEVEL", "ERROR")
     app = create_app()
     return TestClient(app)
 

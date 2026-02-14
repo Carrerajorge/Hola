@@ -18,6 +18,8 @@ class TextBlockOut(BaseModel):
 
 class OcrPageOut(BaseModel):
     page_index: int
+    engine: str
+    engine_lang: str
     text: str
     avg_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     blocks: list[TextBlockOut] = Field(default_factory=list)
@@ -36,4 +38,3 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
     request_id: str | None = None
-

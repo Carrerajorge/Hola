@@ -151,7 +151,6 @@ jobs:
             compose build --no-cache app
             compose build --no-cache sandbox-runner
             compose build --no-cache ocr
-            compose build --no-cache ocr
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
@@ -428,6 +427,7 @@ jobs:
             # Build sequentially for stability (avoids cross-target stage sharing bugs).
             compose build --no-cache app
             compose build --no-cache sandbox-runner
+            compose build --no-cache ocr
 
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
