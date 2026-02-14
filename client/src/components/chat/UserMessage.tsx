@@ -26,6 +26,7 @@ export interface UserMessageProps {
     onStartEdit: (msg: Message) => void;
     onOpenPreview: (attachment: NonNullable<Message["attachments"]>[0]) => void;
     onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
+    onRetrySend?: (msg: Message) => void;
 }
 
 export const UserMessage = memo(function UserMessage({
@@ -40,7 +41,8 @@ export const UserMessage = memo(function UserMessage({
     onCopyMessage,
     onStartEdit,
     onOpenPreview,
-    onReopenDocument
+    onReopenDocument,
+    onRetrySend
 }: UserMessageProps) {
     const { settings: platformSettings } = usePlatformSettings();
 
@@ -117,6 +119,33 @@ export const UserMessage = memo(function UserMessage({
                                 {formatMessageTime(message.timestamp, platformSettings.timezone_default)}
                             </span>
                         )}
+                        {message.deliveryStatus === "sending" && (
+                            <span className="text-[10px] text-muted-foreground/70">
+                                Enviando...
+                            </span>
+                        )}
+                        {(message.deliveryStatus === "sent" || message.deliveryStatus === "delivered") && (
+                            <span className="text-[10px] text-muted-foreground/60">
+                                Enviado
+                            </span>
+                        )}
+                        {message.deliveryStatus === "error" && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-destructive">
+                                    Error
+                                </span>
+                                {onRetrySend && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-[10px] text-destructive hover:text-destructive"
+                                        onClick={() => onRetrySend(message)}
+                                    >
+                                        Reintentar
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <Button
                                 variant="ghost"
@@ -153,7 +182,10 @@ export const UserMessage = memo(function UserMessage({
 }, (prevProps, nextProps) => {
     return (
         prevProps.message.id === nextProps.message.id &&
+        prevProps.message.clientTempId === nextProps.message.clientTempId &&
         prevProps.message.content === nextProps.message.content &&
+        prevProps.message.deliveryStatus === nextProps.message.deliveryStatus &&
+        prevProps.message.deliveryError === nextProps.message.deliveryError &&
         prevProps.variant === nextProps.variant &&
         prevProps.isEditing === nextProps.isEditing &&
         prevProps.editContent === nextProps.editContent &&

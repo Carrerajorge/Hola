@@ -64,6 +64,7 @@ export interface ChatMessageListProps {
     /** Pre-generated message ID for zero-flicker streaming→final transition.
      *  When provided, the streaming message uses this ID so it matches the finalized message key. */
     streamingMsgId?: string | null;
+    onUserRetrySend?: (message: Message) => void;
 }
 
 export function ChatMessageList({
@@ -108,7 +109,8 @@ export function ChatMessageList({
     onRunComplete,
     uiPhase = 'idle',
     aiProcessSteps = [],
-    streamingMsgId
+    streamingMsgId,
+    onUserRetrySend
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -274,6 +276,7 @@ export function ChatMessageList({
                     msgIndex={index}
                     totalMessages={mergedMessages.length}
                     variant={variant}
+                    onUserRetrySend={onUserRetrySend}
                     editingMessageId={editingMessageId}
                     editContent={editContent}
                     copiedMessageId={copiedMessageId}
@@ -320,7 +323,7 @@ export function ChatMessageList({
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
         onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
-        effectiveStreamingId, streamingContent
+        effectiveStreamingId, streamingContent, onUserRetrySend
     ]);
 
     return (

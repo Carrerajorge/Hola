@@ -284,6 +284,25 @@ function extractReservationDetails(text: string): ReservationDetails {
   const restaurantAfterKeyword = source.match(
     /\b(?:restaurante|restaurant)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
+  const afterKeywordCandidate = restaurantAfterKeyword?.[1]?.toLowerCase();
+  const afterKeywordStopwords = new Set([
+    "para",
+    "for",
+    "en",
+    "in",
+    "de",
+    "del",
+    "la",
+    "el",
+    "los",
+    "las",
+    "the",
+    "at",
+  ]);
+  const restaurantAfterKeywordValue =
+    afterKeywordCandidate && afterKeywordStopwords.has(afterKeywordCandidate)
+      ? undefined
+      : restaurantAfterKeyword?.[1];
   // Pattern 2: "en [Name] restaurante" — name comes BEFORE "restaurante" (e.g., "en Cala restaurante")
   // Skip articles (el, la, los, las, the) that may appear before "restaurante"
   const restaurantBeforeKeyword = source.match(
@@ -294,7 +313,7 @@ function extractReservationDetails(text: string): ReservationDetails {
     /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|the\s+)?([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
   // Priority: afterKeyword > beforeKeyword > byReservePattern
-  const restaurantRaw = restaurantAfterKeyword?.[1] || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
+  const restaurantRaw = restaurantAfterKeywordValue || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
   if (restaurantRaw) {
     // Clean up: remove leading articles and trailing punctuation
     details.restaurant = normalizeSpaces(

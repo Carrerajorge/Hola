@@ -4,6 +4,7 @@ import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { getFileUploader } from "@/lib/fileUploader";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
@@ -685,7 +686,12 @@ export function ChatInterface({
   useEffect(() => {
     if (optimisticMessages.length > 0 && messages.length > 0) {
       const propsMessageIds = new Set(messages.map(m => m.id));
-      setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !propsMessageIds.has(m.id)));
+      const propsTempIds = new Set(
+        messages.map((m: any) => m.clientTempId).filter((id: any): id is string => typeof id === "string" && id.length > 0)
+      );
+      setOptimisticMessages((prev: Message[]) =>
+        prev.filter((m: any) => !propsMessageIds.has(m.id) && !propsTempIds.has(m.id))
+      );
     }
   }, [messages, optimisticMessages.length]);
 
@@ -1587,6 +1593,14 @@ export function ChatInterface({
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
   }, []);
+
+  const handleUserRetrySend = useCallback((msg: Message) => {
+    onSendMessage({
+      ...msg,
+      deliveryStatus: "sending",
+      deliveryError: undefined,
+    });
+  }, [onSendMessage]);
 
   const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -2638,8 +2652,8 @@ export function ChatInterface({
   };
 
   // Returns a Promise that resolves when the file reaches a terminal state (ready/error).
-  // First polls fast (250ms) for 5s, then falls back to slow polling (2s).
-  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+  // Prefer persistent WebSocket status updates; fall back to polling when WS is unavailable.
+  const pollFileStatusFastPolling = (fileId: string, trackingId: string): Promise<void> => {
     return new Promise<void>((resolve) => {
       const maxTime = 5000;
       const pollInterval = 250;
@@ -2693,6 +2707,124 @@ export function ChatInterface({
       };
 
       checkStatus();
+    });
+  };
+
+  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+    const uploader = getFileUploader();
+    const wsTimeoutMs = 1500;
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let sawWsEvent = false;
+      let unsubscribe: (() => void) | null = null;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const stillTracked = () => uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+      };
+
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const fallback = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        pollFileStatusFastPolling(fileId, trackingId).then(resolve);
+      };
+
+      if (!stillTracked()) { done(); return; }
+
+      try {
+        unsubscribe = uploader.subscribeToProcessingStatus(fileId, async (data: any) => {
+          if (!sawWsEvent) {
+            sawWsEvent = true;
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+          }
+
+          if (!stillTracked()) { done(); return; }
+
+          if (data?.type === "auth_error") {
+            console.warn("[FileStatus] WS auth_error, falling back to polling");
+            fallback();
+            return;
+          }
+
+          if (data?.type !== "file_status" || data.fileId !== fileId) return;
+
+          if (data.status === "failed") {
+            setUploadedFiles((prev: UploadedFile[]) =>
+              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
+                ? { ...f, id: fileId, status: "error", error: data.error || (f as any).error }
+                : f))
+            );
+            done();
+            return;
+          }
+
+          if (data.status === "completed") {
+            // Fetch content once (with short retry for eventual consistency).
+            for (let attempt = 0; attempt < 5; attempt++) {
+              try {
+                const contentRes = await fetch(`/api/files/${fileId}/content`);
+                if (contentRes.ok) {
+                  const contentData = await contentRes.json();
+                  if (contentData.status === "ready") {
+                    setUploadedFiles((prev: UploadedFile[]) =>
+                      prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
+                        ? { ...f, id: fileId, status: "ready", content: contentData.content }
+                        : f))
+                    );
+                    done();
+                    return;
+                  }
+                } else if (contentRes.status !== 202) {
+                  break;
+                }
+              } catch {
+                // ignore and retry
+              }
+              await new Promise(r => setTimeout(r, 250));
+            }
+
+            // If content isn't ready yet, fall back to polling as a safety net.
+            fallback();
+            return;
+          }
+
+          // pending/processing: reflect state (best-effort)
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "processing" } : f))
+          );
+        });
+
+        timeoutId = setTimeout(() => {
+          if (!sawWsEvent) {
+            console.warn("[FileStatus] WS timeout, falling back to polling");
+            fallback();
+          }
+        }, wsTimeoutMs);
+      } catch (error) {
+        console.warn("[FileStatus] WS subscribe failed, falling back to polling:", error);
+        fallback();
+      }
     });
   };
 
@@ -4062,7 +4194,7 @@ export function ChatInterface({
     // Capture state immediately — use auto-generated prompt if user sent only files
     const userInput = input || autoPromptForFiles;
     const currentUploadedFiles = [...uploadedFilesRef.current];
-    const userMsgId = Date.now().toString();
+    const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     // Reset UI state immediately — save files for restoration on error
     const savedMainFiles = [...uploadedFilesRef.current];
@@ -4093,17 +4225,28 @@ export function ChatInterface({
     // Construct the User Message object
     const userMsg: Message = {
       id: userMsgId,
+      clientTempId: userMsgId,
       role: "user",
       content: userInput,
       timestamp: new Date(),
       requestId: generateRequestId(),
       clientRequestId: generateClientRequestId(),
       status: 'pending',
+      deliveryStatus: "sending",
+      deliveryError: undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     // Apply Optimistic Update IMMEDIATELY
+    const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
     setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+    if (optimisticStart !== null) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
+        });
+      });
+    }
 
     // Set initial AI state
     setAiState("thinking");
@@ -5806,6 +5949,7 @@ IMPORTANTE:
                 >
                   <ChatMessageList
                     messages={displayMessages}
+                    onUserRetrySend={handleUserRetrySend}
                     variant={activeDocEditor ? "compact" : "default"}
                     editingMessageId={editingMessageId}
                     editContent={editContent}
@@ -6109,6 +6253,7 @@ IMPORTANTE:
               >
                 <ChatMessageList
                   messages={displayMessages}
+                  onUserRetrySend={handleUserRetrySend}
                   variant="default"
                   editingMessageId={editingMessageId}
                   editContent={editContent}

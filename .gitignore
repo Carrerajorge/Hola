@@ -95,3 +95,6 @@ client/public/vendor/mathjax/
 # accidental files
 MAX_STDOUT_BYTES
 MAX_STDERR_BYTES
+
+# Local agent/tooling folders
+.claude/

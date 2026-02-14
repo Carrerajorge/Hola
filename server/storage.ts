@@ -134,6 +134,7 @@ export interface IStorage {
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  getChatMessage(chatId: string, messageId: string): Promise<ChatMessage | undefined>;
   getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string, metadata?: Record<string, any>): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
@@ -691,6 +692,21 @@ export class MemStorage implements IStorage {
     return result;
   }
 
+  async getChatMessage(chatId: string, messageId: string): Promise<ChatMessage | undefined> {
+    const [fromRead] = await dbRead
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.id, messageId)));
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.id, messageId)));
+    return fromPrimary;
+  }
+
   async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
     const { limit, offset, before, orderBy = 'asc' } = options || {};
     // Cache key includes pagination params
@@ -856,10 +872,16 @@ export class MemStorage implements IStorage {
   }
 
   async getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined> {
-    const [result] = await dbRead.select().from(chatRuns).where(
+    const [fromRead] = await dbRead.select().from(chatRuns).where(
       and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
     );
-    return result;
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db.select().from(chatRuns).where(
+      and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
+    );
+    return fromPrimary;
   }
 
   async claimPendingRun(chatId: string, clientRequestId?: string): Promise<ChatRun | undefined> {
@@ -2003,9 +2025,14 @@ export class MemStorage implements IStorage {
 
   // Message Idempotency operations
   async findMessageByRequestId(requestId: string): Promise<ChatMessage | null> {
-    const [message] = await dbRead.select().from(chatMessages)
+    const [fromRead] = await dbRead.select().from(chatMessages)
       .where(eq(chatMessages.requestId, requestId));
-    return message || null;
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db.select().from(chatMessages)
+      .where(eq(chatMessages.requestId, requestId));
+    return fromPrimary || null;
   }
 
   async claimPendingMessage(messageId: string): Promise<ChatMessage | null> {
