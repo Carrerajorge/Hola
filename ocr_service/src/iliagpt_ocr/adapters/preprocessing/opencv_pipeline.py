@@ -26,9 +26,14 @@ def _estimate_skew_angle_deg(binary_inv: np.ndarray) -> float:
         return 0.0
     rect = cv2.minAreaRect(coords)
     angle = float(rect[-1])
-    # OpenCV returns angles in [-90, 0)
+
+    # OpenCV's angle convention for minAreaRect varies in practice across versions/builds:
+    # some report angles in [-90, 0), others in [0, 90). Normalize to [-45, 45].
     if angle < -45.0:
-        angle = 90.0 + angle
+        angle += 90.0
+    elif angle > 45.0:
+        angle -= 90.0
+
     return angle
 
 
@@ -130,4 +135,3 @@ class OpenCvPreprocessor:
             image_bgr = _crop_to_text_region(binary, image_bgr)
 
         return image_bgr
-
