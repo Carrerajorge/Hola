@@ -142,7 +142,6 @@ jobs:
             echo "▸ Building Docker images (no cache)..."
             # Build sequentially for stability (avoids cross-target stage sharing bugs).
             compose build --no-cache app
-            compose build --no-cache worker
             compose build --no-cache sandbox-runner
 
             # ── Stop old containers (keep DB + Redis running) ──
@@ -357,7 +356,6 @@ jobs:
             echo "▸ Building Docker images (no cache)..."
             # Build sequentially for stability (avoids cross-target stage sharing bugs).
             compose build --no-cache app
-            compose build --no-cache worker
             compose build --no-cache sandbox-runner
 
             echo "▸ Rolling update: stopping app containers..."

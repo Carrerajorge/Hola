@@ -3,6 +3,8 @@ services:
 
   app:
 
+    image: iliagpt-app:${APP_VERSION:-dev}
+
     build:
 
       context: .
@@ -70,13 +72,7 @@ services:
 
   worker:
 
-    build:
-
-      context: .
-
-      args:
-
-        APP_VERSION: ${APP_VERSION:-dev}
+    image: iliagpt-app:${APP_VERSION:-dev}
 
     command: ["node", "dist/worker.cjs"]
 
@@ -145,6 +141,8 @@ services:
 
 
   sandbox-runner:
+
+    image: iliagpt-sandbox-runner:${APP_VERSION:-dev}
 
     build:
 
