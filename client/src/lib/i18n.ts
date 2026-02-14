@@ -2,6 +2,7 @@ type TranslationKeys = {
   welcome: string;
   placeholder: string;
   send: string;
+  sendMessage: string;
   newChat: string;
   upgrade: string;
   upgradeFull: string;
@@ -27,6 +28,56 @@ type TranslationKeys = {
   loading: string;
   error: string;
   retry: string;
+  // Additional common translations
+  save: string;
+  edit: string;
+  delete: string;
+  close: string;
+  open: string;
+  back: string;
+  next: string;
+  previous: string;
+  submit: string;
+  download: string;
+  upload: string;
+  create: string;
+  update: string;
+  remove: string;
+  add: string;
+  view: string;
+  hide: string;
+  show: string;
+  enable: string;
+  disable: string;
+  refresh: string;
+  reset: string;
+  clear: string;
+  // Form labels
+  email: string;
+  password: string;
+  name: string;
+  description: string;
+  title: string;
+  // Status messages
+  success: string;
+  failed: string;
+  pending: string;
+  completed: string;
+  processing: string;
+  // Error messages
+  errorGeneric: string;
+  errorNetwork: string;
+  errorAuth: string;
+  errorNotFound: string;
+  errorPermission: string;
+  errorValidation: string;
+  errorTimeout: string;
+  // Accessibility
+  closeDialog: string;
+  openMenu: string;
+  expandSection: string;
+  collapseSection: string;
+  moreOptions: string;
   plans: {
     free: string;
     go: string;
@@ -73,6 +124,57 @@ const translations: Record<string, TranslationKeys> = {
     loading: "Cargando...",
     error: "Error",
     retry: "Reintentar",
+    sendMessage: "Enviar mensaje",
+    // Additional common translations
+    save: "Guardar",
+    edit: "Editar",
+    delete: "Eliminar",
+    close: "Cerrar",
+    open: "Abrir",
+    back: "Volver",
+    next: "Siguiente",
+    previous: "Anterior",
+    submit: "Enviar",
+    download: "Descargar",
+    upload: "Subir",
+    create: "Crear",
+    update: "Actualizar",
+    remove: "Quitar",
+    add: "Agregar",
+    view: "Ver",
+    hide: "Ocultar",
+    show: "Mostrar",
+    enable: "Activar",
+    disable: "Desactivar",
+    refresh: "Actualizar",
+    reset: "Restablecer",
+    clear: "Limpiar",
+    // Form labels
+    email: "Correo electrónico",
+    password: "Contraseña",
+    name: "Nombre",
+    description: "Descripción",
+    title: "Título",
+    // Status messages
+    success: "Éxito",
+    failed: "Fallido",
+    pending: "Pendiente",
+    completed: "Completado",
+    processing: "Procesando",
+    // Error messages
+    errorGeneric: "Ocurrió un error. Por favor, intenta nuevamente.",
+    errorNetwork: "Error de conexión. Verifica tu internet.",
+    errorAuth: "Tu sesión ha expirado. Inicia sesión nuevamente.",
+    errorNotFound: "No se encontró el recurso solicitado.",
+    errorPermission: "No tienes permisos para realizar esta acción.",
+    errorValidation: "Por favor, revisa los datos ingresados.",
+    errorTimeout: "La operación tardó demasiado. Intenta nuevamente.",
+    // Accessibility
+    closeDialog: "Cerrar diálogo",
+    openMenu: "Abrir menú",
+    expandSection: "Expandir sección",
+    collapseSection: "Contraer sección",
+    moreOptions: "Más opciones",
     plans: {
       free: "Gratis",
       go: "Go",
@@ -117,6 +219,57 @@ const translations: Record<string, TranslationKeys> = {
     loading: "Loading...",
     error: "Error",
     retry: "Retry",
+    sendMessage: "Send message",
+    // Additional common translations
+    save: "Save",
+    edit: "Edit",
+    delete: "Delete",
+    close: "Close",
+    open: "Open",
+    back: "Back",
+    next: "Next",
+    previous: "Previous",
+    submit: "Submit",
+    download: "Download",
+    upload: "Upload",
+    create: "Create",
+    update: "Update",
+    remove: "Remove",
+    add: "Add",
+    view: "View",
+    hide: "Hide",
+    show: "Show",
+    enable: "Enable",
+    disable: "Disable",
+    refresh: "Refresh",
+    reset: "Reset",
+    clear: "Clear",
+    // Form labels
+    email: "Email",
+    password: "Password",
+    name: "Name",
+    description: "Description",
+    title: "Title",
+    // Status messages
+    success: "Success",
+    failed: "Failed",
+    pending: "Pending",
+    completed: "Completed",
+    processing: "Processing",
+    // Error messages
+    errorGeneric: "An error occurred. Please try again.",
+    errorNetwork: "Connection error. Check your internet.",
+    errorAuth: "Your session has expired. Please log in again.",
+    errorNotFound: "The requested resource was not found.",
+    errorPermission: "You don't have permission to perform this action.",
+    errorValidation: "Please check the entered data.",
+    errorTimeout: "The operation took too long. Please try again.",
+    // Accessibility
+    closeDialog: "Close dialog",
+    openMenu: "Open menu",
+    expandSection: "Expand section",
+    collapseSection: "Collapse section",
+    moreOptions: "More options",
     plans: {
       free: "Free",
       go: "Go",
