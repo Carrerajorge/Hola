@@ -150,6 +150,8 @@ jobs:
             # Build sequentially for stability (avoids cross-target stage sharing bugs).
             compose build --no-cache app
             compose build --no-cache sandbox-runner
+            compose build --no-cache ocr
+            compose build --no-cache ocr
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
@@ -187,31 +189,31 @@ jobs:
             # Compose can occasionally get into a bad state where it tries to stop/remove containers
             # that have already been removed (daemon: "No such container"). Pre-clean service containers
             # deterministically, then retry once if compose still fails.
-            for svc in app worker sandbox-runner; do
+            for svc in ocr app worker sandbox-runner; do
               docker ps -aq \
                 --filter "label=com.docker.compose.project=${PROJECT}" \
                 --filter "label=com.docker.compose.service=${svc}" \
                 | xargs -r docker rm -f || true
             done
             docker ps -a --format '{{.ID}} {{.Names}}' \
-              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
               | xargs -r docker rm -f || true
 
-            if ! compose up -d --force-recreate --remove-orphans app worker sandbox-runner; then
+            if ! compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner; then
               echo "⚠️ docker compose up failed; running cleanup + retry..."
               compose down --remove-orphans || true
               compose up -d postgres redis
               sleep 3
-              for svc in app worker sandbox-runner; do
+              for svc in ocr app worker sandbox-runner; do
                 docker ps -aq \
                   --filter "label=com.docker.compose.project=${PROJECT}" \
                   --filter "label=com.docker.compose.service=${svc}" \
                   | xargs -r docker rm -f || true
               done
               docker ps -a --format '{{.ID}} {{.Names}}' \
-                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
                 | xargs -r docker rm -f || true
-              compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+              compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner
             fi
 
             # ── Wait for health check ──
@@ -229,6 +231,30 @@ jobs:
               echo "  Attempt $i/30 - waiting..."
               sleep 5
             done
+
+            echo "▸ Waiting for OCR service healthcheck..."
+            for i in $(seq 1 30); do
+              if compose exec -T ocr curl -sf http://127.0.0.1:8000/healthz > /dev/null 2>&1; then
+                echo "✓ OCR service is healthy!"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "✗ OCR health check failed after 30 attempts"
+                compose logs --tail=100 ocr
+                exit 1
+              fi
+              echo "  Attempt $i/30 - waiting..."
+              sleep 3
+            done
+
+            echo "▸ OCR smoke test (upload a generated image)..."
+            compose exec -T ocr python -c "import os; from PIL import Image, ImageDraw, ImageFont; fp='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'; font=ImageFont.truetype(fp, 64) if os.path.exists(fp) else ImageFont.load_default(); img=Image.new('RGB',(1200,300),'white'); d=ImageDraw.Draw(img); d.text((30,110),'ILIAGPT OCR smoke test 123', fill='black', font=font); img.save('/tmp/ocr_smoke.png'); print('ok')"
+            OCR_JSON="$(compose exec -T ocr curl -sS -w '\\nTIME_TOTAL=%{time_total}\\n' -F file=@/tmp/ocr_smoke.png 'http://127.0.0.1:8000/v1/ocr?engine=auto&lang=eng')"
+            echo "${OCR_JSON}" | head -n 20
+            if ! echo "${OCR_JSON}" | grep -qi "ILIAGPT"; then
+              echo "✗ OCR smoke test failed (expected output to contain ILIAGPT)"
+              exit 1
+            fi
 
             # ── Cleanup old images ──
             echo "▸ Cleaning up old images..."
@@ -429,31 +455,31 @@ jobs:
 
             echo "▸ Starting updated containers..."
             echo "▸ Removing stale service containers to avoid name conflicts..."
-            for svc in app worker sandbox-runner; do
+            for svc in ocr app worker sandbox-runner; do
               docker ps -aq \
                 --filter "label=com.docker.compose.project=${PROJECT}" \
                 --filter "label=com.docker.compose.service=${svc}" \
                 | xargs -r docker rm -f || true
             done
             docker ps -a --format '{{.ID}} {{.Names}}' \
-              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
               | xargs -r docker rm -f || true
 
-            if ! compose up -d --force-recreate --remove-orphans app worker sandbox-runner; then
+            if ! compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner; then
               echo "⚠️ docker compose up failed; running cleanup + retry..."
               compose down --remove-orphans || true
               compose up -d postgres redis
               sleep 3
-              for svc in app worker sandbox-runner; do
+              for svc in ocr app worker sandbox-runner; do
                 docker ps -aq \
                   --filter "label=com.docker.compose.project=${PROJECT}" \
                   --filter "label=com.docker.compose.service=${svc}" \
                   | xargs -r docker rm -f || true
               done
               docker ps -a --format '{{.ID}} {{.Names}}' \
-                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
                 | xargs -r docker rm -f || true
-              compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+              compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner
             fi
 
             echo "▸ Waiting for health check..."
@@ -470,6 +496,30 @@ jobs:
               echo "  Attempt $i/30 - waiting..."
               sleep 5
             done
+
+            echo "▸ Waiting for OCR service healthcheck..."
+            for i in $(seq 1 30); do
+              if compose exec -T ocr curl -sf http://127.0.0.1:8000/healthz > /dev/null 2>&1; then
+                echo "✓ OCR service is healthy!"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "✗ OCR health check failed after 30 attempts"
+                compose logs --tail=100 ocr
+                exit 1
+              fi
+              echo "  Attempt $i/30 - waiting..."
+              sleep 3
+            done
+
+            echo "▸ OCR smoke test (upload a generated image)..."
+            compose exec -T ocr python -c "import os; from PIL import Image, ImageDraw, ImageFont; fp='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'; font=ImageFont.truetype(fp, 64) if os.path.exists(fp) else ImageFont.load_default(); img=Image.new('RGB',(1200,300),'white'); d=ImageDraw.Draw(img); d.text((30,110),'ILIAGPT OCR smoke test 123', fill='black', font=font); img.save('/tmp/ocr_smoke.png'); print('ok')"
+            OCR_JSON="$(compose exec -T ocr curl -sS -w '\\nTIME_TOTAL=%{time_total}\\n' -F file=@/tmp/ocr_smoke.png 'http://127.0.0.1:8000/v1/ocr?engine=auto&lang=eng')"
+            echo "${OCR_JSON}" | head -n 20
+            if ! echo "${OCR_JSON}" | grep -qi "ILIAGPT"; then
+              echo "✗ OCR smoke test failed (expected output to contain ILIAGPT)"
+              exit 1
+            fi
 
             echo "▸ Cleaning up old images..."
             docker image prune -f
