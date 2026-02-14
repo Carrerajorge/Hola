@@ -94,9 +94,11 @@ export class AnalysisService {
                     .join("\n");
 
                 // Create a simple analysis record for tracking
+                // Note: uploadId set to null because chat_message_analysis.upload_id
+                // has a FK to spreadsheet_uploads, not to files table.
                 const chatAnalysis = await storage.createChatMessageAnalysis({
                     messageId: messageId || null,
-                    uploadId,
+                    uploadId: null,
                     status: "completed",
                     scope,
                     sheetsToAnalyze: [baseName],
