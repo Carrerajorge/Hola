@@ -168,6 +168,10 @@ export function getSession() {
   const isTest = process.env.NODE_ENV === "test";
   const isReplitDeployment = !!process.env.REPL_SLUG;
 
+  // SameSite=None is required for some OAuth callback flows (e.g. form_post) where the browser
+  // treats the redirect as cross-site. Only use it when the cookie is Secure.
+  const useNoneSameSite = isReplitDeployment || isProduction;
+
   // Tests should be hermetic and must not require DB migrations just to serve a request.
   // Use the default MemoryStore in test env.
   const sessionStore = isTest
@@ -184,8 +188,8 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments.
-      sameSite: isReplitDeployment ? "none" as const : "lax" as const,
+      // SameSite=None required for OAuth callback to work (cross-origin redirect)
+      sameSite: useNoneSameSite ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
       // Don't set domain - let browser use host-only cookie for iliagpt.com

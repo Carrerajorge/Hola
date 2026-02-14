@@ -7,80 +7,89 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { auditLog, AuditActions } from "../../services/auditLogger";
 
-// SECURITY: Admin email moved to environment variable
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+// SECURITY: Admin emails come from env; DB role is the preferred source of truth.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase(); // legacy
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+const ADMIN_EMAIL_ALLOWLIST = Array.from(new Set([ADMIN_EMAIL, ...ADMIN_EMAILS].filter(Boolean)));
+
+function maskEmail(email?: string | null): string | undefined {
+  if (!email) return undefined;
+  if (email.length <= 3) return "***";
+  return `${email.slice(0, 3)}***`;
+}
+
+function maskId(id?: string | null): string | undefined {
+  if (!id) return undefined;
+  if (id.length <= 8) return `${id.slice(0, 3)}***`;
+  return `${id.slice(0, 8)}***`;
+}
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
         const userReq = req as AuthenticatedRequest;
-        const session = req.session as any;
+        const session = (req as any).session as any | undefined;
 
-        // Get user info from multiple possible sources
-        const userEmail = userReq.user?.claims?.email ||
-            userReq.user?.email ||
+        const rawEmail =
+            userReq.user?.claims?.email ||
+            (userReq.user as any)?.email ||
             session?.passport?.user?.claims?.email ||
             session?.passport?.user?.email ||
-            (req as any).user?.profile?.emails?.[0]?.value;
+            (req as any).user?.profile?.emails?.[0]?.value ||
+            (req as any).user?.email;
+        const userEmail = rawEmail ? String(rawEmail).toLowerCase().trim() : null;
 
-        const userId = userReq.user?.claims?.sub ||
-            userReq.user?.id ||
+        const passportUser = session?.passport?.user;
+        const rawUserId =
+            userReq.user?.claims?.sub ||
+            (userReq.user as any)?.id ||
             session?.authUserId ||
-            session?.passport?.user?.claims?.sub ||
-            session?.passport?.user?.id;
+            (typeof passportUser === "string" ? passportUser : undefined) ||
+            passportUser?.claims?.sub ||
+            passportUser?.id ||
+            passportUser?.sub;
+        const userId = rawUserId ? String(rawUserId) : null;
 
-        console.log("[Admin] Auth check:", {
-            userEmail,
-            userId,
-            hasUser: !!userReq.user,
-            hasSession: !!session,
-            sessionKeys: session ? Object.keys(session) : []
-        });
-
-        // If no user info at all, reject
-        if (!userEmail && !userId) {
-            console.log("[Admin] No user info found in request");
+        if (!userId && !userEmail) {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        // SECURITY: Check both email (from env) and database role
         let isAdmin = false;
 
-        // Check against env-configured admin email (if set)
-        if (ADMIN_EMAIL && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-            isAdmin = true;
-            console.log("[Admin] Matched ADMIN_EMAIL env var");
+        // Preferred: DB role check
+        if (userId) {
+            const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
+            isAdmin = user?.role === "admin";
         }
 
-        // Verify against database role - check by userId OR email
-        if (!isAdmin) {
-            let dbUser = null;
+        // Fallback: DB role check by email (useful when the session isn't bound to a DB id yet)
+        if (!isAdmin && userEmail) {
+            const [user] = await db
+                .select({ role: users.role })
+                .from(users)
+                .where(sql`LOWER(${users.email}) = ${userEmail}`)
+                .limit(1);
+            isAdmin = user?.role === "admin";
+        }
 
-            if (userId) {
-                const result = await db.select({ role: users.role, email: users.email })
-                    .from(users).where(eq(users.id, userId));
-                dbUser = result[0];
-            }
-
-            // Fallback: check by email if userId didn't find admin
-            if (!dbUser?.role && userEmail) {
-                const normalizedEmail = userEmail.toLowerCase().trim();
-                const result = await db
-                    .select({ role: users.role, email: users.email, id: users.id })
-                    .from(users)
-                    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
-                    .limit(1);
-                dbUser = result[0];
-            }
-
-            isAdmin = dbUser?.role === "admin";
-            console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
+        // Last resort: env allowlist (initial bootstrap)
+        if (!isAdmin && userEmail && ADMIN_EMAIL_ALLOWLIST.length > 0 && ADMIN_EMAIL_ALLOWLIST.includes(userEmail)) {
+            isAdmin = true;
+            console.warn(`[Admin] Using email allowlist fallback for: ${maskEmail(userEmail)}`);
         }
 
         if (!isAdmin) {
             await auditLog(req, {
                 action: AuditActions.ADMIN_DENIED,
                 resource: "admin_panel",
-                details: { email: userEmail, userId, path: req.path },
+                details: {
+                    email: maskEmail(userEmail),
+                    userId: maskId(userId),
+                    path: req.path,
+                    ip: req.ip,
+                },
                 category: "admin",
                 severity: "warning",
             });
@@ -98,7 +107,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 
         next();
     } catch (error) {
-        console.error("[Admin] Authorization check failed:", error);
+        console.error("[Admin] Authorization check failed:", error instanceof Error ? error.message : "Unknown error");
         return res.status(500).json({ error: "Authorization check failed" });
     }
 }

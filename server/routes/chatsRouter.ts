@@ -1,6 +1,7 @@
 import { Router } from "express";
 import express from "express";
 import { storage } from "../storage";
+import { performance } from "perf_hooks";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { sanitizeMessageContent } from "../lib/markdownSanitizer";
@@ -11,6 +12,23 @@ import { isTitlePlaceholder } from "../lib/chatTitleGenerator";
 // Actual file data is uploaded separately via presigned URLs, so this only
 // covers JSON metadata (storagePath, fileId, etc.) — typically well under 5MB.
 const messageBodyLimit = express.json({ limit: '5mb' });
+
+// SECURITY FIX #44: Message content length limits
+const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
+const MAX_TITLE_LENGTH = 200;
+
+// SECURITY FIX #45: Validate and sanitize message content
+function validateMessageContent(content: any): { valid: boolean; error?: string; sanitized?: string } {
+  if (typeof content !== 'string') {
+    return { valid: false, error: 'Content must be a string' };
+  }
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    return { valid: false, error: `Content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` };
+  }
+  // Remove null bytes which can cause issues
+  const sanitized = content.replace(/\0/g, '');
+  return { valid: true, sanitized };
+}
 
 export function createChatsRouter() {
   const router = Router();
@@ -462,24 +480,57 @@ export function createChatsRouter() {
   });
 
   router.post("/chats/:id/messages", messageBodyLimit, async (req, res) => {
+    const t0 = performance.now();
+    const timing: Record<string, number> = {};
+    const addTiming = (name: string, start: number) => {
+      timing[name] = performance.now() - start;
+    };
+    const setServerTiming = () => {
+      const total = performance.now() - t0;
+      const parts = Object.entries({ ...timing, total }).map(
+        ([name, dur]) => `${name};dur=${dur.toFixed(1)}`
+      );
+      if (parts.length > 0) {
+        res.setHeader("Server-Timing", parts.join(", "));
+      }
+    };
+
     try {
       const userId = getSecureUserId(req);
 
+      const tChat = performance.now();
       const chat = await storage.getChat(req.params.id);
+      addTiming("chat", tChat);
       if (!chat) {
+        setServerTiming();
         return res.status(404).json({ error: "Chat not found" });
       }
       if (!chat.userId || chat.userId !== userId) {
+        setServerTiming();
         return res.status(403).json({ error: "Access denied" });
       }
 
       const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage, webSources, confidence, uncertaintyReason, retrievalSteps } = req.body;
       if (!role || !content) {
+        setServerTiming();
         return res.status(400).json({ error: "role and content are required" });
       }
 
-      // SANITIZATION: Prevent XSS
-      const sanitizedContent = sanitizeMessageContent(content);
+      // Validate and sanitize message content (defense in depth).
+      const contentValidation = validateMessageContent(content);
+      if (!contentValidation.valid) {
+        setServerTiming();
+        return res.status(400).json({ error: contentValidation.error });
+      }
+
+      // Validate role is allowed value
+      if (!['user', 'assistant', 'system'].includes(role)) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid role. Must be 'user', 'assistant', or 'system'" });
+      }
+
+      // Prevent XSS in persisted message content
+      const sanitizedContent = sanitizeMessageContent(contentValidation.sanitized || content);
 
       // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
       // Strip all large data fields (imageUrl, content, thumbnail, dataUrl) that should not be
@@ -518,12 +569,19 @@ export function createChatsRouter() {
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
         // Check if a run with this clientRequestId already exists
+        const tRunLookup = performance.now();
         const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
+        addTiming("run_lookup", tRunLookup);
         if (existingRun) {
           console.log(`[Dedup] Run with clientRequestId ${clientRequestId} already exists, returning existing`);
           // Fetch the user message that was created with this run
-          const messages = await storage.getChatMessages(req.params.id);
-          const existingMessage = messages.find(m => m.id === existingRun.userMessageId);
+          const tMsgLookup = performance.now();
+          const existingMessage = await storage.getChatMessage(req.params.id, existingRun.userMessageId);
+          addTiming("msg_lookup", tMsgLookup);
+          if (!existingMessage) {
+            console.warn(`[Dedup] Missing userMessageId ${existingRun.userMessageId} for existing run ${existingRun.id}`);
+          }
+          setServerTiming();
           return res.json({
             message: existingMessage,
             run: existingRun,
@@ -532,6 +590,7 @@ export function createChatsRouter() {
         }
 
         // Create user message and run atomically
+        const tCreate = performance.now();
         const { message, run } = await storage.createUserMessageAndRun(
           req.params.id,
           {
@@ -550,6 +609,7 @@ export function createChatsRouter() {
           },
           clientRequestId
         );
+        addTiming("create_message_run", tCreate);
 
         // Persist conversationDocuments for each attachment so files survive reload.
         // Best-effort & non-blocking — runs in parallel without delaying the response.
@@ -579,21 +639,28 @@ export function createChatsRouter() {
         // The AI-generated title will replace this during streaming via chatTitleGenerator.
         if (isTitlePlaceholder(chat.title)) {
           const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
-          await storage.updateChat(req.params.id, { title: newTitle });
+          void storage.updateChat(req.params.id, { title: newTitle }).catch((err) => {
+            console.warn("[Chats] Failed to update placeholder title:", err);
+          });
         }
 
+        setServerTiming();
         return res.json({ message, run, deduplicated: false });
       }
 
       // Legacy flow for assistant messages or messages without clientRequestId
       if (requestId) {
+        const tDedupReq = performance.now();
         const existingMessage = await storage.findMessageByRequestId(requestId);
+        addTiming("dedup_request", tDedupReq);
         if (existingMessage) {
           console.log(`[Dedup] Message with requestId ${requestId} already exists, returning existing`);
+          setServerTiming();
           return res.json(existingMessage);
         }
       }
 
+      const tCreateLegacy = performance.now();
       const message = await storage.createChatMessage({
         chatId: req.params.id,
         role,
@@ -614,14 +681,18 @@ export function createChatsRouter() {
           retrievalSteps: retrievalSteps || undefined,
         } : null
       });
+      addTiming("create_message", tCreateLegacy);
 
       // Set a quick placeholder title from the user's message (legacy flow).
       // The AI-generated title will replace this during streaming via chatTitleGenerator.
       if (isTitlePlaceholder(chat.title) && role === "user") {
         const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
-        await storage.updateChat(req.params.id, { title: newTitle });
+        void storage.updateChat(req.params.id, { title: newTitle }).catch((err) => {
+          console.warn("[Chats] Failed to update placeholder title:", err);
+        });
       }
 
+      setServerTiming();
       res.json(message);
     } catch (error: any) {
       // Handle unique constraint violation gracefully (duplicate clientRequestId or requestId)
@@ -629,20 +700,28 @@ export function createChatsRouter() {
         console.log(`[Dedup] Duplicate constraint hit, fetching existing`);
         const { clientRequestId, requestId } = req.body;
         if (clientRequestId) {
+          const tRunLookup2 = performance.now();
           const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
+          addTiming("run_lookup", tRunLookup2);
           if (existingRun) {
-            const messages = await storage.getChatMessages(req.params.id);
-            const existingMessage = messages.find(m => m.id === existingRun.userMessageId);
+            const tMsgLookup2 = performance.now();
+            const existingMessage = await storage.getChatMessage(req.params.id, existingRun.userMessageId);
+            addTiming("msg_lookup", tMsgLookup2);
+            setServerTiming();
             return res.json({ message: existingMessage, run: existingRun, deduplicated: true });
           }
         }
         if (requestId) {
+          const tDedupReq2 = performance.now();
           const existingMessage = await storage.findMessageByRequestId(requestId);
+          addTiming("dedup_request", tDedupReq2);
           if (existingMessage) {
+            setServerTiming();
             return res.json(existingMessage);
           }
         }
       }
+      setServerTiming();
       res.status(500).json({ error: error.message });
     }
   });

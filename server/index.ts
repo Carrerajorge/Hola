@@ -104,10 +104,12 @@ app.use(
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
+    // SECURITY FIX #15: Strict JSON parsing to reject malformed JSON
+    strict: true,
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb', parameterLimit: 1000 }));
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);

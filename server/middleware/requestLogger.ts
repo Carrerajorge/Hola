@@ -5,6 +5,24 @@ import { createLogger } from "../utils/logger";
 
 const logger = createLogger("http");
 
+// SECURITY FIX #19: Sensitive query parameters to redact from logs
+const SENSITIVE_QUERY_PARAMS = ['token', 'key', 'secret', 'password', 'apiKey', 'api_key', 'access_token', 'refresh_token', 'code', 'state'];
+
+// SECURITY FIX #20: Sanitize query params for logging
+function sanitizeQueryForLogging(query: Record<string, any>): Record<string, any> | undefined {
+  if (!query || Object.keys(query).length === 0) return undefined;
+
+  const sanitized: Record<string, any> = {};
+  for (const [key, value] of Object.entries(query)) {
+    if (SENSITIVE_QUERY_PARAMS.some(param => key.toLowerCase().includes(param.toLowerCase()))) {
+      sanitized[key] = '[REDACTED]';
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 export function getTraceId(): string | undefined {
   return getTraceIdFromContext();
 }
@@ -32,7 +50,8 @@ export function requestLoggerMiddleware(
     requestLogger.info("Request started", {
       method: req.method,
       path: req.path,
-      query: Object.keys(req.query).length > 0 ? req.query : undefined,
+      // SECURITY FIX #21: Use sanitized query params
+      query: sanitizeQueryForLogging(req.query as Record<string, any>),
       userAgent: req.get("user-agent"),
       ip: req.ip || req.socket.remoteAddress,
     });
