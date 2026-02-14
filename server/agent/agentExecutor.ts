@@ -979,69 +979,74 @@ export async function executeAgentLoop(
 
   const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
 
-  const requestBrief = await requestUnderstandingAgent.buildBrief({
-    text: recentUserText || requestSpec.rawMessage || "",
-    conversationHistory: messages
-      .slice(-6)
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content || "") })),
-    availableTools: tools.map((tool) => tool.name),
-    userId,
-    chatId,
-    requestId: runId,
-    userPlan: "free",
-  });
-
-  writeSse(res, "brief", {
-    runId,
-    brief: requestBrief,
-  });
-
-  if (requestBrief.blocker?.is_blocked) {
-    const question =
-      normalizeSpaces(requestBrief.blocker.question || "") ||
-      "Necesito una aclaración para ejecutar la solicitud con seguridad.";
-    fullResponse = question;
-
-    writeSse(res, "clarification", {
-      runId,
-      question,
-      blocker: "intent_requirements",
+  // Request understanding brief is best-effort: if the planner LLM is unavailable
+  // or the call fails for any reason, we continue without the brief rather than
+  // aborting the entire agent loop (which would surface as a generic error).
+  let requestBrief: Awaited<ReturnType<typeof requestUnderstandingAgent.buildBrief>> | null = null;
+  try {
+    requestBrief = await requestUnderstandingAgent.buildBrief({
+      text: recentUserText || requestSpec.rawMessage || "",
+      conversationHistory: messages
+        .slice(-6)
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content || "") })),
+      availableTools: tools.map((tool) => tool.name),
+      userId,
+      chatId,
+      requestId: runId,
+      userPlan: "free",
     });
 
-    const chunks = question.match(/.{1,100}/g) || [question];
-    for (let i = 0; i < chunks.length; i++) {
-      writeSse(res, "chunk", {
-        content: chunks[i],
-        sequence: i + 1,
+    writeSse(res, "brief", {
+      runId,
+      brief: requestBrief,
+    });
+
+    if (requestBrief.blocker?.is_blocked) {
+      const question =
+        normalizeSpaces(requestBrief.blocker.question || "") ||
+        "Necesito una aclaración para ejecutar la solicitud con seguridad.";
+      fullResponse = question;
+
+      writeSse(res, "clarification", {
         runId,
+        question,
+        blocker: "intent_requirements",
       });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const chunks = question.match(/.{1,100}/g) || [question];
+      for (let i = 0; i < chunks.length; i++) {
+        writeSse(res, "chunk", {
+          content: chunks[i],
+          sequence: i + 1,
+          runId,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      await emitTraceEvent(runId, "progress_update", {
+        progress: {
+          current: 0,
+          total: maxIterations,
+          message: "Waiting for required clarification before tool execution",
+        },
+      });
+      await emitTraceEvent(runId, "agent_completed", {
+        agent: {
+          name: requestSpec.primaryAgent,
+          role: "primary",
+          status: "completed",
+        },
+        iterations: 0,
+        artifactsGenerated: 0,
+      });
+
+      return fullResponse;
     }
 
-    await emitTraceEvent(runId, "progress_update", {
-      progress: {
-        current: 0,
-        total: maxIterations,
-        message: "Waiting for required clarification before tool execution",
-      },
-    });
-    await emitTraceEvent(runId, "agent_completed", {
-      agent: {
-        name: requestSpec.primaryAgent,
-        role: "primary",
-        status: "completed",
-      },
-      iterations: 0,
-      artifactsGenerated: 0,
-    });
-
-    return fullResponse;
-  }
-
-  conversationHistory.unshift({
-    role: "system",
-    content: `Execution brief:
+    conversationHistory.unshift({
+      role: "system",
+      content: `Execution brief:
 - Objective: ${requestBrief.objective}
 - Scope(in): ${requestBrief.scope.in_scope.join("; ") || "n/a"}
 - Required inputs: ${requestBrief.required_inputs.filter((entry) => entry.required).map((entry) => entry.input).join("; ") || "none"}
@@ -1050,7 +1055,10 @@ export async function executeAgentLoop(
 - Suggested tools: ${requestBrief.tool_routing.suggested_tools.join(", ") || "none"}
 - Blocked tools: ${requestBrief.tool_routing.blocked_tools.join(", ") || "none"}
 - Guardrails flags: ${requestBrief.guardrails.flags.join(", ") || "none"}`,
-  });
+    });
+  } catch (briefErr: any) {
+    console.warn(`[AgentLoop] requestUnderstanding.buildBrief failed (non-fatal):`, briefErr?.message || briefErr);
+  }
 
   const isReservationRequest =
     requestSpec.intent === "web_automation" && isRestaurantReservationRequest(recentUserText);
