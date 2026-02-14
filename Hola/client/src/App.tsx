@@ -1,6 +1,7 @@
 import { Switch, Route, useLocation, useParams } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
@@ -19,17 +20,42 @@ import { SkipLink } from "@/lib/accessibility";
 import { trackWorkspaceEvent } from "@/lib/analytics";
 import { Loader2 } from "lucide-react";
 const Home = lazy(() => import("@/pages/home"));
-const LandingPage = lazy(() => import("@/pages/landing"));
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { PlatformSettingsProvider, usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { isAdminUser } from "@/lib/admin";
 const MaintenancePage = lazy(() => import("@/pages/maintenance"));
+const LandingPage = lazy(() => import("@/pages/landing"));
+import type { ComponentType } from "react";
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
     <Loader2 className="h-8 w-8 animate-spin text-primary" />
   </div>
 );
+
+function RootRoute() {
+  const { isReady, isAuthenticated } = useAuth();
+  if (!isReady) return <PageLoader />;
+  return isAuthenticated ? <Home /> : <LandingPage />;
+}
+
+// Wouter passes RouteComponentProps to route components; pages typically ignore them.
+// Keep this permissive so protected routes type-check cleanly.
+function requireAuth(Component: ComponentType<any>) {
+  return function ProtectedRoute(props: any) {
+    const { isReady, isAuthenticated } = useAuth();
+    const [, setLocation] = useLocation();
+
+    useEffect(() => {
+      if (!isReady) return;
+      if (!isAuthenticated) setLocation("/login");
+    }, [isReady, isAuthenticated, setLocation]);
+
+    if (!isReady) return <PageLoader />;
+    if (!isAuthenticated) return <PageLoader />;
+    return <Component {...props} />;
+  };
+}
 
 function WorkspaceAnalyticsTracker() {
   const [location] = useLocation();
@@ -89,6 +115,19 @@ const BusinessPage = lazy(() => import("@/pages/business"));
 const DownloadPage = lazy(() => import("@/pages/download"));
 const PowerPage = lazy(() => import("@/pages/power"));
 const MemoryPage = lazy(() => import("@/pages/memory"));
+
+const ProtectedProfilePage = requireAuth(ProfilePage);
+const ProtectedBillingPage = requireAuth(BillingPage);
+const ProtectedSettingsPage = requireAuth(SettingsPage);
+const ProtectedPrivacyPage = requireAuth(PrivacyPage);
+const ProtectedAdminPage = requireAuth(AdminPage);
+const ProtectedSystemHealthPage = requireAuth(SystemHealthPage);
+const ProtectedWorkspaceSettingsPage = requireAuth(WorkspaceSettingsPage);
+const ProtectedWorkspacePage = requireAuth(WorkspacePage);
+const ProtectedSkillsPage = requireAuth(SkillsPage);
+const ProtectedMemoryPage = requireAuth(MemoryPage);
+const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
+const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -210,25 +249,25 @@ function Router() {
       <Suspense fallback={<PageLoader />}>
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
-            <Route path={HOME_ROUTE_REGEX} component={Home} />
+            <Route path={HOME_ROUTE_REGEX} component={RootRoute} />
             <Route path="/welcome" component={LandingPage} />
             <Route path="/login" component={LoginPage} />
             <Route path="/login/approve" component={LoginApprovePage} />
             <Route path="/signup" component={SignupPage} />
-            <Route path="/profile" component={ProfilePage} />
-            <Route path="/billing" component={BillingPage} />
-            <Route path="/settings" component={SettingsPage} />
-            <Route path="/privacy" component={PrivacyPage} />
+            <Route path="/profile" component={ProtectedProfilePage} />
+            <Route path="/billing" component={ProtectedBillingPage} />
+            <Route path="/settings" component={ProtectedSettingsPage} />
+            <Route path="/privacy" component={ProtectedPrivacyPage} />
             <Route path="/privacy-policy" component={PrivacyPolicyPage} />
             <Route path="/terms" component={TermsPage} />
-            <Route path="/admin" component={AdminPage} />
-            <Route path="/admin/health" component={SystemHealthPage} />
-            <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
-            <Route path="/workspace" component={WorkspacePage} />
-            <Route path="/skills" component={SkillsPage} />
-            <Route path="/memory" component={MemoryPage} />
-            <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
-            <Route path="/monitoring" component={MonitoringDashboard} />
+            <Route path="/admin" component={ProtectedAdminPage} />
+            <Route path="/admin/health" component={ProtectedSystemHealthPage} />
+            <Route path="/workspace-settings" component={ProtectedWorkspaceSettingsPage} />
+            <Route path="/workspace" component={ProtectedWorkspacePage} />
+            <Route path="/skills" component={ProtectedSkillsPage} />
+            <Route path="/memory" component={ProtectedMemoryPage} />
+            <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
+            <Route path="/monitoring" component={ProtectedMonitoringDashboard} />
             <Route path="/about" component={AboutPage} />
             <Route path="/learn" component={LearnPage} />
             <Route path="/pricing" component={PricingPage} />
@@ -248,8 +287,21 @@ function AppContent() {
   const { settings: platformSettings, isLoading: platformLoading } = usePlatformSettings();
   const { user } = useAuth();
 
-  const isLoginRoute = location.startsWith("/login");
-  const allowDuringMaintenance = isLoginRoute;
+  const publicMaintenanceRoutePrefixes = [
+    "/welcome",
+    "/login",
+    "/signup",
+    "/terms",
+    "/privacy-policy",
+    "/about",
+    "/learn",
+    "/pricing",
+    "/business",
+    "/download",
+    "/power",
+  ];
+  const allowDuringMaintenance =
+    location === "/" || publicMaintenanceRoutePrefixes.some((route) => location.startsWith(route));
 
   if (!platformLoading && platformSettings.maintenance_mode && !isAdminUser(user) && !allowDuringMaintenance) {
     return (
@@ -266,6 +318,7 @@ function AppContent() {
       {/* AuthCallbackHandler removed, moved to AuthProvider */}
       <GlobalKeyboardShortcuts />
       <WorkspaceAnalyticsTracker />
+      <Toaster />
       <SonnerToaster
         position="bottom-right"
         richColors

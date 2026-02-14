@@ -76,6 +76,7 @@ import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-r
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession, globalStartSseSession, globalUpdateFromSseStep } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
+import { VirtualComputer } from "@/components/virtual-computer";
 import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
 import { usePptStreaming } from "@/hooks/usePptStreaming";
 import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
@@ -1068,17 +1069,25 @@ export function ChatInterface({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const lastScrollTimeRef = useRef<number>(0);
-  const scrollThrottleMs = 300;
+  const scrollThrottleMs = 100; // Reduced from 300ms for snappier scroll-to-bottom during streaming
 
-  const scrollToBottom = useCallback((force = false) => {
+  const scrollToBottom = useCallback((force = false, instant = false) => {
     if (userHasScrolledUp && !force) return;
 
-    requestAnimationFrame(() => {
+    if (instant) {
+      // Instant scroll — no animation delay (used when user sends a message)
       messagesEndRef.current?.scrollIntoView({
-        behavior: 'smooth',
+        behavior: 'auto',
         block: 'end'
       });
-    });
+    } else {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'end'
+        });
+      });
+    }
   }, [userHasScrolledUp]);
 
   const isNearBottom = useCallback(() => {
@@ -1124,7 +1133,7 @@ export function ChatInterface({
 
     if (currentCount > prevCount) {
       setUserHasScrolledUp(false);
-      scrollToBottom(true);
+      scrollToBottom(true, true); // force + instant — no animation lag on new messages
     }
   }, [displayMessages.length, scrollToBottom]);
 
@@ -2988,11 +2997,10 @@ export function ChatInterface({
       return;
     }
 
-    // SSE STREAMING: Use direct SSE streaming for text-only messages.
-    // This enables real-time browser automation (browser_step events), clarification flows,
-    // and web search with immediate rendering. The run-based polling path below does NOT
-    // support real-time SSE events needed for web automation.
-    const ENABLE_EMERGENCY_BYPASS = true;
+    // EMERGENCY BYPASS (DEV-ONLY): Allows quick debugging by bypassing run persistence/idempotency.
+    // Keep disabled in production.
+    const ENABLE_EMERGENCY_BYPASS =
+      import.meta.env.DEV && import.meta.env.VITE_ENABLE_EMERGENCY_BYPASS === "true";
 
     // If input is present and starts with "!", do direct API call (dev only).
     if (ENABLE_EMERGENCY_BYPASS && input.trim().startsWith("!")) {
@@ -3109,10 +3117,11 @@ export function ChatInterface({
       console.log("[handleSubmit] No text provided with files, using auto-prompt:", autoPromptForFiles);
     }
 
-    // SSE STREAMING: For simple text messages without files, go directly to streaming API.
-    // This path supports real-time SSE events (browser_step, clarification, heartbeat).
+    // EMERGENCY BYPASS (DEV-ONLY, DISABLED IN PROD): For simple text messages without files, go directly to streaming API
+    // This bypasses normal chat_run creation and WILL break persistence/idempotency if enabled in prod.
+    // Keep behind explicit flag for dev troubleshooting only.
     if (ENABLE_EMERGENCY_BYPASS && hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
-      console.log("[SSE Stream] Text message - using direct SSE streaming", selectedTool === "web" ? "(with web search)" : "");
+      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
       const userInput = input.trim();
       setInput("");
       
@@ -3131,15 +3140,10 @@ export function ChatInterface({
         role: "user",
         content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
         timestamp: new Date(),
-        requestId: `req_${Date.now()}`,
-        skipRun: true, // SSE path: don't create a server-side run — response comes from /api/chat/stream
-      } as any;
+        requestId: `req_${Date.now()}`
+      };
       // Show user message immediately (optimistic update) — BEFORE any async work
       setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-      // Fire-and-forget: persist user message to backend.
-      // NOTE: This triggers chat creation (for new chats) which may cause a component
-      // remount if chatInterfaceKey changes. We work around this by ensuring the key
-      // stays stable (see lastStableKeyRef in home.tsx).
       onSendMessage(userMessage);
 
       // Stream the response using the all-in-one hook
@@ -3148,6 +3152,9 @@ export function ChatInterface({
       const cleanInput = userInput.replace(/^🌐\s*/, "");
 
       const effectiveChatIdForStream = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
+      if (chatId?.startsWith("pending-")) {
+        window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: effectiveChatIdForStream, preserveKey: true } }));
+      }
 
       const streamResult = await streamChat.stream("/api/chat/stream", {
         chatId: effectiveChatIdForStream,
@@ -4746,7 +4753,6 @@ IMPORTANTE:
             }));
 
             let fullContent = "";
-            let browserStepCounter = 0;
             let sseError: Error | null = null;
 
             // Build attachments array for streaming endpoint
@@ -5061,26 +5067,6 @@ IMPORTANTE:
                     globalUpdateFromSseStep(data);
                     setAiState("agent_working");
                     if (!isBrowserOpen) setIsBrowserOpen(true);
-                    currentEventType = "chunk";
-                    continue;
-                  }
-
-                  // Inline browser report: compact step line with emoji indicators
-                  if (currentEventType === 'browser_report') {
-                    browserStepCounter++;
-                    const progress = data.goalProgress || "0%";
-                    const emoji = data.action === "done" ? "✅" :
-                      data.action === "navigate" ? "🌐" :
-                      data.action === "click" ? "👆" :
-                      data.action === "type" ? "⌨️" :
-                      data.action === "select" ? "📋" :
-                      data.action === "scroll" ? "📜" :
-                      data.action === "wait" ? "⏳" : "⚙️";
-                    const reasoning = (data.reasoning || "").slice(0, 80);
-                    const reportChunk = `\n> ${emoji} **${browserStepCounter}.** ${reasoning} · *${progress}*\n`;
-                    fullContent += reportChunk;
-                    streamingContentRef.current = fullContent;
-                    setStreamingContent(fullContent);
                     currentEventType = "chunk";
                     continue;
                   }

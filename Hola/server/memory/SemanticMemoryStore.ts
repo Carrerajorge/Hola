@@ -57,6 +57,8 @@ export interface SemanticSearchOptions {
 class EmbeddingProvider {
     private cache = new Map<string, number[]>();
     private cacheMaxSize = 10000;
+    private openAiEmbeddingModel = process.env.MEMORY_EMBEDDING_MODEL || "text-embedding-3-large";
+    private voyageEmbeddingModel = process.env.VOYAGE_EMBEDDING_MODEL || "voyage-3-large";
 
     /**
      * Get embedding for text, with caching
@@ -70,16 +72,23 @@ class EmbeddingProvider {
         try {
             const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.VITEST_WORKER_ID || !!process.env.VITEST_POOL_ID;
 
-            // Use Gemini embeddings if available (avoid network calls during tests)
-            if (process.env.GEMINI_API_KEY && !isTestEnv) {
-                const embedding = await this.getGeminiEmbedding(text);
+            // Prefer OpenAI text-embedding-3-large for planner/RAG quality.
+            if (process.env.OPENAI_API_KEY && !isTestEnv) {
+                const embedding = await this.getOpenAIEmbedding(text);
                 this.cacheEmbedding(cacheKey, embedding);
                 return embedding;
             }
 
-            // Fallback to OpenAI embeddings
-            if (process.env.OPENAI_API_KEY) {
-                const embedding = await this.getOpenAIEmbedding(text);
+            // Secondary provider: Voyage embeddings.
+            if (process.env.VOYAGE_API_KEY && !isTestEnv) {
+                const embedding = await this.getVoyageEmbedding(text);
+                this.cacheEmbedding(cacheKey, embedding);
+                return embedding;
+            }
+
+            // Third option: Gemini embeddings.
+            if (process.env.GEMINI_API_KEY && !isTestEnv) {
+                const embedding = await this.getGeminiEmbedding(text);
                 this.cacheEmbedding(cacheKey, embedding);
                 return embedding;
             }
@@ -121,13 +130,35 @@ class EmbeddingProvider {
                 "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: "text-embedding-3-small",
+                model: this.openAiEmbeddingModel,
                 input: text.slice(0, 8000)
             })
         });
 
         if (!response.ok) {
             throw new Error(`OpenAI embedding failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.data?.[0]?.embedding || [];
+    }
+
+    private async getVoyageEmbedding(text: string): Promise<number[]> {
+        const response = await fetch("https://api.voyageai.com/v1/embeddings", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${process.env.VOYAGE_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: this.voyageEmbeddingModel,
+                input: [text.slice(0, 8000)],
+                input_type: "query",
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Voyage embedding failed: ${response.status}`);
         }
 
         const data = await response.json();
@@ -633,11 +664,13 @@ export class SemanticMemoryStore {
             totalMemories: chunks.length,
             byType,
             avgConfidence: chunks.length > 0 ? Math.round((totalConfidence / chunks.length) * 100) : 0,
-            embeddingProvider: process.env.GEMINI_API_KEY
-                ? "gemini"
-                : process.env.OPENAI_API_KEY
-                    ? "openai"
-                    : "simple"
+            embeddingProvider: process.env.OPENAI_API_KEY
+                ? "openai"
+                : process.env.VOYAGE_API_KEY
+                    ? "voyage"
+                    : process.env.GEMINI_API_KEY
+                        ? "gemini"
+                        : "simple"
         };
     }
 

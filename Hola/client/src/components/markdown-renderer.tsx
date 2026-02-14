@@ -1003,7 +1003,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <h4 className="text-sm font-semibold mb-2 mt-2">{children}</h4>
     ),
     blockquote: ({ children }: { children?: React.ReactNode }) => (
-      <blockquote className="border-l-2 border-primary/40 pl-3 my-1 text-sm text-muted-foreground not-italic leading-relaxed">
+      <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3 text-muted-foreground">
         {children}
       </blockquote>
     ),

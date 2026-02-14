@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useSettings, applyTheme, applyAccentColor, UserSettings } from "@/hooks/use-settings";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
@@ -136,7 +136,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [settings.highContrast, settings.reducedMotion, settings.fontSize, settings.density]);
 
-  const wrappedUpdateSettings = useCallback((updates: Partial<UserSettings>) => {
+  const wrappedUpdateSettings = (updates: Partial<UserSettings>) => {
     const normalized: Partial<UserSettings> = { ...updates };
     // If voice mode is disabled, advanced voice must be disabled as well.
     if (normalized.voiceMode === false) {
@@ -146,9 +146,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       normalized.voiceMode = true;
     }
     updateSettings(normalized);
-  }, [updateSettings]);
+  };
 
-  const wrappedUpdateSetting = useCallback(<K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
+  const wrappedUpdateSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
     if (key === "voiceMode" && value === false) {
       wrappedUpdateSettings({ voiceMode: false, advancedVoice: false });
       return;
@@ -174,7 +174,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     if (key === "accentColor") {
       applyAccentColor("default");
     }
-  }, [platformSettings.theme_mode, updateSetting, wrappedUpdateSettings]);
+  };
 
   return (
     <SettingsContext.Provider value={{

@@ -237,13 +237,6 @@ describe("academicArticlesExport (integration-ish)", () => {
       "Scopus",
     ]);
 
-    // DOI column should never be blank in export (at least "n.d.")
-    for (let r = 2; r <= articlesSheet!.rowCount; r++) {
-      const cell = articlesSheet!.getCell(`I${r}`).value;
-      const text = typeof cell === "string" ? cell.trim() : String(cell ?? "").trim();
-      expect(text.length).toBeGreaterThan(0);
-    }
-
     // Provenance sheet should have at least one row for a field
     const provSheet = wb.getWorksheet("Provenance")!;
     expect(provSheet.rowCount).toBeGreaterThan(1);

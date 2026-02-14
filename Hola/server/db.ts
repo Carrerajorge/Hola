@@ -1,11 +1,5 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import * as pkg from "pg";
-import type { PoolClient } from "pg";
-import * as schema from "../shared/schema";
-import { Registry, Histogram, Counter, Gauge } from 'prom-client';
-import { env } from "./config/env";
-import { Logger } from "./lib/logger";
+import { drizzle } from "drizzle-orm/node-postgres"; import { migrate } from "drizzle-orm/node-postgres/migrator"; import * as pkg from "pg"; import type { PoolClient } from "pg"; import * as schema 
+from "../shared/schema"; import { Registry, Histogram, Counter, Gauge } from 'prom-client'; import { env } from "./config/env"; import { Logger } from "./lib/logger";
 
 const { Pool } = pkg;
 
@@ -360,11 +354,40 @@ export async function getDbMetricsText(): Promise<string> {
   return dbMetricsRegistry.metrics();
 }
 
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  opts: { label: string; retries: number; delayMs: number; maxDelayMs: number }
+): Promise<T> {
+  let attempt = 0;
+  let delay = opts.delayMs;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      attempt += 1;
+      const msg = err?.message || String(err);
+      console.warn(`[Startup] ${opts.label} failed (${attempt}/${opts.retries}): ${msg}`);
+      if (attempt >= opts.retries) throw err;
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(opts.maxDelayMs, Math.round(delay * 1.6));
+    }
+  }
+}
+
 export async function verifyDatabaseConnection(): Promise<boolean> {
   try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT current_database(), NOW() as server_time');
-    client.release();
+    const result = await retryWithBackoff(
+	  async () => {
+	    const client = await pool.connect();
+	    try {
+	      return await client.query('SELECT current_database(), NOW() as server_time');
+	    } finally {
+	      client.release();
+	    }
+	  },
+	  { label: "DB connect", retries: 10, delayMs: 300, maxDelayMs: 3000 }
+	);
+
     console.log(`[DB] Connected to database: ${result.rows[0].current_database}`);
 
     healthState.consecutiveSuccesses = HEALTHY_THRESHOLD;

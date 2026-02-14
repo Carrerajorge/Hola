@@ -92,14 +92,7 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       return;
     }
     setSelectedModelIdState(id);
-
-    // Persist default model only on explicit user selection to avoid effect loops.
-    if (!id) return;
-    const selected = enabledModels.find((m) => m.id === id || m.modelId === id);
-    if (selected?.modelId && selected.modelId !== settings.defaultModel) {
-      updateSetting("defaultModel", selected.modelId);
-    }
-  }, [enabledModels, settings.defaultModel, toast, updateSetting]);
+  }, [enabledModels, toast]);
 
   useEffect(() => {
     if (selectedModelId && !enabledModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId)) {
@@ -139,6 +132,16 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
       setSelectedModelIdState(enabledModels[0].id);
     }
   }, [enabledModels, selectedModelId, settings.defaultModel, platformSettings.default_model]);
+
+  // Keep Settings -> Default Model in sync with the selector.
+  useEffect(() => {
+    if (!selectedModelId) return;
+    const model = enabledModels.find((m) => m.id === selectedModelId || m.modelId === selectedModelId);
+    if (!model?.modelId) return;
+    if (model.modelId !== settings.defaultModel) {
+      updateSetting("defaultModel", model.modelId);
+    }
+  }, [enabledModels, selectedModelId, settings.defaultModel, updateSetting]);
 
   // If the user changes Default Model from Settings, reflect it in the selector.
   useEffect(() => {

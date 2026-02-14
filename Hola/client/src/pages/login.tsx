@@ -410,7 +410,7 @@ export default function LoginPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="absolute top-4 right-4 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full transition-colors"
+            className="absolute top-4 right-4 z-10 text-muted-foreground hover:text-foreground hover:bg-muted/60 rounded-full transition-colors"
             onClick={() => setLocation("/welcome")}
             data-testid="button-close-login"
           >

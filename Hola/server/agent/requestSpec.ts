@@ -126,7 +126,9 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
   research: [
     /\b(investiga|busca|encuentra|search|find|research|look up|investigar)\b/i,
     /\b(qué es|what is|cuál es|who is|quién es)\b/i,
-    /\b(información sobre|info about|datos de)\b/i
+    /\b(información sobre|info about)\b/i,
+    // "datos de" tends to collide with data_analysis. Avoid obvious analysis contexts.
+    /\b(datos de|datos sobre)\b(?!.*\b(ventas|sales|presupuesto|budget|cálculo|calculo|usuarios|users|estadísticas|estadisticas|statistics)\b)/i
   ],
   document_analysis: [
     /\b(analiza|analyze|revisa|review|examina|examine)\b.*\b(documento|document|archivo|file|pdf|excel|word)\b/i,
@@ -134,7 +136,8 @@ const INTENT_PATTERNS: Record<IntentType, RegExp[]> = {
   ],
   document_generation: [
     /\b(crea|create|genera|generate|escribe|write|redacta|draft)\b.*\b(documento|document|informe|report|carta|letter)\b/i,
-    /\b(hazme|make me|prepara|prepare)\b.*\b(un|a)\b/i
+    // Broad, but avoid stealing obvious presentation/spreadsheet/image requests.
+    /\b(hazme|make me|prepara|prepare)\b.*\b(un|a)\b(?!.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas|excel|spreadsheet|hoja de cálculo|hoja de calculo|tabla|table|imagen|image|foto|illustration|ilustración|ilustracion)\b)/i
   ],
   presentation_creation: [
     /\b(crea|create|genera|generate|hazme|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i
@@ -260,8 +263,22 @@ export function detectIntent(message: string, attachments: AttachmentSpec[] = []
     }
   }
 
-  for (const [intent, patterns] of Object.entries(INTENT_PATTERNS) as [IntentType, RegExp[]][]) {
-    if (intent === "chat" || intent === "unknown" || intent === "web_automation") continue;
+  // Check intents in priority order: specific before general.
+  // presentation/spreadsheet before document_generation (which has broader patterns),
+  // data_analysis before research (which has broader patterns like "datos de").
+  const INTENT_CHECK_ORDER: IntentType[] = [
+    "document_analysis",
+    "presentation_creation",
+    "spreadsheet_creation",
+    "data_analysis",
+    "image_generation",
+    "code_generation",
+    "document_generation",
+    "multi_step_task",
+    "research",
+  ];
+  for (const intent of INTENT_CHECK_ORDER) {
+    const patterns = INTENT_PATTERNS[intent] || [];
     for (const pattern of patterns) {
       if (pattern.test(lowerMessage)) {
         return { intent, confidence: 0.8 };
@@ -284,8 +301,14 @@ export function createRequestSpec(params: {
   attachments?: AttachmentSpec[];
   sessionState?: SessionState;
   constraints?: Partial<QualityConstraints>;
+  /** When provided by the intent analysis layer, skips regex detectIntent(). */
+  intentOverride?: IntentType;
+  /** Confidence from the planner (used only when intentOverride is set). */
+  confidenceOverride?: number;
 }): RequestSpec {
-  const { intent, confidence } = detectIntent(params.rawMessage, params.attachments);
+  const { intent, confidence } = params.intentOverride
+    ? { intent: params.intentOverride, confidence: params.confidenceOverride ?? 0.8 }
+    : detectIntent(params.rawMessage, params.attachments);
   const deliverableType = DELIVERABLE_MAPPING[intent];
   const targetAgents = AGENT_MAPPING[intent];
   

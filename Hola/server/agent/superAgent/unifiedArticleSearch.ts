@@ -39,20 +39,15 @@ const SOURCE_PRIORITY: Record<string, number> = {
  * resolve with empty result instead of blocking the entire search.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    const timeoutPromise = new Promise<null>((resolve) => {
-        timeoutHandle = setTimeout(() => {
-            console.warn(`[UnifiedSearch] ${label} timed out after ${ms}ms`);
-            resolve(null);
-        }, ms);
-    });
-
-    return Promise.race([promise, timeoutPromise]).finally(() => {
-        if (timeoutHandle) {
-            clearTimeout(timeoutHandle);
-            timeoutHandle = null;
-        }
-    });
+    return Promise.race([
+        promise,
+        new Promise<null>((resolve) => {
+            setTimeout(() => {
+                console.warn(`[UnifiedSearch] ${label} timed out after ${ms}ms`);
+                resolve(null);
+            }, ms);
+        }),
+    ]);
 }
 
 /**

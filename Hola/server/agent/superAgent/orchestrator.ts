@@ -293,7 +293,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
       this.emitThought("Analizando solicitud del usuario...");
 
       // === Mandatory Request-Understanding Gate (Brief) ===
-      const brief = await requestUnderstandingAgent.buildBrief({ text: prompt });
+      const brief = await requestUnderstandingAgent.buildBrief({
+        text: prompt,
+        chatId: this.sessionId,
+        requestId: this.sessionId,
+      });
       this.emitSSE("brief", brief);
 
       if (brief.blocker?.is_blocked) {

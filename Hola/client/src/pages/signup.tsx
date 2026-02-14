@@ -64,7 +64,7 @@ export default function SignupPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="absolute -top-2 -right-2"
+            className="absolute -top-2 -right-2 z-10"
             onClick={() => setLocation("/welcome")}
             data-testid="button-close-signup-disabled"
           >
@@ -117,7 +117,7 @@ export default function SignupPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="absolute top-4 right-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
+            className="absolute top-4 right-4 z-10 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
             onClick={() => setLocation("/welcome")}
             data-testid="button-close-signup-email"
           >
@@ -287,7 +287,7 @@ export default function SignupPage() {
         <Button
           variant="ghost"
           size="icon"
-          className="absolute top-4 right-4 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
+          className="absolute top-4 right-4 z-10 rounded-full text-zinc-500 hover:text-zinc-900 hover:bg-black/5"
           onClick={() => setLocation("/welcome")}
           data-testid="button-close-signup"
         >
