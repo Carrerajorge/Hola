@@ -95,7 +95,8 @@ jobs:
         working-directory: ocr_service
         env:
           OCR_DEFAULT_LANG: eng
-          OCR_PREFER_ENGINE: auto
+          # Deterministic in CI: prefer Tesseract for the real-OCR accuracy suite.
+          OCR_PREFER_ENGINE: tesseract
         run: |
           set -euo pipefail
           pytest

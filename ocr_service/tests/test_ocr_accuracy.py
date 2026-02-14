@@ -48,10 +48,10 @@ def _make_cases() -> list[OcrCase]:
 
 
 @pytest.mark.parametrize("case", _make_cases(), ids=lambda c: f"{c.fmt}-{c.case_id:03d}")
-def test_ocr_accuracy_cases(client, ocr_available, case: OcrCase):
+def test_ocr_accuracy_cases(client, ocr_available, tesseract_available, case: OcrCase):
     content_type = "application/pdf" if case.fmt == "pdf" else ("image/jpeg" if case.fmt == "jpg" else "image/png")
     r = client.post(
-        "/v1/ocr?engine=auto&lang=eng",
+        "/v1/ocr?engine=tesseract&lang=eng",
         files={"file": (case.filename, case.bytes, content_type)},
     )
     assert r.status_code == 200, r.text
@@ -60,5 +60,5 @@ def test_ocr_accuracy_cases(client, ocr_available, case: OcrCase):
     score = similarity(out_text, case.text)
     assert score >= 0.90, f"case={case.case_id} fmt={case.fmt} score={score:.3f} out={out_text!r}"
 
-    assert body["engine"] in ("paddle", "tesseract")
+    assert body["engine"] == "tesseract"
     assert "timings_ms" in body
