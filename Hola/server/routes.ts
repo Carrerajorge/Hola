@@ -112,6 +112,7 @@ import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
@@ -241,27 +242,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Google login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Google login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Google session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -312,27 +320,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Microsoft login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Microsoft login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Microsoft session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -382,27 +397,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Auth0 login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Auth0 login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Auth0 session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -544,6 +566,26 @@ export async function registerRoutes(
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
+  // Pre-execution intent guard for high-impact mutation endpoints.
+  // Mode is controlled by EXECUTION_INTENT_GUARD_MODE=off|monitor|enforce
+  // and defaults to enforce when SYSTEM_AUDIT_MODE is enabled.
+  const guardedExecutionPrefixes = [
+    "/api/agent",
+    "/api/orchestrator",
+    "/api/execution",
+    "/api/planning",
+    "/api/python-agent",
+    "/api/browser-control",
+    "/api/terminal",
+    "/api/workflows",
+    "/api/document-analysis",
+    "/api/word-pipeline",
+    "/api/openclaw",
+  ];
+  for (const prefix of guardedExecutionPrefixes) {
+    app.use(prefix, preExecutionIntentGuard);
+  }
+
 
   // ... existing imports ...
 
@@ -608,6 +650,10 @@ export async function registerRoutes(
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     });
+  });
+
+  app.get("/api/audit/execution-guard/status", (_req: Request, res: Response) => {
+    res.json(getExecutionIntentGuardStatus());
   });
 
   // API Documentation

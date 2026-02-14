@@ -492,10 +492,17 @@ export function createGptRouter() {
   router.get("/users/:userId/sidebar-gpts", async (req, res) => {
     try {
       const { userId } = req.params;
+
+      if (!userId) {
+        return res.json([]);
+      }
+
       const pinnedGpts = await storage.getSidebarPinnedGpts(userId);
       res.json(pinnedGpts);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("[api] sidebar-gpts load failed", error);
+      // Keep sidebar resilient if the DB has a transient failure.
+      res.json([]);
     }
   });
 
@@ -504,12 +511,16 @@ export function createGptRouter() {
     try {
       const { userId } = req.params;
       const { gptId, displayOrder } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
+      }
       if (!gptId) {
         return res.status(400).json({ error: "gptId is required" });
       }
       const pinned = await storage.pinGptToSidebar(userId, gptId, displayOrder || 0);
       res.json(pinned);
     } catch (error: any) {
+      console.error("[api] sidebar-gpts pin failed", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -518,9 +529,13 @@ export function createGptRouter() {
   router.delete("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
     try {
       const { userId, gptId } = req.params;
+      if (!userId || !gptId) {
+        return res.status(400).json({ error: "userId and gptId are required" });
+      }
       await storage.unpinGptFromSidebar(userId, gptId);
       res.json({ success: true });
     } catch (error: any) {
+      console.error("[api] sidebar-gpts unpin failed", error);
       res.status(500).json({ error: error.message });
     }
   });
@@ -529,9 +544,13 @@ export function createGptRouter() {
   router.get("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
     try {
       const { userId, gptId } = req.params;
+      if (!userId || !gptId) {
+        return res.json({ isPinned: false });
+      }
       const isPinned = await storage.isGptPinnedToSidebar(userId, gptId);
       res.json({ isPinned });
     } catch (error: any) {
+      console.error("[api] sidebar-gpts status check failed", error);
       res.status(500).json({ error: error.message });
     }
   });

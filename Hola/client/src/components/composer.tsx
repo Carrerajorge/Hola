@@ -963,16 +963,106 @@ export function Composer({
         </div>
       )}
 
-      {/* VirtualComputer — fixed 2cm x 2cm mini square, right side next to chat bar */}
-      {/* Always shows as mini square. User clicks expand icon for fullscreen. */}
-      {browserSession.state.status !== "idle" && (
-        <div className="fixed z-50 right-4 sm:right-6 bottom-20">
+      {/* Show VirtualComputer in non-document mode when browser session is active */}
+      {/* Uses fixed positioning to escape overflow-hidden parent containers */}
+      {!isDocumentMode && browserSession.state.status !== "idle" && (
+        <div className="fixed left-4 sm:left-6 bottom-24 z-50">
           <VirtualComputer
             state={browserSession.state}
-            onClose={() => browserSession.reset()}
             onCancel={browserSession.cancel}
+            compact={true}
           />
         </div>
+      )}
+
+      {isDocumentMode && (
+        <>
+          <div className="absolute left-4 sm:left-6 bottom-[calc(100%+8px)] z-20">
+            <VirtualComputer
+              state={browserSession.state}
+              onCancel={browserSession.cancel}
+              compact={true}
+            />
+          </div>
+
+          {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
+            <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
+              <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
+                <span className="text-[8px] font-medium text-muted-foreground">Computadora Virtual</span>
+                <div className="flex items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsBrowserMaximized(true)}
+                  >
+                    <Maximize2 className="h-2 w-2" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsBrowserOpen(false)}
+                  >
+                    <X className="h-2 w-2" />
+                  </Button>
+                </div>
+              </div>
+              <div className="bg-card relative h-[100px]">
+                <iframe
+                  src={browserUrl}
+                  className="w-full h-full border-0"
+                  sandbox="allow-scripts allow-same-origin allow-forms"
+                  title="Virtual Browser"
+                />
+                {aiState !== "idle" && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isBrowserMaximized && (
+            <div className="fixed inset-4 z-50 border rounded-lg overflow-hidden shadow-lg bg-card">
+              <div className="flex items-center justify-between px-2 py-1 bg-muted/50 border-b">
+                <span className="text-xs font-medium text-muted-foreground">Computadora Virtual</span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsBrowserMaximized(false)}
+                  >
+                    <Minimize2 className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => { setIsBrowserOpen(false); setIsBrowserMaximized(false); }}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+              <div className="bg-card relative h-[calc(100%-28px)]">
+                <iframe
+                  src={browserUrl}
+                  className="w-full h-full border-0"
+                  sandbox="allow-scripts allow-same-origin allow-forms"
+                  title="Virtual Browser"
+                />
+                {aiState !== "idle" && (
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <input

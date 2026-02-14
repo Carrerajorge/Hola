@@ -889,19 +889,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       // Previously fast lane blocked auto-search, but this prevented news/current-event queries from working
       const shouldSearch = requestedWebSearch || allowAutoSearch;
 
-      // QUICK CHECK: Skip web search for web_automation intent (reservations, browser tasks)
-      // These don't need web search results — they use Playwright browser automation instead.
-      // This early detection avoids 3-5s of wasted web search latency.
-      const looksLikeWebAutomation = /\b(reserv(a|ar|ación|ation)|book(ing)?)\b/i.test(userQuery || "") &&
-        /\b(restaurante?|hotel|mesa|cena|almuerzo)\b/i.test(userQuery || "");
-      const looksLikeBrowserNavigation = /\b(navega|navigate|abre|open|go\s+to|visita)\b/i.test(userQuery || "") &&
-        /\b(\.com|\.pe|\.org|\.net|wikipedia|google|youtube)\b/i.test(userQuery || "");
-      const skipSearchForAutomation = looksLikeWebAutomation || looksLikeBrowserNavigation;
-      if (skipSearchForAutomation) {
-        console.log(`[Stream] Skipping web search for likely web_automation request`);
-      }
-
-      if (shouldSearch && userQuery && !isConnectionClosed && !skipSearchForAutomation) {
+      if (shouldSearch && userQuery && !isConnectionClosed) {
         // Emit thinking event so the user sees progress while search runs
         if (!isConnectionClosed) {
           writeSse(res, 'thinking', {

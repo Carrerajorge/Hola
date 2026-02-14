@@ -215,10 +215,6 @@ export const PhaseNarrator = memo(function PhaseNarrator({
   // Feature: Dynamic Icon
   const Icon = isDeepWork ? Zap : (isIntentActive ? getIntentIcon(intent) : (currentPhase === 'connecting' ? Sparkles : Loader2));
 
-  // Keep narrations in a ref to avoid infinite re-render loops
-  const narrationsRef = useRef(narrations);
-  narrationsRef.current = narrations;
-
   // Cycle narrations
   useEffect(() => {
     if (message) {
@@ -227,28 +223,29 @@ export const PhaseNarrator = memo(function PhaseNarrator({
     }
 
     // Reset when phase or intent changes
-    const currentNarrations = narrationsRef.current;
-    setCurrentNarration(currentNarrations[0]);
+    setCurrentNarration(narrations[0]);
     narrationIndex.current = 0;
     elapsedTimeRef.current = 0;
     setIsDeepWork(false);
 
     const startTime = Date.now();
 
+    // Feature: Micro-Sequences - Cycle faster for dynamic effect
+    const intervalTime = isDeepWork ? 2500 : 1800;
+
     const narrationInterval = setInterval(() => {
-      const n = narrationsRef.current;
-      narrationIndex.current = (narrationIndex.current + 1) % n.length;
-      setCurrentNarration(n[narrationIndex.current]);
+      narrationIndex.current = (narrationIndex.current + 1) % narrations.length;
+      setCurrentNarration(narrations[narrationIndex.current]);
 
       // Feature: Deep Work detection
       const totalElapsed = Date.now() - startTime;
-      if (totalElapsed > 8000) {
+      if (totalElapsed > 8000 && !isDeepWork) {
         setIsDeepWork(true);
       }
-    }, 1800);
+    }, intervalTime);
 
     return () => clearInterval(narrationInterval);
-  }, [currentPhase, message, intent]);
+  }, [currentPhase, message, narrations, isDeepWork]);
 
   // Handle Phrase Progress
   useEffect(() => {

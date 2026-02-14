@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.0] - 2026-02-14
+
+### Added
+- OCR microservice (`ocr_service/`) with PaddleOCR primary + Tesseract fallback, OpenCV preprocessing, structured logs, Prometheus metrics, and CI/deploy integration.
+
 ## [1.0.0] - 2024-12-27
 
 ### Added

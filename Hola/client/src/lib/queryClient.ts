@@ -8,8 +8,21 @@ let isRedirecting = false;
 function handleUnauthorized() {
   if (isRedirecting) return;
   
-  const publicPaths = ['/login', '/signup', '/welcome', '/privacy'];
-  const isPublicPath = publicPaths.some(path => window.location.pathname.startsWith(path));
+  const publicPathPrefixes = [
+    '/login',
+    '/signup',
+    '/welcome',
+    '/about',
+    '/learn',
+    '/pricing',
+    '/business',
+    '/download',
+    '/power',
+    '/terms',
+    '/privacy-policy',
+  ];
+  const pathname = window.location.pathname;
+  const isPublicPath = pathname === '/' || publicPathPrefixes.some(path => pathname.startsWith(path));
   
   if (!isPublicPath) {
     isRedirecting = true;

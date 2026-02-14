@@ -13,7 +13,16 @@ import { env } from "../../config/env";
 
 // Serialize user for the session
 passport.serializeUser((user: any, done) => {
-    done(null, user.id);
+    try {
+        // Some flows (e.g. MFA-preserved sessionUser) keep the identifier in claims.sub.
+        const id = user?.id || user?.claims?.sub || user?.sub;
+        if (!id) {
+            return done(new Error("Cannot serialize user: missing id/claims.sub"));
+        }
+        done(null, String(id));
+    } catch (error) {
+        done(error as any);
+    }
 });
 
 // Deserialize user from the session
@@ -101,14 +110,21 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                         user = await authStorage.upsertUser({ ...userData, id: user.id });
                     }
 
-                    // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "google", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        // Google typically expires in 1 hour (3599 seconds)
-                        expiry_date: Date.now() + 3600 * 1000,
-                        scope: "openid email profile"
-                    });
+                    // Persist tokens (best-effort: never block login on token storage issues).
+                    try {
+                        await tokenManager.saveTokens(user.id, "google", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            // Google typically expires in 1 hour (3599 seconds)
+                            expiry_date: Date.now() + 3600 * 1000,
+                            scope: "openid email profile"
+                        });
+                    } catch (tokenError) {
+                        Logger.warn("[Passport] Google token persistence failed; continuing without stored tokens", {
+                            userId: user.id,
+                            error: (tokenError as any)?.message || tokenError,
+                        });
+                    }
 
                     return done(null, user);
                 } catch (error) {
@@ -158,13 +174,20 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
                         user = await authStorage.upsertUser({ ...userData, id: user.id });
                     }
 
-                    // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "microsoft", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        expiry_date: Date.now() + 3600 * 1000,
-                        scope: "openid profile email User.Read offline_access"
-                    });
+                    // Persist tokens (best-effort: never block login on token storage issues).
+                    try {
+                        await tokenManager.saveTokens(user.id, "microsoft", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            expiry_date: Date.now() + 3600 * 1000,
+                            scope: "openid profile email User.Read offline_access"
+                        });
+                    } catch (tokenError) {
+                        Logger.warn("[Passport] Microsoft token persistence failed; continuing without stored tokens", {
+                            userId: user.id,
+                            error: (tokenError as any)?.message || tokenError,
+                        });
+                    }
 
                     return done(null, user);
 
@@ -212,13 +235,20 @@ if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
                         user = await authStorage.upsertUser({ ...userData, id: user.id });
                     }
 
-                    // Persist Tokens
-                    await tokenManager.saveTokens(user.id, "auth0", {
-                        access_token: accessToken,
-                        refresh_token: refreshToken,
-                        expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
-                        scope: "openid email profile offline_access"
-                    });
+                    // Persist tokens (best-effort: never block login on token storage issues).
+                    try {
+                        await tokenManager.saveTokens(user.id, "auth0", {
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            expiry_date: Date.now() + (extraParams.expires_in || 3600) * 1000,
+                            scope: "openid email profile offline_access"
+                        });
+                    } catch (tokenError) {
+                        Logger.warn("[Passport] Auth0 token persistence failed; continuing without stored tokens", {
+                            userId: user.id,
+                            error: (tokenError as any)?.message || tokenError,
+                        });
+                    }
 
                     return done(null, user);
 

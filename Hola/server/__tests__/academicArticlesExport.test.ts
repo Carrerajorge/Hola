@@ -21,20 +21,6 @@ describe("academicArticlesExport", () => {
     expect(plan.affilCountries || []).toContain("Mexico");
   });
 
-  it("strips export instructions from topic query", () => {
-    const prompt =
-      "buscarme 100 articulos cientificos solo de latinoamerica y españa sobre Impacto de la economía circular en la cadena de suministro de una empresas exportadora del 2021 al 2025 y colocalo en un excel ordenado por Authors Title Year Journal y luego en un word";
-
-    const plan = planAcademicArticlesExport(prompt);
-    const topic = plan.topicQuery.toLowerCase();
-
-    expect(topic).toContain("impacto de la economía circular");
-    expect(topic).toContain("cadena de suministro");
-    expect(topic).not.toContain("excel");
-    expect(topic).not.toContain("word");
-    expect(topic).not.toContain("2021 al 2025");
-  });
-
   it("generates Excel with the required header order", () => {
     const articles: UnifiedArticle[] = [
       {

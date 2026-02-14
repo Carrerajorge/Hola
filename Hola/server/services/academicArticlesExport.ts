@@ -170,47 +170,15 @@ function extractYearRange(prompt: string): { yearFrom?: number; yearTo?: number 
   return { yearFrom: Math.min(a, b), yearTo: Math.max(a, b) };
 }
 
-function stripTopicTail(raw: string): string {
-  let topic = (raw || "").trim();
-  if (!topic) return "";
-
-  const stopPatterns = [
-    /\b(?:del?|desde|entre)\s+(?:19|20)\d{2}\s*(?:al|-|hasta|to)\s*(?:19|20)\d{2}\b/i,
-    /\b(?:entre)\s+(?:19|20)\d{2}\s+y\s+(?:19|20)\d{2}\b/i,
-    /\b(?:y\s+luego|luego|despu[eé]s|adem[aá]s)\b/i,
-    /\b(?:col[oó]ca(?:lo|la|r)|coloca(?:lo|la|r)|pon(?:lo|la)|exporta(?:lo|la|r)?|genera(?:lo|la|r)?|guardar(?:lo|la)?|gu[aá]rdalo)\b/i,
-    /\b(?:en\s+un\s+excel|en\s+excel|en\s+un\s+word|en\s+word|xlsx|docx|excel|word)\b/i,
-    /\b(?:ordenado\s+por)\b/i,
-  ];
-
-  let cutAt = topic.length;
-  for (const re of stopPatterns) {
-    const m = re.exec(topic);
-    if (m && m.index < cutAt) cutAt = m.index;
-  }
-  if (cutAt < topic.length) topic = topic.slice(0, cutAt).trim();
-
-  topic = topic
-    .replace(/[,:;.\-–\s]+$/g, "")
-    .replace(/\s+(?:del?|desde|entre)\s*$/i, "")
-    .trim();
-
-  return topic;
-}
-
 function extractTopicQuery(prompt: string): string {
-  // Try to capture: "... sobre <TOPIC> del 2021 al 2025 ..." and strip export/year tails.
-  const m = prompt.match(/(?:\bsobre\b|\bacerca\s+de\b|\brelacionad[ao]\s+con\b)\s+([\s\S]{3,500})/i);
-  if (m?.[1]?.trim()) {
-    const stripped = stripTopicTail(m[1]);
-    if (stripped) return stripped;
-  }
+  // Try to capture: "... sobre <TOPIC> del 2021 al 2025 ..." or before export instructions.
+  const m = prompt.match(/(?:\bsobre\b|\bacerca\s+de\b|\brelacionad[ao]\s+con\b)\s+([^.\n]{3,240})/i);
+  if (m?.[1]?.trim()) return m[1].trim();
 
   // Fallback: strip common "find me N papers" prefix and trailing export instructions
   let t = prompt.trim();
   t = t.replace(/\b(?:buscarme|buscame|dame|necesito|encuentra(?:me)?)\s+\d{1,3}\s+(?:art[ií]culos?|papers?|estudios?)\b/i, "").trim();
   t = t.replace(/\b(en|en\s+un)\s+(excel|xlsx|word|docx)\b[\s\S]*$/i, "").trim();
-  t = stripTopicTail(t);
   return t || prompt.trim();
 }
 
@@ -608,7 +576,7 @@ async function generateAcademicArticlesExcel(
       keywords: (a.keywords || []).join(", ") || "n.d.",
       language: normalizeLanguageLabel(a.language),
       documentType: a.documentType || "Article",
-      doi: a.doi ? `🔗 https://doi.org/${a.doi}` : "n.d.",
+      doi: a.doi ? `🔗 https://doi.org/${a.doi}` : "",
       city: a.city || "n.d.",
       country: a.country || "n.d.",
       scopus: a.source === "scopus" ? "Yes" : "No",
@@ -990,102 +958,6 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     return Array.from(map.values());
   }
 
-  const QUERY_STOPWORDS = new Set<string>([
-    "a", "an", "the", "and", "or", "of", "in", "on", "for", "with", "to", "from", "by", "at",
-    "is", "are", "was", "were", "be", "been", "being", "as", "it", "its", "into", "this", "that",
-    "these", "those", "we", "our", "their", "they", "them",
-    "el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "de", "del", "al", "en",
-    "para", "por", "con", "sin", "sobre", "entre", "desde", "hacia", "que", "se", "su", "sus",
-    "es", "son", "fue", "fueron", "ser", "como", "más", "mas",
-    "do", "da", "dos", "das", "em", "ate", "até",
-    "study", "studies", "analysis", "results", "method", "methods", "approach",
-    "articulo", "articulos", "artículo", "artículos", "paper", "papers", "cientifico", "cientificos",
-    "científico", "científicos", "academico", "academicos", "académico", "académicos",
-    "buscar", "buscarme", "buscame", "encuentra", "encuentrame", "dame", "necesito", "sobre",
-  ]);
-
-  const TRANSLATION_HINTS: Record<string, string> = {
-    // Spanish / Portuguese -> English hints for broader coverage
-    impacto: "impact",
-    efectos: "effects",
-    efecto: "effect",
-    analisis: "analysis",
-    análisis: "analysis",
-    estudio: "study",
-    estudios: "studies",
-    economia: "economy",
-    economía: "economy",
-    circular: "circular",
-    cadena: "chain",
-    suministro: "supply",
-    empresa: "company",
-    empresas: "companies",
-    exportadora: "exporter",
-    exportadoras: "exporters",
-    exportacion: "export",
-    exportación: "export",
-    sostenibilidad: "sustainability",
-    sustentabilidad: "sustainability",
-    innovacion: "innovation",
-    innovación: "innovation",
-    tecnologia: "technology",
-    tecnología: "technology",
-    salud: "health",
-    educacion: "education",
-    educación: "education",
-    politica: "policy",
-    política: "policy",
-    energia: "energy",
-    energía: "energy",
-    agricultura: "agriculture",
-    industria: "industry",
-    manufactura: "manufacturing",
-    logistica: "logistics",
-    logística: "logistics",
-    transporte: "transport",
-    governance: "governance",
-    governanca: "governance",
-    governança: "governance",
-    risco: "risk",
-    riesgo: "risk",
-    mercados: "markets",
-    mercado: "market",
-    finanzas: "finance",
-    climate: "climate",
-    clima: "climate",
-    cambio: "change",
-    ambiental: "environmental",
-    ambiente: "environment",
-    social: "social",
-  };
-
-  function queryTokens(text: string): string[] {
-    const normalized = (text || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^\w\s]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (!normalized) return [];
-
-    const tokens = normalized
-      .split(" ")
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .filter((t) => t.length >= 3)
-      .filter((t) => !QUERY_STOPWORDS.has(t))
-      .filter((t) => !/^\d+$/.test(t));
-
-    return Array.from(new Set(tokens));
-  }
-
-  function tokensToEnglishHint(tokens: string[]): string[] {
-    const mapped = tokens.map((t) => TRANSLATION_HINTS[t] || t);
-    return Array.from(new Set(mapped.filter(Boolean)));
-  }
-
   function buildQueryVariants(topic: string): string[] {
     const base = (topic || "").trim();
     if (!base) return [];
@@ -1095,32 +967,26 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     const ascii = base.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     if (ascii !== base) variants.push(ascii);
 
-    const baseTokens = queryTokens(base);
-    if (baseTokens.length > 0) {
-      variants.push(baseTokens.slice(0, Math.min(12, baseTokens.length)).join(" "));
-
-      if (baseTokens.length >= 5) {
-        variants.push(baseTokens.slice(0, 8).join(" "));
-      }
-
-      if (baseTokens.length >= 7) {
-        variants.push([
-          ...baseTokens.slice(0, 4),
-          ...baseTokens.slice(-3),
-        ].join(" "));
-      }
+    // Lightweight domain translation (helps OpenAlex recall).
+    let en = ascii;
+    const replacements: Array<[RegExp, string]> = [
+      [/\beconomia\s+circular\b/gi, "circular economy"],
+      [/\beconom[ií]a\s+circular\b/gi, "circular economy"],
+      [/\bcadena\s+de\s+suministro\b/gi, "supply chain"],
+      [/\bempresa(?:s)?\s+exportadora(?:s)?\b/gi, "exporting company"],
+      [/\bexportadora(?:s)?\b/gi, "exporter"],
+      [/\bimpacto\b/gi, "impact"],
+      [/\blog[ií]stica\b/gi, "logistics"],
+      [/\bsostenibilidad\b/gi, "sustainability"],
+    ];
+    for (const [re, rep] of replacements) {
+      en = en.replace(re, rep);
     }
+    if (en !== base && en !== ascii) variants.push(en);
 
-    const englishHintTokens = tokensToEnglishHint(baseTokens);
-    if (englishHintTokens.length > 0) {
-      const englishQuery = englishHintTokens.slice(0, Math.min(12, englishHintTokens.length)).join(" ");
-      if (englishQuery && !variants.includes(englishQuery)) variants.push(englishQuery);
-
-      if (englishHintTokens.length >= 6) {
-        const compact = englishHintTokens.slice(0, 6).join(" ");
-        if (compact && !variants.includes(compact)) variants.push(compact);
-      }
-    }
+    // Core terms only
+    variants.push("circular economy supply chain");
+    variants.push("circular economy supply chain exporter");
 
     return Array.from(new Set(variants.map(v => v.trim()).filter(Boolean)));
   }
@@ -1609,7 +1475,7 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
 
   // 3) Rank by completeness, then source preference, then year desc
   const sourceRank: Record<string, number> = { scopus: 5, wos: 4, openalex: 3, scielo: 2, redalyc: 2, duckduckgo: 1, pubmed: 1 };
-  const rankArticles = (input: UnifiedArticle[]): UnifiedArticle[] => [...input].sort((a, b) => {
+  const ranked = [...enrichedRegionFiltered].sort((a, b) => {
     const sa = completenessScore(a);
     const sb = completenessScore(b);
     if (sb !== sa) return sb - sa;
@@ -1625,34 +1491,7 @@ export async function exportAcademicArticlesFromPrompt(prompt: string): Promise<
     return (a.title || "").localeCompare(b.title || "");
   });
 
-  let finalArticles = rankArticles(enrichedRegionFiltered).slice(0, plan.requestedCount);
-
-  // If strict "all affiliations in-region" is too restrictive, recover with OpenAlex primary-affiliation mode.
-  // This keeps regional relevance while increasing recall when Scopus/WoS are unavailable.
-  if (
-    finalArticles.length < plan.requestedCount &&
-    plan.geoStrict &&
-    plan.geoStrictMode === "all"
-  ) {
-    const relaxedPlan: AcademicArticlesExportPlan = { ...plan, geoStrictMode: "primary" };
-    const relaxedPool = enrichedDeduped.filter((a) =>
-      isAllowedByDateRange(a) &&
-      (
-        a.source === "openalex"
-          ? isAllowedByRegion(a, relaxedPlan, allowedCountries, allowedCountryCodes)
-          : isAllowedByRegion(a, plan, allowedCountries, allowedCountryCodes)
-      )
-    );
-
-    const merged = dedupeUnifiedArticles([...finalArticles, ...rankArticles(relaxedPool)]);
-    const recovered = rankArticles(merged).slice(0, plan.requestedCount);
-    if (recovered.length > finalArticles.length) {
-      notes.push(
-        `Se aplico fallback geo para OpenAlex (primary affiliation) para mejorar cobertura: ${finalArticles.length} -> ${recovered.length}.`
-      );
-      finalArticles = recovered;
-    }
-  }
+  const finalArticles = ranked.slice(0, plan.requestedCount);
 
   if (finalArticles.length < plan.requestedCount) {
     notes.push(`No se lograron ${plan.requestedCount} articulos con los filtros; se encontraron ${finalArticles.length}.`);

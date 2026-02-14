@@ -174,10 +174,11 @@ export function createMfaRouter() {
           return res.status(500).json({ success: false, message: "Error al iniciar sesión." });
         }
 
-        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
         session.authUserId = userId;
         session.passport = session.passport || {};
-        session.passport.user = sessionUser;
+        if (typeof session.passport.user !== "string") {
+          session.passport.user = String(userId);
+        }
         delete session.pendingMfa;
 
         try {

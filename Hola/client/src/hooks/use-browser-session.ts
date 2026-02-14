@@ -25,27 +25,6 @@ export interface BrowserSessionState {
   error: string | null;
 }
 
-export interface SseBrowserStep {
-  stepNumber: number;
-  totalSteps: number;
-  action: string;
-  reasoning: string;
-  goalProgress: string;
-  screenshot: string;
-  url: string;
-  title: string;
-}
-
-declare global {
-  interface Window {
-    __ILIAGPT_BROWSER_SESSION_DEBUG__?: {
-      start: (objective: string) => void;
-      update: (step: SseBrowserStep) => void;
-      reset: () => void;
-    };
-  }
-}
-
 const initialState: BrowserSessionState = {
   sessionId: null,
   status: "idle",
@@ -95,7 +74,16 @@ export function globalStartSseSession(objective: string) {
   });
 }
 
-export function globalUpdateFromSseStep(step: SseBrowserStep) {
+export function globalUpdateFromSseStep(step: {
+  stepNumber: number;
+  totalSteps: number;
+  action: string;
+  reasoning: string;
+  goalProgress: string;
+  screenshot: string;
+  url: string;
+  title: string;
+}) {
   console.log('[BrowserSession] updateFromSseStep called:', step.stepNumber, step.action, step.url?.substring(0, 50));
   setGlobalState(prev => {
     // Auto-initialize session if this is the first step (stepNumber 0 = browser_started)
@@ -451,7 +439,16 @@ export function useBrowserSession() {
 
   // Direct update from SSE browser_step events (no WebSocket/polling needed)
   // These now delegate to global functions so they work across remounts
-  const updateFromSseStep = useCallback((step: SseBrowserStep) => {
+  const updateFromSseStep = useCallback((step: {
+    stepNumber: number;
+    totalSteps: number;
+    action: string;
+    reasoning: string;
+    goalProgress: string;
+    screenshot: string;
+    url: string;
+    title: string;
+  }) => {
     globalUpdateFromSseStep(step);
   }, []);
 
@@ -461,18 +458,7 @@ export function useBrowserSession() {
   }, []);
 
   useEffect(() => {
-    if (import.meta.env.DEV && typeof window !== "undefined") {
-      window.__ILIAGPT_BROWSER_SESSION_DEBUG__ = {
-        start: globalStartSseSession,
-        update: globalUpdateFromSseStep,
-        reset: globalResetBrowserSession,
-      };
-    }
-
     return () => {
-      if (import.meta.env.DEV && typeof window !== "undefined") {
-        delete window.__ILIAGPT_BROWSER_SESSION_DEBUG__;
-      }
       stopPolling();
       if (wsRef.current) {
         wsRef.current.close();

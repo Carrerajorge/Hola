@@ -28,7 +28,6 @@ import { useAgentStore } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
-import { globalResetBrowserSession } from "@/hooks/use-browser-session";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
 const WhatsAppConnectDialogLazy = lazy(() =>
@@ -60,7 +59,16 @@ const PromptTemplatesDialogLazy = lazy(() =>
 export default function Home() {
   const isMobile = useIsMobile();
   const [location, setLocation] = useLocation();
-  const { isLoading } = useAuth();
+  const { user, isLoading, isReady } = useAuth();
+
+
+  useEffect(() => {
+    // Allow anonymous/guest sessions to use the chat UI. Only redirect when we
+    // couldn't establish any identity at all (e.g. auth fetch and anon identity failed).
+    if (isReady && !isLoading && !user) {
+      setLocation("/welcome");
+    }
+  }, [user, isLoading, isReady, setLocation]);
 
   useEffect(() => {
     useMediaLibrary.getState().preload();
@@ -242,6 +250,8 @@ export default function Home() {
 
     if (activeChat?.id === chatIdFromUrl) return;
 
+
+
     // Exit new chat mode and clear project selection
 
     setIsNewChatMode(false);
@@ -251,6 +261,8 @@ export default function Home() {
     pendingChatIdRef.current = null;
 
     setSelectedProjectId(null);
+
+
 
     setActiveChatId(chatIdFromUrl);
 
@@ -352,9 +364,6 @@ export default function Home() {
       setActiveGpt(null);
     }
 
-    // Reset browser session state (VirtualComputer)
-    globalResetBrowserSession();
-
     // Close any open dialogs
     setIsAppsDialogOpen(false);
     setLocation("/");
@@ -378,6 +387,9 @@ export default function Home() {
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
+    // CRITICAL: Use the stableKey from createChat to ensure chatInterfaceKey
+    // matches activeChat.stableKey after backend confirms. This prevents
+    // component remount when newChatStableKey is cleared during navigation.
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
     const result = await addMessage(pendingId, message);
@@ -472,12 +484,12 @@ export default function Home() {
   }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat, addMessage]);
 
 
-  // FIXED: Use a CONSTANT key so ChatInterface NEVER remounts during chat transitions.
-  // Previously, key changes (from "default-chat" → "stable-xxx" → "stable-yyy") caused
-  // unmount/remount cycles that killed active SSE streams. With a constant key,
-  // ChatInterface stays mounted and re-renders with new props (chatId, messages) instead.
-  // Chat state isolation is handled by the chatId prop, not by React key.
-  const chatInterfaceKey = "chat-interface-singleton";
+  const chatInterfaceKey = useMemo(() => {
+    // Prioritize newChatStableKey to prevent component remount during new chat creation
+    if (newChatStableKey) return newChatStableKey;
+    if (activeChat) return activeChat.stableKey;
+    return "default-chat";
+  }, [activeChat?.stableKey, newChatStableKey]);
 
   // Get messages from either activeChat or pending chat
   const currentMessages = useMemo(() => {

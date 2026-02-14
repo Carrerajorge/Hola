@@ -384,9 +384,6 @@ export function useSettings(userId?: string | null) {
     value: UserSettings[K]
   ) => {
     setSettingsState((prev) => {
-      if (Object.is(prev[key], value)) {
-        return prev;
-      }
       const updated = { ...prev, [key]: value };
       saveSettings(updated);
       debouncedSyncToServer(updated);
@@ -396,11 +393,6 @@ export function useSettings(userId?: string | null) {
 
   const updateSettings = useCallback((updates: Partial<UserSettings>) => {
     setSettingsState((prev) => {
-      const entries = Object.entries(updates) as Array<[keyof UserSettings, UserSettings[keyof UserSettings]]>;
-      const hasChanges = entries.some(([key, value]) => !Object.is(prev[key], value));
-      if (!hasChanges) {
-        return prev;
-      }
       const updated = { ...prev, ...updates };
       saveSettings(updated);
       debouncedSyncToServer(updated);

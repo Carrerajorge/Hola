@@ -34,6 +34,8 @@ test-results/
 playwright-report/
 e2e-reports/
 coverage/
+.coverage
+**/.hypothesis/
 test_fixtures/large-10k-rows.xlsx
 test_output.docx
 test_excel_output.xlsx
@@ -65,6 +67,8 @@ verify.log
 **/__pycache__/
 **/*.pyc
 **/*.pyo
+**/.venv/
+**/.pytest_cache/
 
 # WhatsApp auth state
 data/whatsapp-web/

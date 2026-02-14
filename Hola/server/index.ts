@@ -60,20 +60,22 @@ app.use(requestLoggerMiddleware);
 app.use(canonicalUrlMiddleware);
 
 // Compression middleware - skip SSE streams (text/event-stream) to prevent buffering.
-// compression() holds data until it has enough to compress, which completely breaks
-// real-time Server-Sent Events (browser automation steps, thinking indicators, etc.).
-app.use(compression({
-  filter: (req, res) => {
-    // Skip compression for SSE endpoints — these MUST stream unbuffered
-    if (req.url?.includes('/chat/stream') || req.url?.includes('/super/stream') ||
-        req.headers.accept === 'text/event-stream' ||
-        res.getHeader('Content-Type')?.toString().includes('text/event-stream')) {
-      return false;
-    }
-    // Use default filter for everything else
-    return compression.filter(req, res);
-  }
-}));
+// compression() buffers output to build compression blocks, which breaks real-time SSE.
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (
+        req.url?.includes("/chat/stream") ||
+        req.url?.includes("/super/stream") ||
+        req.headers.accept === "text/event-stream" ||
+        res.getHeader("Content-Type")?.toString().includes("text/event-stream")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 // CORS configuration - must be before other middleware
 app.use(corsMiddleware);
@@ -106,9 +108,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-
-// Keep `/welcome` as a public SPA route so logout/marketing links land on the
-// client landing page instead of forcing a redirect to `/`.
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);

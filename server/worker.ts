@@ -89,14 +89,46 @@ const processors: Record<TaskType, (data: any) => Promise<any>> = {
     },
 
     ocr: async (data: { buffer: { type: 'Buffer', data: number[] } }) => {
-        // Tesseract.js implementation
-        const Tesseract = (await import("tesseract.js")).default;
         // Handle Buffer from JSON (Redis serialization)
         const buffer = Buffer.from(data.buffer.data);
 
-        const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
+        const serviceUrl = process.env.OCR_SERVICE_URL;
 
-        return { text, confidence };
+        // Prefer the decoupled OCR microservice (PaddleOCR primary + Tesseract fallback).
+        if (serviceUrl) {
+            try {
+                const url = new URL("/v1/ocr", serviceUrl);
+                url.searchParams.set("engine", "auto");
+                url.searchParams.set("lang", "eng");
+
+                const isPdf = buffer.subarray(0, 4).toString("ascii") === "%PDF";
+                const filename = isPdf ? "upload.pdf" : "upload.png";
+                const mime = isPdf ? "application/pdf" : "image/png";
+
+                const form = new FormData();
+                form.append("file", new Blob([buffer], { type: mime }), filename);
+
+                const resp = await fetch(url.toString(), { method: "POST", body: form });
+                if (resp.ok) {
+                    const json: any = await resp.json();
+                    const avg = typeof json.avg_confidence === "number" ? json.avg_confidence : undefined;
+                    return {
+                        text: String(json.text ?? ""),
+                        confidence: avg !== undefined ? avg * 100 : undefined,
+                        engine: json.engine ?? "unknown",
+                        timingsMs: json.timings_ms ?? undefined,
+                    };
+                }
+            } catch {
+                // Best-effort: fall back to local OCR.
+            }
+        }
+
+        // Fallback (legacy): Tesseract.js implementation
+        const Tesseract = (await import("tesseract.js")).default;
+        const { data: { text, confidence } } = await Tesseract.recognize(buffer, "eng");
+
+        return { text, confidence, engine: "tesseract.js" };
     },
 
     vision: async (data: { image: string }) => {

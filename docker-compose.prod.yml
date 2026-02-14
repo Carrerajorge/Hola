@@ -42,6 +42,8 @@ services:
 
       SHELL_COMMAND_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
 
+      OCR_SERVICE_URL: http://ocr:8000
+
     ports:
 
       - "5000:5000"
@@ -57,6 +59,8 @@ services:
       - redis
 
       - sandbox-runner
+
+      - ocr
 
     networks:
 
@@ -93,11 +97,15 @@ services:
 
       REDIS_URL: redis://redis:6379
 
+      OCR_SERVICE_URL: http://ocr:8000
+
     depends_on:
 
       - postgres
 
       - redis
+
+      - ocr
 
     networks:
 
@@ -196,6 +204,67 @@ services:
       - app-network
 
 
+  ocr:
+
+    image: iliagpt-ocr:${APP_VERSION:-dev}
+
+    build:
+
+      context: .
+
+      dockerfile: ocr_service/Dockerfile
+
+    env_file:
+
+      - .env.production
+
+    environment:
+
+      OCR_HOST: 0.0.0.0
+
+      OCR_PORT: "8000"
+
+      OCR_PREFER_ENGINE: ${OCR_PREFER_ENGINE:-auto}
+
+      OCR_DEFAULT_LANG: ${OCR_DEFAULT_LANG:-eng}
+
+      OCR_DPI: ${OCR_DPI:-300}
+
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-10}
+
+      OCR_MAX_FILE_SIZE_MB: ${OCR_MAX_FILE_SIZE_MB:-15}
+
+      OCR_MAX_CONCURRENT_REQUESTS: ${OCR_MAX_CONCURRENT_REQUESTS:-4}
+
+      OCR_API_KEY: ${OCR_API_KEY:-}
+
+      OCR_LOG_LEVEL: ${OCR_LOG_LEVEL:-INFO}
+
+    expose:
+
+      - "8000"
+
+    volumes:
+
+      - ocr_models:/root/.paddleocr
+
+    networks:
+
+      - app-network
+
+    healthcheck:
+
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1"]
+
+      interval: 10s
+
+      timeout: 3s
+
+      retries: 10
+
+    mem_limit: 1g
+
+
 
 networks:
 
@@ -210,3 +279,5 @@ volumes:
   postgres_data:
 
   agent_workspace:
+
+  ocr_models:

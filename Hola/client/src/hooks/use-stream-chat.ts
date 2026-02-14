@@ -198,7 +198,6 @@ export function useStreamChat(deps: StreamChatDeps) {
       setAiProcessSteps?.([]);
 
       let fullContent = "";
-      let browserStepCounter = 0;
       let response: Response | undefined;
 
       try {
@@ -299,25 +298,6 @@ export function useStreamChat(deps: StreamChatDeps) {
                   pendingContentRef.current = fullContent;
                   scheduleFlush();
                 }
-              }
-
-              // Inline browser report: compact step line with emoji indicators
-              if (currentEventType === "browser_report") {
-                browserStepCounter++;
-                const progress = data.goalProgress || "0%";
-                const emoji = data.action === "done" ? "✅" :
-                  data.action === "navigate" ? "🌐" :
-                  data.action === "click" ? "👆" :
-                  data.action === "type" ? "⌨️" :
-                  data.action === "select" ? "📋" :
-                  data.action === "scroll" ? "📜" :
-                  data.action === "wait" ? "⏳" : "⚙️";
-                const reasoning = (data.reasoning || "").slice(0, 80);
-                const reportChunk = `\n> ${emoji} **${browserStepCounter}.** ${reasoning} · *${progress}*\n`;
-                fullContent += reportChunk;
-                streamingContentRef.current = fullContent;
-                pendingContentRef.current = fullContent;
-                scheduleFlush();
               }
 
               // Handle AI state changes from events.
