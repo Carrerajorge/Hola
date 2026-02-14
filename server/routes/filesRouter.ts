@@ -1336,27 +1336,26 @@ export function createFilesRouter() {
   });
 
   // Serve locally uploaded files with proper content type
-	  router.get("/api/local-files/:objectId", async (req, res) => {
-	    try {
-	      const { objectId } = req.params;
+  router.get("/api/local-files/:objectId", async (req, res) => {
+    try {
+      const { objectId } = req.params;
 
-	      // Security: validate objectId to prevent path traversal
-	      if (!isValidObjectId(objectId)) {
-	        return res.status(400).json({ error: "Invalid object ID" });
-	      }
+      // Security: validate objectId to prevent path traversal
+      if (!isValidObjectId(objectId)) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
 
-	      const fsSync = await import("fs");
-	      const pathMod = await import("path");
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
 
-	      const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
-	      const filePath = pathMod.default.join(uploadsDir, objectId);
+      const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
+      const filePath = pathMod.default.resolve(uploadsDir, objectId);
+      const safePrefix = uploadsDir + pathMod.default.sep;
 
-	      // Security: ensure resolved path stays within uploads directory
-	      const resolvedPath = pathMod.default.resolve(filePath);
-	      if (!resolvedPath.startsWith(uploadsDir + pathMod.default.sep)) {
-	        console.warn(`[Security] Path traversal attempt in local-files: ${objectId}`);
-	        return res.status(400).json({ error: "Invalid path" });
-	      }
+      // Security: ensure resolved path stays within uploads directory
+      if (!filePath.startsWith(safePrefix)) {
+        console.warn(`[Security] Path traversal attempt in local-files: ${objectId}`);
+        return res.status(400).json({ error: "Invalid path" });
       }
 
       if (!fsSync.default.existsSync(filePath)) {

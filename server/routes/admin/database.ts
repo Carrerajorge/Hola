@@ -461,9 +461,6 @@ databaseRouter.get("/tables/:tableName", async (req, res) => {
     }
 });
 
-// SECURITY FIX #39: Query length limit
-const MAX_QUERY_LENGTH = 10000;
-
 databaseRouter.post("/query", async (req, res) => {
     try {
         const { query } = req.body;

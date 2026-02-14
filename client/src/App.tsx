@@ -182,10 +182,6 @@ function GlobalKeyboardShortcuts() {
     setShortcutsModalOpen(true);
   }, []);
 
-  const handleOpenShortcuts = useCallback(() => {
-    setShortcutsModalOpen(true);
-  }, []);
-
   const handleOpenSettings = useCallback(() => {
     setLocation("/settings");
     void trackWorkspaceEvent({
