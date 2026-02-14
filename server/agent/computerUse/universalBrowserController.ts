@@ -1803,15 +1803,17 @@ RULES:
     const escapeRegex = (value: string): string =>
       value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const emitProgress = async (action: string, reasoning: string, progress: string) => {
+    const emitProgress = async (action: string, reasoning: string, progress: string, skipScreenshot = false) => {
       stepNumber += 1;
       const page = this.getActivePage(sessionId);
       let screenshot = "";
-      try {
-        screenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 50 });
-        screenshots.push(screenshot);
-      } catch {
-        // Best effort screenshot
+      if (!skipScreenshot) {
+        try {
+          screenshot = await this.screenshot(sessionId, { type: "jpeg", quality: 40 });
+          screenshots.push(screenshot);
+        } catch {
+          // Best effort screenshot
+        }
       }
       let url = "";
       let title = "";
@@ -2215,7 +2217,7 @@ RULES:
           progressSent = true;
           await emitProgress("wait", waitReasoning, waitProgress);
         }
-        await page.waitForTimeout(900).catch(() => {});
+        await page.waitForTimeout(500).catch(() => {});
         state = await readFlowState();
       }
       return state;
@@ -2245,20 +2247,19 @@ RULES:
         }
       };
       page.on("response", responseListener);
-      await page.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
-      // Verify page loaded correctly — check for reservation form indicators
+      // Page is already navigated by the caller (agentExecutor navigate()).
+      // Just ensure DOM is ready — this should be near-instant since navigate() already waited.
+      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      // Quick check: if the page somehow failed to load, reload once
       const pageLoaded = await page.evaluate(() => {
         const body = document.body?.innerText || "";
-        // CoverManager pages should have at least a select or calendar element
-        return body.length > 100 || !!document.querySelector("select, .ui-datepicker, #datepicker_calendar, .calendar");
+        return body.length > 50 || !!document.querySelector("select, .ui-datepicker, #datepicker_calendar, .calendar");
       }).catch(() => false);
       if (!pageLoaded) {
-        // Retry with full page reload
         console.log("[CalaReservation] Page appears empty, retrying with reload...");
         await page.reload({ timeout: 15000 }).catch(() => {});
         await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
       }
-      await page.waitForTimeout(800).catch(() => {});
       steps.push("Opened Cala reservation page.");
       await emitProgress("navigate", "Página de reserva abierta", "10%");
 
@@ -2319,9 +2320,9 @@ RULES:
       }
 
       // Brief wait for calendar to update after party size change
-      await page.waitForTimeout(800).catch(() => {});
+      await page.waitForTimeout(400).catch(() => {});
       steps.push(`Selected party size: ${partySize}.`);
-      await emitProgress("select", `Seleccionadas ${partySize} personas`, "20%");
+      await emitProgress("select", `Seleccionadas ${partySize} personas`, "20%", true);
 
       const day = parseDayFromDate(reservation.date);
       if (!day || day < 1 || day > 31) {
@@ -2490,7 +2491,7 @@ RULES:
           screenshots,
         };
       }
-      await page.waitForTimeout(1000).catch(() => {});
+      await page.waitForTimeout(500).catch(() => {});
       steps.push(`Selected date day: ${day}.`);
       await emitProgress("click", `Fecha seleccionada (día ${day})`, "30%");
 
@@ -2573,7 +2574,7 @@ RULES:
         }
         // Time slots may exist in a non-standard format or the page is slow — try once more with longer wait
         ensureBudget();
-        await page.waitForTimeout(1000).catch(() => {});
+        await page.waitForTimeout(500).catch(() => {});
         availableTimes = await scanAvailableTimes();
       }
 
@@ -2738,7 +2739,7 @@ RULES:
       await quickType("#user_phone", phone);
       await quickType("#user_phone_number", phone);
       await autofillVisibleRequiredFields({ firstName, lastName: lastName || firstName, email, phone });
-      await page.waitForTimeout(600).catch(() => {});
+      await page.waitForTimeout(300).catch(() => {});
       steps.push("Filled reservation contact details.");
       await emitProgress("type", "Datos de contacto completados", "55%");
 
@@ -2749,7 +2750,7 @@ RULES:
       await ensureInputChecked('[name="legal"]');
       await ensureInputChecked('[name="privacy"]');
       steps.push("Accepted reservation terms.");
-      await emitProgress("click", "Condiciones legales aceptadas", "62%");
+      await emitProgress("click", "Condiciones legales aceptadas", "62%", true);
 
       ensureBudget();
       const step2Submit = await clickSubmitButton([
@@ -2875,7 +2876,7 @@ RULES:
         await autofillVisibleRequiredFields({ firstName, lastName: lastName || "-", email, phone });
         await page.waitForTimeout(500).catch(() => {});
         steps.push("Answered additional reservation questions.");
-        await emitProgress("type", "Preguntas adicionales completadas", "82%");
+        await emitProgress("type", "Preguntas adicionales completadas", "82%", true);
 
         const step3Submit = await clickSubmitButton([
           "input.reservarButton.step3:not(.ng-hide)",
@@ -2896,7 +2897,7 @@ RULES:
             screenshots,
           };
         }
-        await page.waitForTimeout(1200).catch(() => {});
+        await page.waitForTimeout(600).catch(() => {});
         flowState = await waitForFlowTransition(
           15000,
           "Esperando confirmacion final de la reserva",

@@ -506,7 +506,7 @@ async function executeToolCall(
           const requestedMaxSteps = Number.isFinite(Number(args.maxSteps)) ? Number(args.maxSteps) : undefined;
           // Allow up to 20 steps, 3 minutes total runtime, 25s per Gemini vision decision
           const maxSteps = Math.max(1, Math.min(requestedMaxSteps ?? 15, 20));
-          const maxRuntimeMs = 180000;  // 3 minutes max
+          const maxRuntimeMs = 300000;  // 5 minutes max
           const decisionTimeoutMs = 25000;  // 25s per Gemini vision decision
           try {
             // Send immediate "browser_started" event so the UI opens the virtual computer immediately
@@ -629,7 +629,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 180000 }
+                  { maxRuntimeMs: 300000 }
                 );
               })()
               : await universalBrowserController.agenticNavigate(
