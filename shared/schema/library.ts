@@ -18,7 +18,7 @@ export const libraryItems = pgTable("library_items", {
     metadata: jsonb("metadata"),
     sourceChatId: varchar("source_chat_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("library_items_user_idx").on(table.userId),
     index("library_items_type_idx").on(table.userId, table.mediaType),
 ]);
@@ -53,7 +53,7 @@ export const libraryFolders = pgTable('library_folders', {
     isSystem: boolean('is_system').default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('library_folders_user_idx').on(table.userId),
     index('library_folders_parent_idx').on(table.parentId),
 ]);
@@ -96,7 +96,7 @@ export const libraryFiles = pgTable('library_files', {
     deletedAt: timestamp('deleted_at'),
     version: integer('version').default(1),
     parentVersionId: integer('parent_version_id'),
-}, (table) => [
+}, (table: any) => [
     index('library_files_user_idx').on(table.userId),
     index('library_files_type_idx').on(table.userId, table.type),
     index('library_files_folder_idx').on(table.folderId),
@@ -129,7 +129,7 @@ export const libraryCollections = pgTable('library_collections', {
     isPublic: boolean('is_public').default(false),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('library_collections_user_idx').on(table.userId),
 ]);
 
@@ -144,7 +144,7 @@ export const libraryFileCollections = pgTable('library_file_collections', {
     collectionId: integer('collection_id').notNull(),
     order: integer('order').default(0),
     addedAt: timestamp('added_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('library_file_collections_file_idx').on(table.fileId),
     index('library_file_collections_collection_idx').on(table.collectionId),
 ]);
@@ -158,7 +158,7 @@ export const libraryActivity = pgTable('library_activity', {
     userId: varchar('user_id').notNull(),
     details: jsonb('details'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('library_activity_user_idx').on(table.userId),
     index('library_activity_file_idx').on(table.fileId),
     index('library_activity_created_idx').on(table.createdAt),
@@ -177,7 +177,7 @@ export const libraryStorage = pgTable('library_storage', {
     fileCount: integer('file_count').default(0),
     quotaBytes: bigint('quota_bytes', { mode: 'number' }).default(5368709120),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('library_storage_user_idx').on(table.userId),
 ]);
 
@@ -206,7 +206,7 @@ export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
     encoding: text('encoding'),
     pageCount: integer('page_count'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('spreadsheet_uploads_user_idx').on(table.userId),
     index('spreadsheet_uploads_status_idx').on(table.status),
 ]);
@@ -234,7 +234,7 @@ export const spreadsheetSheets = pgTable('spreadsheet_sheets', {
     columnTypes: jsonb('column_types').$type<z.infer<typeof columnTypeSchema>[]>(),
     previewData: jsonb('preview_data').$type<any[][]>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('spreadsheet_sheets_upload_idx').on(table.uploadId),
 ]);
 
@@ -277,7 +277,7 @@ export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_session
     completedJobs: integer('completed_jobs').default(0),
     failedJobs: integer('failed_jobs').default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('spreadsheet_analysis_user_idx').on(table.userId),
     index('spreadsheet_analysis_upload_idx').on(table.uploadId),
     index('spreadsheet_analysis_status_idx').on(table.status),
@@ -301,7 +301,7 @@ export const spreadsheetAnalysisJobs = pgTable('spreadsheet_analysis_jobs', {
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('spreadsheet_analysis_jobs_session_idx').on(table.sessionId),
     index('spreadsheet_analysis_jobs_status_idx').on(table.status),
 ]);
@@ -322,7 +322,7 @@ export const spreadsheetAnalysisOutputs = pgTable('spreadsheet_analysis_outputs'
     payload: jsonb('payload').notNull(),
     order: integer('order').default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('spreadsheet_outputs_session_idx').on(table.sessionId),
 ]);
 
@@ -344,7 +344,7 @@ export const chatMessageAnalysis = pgTable('chat_message_analysis', {
     completedAt: timestamp('completed_at'),
     summary: text('summary'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index('chat_message_analysis_message_idx').on(table.messageId),
     index('chat_message_analysis_upload_idx').on(table.uploadId),
     index('chat_message_analysis_session_idx').on(table.sessionId),
@@ -370,7 +370,7 @@ export const excelDocuments = pgTable('excel_documents', {
     isTemplate: boolean('is_template').default(false),
     templateCategory: text('template_category'),
     version: integer('version').default(1)
-}, (table) => [
+}, (table: any) => [
     index("excel_documents_uuid_idx").on(table.uuid),
     index("excel_documents_created_idx").on(table.createdAt),
 ]);
@@ -392,7 +392,7 @@ export const companyKnowledge = pgTable("company_knowledge", {
     source: text("source").default("manual"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("company_knowledge_user_idx").on(table.userId),
 ]);
 

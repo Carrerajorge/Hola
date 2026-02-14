@@ -50,7 +50,7 @@ export const ragChunks = pgTable("rag_chunks", {
     lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("rag_chunks_tenant_user_idx").on(table.tenantId, table.userId),
     index("rag_chunks_conversation_idx").on(table.conversationId),
     index("rag_chunks_source_idx").on(table.source, table.sourceId),
@@ -90,7 +90,7 @@ export const ragKvStore = pgTable("rag_kv_store", {
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     uniqueIndex("rag_kv_tenant_user_ns_key_idx").on(table.tenantId, table.userId, table.namespace, table.key),
     index("rag_kv_namespace_idx").on(table.namespace),
     index("rag_kv_expires_idx").on(table.expiresAt),
@@ -149,7 +149,7 @@ export const userMemories = pgTable("user_memories", {
     lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("user_memories_tenant_user_idx").on(table.tenantId, table.userId),
     index("user_memories_category_idx").on(table.category),
     index("user_memories_scope_idx").on(table.scope),
@@ -192,7 +192,7 @@ export const episodicSummaries = pgTable("episodic_summaries", {
     isActive: boolean("is_active").default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("episodic_summaries_user_idx").on(table.tenantId, table.userId),
     uniqueIndex("episodic_summaries_conv_idx").on(table.conversationId),
     index("episodic_summaries_embedding_idx").using("hnsw", sql`${table.embedding} vector_cosine_ops`),
@@ -229,7 +229,7 @@ export const ragAuditLog = pgTable("rag_audit_log", {
     success: boolean("success").default(true),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("rag_audit_tenant_user_idx").on(table.tenantId, table.userId),
     index("rag_audit_action_idx").on(table.action),
     index("rag_audit_resource_idx").on(table.resourceType, table.resourceId),
@@ -271,7 +271,7 @@ export const ragEvalResults = pgTable("rag_eval_results", {
     retrievalConfig: jsonb("retrieval_config").default({}),
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("rag_eval_run_idx").on(table.runId),
     index("rag_eval_test_case_idx").on(table.testCaseId),
     index("rag_eval_created_idx").on(table.createdAt),

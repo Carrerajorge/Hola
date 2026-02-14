@@ -36,7 +36,7 @@ export const billingCreditGrants = pgTable(
     expiresAt: timestamp("expires_at").notNull(),
     metadata: jsonb("metadata"),
   },
-  (table) => [
+  (table: any) => [
     index("billing_credit_grants_user_idx").on(table.userId),
     index("billing_credit_grants_expires_idx").on(table.expiresAt),
     index("billing_credit_grants_user_expires_idx").on(table.userId, table.expiresAt),

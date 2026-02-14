@@ -17,7 +17,7 @@ export const agentRuns = pgTable("agent_runs", {
     startedAt: timestamp("started_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
     error: text("error"),
-}, (table) => [
+}, (table: any) => [
     index("agent_runs_conversation_idx").on(table.conversationId),
     index("agent_runs_status_idx").on(table.status),
     index("agent_runs_conversation_started_idx").on(table.conversationId, table.startedAt),
@@ -41,7 +41,7 @@ export const agentSteps = pgTable("agent_steps", {
     success: text("success").default("pending"), // pending, success, failed
     error: text("error"),
     stepIndex: integer("step_index").notNull().default(0),
-}, (table) => [
+}, (table: any) => [
     index("agent_steps_run_idx").on(table.runId),
     index("agent_steps_run_step_idx").on(table.runId, table.stepIndex),
     index("agent_steps_step_type_idx").on(table.stepType),
@@ -61,7 +61,7 @@ export const agentAssets = pgTable("agent_assets", {
     content: text("content"),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_assets_run_idx").on(table.runId),
     index("agent_assets_asset_type_idx").on(table.assetType),
 ]);
@@ -88,7 +88,7 @@ export const toolCallLogs = pgTable("tool_call_logs", {
     latencyMs: integer("latency_ms"),
     idempotencyKey: text("idempotency_key"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("tool_call_logs_user_id_idx").on(table.userId),
     index("tool_call_logs_tool_id_idx").on(table.toolId),
     index("tool_call_logs_created_at_idx").on(table.createdAt),
@@ -109,7 +109,7 @@ export const cachedPages = pgTable("cached_pages", {
     content: text("content"),
     fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at"),
-}, (table) => [
+}, (table: any) => [
     index("cached_pages_url_hash_idx").on(table.urlHash),
     index("cached_pages_url_idx").on(table.url),
     index("cached_pages_expires_at_idx").on(table.expiresAt),
@@ -128,7 +128,7 @@ export const domainPolicies = pgTable("domain_policies", {
     rateLimit: integer("rate_limit").default(10), // requests per minute
     customHeaders: jsonb("custom_headers"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     check("domain_policies_rate_limit_check", sql`${table.rateLimit} >= 0`),
 ]);
 
@@ -161,7 +161,7 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
     pendingConfirmation: jsonb("pending_confirmation"),
     awaitingConfirmationSince: timestamp("awaiting_confirmation_since"),
     confirmedStepIndices: jsonb("confirmed_step_indices"),
-}, (table) => [
+}, (table: any) => [
     index("agent_mode_runs_chat_idx").on(table.chatId),
     index("agent_mode_runs_message_idx").on(table.messageId),
     index("agent_mode_runs_status_idx").on(table.status),
@@ -187,7 +187,7 @@ export const agentModeSteps = pgTable("agent_mode_steps", {
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_mode_steps_run_idx").on(table.runId),
     index("agent_mode_steps_status_idx").on(table.status),
 ]);
@@ -211,7 +211,7 @@ export const agentModeEvents = pgTable("agent_mode_events", {
     durationMs: integer("duration_ms"),
     errorCode: text("error_code"),
     retryCount: integer("retry_count").default(0),
-}, (table) => [
+}, (table: any) => [
     index("agent_mode_events_run_idx").on(table.runId),
     index("agent_mode_events_correlation_idx").on(table.correlationId),
     index("agent_mode_events_type_idx").on(table.eventType),
@@ -233,7 +233,7 @@ export const agentWorkspaces = pgTable("agent_workspaces", {
     metadata: jsonb("metadata"), // additional metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_workspaces_run_idx").on(table.runId),
     index("agent_workspaces_path_idx").on(table.runId, table.filePath),
     index("agent_workspaces_file_type_idx").on(table.fileType),
@@ -255,7 +255,7 @@ export const agentMemoryStore = pgTable("agent_memory_store", {
     expiresAt: timestamp("expires_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_memory_store_chat_key_idx").on(table.chatId, table.memoryKey),
     index("agent_memory_store_user_idx").on(table.userId),
     index("agent_memory_store_type_idx").on(table.memoryType),
@@ -280,7 +280,7 @@ export const requestSpecHistory = pgTable("request_spec_history", {
     executionDurationMs: integer("execution_duration_ms"),
     status: text("status").default("pending"), // pending, completed, failed
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("request_spec_history_chat_created_idx").on(table.chatId, table.createdAt),
     index("request_spec_history_run_idx").on(table.runId),
     index("request_spec_history_intent_idx").on(table.intent),
@@ -305,7 +305,7 @@ export const agentGapLogs = pgTable("agent_gap_logs", {
     frequencyCount: integer("frequency_count").default(1),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_gap_logs_status_idx").on(table.status),
     index("agent_gap_logs_created_idx").on(table.createdAt),
     index("agent_gap_logs_user_id_idx").on(table.userId),
@@ -328,7 +328,7 @@ export const agentMemories = pgTable("agent_memories", {
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_memories_namespace_idx").on(table.namespace),
     index("agent_memories_created_at_idx").on(table.createdAt),
 ]);
@@ -345,7 +345,7 @@ export const agentContext = pgTable("agent_context", {
     tokenCount: integer("token_count").default(0),
     maxTokens: integer("max_tokens").default(128000),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_context_thread_id_idx").on(table.threadId),
     uniqueIndex("agent_context_thread_unique").on(table.threadId),
     check("agent_context_token_count_check", sql`${table.tokenCount} >= 0`),
@@ -364,7 +364,7 @@ export const agentSessionState = pgTable("agent_session_state", {
     expiresAt: timestamp("expires_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("agent_session_state_session_idx").on(table.sessionId),
     uniqueIndex("agent_session_state_unique").on(table.sessionId, table.key),
 ]);
@@ -386,7 +386,7 @@ export const codeInterpreterRuns = pgTable("code_interpreter_runs", {
     stderr: text("stderr"),
     executionTimeMs: integer("execution_time_ms"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("code_runs_conversation_idx").on(table.conversationId),
     index("code_runs_user_idx").on(table.userId),
     index("code_runs_status_idx").on(table.status),
@@ -407,7 +407,7 @@ export const codeInterpreterArtifacts = pgTable("code_interpreter_artifacts", {
     data: text("data"), // base64 encoded for images, or text content
     mimeType: text("mime_type"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("code_artifacts_run_idx").on(table.runId),
 ]);
 
@@ -473,7 +473,7 @@ export const customSkills = pgTable("custom_skills", {
     lastUsedAt: timestamp("last_used_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("custom_skills_user_id_idx").on(table.userId),
     index("custom_skills_category_idx").on(table.category),
     index("custom_skills_enabled_idx").on(table.enabled),

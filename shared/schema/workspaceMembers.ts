@@ -27,7 +27,7 @@ export const workspaceInvitations = pgTable(
     acceptedAt: timestamp("accepted_at"),
     revokedAt: timestamp("revoked_at"),
   },
-  (table) => [
+  (table: any) => [
     index("workspace_invitations_org_idx").on(table.orgId),
     index("workspace_invitations_email_idx").on(table.email),
     index("workspace_invitations_status_idx").on(table.status),
