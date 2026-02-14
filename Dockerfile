@@ -86,8 +86,15 @@ RUN groupadd --system --gid 1001 nodejs \
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Install wget for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends wget \
+# Install Playwright Chromium system dependencies + wget for healthcheck.
+# These are the shared libraries Playwright's bundled Chromium needs on Debian.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget ca-certificates fonts-liberation \
+      libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 \
+      libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \
+      libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
+      libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy prod dependencies only (with ownership)
@@ -98,13 +105,10 @@ COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
 COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 
-# Install Playwright Chromium + all its system dependencies.
-# `install-deps chromium` uses the distro's package manager to install the exact
-# set of shared libraries Chromium needs (varies by Debian version).
-# `install chromium` downloads the matching Chromium binary.
+# Download Playwright's bundled Chromium browser binary.
+# System deps are installed above via apt-get; here we only fetch the browser.
 ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
-RUN npx playwright install-deps chromium \
-  && npx playwright install chromium \
+RUN node ./node_modules/playwright/cli.js install chromium \
   && chown -R iliagpt:nodejs /app/.playwright-browsers
 
 # Create temp directories for uploads/sandbox with correct permissions
