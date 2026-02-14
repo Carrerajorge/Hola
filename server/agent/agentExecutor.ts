@@ -629,7 +629,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 90000 }
+                  { maxRuntimeMs: 180000 }
                 );
               })()
               : await universalBrowserController.agenticNavigate(

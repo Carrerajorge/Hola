@@ -7,6 +7,7 @@ import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifac
 import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
 import { getGeminiClientOrThrow } from "../lib/gemini";
+import { requestUnderstandingAgent } from "./requestUnderstanding";
 
 export interface AgentExecutorOptions {
   maxIterations?: number;
@@ -288,7 +289,7 @@ function extractReservationDetails(text: string): ReservationDetails {
   const restaurantBeforeKeyword = source.match(
     /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|los\s+|las\s+|the\s+)?(.+?)\s+(?:restaurante|restaurant)\b/i
   );
-  // Pattern 3: "reserva en [Name]" — broader fallback (name after "en" not followed by common stopwords)
+  // Pattern 3: "reserva en [Name]" — broader fallback (single token to avoid greediness)
   const restaurantByReservePattern = source.match(
     /\b(?:reserva(?:r)?|book(?:ing)?)\s+(?:mesa|table)?\s*(?:en|at)\s+(?:el\s+|la\s+|the\s+)?([A-Za-zÁÉÍÓÚÑáéíóúñ'\-]+)(?:\s|$|,)/i
   );
@@ -296,7 +297,11 @@ function extractReservationDetails(text: string): ReservationDetails {
   const restaurantRaw = restaurantAfterKeyword?.[1] || restaurantBeforeKeyword?.[1] || restaurantByReservePattern?.[1];
   if (restaurantRaw) {
     // Clean up: remove leading articles and trailing punctuation
-    details.restaurant = normalizeSpaces(restaurantRaw.replace(/^(?:en|el|la|los|las|the)\s+/i, "").replace(/[,;.]$/, ""));
+    details.restaurant = normalizeSpaces(
+      restaurantRaw
+        .replace(/^(?:en|el|la|los|las|the)\s+/i, "")
+        .replace(/[,;.]$/, ""),
+    );
   }
 
   // Prefer "restaurante en [City]" pattern — capture single word city name (no spaces to avoid greediness)
@@ -624,7 +629,7 @@ async function executeToolCall(
                     phone: reservationDetailsFromGoal?.phone,
                   },
                   onBrowserStep,
-                  { maxRuntimeMs: 90000 } // 90s: turbo block is fast but browser launch + page load take 15-25s
+                  { maxRuntimeMs: 180000 }
                 );
               })()
               : await universalBrowserController.agenticNavigate(
@@ -973,6 +978,80 @@ export async function executeAgentLoop(
   let fullResponse = "";
 
   const recentUserText = collectRecentUserText(messages) || requestSpec.rawMessage || "";
+
+  const requestBrief = await requestUnderstandingAgent.buildBrief({
+    text: recentUserText || requestSpec.rawMessage || "",
+    conversationHistory: messages
+      .slice(-6)
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content || "") })),
+    availableTools: tools.map((tool) => tool.name),
+    userId,
+    chatId,
+    requestId: runId,
+    userPlan: "free",
+  });
+
+  writeSse(res, "brief", {
+    runId,
+    brief: requestBrief,
+  });
+
+  if (requestBrief.blocker?.is_blocked) {
+    const question =
+      normalizeSpaces(requestBrief.blocker.question || "") ||
+      "Necesito una aclaración para ejecutar la solicitud con seguridad.";
+    fullResponse = question;
+
+    writeSse(res, "clarification", {
+      runId,
+      question,
+      blocker: "intent_requirements",
+    });
+
+    const chunks = question.match(/.{1,100}/g) || [question];
+    for (let i = 0; i < chunks.length; i++) {
+      writeSse(res, "chunk", {
+        content: chunks[i],
+        sequence: i + 1,
+        runId,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    await emitTraceEvent(runId, "progress_update", {
+      progress: {
+        current: 0,
+        total: maxIterations,
+        message: "Waiting for required clarification before tool execution",
+      },
+    });
+    await emitTraceEvent(runId, "agent_completed", {
+      agent: {
+        name: requestSpec.primaryAgent,
+        role: "primary",
+        status: "completed",
+      },
+      iterations: 0,
+      artifactsGenerated: 0,
+    });
+
+    return fullResponse;
+  }
+
+  conversationHistory.unshift({
+    role: "system",
+    content: `Execution brief:
+- Objective: ${requestBrief.objective}
+- Scope(in): ${requestBrief.scope.in_scope.join("; ") || "n/a"}
+- Required inputs: ${requestBrief.required_inputs.filter((entry) => entry.required).map((entry) => entry.input).join("; ") || "none"}
+- Expected output: ${requestBrief.expected_output.format} :: ${requestBrief.expected_output.description}
+- Definition of done: ${requestBrief.definition_of_done.join("; ") || "n/a"}
+- Suggested tools: ${requestBrief.tool_routing.suggested_tools.join(", ") || "none"}
+- Blocked tools: ${requestBrief.tool_routing.blocked_tools.join(", ") || "none"}
+- Guardrails flags: ${requestBrief.guardrails.flags.join(", ") || "none"}`,
+  });
+
   const isReservationRequest =
     requestSpec.intent === "web_automation" && isRestaurantReservationRequest(recentUserText);
   const reservationDetails = isReservationRequest ? extractReservationDetails(recentUserText) : undefined;
@@ -987,12 +1066,15 @@ export async function executeAgentLoop(
         question: clarificationQuestion,
         missingFields,
       });
-      // Send as single chunk to preserve markdown formatting
-      writeSse(res, "chunk", {
-        content: clarificationQuestion,
-        sequence: 1,
-        runId
-      });
+      const chunks = clarificationQuestion.match(/.{1,100}/g) || [clarificationQuestion];
+      for (let i = 0; i < chunks.length; i++) {
+        writeSse(res, "chunk", {
+          content: chunks[i],
+          sequence: i + 1,
+          runId
+        });
+        await new Promise(r => setTimeout(r, 10));
+      }
       await emitTraceEvent(runId, "progress_update", {
         progress: {
           current: 0,
@@ -1205,85 +1287,76 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
               r?.data?.confirmation;
             const isNeedsUserInput = dataStatus === "needs_user_input" || missingFields.length > 0;
 
-            // Build rich summary with checklist for reservations
-            // Note: use variables in executeAgentLoop scope (isReservationRequest, reservationDetails, res)
-            // NOT the ones from executeToolCall scope (isReservationGoal, reservationDetailsFromGoal, sseRes, effectiveUrl)
-            const finalUrl = r?.data?.finalUrl || r?.data?.url || "";
-            const allSteps = (r.steps || []).map((s: any) =>
-              typeof s === 'string' ? s : (s?.action || s?.description || JSON.stringify(s).slice(0, 80))
-            );
-
             let summaryText: string;
             if (isNeedsUserInput) {
-              summaryText = clarificationQuestion ||
+              const reason = String(r?.data?.reason || "").toLowerCase();
+              const question =
+                clarificationQuestion ||
                 `Para continuar con la reserva necesito: ${missingFields.join(", ")}.`;
+              // Build rich "needs input" message based on reason
+              if (reason === "no_web_availability" && isReservationRequest) {
+                const rd = reservationDetails;
+                const avail = Array.isArray(r?.data?.availableTimes) ? r.data.availableTimes : [];
+                const availBlock = avail.length > 0 ? `\n\n**Horarios disponibles:** ${avail.join(", ")}` : "";
+                summaryText = `⚠️ **Sin disponibilidad online**\n\n${question}${availBlock}\n\n_Restaurante: ${rd?.restaurant || "—"} · Fecha: ${rd?.date || "—"} · Personas: ${rd?.partySize || "—"}_`;
+              } else if (reason === "past_date" && isReservationRequest) {
+                summaryText = `⚠️ **Fecha pasada**\n\n${question}`;
+              } else if (reason === "duplicate_reservation_detected" && isReservationRequest) {
+                summaryText = `⚠️ **Reserva duplicada**\n\n${question}`;
+              } else if (reason === "restaurant_closed" && isReservationRequest) {
+                summaryText = `⚠️ **Restaurante cerrado**\n\n${question}`;
+              } else if (reason === "runtime_timeout") {
+                summaryText = `⏳ **Tiempo agotado**\n\n${question}`;
+              } else if (reason === "page_navigation_error" || reason === "browser_session_closed") {
+                summaryText = `❌ **Error de conexión**\n\n${question}`;
+              } else if (reason === "invalid_contact_data") {
+                summaryText = `⚠️ **Datos inválidos**\n\n${question}`;
+              } else {
+                summaryText = question;
+              }
               writeSse(res, "clarification", {
                 runId,
-                question: summaryText,
+                question,
                 missingFields,
               });
             } else if (isReservationRequest) {
-              // Rich reservation checklist summary
               const rd = reservationDetails;
               const checkItems: string[] = [];
               if (rd?.restaurant) checkItems.push(`- [x] **Restaurante:** ${rd.restaurant}`);
               if (rd?.date) checkItems.push(`- [x] **Fecha:** ${rd.date}`);
-              if (rd?.time) checkItems.push(`- [x] **Hora:** ${rd.time}`);
+              if (r?.data?.timeAdjusted && r?.data?.selectedTime) {
+                checkItems.push(`- [x] **Hora:** ${r.data.selectedTime} _(solicitada: ${r.data.requestedTime || rd?.time})_`);
+              } else if (rd?.time) {
+                checkItems.push(`- [x] **Hora:** ${rd.time}`);
+              }
               if (rd?.partySize) checkItems.push(`- [x] **Personas:** ${rd.partySize}`);
               if (rd?.contactName) checkItems.push(`- [x] **Nombre:** ${rd.contactName}`);
               if (rd?.phone) checkItems.push(`- [x] **Teléfono:** ${rd.phone}`);
               if (rd?.email) checkItems.push(`- [x] **Email:** ${rd.email}`);
-              const checklistBlock = checkItems.length > 0
-                ? `\n\n**Datos registrados:**\n${checkItems.join('\n')}`
-                : "";
-              const stepsBlock = allSteps.length > 0
-                ? `\n\n**Acciones realizadas (${allSteps.length} pasos):**\n${allSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`
-                : "";
-              const linkBlock = finalUrl ? `\n\n**Enlace de la reserva:** [${finalUrl}](${finalUrl})` : "";
 
+              const checklistBlock = checkItems.length > 0 ? `\n\n**Checklist:**\n${checkItems.join("\n")}` : "";
               if (wasSuccessful && confirmationCode) {
-                summaryText = `✅ **Reserva confirmada exitosamente**\n\n**Código de confirmación:** \`${confirmationCode}\`${checklistBlock}${stepsBlock}${linkBlock}`;
+                summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}${checklistBlock}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
               } else if (wasSuccessful) {
-                summaryText = `✅ **Reserva completada exitosamente**${checklistBlock}${stepsBlock}${linkBlock}`;
+                summaryText = `✅ **Automatización web completada exitosamente**${checklistBlock}\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
               } else {
-                const reason = clarificationQuestion || r?.data?.reason || "";
-                const reasonLine = reason ? `\n\n**Estado:** ${reason}` : "";
-                summaryText = `⚠️ **Proceso de reserva finalizado** (${stepsCount} pasos)${reasonLine}${checklistBlock}${stepsBlock}${linkBlock}\n\nTe recomiendo verificar directamente en el enlace.`;
+                summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)${checklistBlock}\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
               }
             } else if (wasSuccessful && confirmationCode) {
-              summaryText = `✅ **Tarea completada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Acciones realizadas:**\n${allSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}${finalUrl ? `\n\n**Enlace:** [${finalUrl}](${finalUrl})` : ""}`;
+              summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
             } else if (wasSuccessful) {
-              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Acciones realizadas:**\n${allSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}${finalUrl ? `\n\n**Enlace:** [${finalUrl}](${finalUrl})` : ""}`;
+              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
             } else {
-              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}${finalUrl ? `\n\n**Enlace:** [${finalUrl}](${finalUrl})` : ""}\n\nTe recomiendo verificar directamente en el sitio web.`;
+              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
             }
 
             fullResponse = summaryText;
-            // Emit final browser_step "done" so VirtualComputer transitions to completed
-            if (res) {
-              try {
-                const r2 = res as any;
-                if (!r2.writableEnded && !r2.destroyed) {
-                  res.write(`event: browser_step\ndata: ${JSON.stringify({
-                    runId,
-                    stepNumber: stepsCount + 1,
-                    totalSteps: stepsCount + 1,
-                    action: "done",
-                    reasoning: wasSuccessful ? "Tarea completada" : "Proceso finalizado",
-                    goalProgress: wasSuccessful ? "100%" : `${Math.min(95, Math.round((stepsCount / 15) * 100))}%`,
-                    screenshot: "",
-                    url: finalUrl,
-                    title: "",
-                  })}\n\n`);
-                  if (typeof r2.flush === "function") r2.flush();
-                }
-              } catch {}
-            }
-            // Send the entire summary as a single chunk to preserve markdown formatting
+            // Send the entire summary as a single chunk to preserve markdown formatting.
+            // Leading \n\n separates it from inline browser_report blockquotes already streamed.
             writeSse(res, "chunk", {
-              content: summaryText,
+              content: "\n\n" + summaryText,
               sequence: 1,
-              runId
+              runId,
             });
             console.log(`[AgentExecutor] browse_and_act FAST EXIT: success=${wasSuccessful}, steps=${stepsCount}`);
             shouldExitAgentLoop = true;
