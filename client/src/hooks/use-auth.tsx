@@ -256,23 +256,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refetch, queryClient]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const forced = localStorage.getItem("siragpt_force_signed_out") === "1";
+
+    const forced = isForcedSignedOut();
     const pathname = window.location.pathname;
     const publicAuthRoute =
       pathname === "/" ||
       [
-      "/login",
-      "/welcome",
-      "/signup",
-      "/terms",
-      "/privacy-policy",
-      "/about",
-      "/learn",
-      "/pricing",
-      "/business",
-      "/download",
-      "/power",
-    ].some((route) => pathname.startsWith(route));
+        "/login",
+        "/welcome",
+        "/signup",
+        "/terms",
+        "/privacy-policy",
+        "/about",
+        "/learn",
+        "/pricing",
+        "/business",
+        "/download",
+        "/power",
+      ].some((route) => pathname.startsWith(route));
+
     if (forced && !publicAuthRoute) {
       window.location.replace("/login?logged_out=1");
     }
