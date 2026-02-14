@@ -164,14 +164,22 @@ jobs:
             if command -v fuser >/dev/null 2>&1; then
               fuser -k 5000/tcp >/dev/null 2>&1 || true
             fi
+            # Give Docker a moment to release the port binding.
+            sleep 2
+            if command -v ss >/dev/null 2>&1; then
+              if ss -ltnp 2>/dev/null | grep -qE 'LISTEN\\s+.*:(5000)\\b'; then
+                echo "✗ Port 5000 is still in use after cleanup"
+                ss -ltnp 2>/dev/null | grep -E 'LISTEN\\s+.*:(5000)\\b' || true
+                exit 1
+              fi
+            fi
 
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
             echo "▸ Removing stale service containers to avoid name conflicts..."
-            for svc in app worker sandbox-runner; do
-              docker ps -a --filter "name=^/${PROJECT}-${svc}-" --format '{{.ID}}' | xargs -r docker rm -f || true
-            done
-            compose up -d --force-recreate app worker sandbox-runner
+            compose stop app worker sandbox-runner >/dev/null 2>&1 || true
+            compose rm -f app worker sandbox-runner >/dev/null 2>&1 || true
+            compose up -d --force-recreate --remove-orphans app worker sandbox-runner
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -373,13 +381,20 @@ jobs:
             if command -v fuser >/dev/null 2>&1; then
               fuser -k 5000/tcp >/dev/null 2>&1 || true
             fi
+            sleep 2
+            if command -v ss >/dev/null 2>&1; then
+              if ss -ltnp 2>/dev/null | grep -qE 'LISTEN\\s+.*:(5000)\\b'; then
+                echo "✗ Port 5000 is still in use after cleanup"
+                ss -ltnp 2>/dev/null | grep -E 'LISTEN\\s+.*:(5000)\\b' || true
+                exit 1
+              fi
+            fi
 
             echo "▸ Starting updated containers..."
             echo "▸ Removing stale service containers to avoid name conflicts..."
-            for svc in app worker sandbox-runner; do
-              docker ps -a --filter "name=^/${PROJECT}-${svc}-" --format '{{.ID}}' | xargs -r docker rm -f || true
-            done
-            compose up -d --force-recreate app worker sandbox-runner
+            compose stop app worker sandbox-runner >/dev/null 2>&1 || true
+            compose rm -f app worker sandbox-runner >/dev/null 2>&1 || true
+            compose up -d --force-recreate --remove-orphans app worker sandbox-runner
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
