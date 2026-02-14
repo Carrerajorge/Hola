@@ -179,9 +179,35 @@ jobs:
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
             echo "▸ Removing stale service containers to avoid name conflicts..."
-            compose stop app worker sandbox-runner >/dev/null 2>&1 || true
-            compose rm -f app worker sandbox-runner >/dev/null 2>&1 || true
-            compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+            # Compose can occasionally get into a bad state where it tries to stop/remove containers
+            # that have already been removed (daemon: "No such container"). Pre-clean service containers
+            # deterministically, then retry once if compose still fails.
+            for svc in app worker sandbox-runner; do
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${PROJECT}" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                | xargs -r docker rm -f || true
+            done
+            docker ps -a --format '{{.ID}} {{.Names}}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | xargs -r docker rm -f || true
+
+            if ! compose up -d --force-recreate --remove-orphans app worker sandbox-runner; then
+              echo "⚠️ docker compose up failed; running cleanup + retry..."
+              compose down --remove-orphans || true
+              compose up -d postgres redis
+              sleep 3
+              for svc in app worker sandbox-runner; do
+                docker ps -aq \
+                  --filter "label=com.docker.compose.project=${PROJECT}" \
+                  --filter "label=com.docker.compose.service=${svc}" \
+                  | xargs -r docker rm -f || true
+              done
+              docker ps -a --format '{{.ID}} {{.Names}}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | xargs -r docker rm -f || true
+              compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+            fi
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -394,9 +420,32 @@ jobs:
 
             echo "▸ Starting updated containers..."
             echo "▸ Removing stale service containers to avoid name conflicts..."
-            compose stop app worker sandbox-runner >/dev/null 2>&1 || true
-            compose rm -f app worker sandbox-runner >/dev/null 2>&1 || true
-            compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+            for svc in app worker sandbox-runner; do
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${PROJECT}" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                | xargs -r docker rm -f || true
+            done
+            docker ps -a --format '{{.ID}} {{.Names}}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | xargs -r docker rm -f || true
+
+            if ! compose up -d --force-recreate --remove-orphans app worker sandbox-runner; then
+              echo "⚠️ docker compose up failed; running cleanup + retry..."
+              compose down --remove-orphans || true
+              compose up -d postgres redis
+              sleep 3
+              for svc in app worker sandbox-runner; do
+                docker ps -aq \
+                  --filter "label=com.docker.compose.project=${PROJECT}" \
+                  --filter "label=com.docker.compose.service=${svc}" \
+                  | xargs -r docker rm -f || true
+              done
+              docker ps -a --format '{{.ID}} {{.Names}}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | xargs -r docker rm -f || true
+              compose up -d --force-recreate --remove-orphans app worker sandbox-runner
+            fi
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
