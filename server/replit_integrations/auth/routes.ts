@@ -88,6 +88,7 @@ export function registerAuthRoutes(app: Express): void {
         });
 
         const adminUser = {
+          id: adminId,
           claims: {
             sub: adminId,
             email: ADMIN_EMAIL,
@@ -141,12 +142,12 @@ export function registerAuthRoutes(app: Express): void {
             return res.status(500).json({ message: "Error al iniciar sesión" });
           }
 
-          // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-          // Some environments end up persisting an empty `passport` object.
           if (req.session) {
             req.session.authUserId = adminId;
             req.session.passport = req.session.passport || {};
-            req.session.passport.user = adminUser;
+            if (typeof req.session.passport.user !== "string") {
+              req.session.passport.user = adminId;
+            }
           }
 
           // Force session save before responding
@@ -297,11 +298,12 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Error al iniciar sesión" });
         }
 
-        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
         if (req.session) {
           req.session.authUserId = dbUser.id;
           req.session.passport = req.session.passport || {};
-          req.session.passport.user = sessionUser;
+          if (typeof req.session.passport.user !== "string") {
+            req.session.passport.user = String(dbUser.id);
+          }
         }
 
         // Track login and update last login
@@ -501,16 +503,17 @@ export function registerAuthRoutes(app: Express): void {
         role: "admin",
       });
 
-      // Set up session for admin
-      const adminUser = {
-        claims: {
-          sub: adminId,
-          email: ADMIN_EMAIL,
-          first_name: "Admin",
-          last_name: "User",
-        },
-        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
-      };
+	      // Set up session for admin
+	      const adminUser = {
+	        id: adminId,
+	        claims: {
+	          sub: adminId,
+	          email: ADMIN_EMAIL,
+	          first_name: "Admin",
+	          last_name: "User",
+	        },
+	        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
+	      };
 
       // MFA gate: require TOTP and/or push approval if enabled (admin too).
       const mfa = await computeMfaForUser({ userId: adminId, excludeSid: req.sessionID || null });
@@ -557,11 +560,12 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Login failed" });
         }
 
-        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
         if (req.session) {
           req.session.authUserId = adminId;
           req.session.passport = req.session.passport || {};
-          req.session.passport.user = adminUser;
+          if (typeof req.session.passport.user !== "string") {
+            req.session.passport.user = adminId;
+          }
         }
 
         // Track admin login and update last login
@@ -765,11 +769,12 @@ export function registerAuthRoutes(app: Express): void {
           return res.redirect("/login?error=login_failed");
         }
 
-        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
         if (req.session) {
           req.session.authUserId = result.user.id;
           req.session.passport = req.session.passport || {};
-          req.session.passport.user = sessionUser;
+          if (typeof req.session.passport.user !== "string") {
+            req.session.passport.user = String(result.user.id);
+          }
         }
 
 	        try {

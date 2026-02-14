@@ -255,12 +255,13 @@ phoneAuthRouter.post("/verify", async (req, res) => {
         return res.status(500).json({ success: false, message: "Error al iniciar sesión" });
       }
 
-      // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-      if ((req as any).session) {
-        (req as any).session.authUserId = user.id;
-        (req as any).session.passport = (req as any).session.passport || {};
-        (req as any).session.passport.user = sessionUser;
-      }
+	      if ((req as any).session) {
+	        (req as any).session.authUserId = user.id;
+	        (req as any).session.passport = (req as any).session.passport || {};
+	        if (typeof (req as any).session.passport.user !== "string") {
+	          (req as any).session.passport.user = String(user.id);
+	        }
+	      }
       
       storage.createAuditLog({
         action: "login_phone",
