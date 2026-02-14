@@ -1557,4 +1557,15 @@ Please rewrite your response addressing these issues.`
   return fullResponse;
 }
 
-export { AGENT_TOOLS, getToolsForIntent };
+export {
+  AGENT_TOOLS,
+  getToolsForIntent,
+  isRestaurantReservationRequest,
+  extractReservationDetails,
+  getMissingReservationFields,
+  formatReservationDetails,
+  buildReservationClarificationQuestion,
+  normalizeSpaces,
+  collectRecentUserText,
+};
+export type { ReservationDetails, ReservationMissingField };
