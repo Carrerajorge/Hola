@@ -2440,6 +2440,31 @@ RULES:
         const cal = document.querySelector("#datepicker_calendar, .ui-datepicker, .calendar-container");
         if (cal) (cal as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
       }).catch(() => {});
+
+      // Wait for calendar to fully render (CoverManager may refresh via AJAX after party size change)
+      let calendarReady = false;
+      for (let i = 0; i < 20; i++) { // up to 10s (20 * 500ms)
+        calendarReady = await page.evaluate((targetDay) => {
+          const dayStr = String(targetDay);
+          // Check if the target day exists and is visible
+          const byDataDay = document.querySelector(`td[data-day="${dayStr}"]`);
+          if (byDataDay && (byDataDay as HTMLElement).offsetParent !== null) return true;
+          const candidates = Array.from(document.querySelectorAll("span.date, a.ui-state-default"));
+          for (const el of candidates) {
+            if ((el.textContent || "").trim() === dayStr && (el as HTMLElement).offsetParent !== null) return true;
+          }
+          return false;
+        }, day).catch(() => false);
+        if (calendarReady) {
+          console.log(`[CalaReservation] Calendar day ${day} visible after ${(i + 1) * 500}ms`);
+          break;
+        }
+        await page.waitForTimeout(500).catch(() => {});
+      }
+      if (!calendarReady) {
+        console.log(`[CalaReservation] Calendar day ${day} NOT visible after 10s wait`);
+      }
+
       // First try exact text match via JS to avoid partial matches (e.g., day 2 matching "12", "20", "22")
       const dateClickedByJs = await page.evaluate((targetDay) => {
         const dayStr = String(targetDay);
@@ -2480,6 +2505,22 @@ RULES:
         ]);
       }
       if (!dateClickedByJs && !dateClickedSelector) {
+        // Log the page state for debugging
+        const calState = await page.evaluate(() => {
+          const calEl = document.querySelector("#datepicker_calendar, .ui-datepicker, .calendar-container");
+          const allDays = Array.from(document.querySelectorAll("td[data-day], span.date, a.ui-state-default"));
+          return {
+            calendarFound: !!calEl,
+            calendarVisible: calEl ? (calEl as HTMLElement).offsetParent !== null : false,
+            dayElements: allDays.slice(0, 40).map(el => ({
+              tag: el.tagName,
+              text: (el.textContent || "").trim().slice(0, 10),
+              visible: (el as HTMLElement).offsetParent !== null,
+              dataDay: el.getAttribute?.("data-day"),
+            })),
+          };
+        }).catch(() => ({ calendarFound: false, calendarVisible: false, dayElements: [] }));
+        console.log(`[CalaReservation] Day ${day} click failed. Calendar state:`, JSON.stringify(calState).slice(0, 500));
         return {
           success: false,
           steps,
