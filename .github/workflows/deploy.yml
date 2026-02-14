@@ -27,7 +27,9 @@ env:
   VPS_USER: root
   VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
-  COMPOSE_PROJECT: iliagpt
+  # IMPORTANT: this must match the production compose project currently serving traffic
+  # (to avoid split-brain volumes like iliagpt_postgres_data vs hola_postgres_data).
+  COMPOSE_PROJECT: hola
 
 jobs:
   # ── CI Gate ─────────────────────────────────────────────
@@ -48,7 +50,7 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'hola' }}
     environment:
       name: production
       url: https://iliagpt.com
@@ -93,7 +95,7 @@ jobs:
 
             DEPLOY_PATH="/opt/hola"
             COMPOSE_FILE="docker-compose.prod.yml"
-            PROJECT="iliagpt"
+            PROJECT="hola"
 
             cd "$DEPLOY_PATH"
 
@@ -262,7 +264,7 @@ jobs:
         if: failure()
         run: |
           echo "::error::Deployment to production FAILED. Check the logs above."
-          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p iliagpt -f docker-compose.prod.yml up -d --build'"
+          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p hola -f docker-compose.prod.yml up -d --build'"
 
   # ── Auto Deploy (after CI) ──────────────────────────────
   deploy_auto:
@@ -275,7 +277,7 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'hola' }}
     environment:
       name: production
       url: https://iliagpt.com
@@ -320,7 +322,7 @@ jobs:
 
             DEPLOY_PATH="/opt/hola"
             COMPOSE_FILE="docker-compose.prod.yml"
-            PROJECT="iliagpt"
+            PROJECT="hola"
 
             cd "$DEPLOY_PATH"
 
@@ -473,4 +475,4 @@ jobs:
         if: failure()
         run: |
           echo "::error::Deployment to production FAILED. Check the logs above."
-          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p iliagpt -f docker-compose.prod.yml up -d --build'"
+          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p hola -f docker-compose.prod.yml up -d --build'"

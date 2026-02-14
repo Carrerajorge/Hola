@@ -223,10 +223,10 @@ log "Setting up SSL auto-renewal..."
 (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | sort -u | crontab -
 
 # ── 12. Build & Start ──
-log "Building and starting ILIAGPT..."
-cd "$DEPLOY_PATH"
-docker compose -p iliagpt -f docker-compose.prod.yml build
-docker compose -p iliagpt -f docker-compose.prod.yml up -d
+	log "Building and starting ILIAGPT..."
+	cd "$DEPLOY_PATH"
+	docker compose -p hola -f docker-compose.prod.yml build
+	docker compose -p hola -f docker-compose.prod.yml up -d
 
 # ── 13. Wait for health ──
 log "Waiting for application to start..."
@@ -238,7 +238,7 @@ for i in $(seq 1 30); do
   fi
   if [ "$i" -eq 30 ]; then
     warn "Health check timed out. Check logs with:"
-    warn "  docker compose -p iliagpt -f docker-compose.prod.yml logs app"
+    warn "  docker compose -p hola -f docker-compose.prod.yml logs app"
   fi
   printf "."
   sleep 5
@@ -250,11 +250,11 @@ echo "════════════════════════�
 echo -e "  ${GREEN}✓ ILIAGPT VPS Setup Complete!${NC}"
 echo "═══════════════════════════════════════════"
 echo ""
-docker compose -p iliagpt -f docker-compose.prod.yml ps
+docker compose -p hola -f docker-compose.prod.yml ps
 echo ""
 echo "Next steps:"
 echo "  1. Edit API keys:  nano /opt/hola/.env.production"
-echo "  2. Restart app:    cd /opt/hola && docker compose -p iliagpt -f docker-compose.prod.yml up -d"
-echo "  3. View logs:      docker compose -p iliagpt -f docker-compose.prod.yml logs -f app"
+echo "  2. Restart app:    cd /opt/hola && docker compose -p hola -f docker-compose.prod.yml up -d"
+echo "  3. View logs:      docker compose -p hola -f docker-compose.prod.yml logs -f app"
 echo "  4. Check health:   curl https://iliagpt.com/health"
 echo ""
