@@ -1720,6 +1720,64 @@ RULES:
       return null;
     };
 
+    const parseMonthFromDate = (raw: string | undefined): number | null => {
+      if (!raw) return null;
+      const source = String(raw).trim().toLowerCase();
+      const iso = source.match(/\b\d{4}-(\d{2})-\d{2}\b/);
+      if (iso?.[1]) return Number(iso[1]);
+      const slash = source.match(/\b\d{1,2}[\/-](\d{1,2})(?:[\/-]\d{2,4})?\b/);
+      if (slash?.[1]) return Number(slash[1]);
+
+      const monthEs: Record<string, number> = {
+        enero: 1,
+        febrero: 2,
+        marzo: 3,
+        abril: 4,
+        mayo: 5,
+        junio: 6,
+        julio: 7,
+        agosto: 8,
+        septiembre: 9,
+        setiembre: 9,
+        octubre: 10,
+        noviembre: 11,
+        diciembre: 12,
+      };
+      const monthEn: Record<string, number> = {
+        january: 1,
+        february: 2,
+        march: 3,
+        april: 4,
+        may: 5,
+        june: 6,
+        july: 7,
+        august: 8,
+        september: 9,
+        october: 10,
+        november: 11,
+        december: 12,
+      };
+
+      const es = source.match(/\b\d{1,2}\s+de\s+([a-záéíóúñ]+)\b/i);
+      if (es?.[1]) {
+        const key = es[1].normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        if (monthEs[key] != null) return monthEs[key];
+      }
+      const en = source.match(/\b([a-z]+)\s+\d{1,2}(?:,\s*\d{4})?\b/i);
+      if (en?.[1]) {
+        const key = en[1].normalize("NFD").replace(/\p{Diacritic}/gu, "");
+        if (monthEn[key] != null) return monthEn[key];
+      }
+
+      if (/\b(hoy|today)\b/i.test(source)) return new Date().getMonth() + 1;
+      if (/\b(mañana|manana|tomorrow)\b/i.test(source)) {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        return d.getMonth() + 1;
+      }
+      return null;
+    };
+
     const normalizeTime = (raw: string | undefined): string | null => {
       if (!raw) return null;
       const source = String(raw).trim().toLowerCase();
@@ -1806,6 +1864,9 @@ RULES:
       ]
         .map((value) => String(value || "").trim())
         .filter(Boolean);
+      // Find the most relevant message (first non-empty one matching the detected condition)
+      const findRelevantMessage = (pattern: RegExp): string =>
+        possibleMessages.find((m) => pattern.test(m.toLowerCase())) || possibleMessages[0] || "";
       const merged = possibleMessages.join(" | ").toLowerCase();
 
       if (!merged) return null;
@@ -1817,7 +1878,7 @@ RULES:
           question:
             "CoverManager indicó que ya existe una reserva para esos datos ese mismo día. ¿Quieres que intente con otro horario, otro nombre/teléfono o editar la reserva existente?",
           missingFields: ["alternativeDateOrTimeOrContact"],
-          backendMessage: possibleMessages[0],
+          backendMessage: findRelevantMessage(/duplicad|registrado|already|tienes? una/),
         };
       }
 
@@ -1828,7 +1889,27 @@ RULES:
           question:
             "No hay disponibilidad web en Cala para ese horario. ¿Quieres que pruebe otra hora/fecha o que intente lista de espera?",
           missingFields: ["alternativeDateOrTime"],
-          backendMessage: possibleMessages[0],
+          backendMessage: findRelevantMessage(/completas|disponibilidad|availability|espera/),
+        };
+      }
+
+      if (/cerrado|closed|fuera de horario|hours/i.test(merged)) {
+        return {
+          status: "needs_user_input",
+          reason: "restaurant_closed",
+          question: "El restaurante está cerrado o fuera de horario para esa fecha. ¿Quieres que pruebe otro día?",
+          missingFields: ["alternativeDateOrTime"],
+          backendMessage: findRelevantMessage(/cerrado|closed|horario|hours/),
+        };
+      }
+
+      if (/email|correo|tel[eé]fono|phone|inv[aá]lid|incorrecto/i.test(merged)) {
+        return {
+          status: "needs_user_input",
+          reason: "invalid_contact_data",
+          question: "El sitio indica que algún dato de contacto es inválido. ¿Puedes verificar email y teléfono?",
+          missingFields: ["contactEmail", "contactPhone"],
+          backendMessage: findRelevantMessage(/email|tel|phone|correo|inv[aá]lid/),
         };
       }
 
@@ -1839,7 +1920,7 @@ RULES:
           question:
             "El sitio rechazó la validación de la reserva con esos datos. ¿Quieres que pruebe con otros datos de contacto u otro horario?",
           missingFields: ["alternativeDateOrTimeOrContact"],
-          backendMessage: possibleMessages[0],
+          backendMessage: findRelevantMessage(/.*/),
         };
       }
 
@@ -2060,15 +2141,25 @@ RULES:
       email: string;
       phone: string;
     }) => {
-      await quickType("#user_first_name", defaults.firstName || "Invitado");
-      await quickType("#user_last_name", defaults.lastName || "-");
+      const fn = defaults.firstName || "Invitado";
+      const ln = defaults.lastName || fn; // Use first name as fallback for last name
+      await quickType("#user_first_name", fn);
+      await quickType("#user_last_name", ln);
+      // Single full-name field fallback
+      await quickType("#user_name", `${fn} ${ln}`.trim());
       await quickType("#user_email", defaults.email);
       await quickType("#user_email2", defaults.email);
       await quickType("#user_phone", defaults.phone);
+      // Alternative phone selectors
+      await quickType("#user_phone_number", defaults.phone);
       await quickType("#comment_text", "N/A");
       await ensureInputChecked("#legal_ficha");
       await ensureInputChecked("#consentimiento_legal");
       await ensureInputChecked("#no_food_restrictions_data");
+      // Generic terms checkboxes
+      await ensureInputChecked('[name="terms"]');
+      await ensureInputChecked('[name="legal"]');
+      await ensureInputChecked('[name="privacy"]');
       await quickType("#food_restrictions", "Sin alergias");
     };
 
@@ -2155,6 +2246,18 @@ RULES:
       };
       page.on("response", responseListener);
       await page.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
+      // Verify page loaded correctly — check for reservation form indicators
+      const pageLoaded = await page.evaluate(() => {
+        const body = document.body?.innerText || "";
+        // CoverManager pages should have at least a select or calendar element
+        return body.length > 100 || !!document.querySelector("select, .ui-datepicker, #datepicker_calendar, .calendar");
+      }).catch(() => false);
+      if (!pageLoaded) {
+        // Retry with full page reload
+        console.log("[CalaReservation] Page appears empty, retrying with reload...");
+        await page.reload({ timeout: 15000 }).catch(() => {});
+        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      }
       await page.waitForTimeout(800).catch(() => {});
       steps.push("Opened Cala reservation page.");
       await emitProgress("navigate", "Página de reserva abierta", "10%");
@@ -2174,12 +2277,49 @@ RULES:
       }
 
       ensureBudget();
-      const selectResult = await this.select(sessionId, "select", String(partySize)).catch(() => ({ success: false }));
+      // Party size — find the correct select (prefer #party_size, #pax, or first visible select)
+      const partySizeSelector = await page.evaluate(() => {
+        // Try known CoverManager selectors first
+        const known = ["#party_size", "#pax", 'select[name="party_size"]', 'select[name="pax"]', 'select[name="personas"]'];
+        for (const sel of known) {
+          const el = document.querySelector(sel) as HTMLSelectElement | null;
+          if (el && el.offsetParent !== null) return sel;
+        }
+        // Fallback: first visible select that has numeric-looking options (party size select typically has 1-20)
+        for (const sel of Array.from(document.querySelectorAll("select"))) {
+          if ((sel as HTMLElement).offsetParent === null) continue;
+          const opts = Array.from((sel as HTMLSelectElement).options).map((o: HTMLOptionElement) => o.value);
+          if (opts.some((v: string) => /^\\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 20)) return "select";
+          break; // Use first visible select as fallback
+        }
+        return "select"; // Ultimate fallback
+      }).catch(() => "select");
+
+      const selectResult = await this.select(sessionId, partySizeSelector, String(partySize)).catch(() => ({ success: false }));
       if (!(selectResult as any)?.success) {
-        // Fallback to visible select option by label
-        await page.selectOption("select", { label: `${partySize} personas` }).catch(() => {});
+        // Try multiple label formats: "2 personas", "2 Personas", "2 pax", "2 comensales"
+        for (const label of [`${partySize} personas`, `${partySize} Personas`, `${partySize} pax`, `${partySize} comensales`, `${partySize}`]) {
+          const ok = await page.selectOption(partySizeSelector, { label }).catch(() => null);
+          if (ok) break;
+        }
       }
-      await page.waitForTimeout(700).catch(() => {});
+
+      // Verify party size was actually selected (strict text check to avoid "2" matching "12")
+      const verifiedPartySize = await page.evaluate(({ expected, selector }) => {
+        const sel = document.querySelector(selector) as HTMLSelectElement | null;
+        if (!sel) return null;
+        if (sel.value === String(expected)) return true;
+        const selectedText = sel.selectedOptions?.[0]?.text || "";
+        // Strict check: the number must be a standalone token, not part of a larger number
+        const regex = new RegExp(`\\\\b${expected}\\\\b`);
+        return regex.test(selectedText);
+      }, { expected: partySize, selector: partySizeSelector }).catch(() => null);
+      if (verifiedPartySize === false) {
+        console.log(`[CalaReservation] Warning: party size ${partySize} may not be selected correctly`);
+      }
+
+      // Brief wait for calendar to update after party size change
+      await page.waitForTimeout(800).catch(() => {});
       steps.push(`Selected party size: ${partySize}.`);
       await emitProgress("select", `Seleccionadas ${partySize} personas`, "20%");
 
@@ -2197,14 +2337,148 @@ RULES:
         };
       }
 
+      // ── Past date detection ──
+      const targetMonth = parseMonthFromDate(reservation.date);
+      const today = new Date();
+      const todayDay = today.getDate();
+      const todayMonth = today.getMonth() + 1;
+      const todayYear = today.getFullYear();
+      // Parse target year from date string (default to current year)
+      const targetYearMatch = String(reservation.date || "").match(/\b(20\d{2})\b/);
+      const targetYear = targetYearMatch ? Number(targetYearMatch[1]) : todayYear;
+      if (targetYear < todayYear) {
+        await emitProgress("wait", `Año ${targetYear} ya pasó`, "22%");
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["date"],
+            question: `El año ${targetYear} ya pasó. ¿Quieres reservar para una fecha en ${todayYear}?`,
+            reason: "past_date",
+          },
+          screenshots,
+        };
+      }
+      if (targetYear === todayYear && targetMonth && targetMonth < todayMonth) {
+        await emitProgress("wait", "Mes solicitado ya pasó", "22%");
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["date"],
+            question: "El mes solicitado ya pasó. ¿Quieres reservar para una fecha futura?",
+            reason: "past_date",
+          },
+          screenshots,
+        };
+      }
+      if (targetYear === todayYear && targetMonth && targetMonth === todayMonth && day < todayDay) {
+        await emitProgress("wait", `Día ${day} ya pasó este mes`, "22%");
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["date"],
+            question: `El día ${day} ya pasó este mes. ¿Quieres reservar para una fecha futura?`,
+            reason: "past_date",
+          },
+          screenshots,
+        };
+      }
+
+      // ── Calendar month navigation — navigate forward if target month differs ──
       ensureBudget();
-      const dateClickedSelector = await clickFirstVisible([
-        `span.date.disponibility_sm:has-text("${day}")`,
-        `span.date:has-text("${day}")`,
-        `#datepicker_calendar a.ui-state-default:has-text("${day}")`,
-        `a.ui-state-default:has-text("${day}")`,
-      ]);
-      if (!dateClickedSelector) {
+      if (targetMonth) {
+        // Detect current calendar month from the visible header (e.g., "Febrero 2026")
+        const currentCalMonth = await page.evaluate(() => {
+          const header = (document.querySelector(".ui-datepicker-title") as HTMLElement | null)?.innerText || "";
+          const m = header.toLowerCase();
+          if (m.includes("enero") || m.includes("january")) return 1;
+          if (m.includes("febrero") || m.includes("february")) return 2;
+          if (m.includes("marzo") || m.includes("march")) return 3;
+          if (m.includes("abril") || m.includes("april")) return 4;
+          if (m.includes("mayo") || m.includes("may")) return 5;
+          if (m.includes("junio") || m.includes("june")) return 6;
+          if (m.includes("julio") || m.includes("july")) return 7;
+          if (m.includes("agosto") || m.includes("august")) return 8;
+          if (m.includes("septiembre") || m.includes("setiembre") || m.includes("september")) return 9;
+          if (m.includes("octubre") || m.includes("october")) return 10;
+          if (m.includes("noviembre") || m.includes("november")) return 11;
+          if (m.includes("diciembre") || m.includes("december")) return 12;
+          return null;
+        }).catch(() => null);
+
+        if (currentCalMonth !== null && currentCalMonth !== targetMonth) {
+          // Always navigate forward — don't go backward in time for reservations
+          let diff = targetMonth - currentCalMonth;
+          if (diff < 0) diff += 12; // wrap forward across year boundary
+          const clicks = Math.min(diff, 11); // Max 11 months forward
+          const navSelector = [".ui-datepicker-next", "a.ui-datepicker-next", ".next-month", "[title='Sig']", "[title='Next']"];
+
+          for (let i = 0; i < clicks; i++) {
+            ensureBudget();
+            const clicked = await clickFirstVisible(navSelector, { allowDispatchFallback: true, clickTimeoutMs: 1200 });
+            if (!clicked) break;
+            await page.waitForTimeout(400).catch(() => {}); // Wait for calendar to re-render
+          }
+          if (clicks > 0) {
+            steps.push(`Navigated calendar forward ${clicks} month(s).`);
+            await page.waitForTimeout(300).catch(() => {});
+          }
+        }
+      }
+
+      ensureBudget();
+      // Reset changeDay signal BEFORE clicking so we can detect the fresh AJAX response
+      backendSignals.changeDay = null;
+      // Scroll calendar into view first for reliability
+      await page.evaluate(() => {
+        const cal = document.querySelector("#datepicker_calendar, .ui-datepicker, .calendar-container");
+        if (cal) (cal as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+      }).catch(() => {});
+      // First try exact text match via JS to avoid partial matches (e.g., day 2 matching "12", "20", "22")
+      const dateClickedByJs = await page.evaluate((targetDay) => {
+        const dayStr = String(targetDay);
+        // Priority order: data-day attribute (most reliable), then CoverManager span.date, then jQuery datepicker
+        const byDataDay = document.querySelector(`td[data-day="${dayStr}"] a, td[data-day="${dayStr}"] span`);
+        if (byDataDay && (byDataDay as HTMLElement).offsetParent !== null) {
+          try {
+            (byDataDay as HTMLElement).click();
+            return true;
+          } catch {
+            /* continue */
+          }
+        }
+        const candidates = Array.from(document.querySelectorAll("span.date, a.ui-state-default, td[data-day]"));
+        for (const el of candidates) {
+          const text = (el.textContent || "").trim();
+          if (text === dayStr && (el as HTMLElement).offsetParent !== null) {
+            try {
+              (el as HTMLElement).click();
+              return true;
+            } catch {
+              /* continue */
+            }
+          }
+        }
+        return false;
+      }, day).catch(() => false);
+      // Fallback: Playwright selector-based click
+      let dateClickedSelector: string | null = null;
+      if (!dateClickedByJs) {
+        dateClickedSelector = await clickFirstVisible([
+          `td[data-day="${day}"] a`,
+          `td[data-day="${day}"] span`,
+          `span.date.disponibility_sm:has-text("${day}")`,
+          `span.date:has-text("${day}")`,
+          `#datepicker_calendar a.ui-state-default:has-text("${day}")`,
+          `a.ui-state-default:has-text("${day}")`,
+        ]);
+      }
+      if (!dateClickedByJs && !dateClickedSelector) {
         return {
           success: false,
           steps,
@@ -2235,78 +2509,182 @@ RULES:
       }
 
       ensureBudget();
-      const availableTimes = await page.evaluate(() => {
-        const set = new Set<string>();
-        const regex = /\b([0-2]?\d:[0-5]\d)\b/g;
-        const nodes = Array.from(document.querySelectorAll("button, a, span, div")).slice(0, 3000);
-        for (const node of nodes) {
-          const text = (node.textContent || "").replace(/\s+/g, " ").trim();
-          if (!text) continue;
-          const matches = text.match(regex) || [];
-          for (const match of matches) {
-            const parts = match.split(":");
-            const hh = Number(parts[0]);
-            const mm = Number(parts[1]);
-            if (Number.isFinite(hh) && Number.isFinite(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
-              set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+      let availableTimes: string[] = [];
+      const scanAvailableTimes = async (): Promise<string[]> => {
+        return page.evaluate(() => {
+          const set = new Set<string>();
+          const regex = /\b([0-2]?\d:[0-5]\d)\b/g;
+          // Prioritize clickable/interactive elements and short text spans
+          for (const node of Array.from(document.querySelectorAll("button, a, span, div, li")).slice(0, 2000)) {
+            const el = node as HTMLElement;
+            const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+            if (!text || text.length > 30) continue; // Skip long text blocks (headers, paragraphs)
+            if (el.offsetParent === null && el.tagName !== "BODY") continue; // Skip hidden elements
+            for (const match of text.match(regex) || []) {
+              const [hh, mm] = match.split(":").map(Number);
+              // Filter to restaurant-plausible hours (7:00 - 23:59) to avoid phone/date false positives
+              if (hh >= 7 && hh <= 23 && mm >= 0 && mm <= 59) {
+                set.add(`${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+              }
             }
           }
+          return Array.from(set).sort();
+        });
+      };
+
+      availableTimes = await scanAvailableTimes();
+      const timePollStart = Date.now();
+      const timePollMaxMs = 5000; // 5 seconds max wait for time slots
+      for (let poll = 0; poll < 25; poll++) { // 25 * 200ms = 5s
+        ensureBudget();
+        await page.waitForTimeout(200).catch(() => {});
+        availableTimes = await scanAvailableTimes();
+        if (availableTimes.length > 0) {
+          console.log(`[CalaReservation] Time slots found after ${Date.now() - timePollStart}ms: ${availableTimes.join(", ")}`);
+          break;
         }
-        return Array.from(set);
-      });
+        // Also check if changeDay AJAX returned a "no availability" signal
+        if (backendSignals.changeDay?.not_avaible) {
+          console.log("[CalaReservation] changeDay backend signal: not_available");
+          break;
+        }
+        if (Date.now() - timePollStart > timePollMaxMs) break;
+      }
 
       if (!Array.isArray(availableTimes) || availableTimes.length === 0) {
-        const pageText = await page.evaluate(() => document.body?.innerText || "");
-        if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText)) {
+        ensureBudget();
+        // Check both page text and backend signals for no-availability
+        const pageText = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+        const changeDayNotAvail = backendSignals.changeDay?.not_avaible;
+        if (/reservas?\s+completas?\s+por\s+web|no\s+availability\s+online/i.test(pageText) || changeDayNotAvail) {
+          await emitProgress("wait", `Sin disponibilidad web para el día ${day}`, "30%");
           return {
             success: false,
             steps,
             data: {
               status: "needs_user_input",
               missingFields: ["alternativeDateOrTime"],
-              question: "No hay disponibilidad web para esa fecha/hora. ¿Quieres que pruebe otro horario o fecha?",
+              question: `No hay disponibilidad web para el día ${day}. ¿Quieres que pruebe otro día u horario?`,
               reason: "no_web_availability",
+              backendMessage: changeDayNotAvail || undefined,
             },
             screenshots,
           };
         }
+        // Time slots may exist in a non-standard format or the page is slow — try once more with longer wait
+        ensureBudget();
+        await page.waitForTimeout(1000).catch(() => {});
+        availableTimes = await scanAvailableTimes();
       }
 
       let selectedTime = timeText;
       if (!availableTimes.includes(selectedTime) && availableTimes.length > 0) {
         const targetMinutes = toMinutes(selectedTime);
-        selectedTime = availableTimes
-          .slice()
-          .sort((a, b) => Math.abs(toMinutes(a) - targetMinutes) - Math.abs(toMinutes(b) - targetMinutes))[0];
+        selectedTime = availableTimes.slice().sort((a, b) => Math.abs(toMinutes(a) - targetMinutes) - Math.abs(toMinutes(b) - targetMinutes))[0];
       }
 
-      const clickedTime = await clickVisibleText(selectedTime);
+      // Multi-strategy time click
+      const clickTimeValue = async (timeVal: string): Promise<boolean> => {
+        // Strategy 1: exact text match
+        if (await clickVisibleText(timeVal)) return true;
+        // Strategy 2: CSS selectors with data attributes
+        const selectorClicked = await clickFirstVisible([
+          `[data-hour="${timeVal}"]`, `[data-time="${timeVal}"]`,
+          `button:has-text("${timeVal}")`, `a:has-text("${timeVal}")`,
+          `span:has-text("${timeVal}")`, `div.hour:has-text("${timeVal}")`,
+        ]);
+        if (selectorClicked) return true;
+        // Strategy 3: JS click on element containing the time text
+        const jsClicked = await page.evaluate((t) => {
+          const regex = new RegExp(`\\b${t}\\b`);
+          for (const el of document.querySelectorAll("button, a, span, div, li")) {
+            if (regex.test((el.textContent || "").trim()) && (el as HTMLElement).offsetParent !== null) {
+              try {
+                (el as HTMLElement).click();
+                return true;
+              } catch {
+                /* continue */
+              }
+            }
+          }
+          return false;
+        }, timeVal).catch(() => false);
+        return jsClicked;
+      };
+
+      let clickedTime = await clickTimeValue(selectedTime);
+      if (!clickedTime && availableTimes.length > 0 && selectedTime !== availableTimes[0]) {
+        // Fallback: try the first available time
+        clickedTime = await clickTimeValue(availableTimes[0]);
+        if (clickedTime) selectedTime = availableTimes[0];
+      }
       if (!clickedTime) {
-        const fallbackClicked = availableTimes.length > 0 ? await clickVisibleText(availableTimes[0]) : false;
-        if (!fallbackClicked) {
-          return {
-            success: false,
-            steps,
-            data: {
-              status: "needs_user_input",
-              missingFields: ["time"],
-              question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}.`,
-            },
-            screenshots,
-          };
-        }
-        selectedTime = availableTimes[0];
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["time"],
+            question: `No pude seleccionar la hora ${timeText}. Horas detectadas: ${availableTimes.slice(0, 8).join(", ") || "ninguna"}. ¿Otra hora?`,
+          },
+          screenshots,
+        };
       }
 
-      await page.waitForTimeout(1200).catch(() => {});
-      steps.push(`Selected time: ${selectedTime}.`);
-      await emitProgress("click", `Hora seleccionada: ${selectedTime}`, "40%");
+      await page.waitForTimeout(150).catch(() => {});
+      const timeWasAdjusted = selectedTime !== timeText;
+      if (timeWasAdjusted) {
+        steps.push(`Requested time ${timeText} not available. Selected closest: ${selectedTime}.`);
+        data.timeAdjusted = true;
+        data.requestedTime = timeText;
+        data.selectedTime = selectedTime;
+        data.availableTimes = availableTimes.slice(0, 10);
+        await emitProgress("click", `${timeText} no disponible → seleccionada ${selectedTime}`, "40%");
+      } else {
+        steps.push(`Selected time: ${selectedTime}.`);
+        await emitProgress("click", `Hora seleccionada: ${selectedTime}`, "40%");
+      }
+
+      // ── Wait for contact form to appear after time selection ──
+      // CoverManager may animate/load the contact form — poll for form fields
+      ensureBudget();
+      for (let i = 0; i < 15; i++) { // up to 3s (15 * 200ms)
+        const formReady = await page.evaluate(() => {
+          // Check for either split name fields or single name field
+          const firstName = document.querySelector("#user_first_name") as HTMLInputElement | null;
+          const userName = document.querySelector("#user_name, [name=\"name\"], [name=\"nombre\"]") as HTMLInputElement | null;
+          const anyField = firstName || userName;
+          return !!(anyField && (anyField as any).offsetParent !== null);
+        }).catch(() => false);
+        if (formReady) break;
+        await page.waitForTimeout(200).catch(() => {});
+      }
 
       const fullName = String(reservation.contactName || "").trim();
-      const [firstName, ...rest] = fullName.split(/\s+/).filter(Boolean);
-      const lastName = rest.join(" ").trim();
+      const nameParts = fullName.split(/\s+/).filter(Boolean);
+      const firstName = nameParts[0] || "";
+      // Handle single-name: use first name as last name fallback (CoverManager may require both)
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : firstName;
       const email = String(reservation.email || "").trim();
-      const phone = String(reservation.phone || "").replace(/[^\d+]/g, "").trim();
+      // Phone normalization: strip non-digits except leading +, keep only first +
+      let phone = String(reservation.phone || "").replace(/[^\d+]/g, "").trim();
+      // Remove any + that isn't at the start
+      if (phone.includes("+")) {
+        phone = (phone.startsWith("+") ? "+" : "") + phone.replace(/\+/g, "");
+      }
+      // If phone doesn't start with +, try to add country code
+      if (phone && !phone.startsWith("+")) {
+        const digits = phone.replace(/\D/g, "");
+        if (digits.length >= 7 && digits.length <= 10) {
+          // Short number without country code → prepend +51 (Peru)
+          phone = "+51" + digits;
+        } else if (digits.length >= 11 && digits.length <= 15) {
+          // Already includes country code as digits (e.g., 51999888777) → just add +
+          phone = "+" + digits;
+        }
+      }
+      // Validate email format loosely
+      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
       if (!firstName || !email || !phone) {
         const missingFields: string[] = [];
@@ -2324,14 +2702,42 @@ RULES:
           screenshots,
         };
       }
+      if (!emailValid) {
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["contactEmail"],
+            question: `El email "${email}" no parece válido. ¿Puedes verificarlo?`,
+            reason: "invalid_contact_data",
+          },
+          screenshots,
+        };
+      }
+      if (phone.replace(/\D/g, "").length < 7) {
+        return {
+          success: false,
+          steps,
+          data: {
+            status: "needs_user_input",
+            missingFields: ["contactPhone"],
+            question: `El teléfono "${phone}" parece incompleto. ¿Puedes verificarlo?`,
+            reason: "invalid_contact_data",
+          },
+          screenshots,
+        };
+      }
 
       ensureBudget();
       await quickType("#user_first_name", firstName);
-      await quickType("#user_last_name", lastName || "-");
+      await quickType("#user_last_name", lastName || firstName);
+      await quickType("#user_name", `${firstName} ${lastName || firstName}`.trim());
       await quickType("#user_email", email);
       await quickType("#user_email2", email);
       await quickType("#user_phone", phone);
-      await autofillVisibleRequiredFields({ firstName, lastName: lastName || "-", email, phone });
+      await quickType("#user_phone_number", phone);
+      await autofillVisibleRequiredFields({ firstName, lastName: lastName || firstName, email, phone });
       await page.waitForTimeout(600).catch(() => {});
       steps.push("Filled reservation contact details.");
       await emitProgress("type", "Datos de contacto completados", "55%");
@@ -2339,6 +2745,9 @@ RULES:
       ensureBudget();
       await ensureInputChecked("#legal_ficha");
       await ensureInputChecked("#consentimiento_legal");
+      await ensureInputChecked('[name="terms"]');
+      await ensureInputChecked('[name="legal"]');
+      await ensureInputChecked('[name="privacy"]');
       steps.push("Accepted reservation terms.");
       await emitProgress("click", "Condiciones legales aceptadas", "62%");
 
@@ -2543,6 +2952,10 @@ RULES:
             date: reservation.date,
             time: selectedTime,
             partySize,
+            timeAdjusted: data.timeAdjusted || undefined,
+            requestedTime: data.requestedTime || undefined,
+            selectedTime: data.selectedTime || undefined,
+            availableTimes: Array.isArray(data.availableTimes) ? data.availableTimes : undefined,
             confirmationCode: finalState.code || undefined,
             confirmationLines: finalState.statusLines,
             finalUrl: finalState.url,
@@ -2590,13 +3003,33 @@ RULES:
         screenshots,
       };
     } catch (error: any) {
-      steps.push(`Error: ${error?.message || "unknown error"}`);
+      const errMsg = error?.message || "unknown error";
+      steps.push(`Error: ${errMsg}`);
+      // Classify error for better user-facing messages
+      const isTimeout = /timeout|exceeded.*runtime.*budget/i.test(errMsg);
+      const isNavigation = /navigation|net::|ERR_/i.test(errMsg);
+      const isClosed = /closed|destroyed|disposed|target.*closed/i.test(errMsg);
+      let reason = "unknown_error";
+      let question = `Ocurrió un error durante la automatización: ${errMsg}`;
+      if (isTimeout) {
+        reason = "runtime_timeout";
+        question = "El proceso de reserva tardó más de lo esperado. ¿Quieres que lo intente de nuevo?";
+      } else if (isNavigation) {
+        reason = "page_navigation_error";
+        question = "No pude cargar la página del restaurante. ¿Quieres que lo intente de nuevo?";
+      } else if (isClosed) {
+        reason = "browser_session_closed";
+        question = "La sesión del navegador se cerró inesperadamente. ¿Quieres que lo intente de nuevo?";
+      }
       return {
         success: false,
         steps,
         data: {
-          status: "unconfirmed",
-          error: error?.message || "unknown error",
+          status: "needs_user_input",
+          error: errMsg,
+          reason,
+          question,
+          missingFields: [],
         },
         screenshots,
       };

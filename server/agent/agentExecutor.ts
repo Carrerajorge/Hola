@@ -1220,7 +1220,8 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
             args as Record<string, any>,
             toolContext,
             runId,
-            res
+            res,
+            reservationDetails
           );
 
           if (artifact) {
@@ -1288,31 +1289,75 @@ DO NOT respond with text. CALL browse_and_act NOW.${reservationHint}`
 
             let summaryText: string;
             if (isNeedsUserInput) {
-              summaryText = clarificationQuestion ||
+              const reason = String(r?.data?.reason || "").toLowerCase();
+              const question =
+                clarificationQuestion ||
                 `Para continuar con la reserva necesito: ${missingFields.join(", ")}.`;
+              // Build rich "needs input" message based on reason
+              if (reason === "no_web_availability" && isReservationRequest) {
+                const rd = reservationDetails;
+                const avail = Array.isArray(r?.data?.availableTimes) ? r.data.availableTimes : [];
+                const availBlock = avail.length > 0 ? `\n\n**Horarios disponibles:** ${avail.join(", ")}` : "";
+                summaryText = `⚠️ **Sin disponibilidad online**\n\n${question}${availBlock}\n\n_Restaurante: ${rd?.restaurant || "—"} · Fecha: ${rd?.date || "—"} · Personas: ${rd?.partySize || "—"}_`;
+              } else if (reason === "past_date" && isReservationRequest) {
+                summaryText = `⚠️ **Fecha pasada**\n\n${question}`;
+              } else if (reason === "duplicate_reservation_detected" && isReservationRequest) {
+                summaryText = `⚠️ **Reserva duplicada**\n\n${question}`;
+              } else if (reason === "restaurant_closed" && isReservationRequest) {
+                summaryText = `⚠️ **Restaurante cerrado**\n\n${question}`;
+              } else if (reason === "runtime_timeout") {
+                summaryText = `⏳ **Tiempo agotado**\n\n${question}`;
+              } else if (reason === "page_navigation_error" || reason === "browser_session_closed") {
+                summaryText = `❌ **Error de conexión**\n\n${question}`;
+              } else if (reason === "invalid_contact_data") {
+                summaryText = `⚠️ **Datos inválidos**\n\n${question}`;
+              } else {
+                summaryText = question;
+              }
               writeSse(res, "clarification", {
                 runId,
-                question: summaryText,
+                question,
                 missingFields,
               });
+            } else if (isReservationRequest) {
+              const rd = reservationDetails;
+              const checkItems: string[] = [];
+              if (rd?.restaurant) checkItems.push(`- [x] **Restaurante:** ${rd.restaurant}`);
+              if (rd?.date) checkItems.push(`- [x] **Fecha:** ${rd.date}`);
+              if (r?.data?.timeAdjusted && r?.data?.selectedTime) {
+                checkItems.push(`- [x] **Hora:** ${r.data.selectedTime} _(solicitada: ${r.data.requestedTime || rd?.time})_`);
+              } else if (rd?.time) {
+                checkItems.push(`- [x] **Hora:** ${rd.time}`);
+              }
+              if (rd?.partySize) checkItems.push(`- [x] **Personas:** ${rd.partySize}`);
+              if (rd?.contactName) checkItems.push(`- [x] **Nombre:** ${rd.contactName}`);
+              if (rd?.phone) checkItems.push(`- [x] **Teléfono:** ${rd.phone}`);
+              if (rd?.email) checkItems.push(`- [x] **Email:** ${rd.email}`);
+
+              const checklistBlock = checkItems.length > 0 ? `\n\n**Checklist:**\n${checkItems.join("\n")}` : "";
+              if (wasSuccessful && confirmationCode) {
+                summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}${checklistBlock}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
+              } else if (wasSuccessful) {
+                summaryText = `✅ **Automatización web completada exitosamente**${checklistBlock}\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
+              } else {
+                summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)${checklistBlock}\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
+              }
             } else if (wasSuccessful && confirmationCode) {
-              summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}`;
+              summaryText = `✅ **Reserva confirmada en la web**\n\nCódigo/confirmación: ${confirmationCode}\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
             } else if (wasSuccessful) {
-              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}`;
+              summaryText = `✅ **Automatización web completada exitosamente**\n\nRealicé ${stepsCount} acciones en el navegador para completar tu solicitud.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}`;
             } else {
-              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join('\n')}\n\nTe recomiendo verificar directamente en el sitio web.`;
+              summaryText = `⚠️ **Automatización web finalizada** (${stepsCount} pasos)\n\nNavegué por el sitio web y realicé varias acciones, pero no pude confirmar que la tarea se completó al 100%.\n\n**Últimas acciones:**\n${lastSteps.map((s: string) => `- ${s}`).join("\n")}\n\nTe recomiendo verificar directamente en el sitio web.`;
             }
 
             fullResponse = summaryText;
-            const chunks = summaryText.match(/.{1,100}/g) || [summaryText];
-            for (let ci = 0; ci < chunks.length; ci++) {
-              writeSse(res, "chunk", {
-                content: chunks[ci],
-                sequence: ci + 1,
-                runId
-              });
-              await new Promise(r => setTimeout(r, 10));
-            }
+            // Send the entire summary as a single chunk to preserve markdown formatting.
+            // Leading \n\n separates it from inline browser_report blockquotes already streamed.
+            writeSse(res, "chunk", {
+              content: "\n\n" + summaryText,
+              sequence: 1,
+              runId,
+            });
             console.log(`[AgentExecutor] browse_and_act FAST EXIT: success=${wasSuccessful}, steps=${stepsCount}`);
             shouldExitAgentLoop = true;
             break;
