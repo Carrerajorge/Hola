@@ -14,7 +14,16 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 def normalize_text(s: str) -> str:
     s = (s or "").lower()
     # Keep only ascii alnum; OCR engines vary in whitespace/punctuation.
-    return "".join(re.findall(r"[a-z0-9]+", s))
+    #
+    # Also normalize a few common OCR confusions to make the accuracy suite stable
+    # across Tesseract/Paddle versions and platforms (e.g. O vs 0, I/l vs 1).
+    tokens = re.findall(r"[a-z0-9]+", s)
+    out: list[str] = []
+    for t in tokens:
+        if any(ch.isdigit() for ch in t) or re.fullmatch(r"[oil]+", t):
+            t = t.replace("o", "0").replace("i", "1").replace("l", "1")
+        out.append(t)
+    return "".join(out)
 
 
 def similarity(a: str, b: str) -> float:
