@@ -29,6 +29,9 @@ def _estimate_skew_angle_deg(binary_inv: np.ndarray) -> float:
     # OpenCV returns angles in [-90, 0)
     if angle < -45.0:
         angle = 90.0 + angle
+    # Clamp to reasonable deskew range to avoid wild rotations from noisy binaries.
+    if abs(angle) > 15.0:
+        return 0.0
     return angle
 
 
@@ -98,7 +101,7 @@ class OpenCvPreprocessor:
 
         if self.enable_denoise:
             # fastNlMeans is more robust than Gaussian blur for scan noise.
-            gray = cv2.fastNlMeansDenoising(gray, h=12)
+            gray = cv2.fastNlMeansDenoising(gray, h=7)
 
         # Adaptive threshold is robust for uneven lighting.
         binary = cv2.adaptiveThreshold(
@@ -116,7 +119,7 @@ class OpenCvPreprocessor:
             image_bgr = _rotate(image_bgr, angle)
             gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
             if self.enable_denoise:
-                gray = cv2.fastNlMeansDenoising(gray, h=12)
+                gray = cv2.fastNlMeansDenoising(gray, h=7)
             binary = cv2.adaptiveThreshold(
                 gray,
                 255,
