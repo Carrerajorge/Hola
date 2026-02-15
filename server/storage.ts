@@ -938,18 +938,40 @@ export class MemStorage implements IStorage {
   }
 
   async createUserMessageAndRun(chatId: string, message: InsertChatMessage, clientRequestId: string): Promise<{ message: ChatMessage; run: ChatRun }> {
-    return await db.transaction(async (tx) => {
-      const [savedMessage] = await tx.insert(chatMessages).values(message).returning();
-      const [run] = await tx.insert(chatRuns).values({
-        chatId,
-        clientRequestId,
-        userMessageId: savedMessage.id,
-        status: 'pending',
-      }).returning();
-      await tx.update(chatMessages).set({ runId: run.id }).where(eq(chatMessages.id, savedMessage.id));
-      await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-      return { message: { ...savedMessage, runId: run.id }, run };
+    const messageId = message.id || randomUUID();
+    const runId = randomUUID();
+
+    const messageToInsert: InsertChatMessage = {
+      ...message,
+      id: messageId,
+      runId,
+    };
+
+    const runToInsert: InsertChatRun = {
+      id: runId,
+      chatId,
+      clientRequestId,
+      userMessageId: messageId,
+      status: "pending",
+    };
+
+    const result = await db.transaction(async (tx) => {
+      const [savedMessage] = await tx.insert(chatMessages).values(messageToInsert).returning();
+      const [run] = await tx.insert(chatRuns).values(runToInsert).returning();
+      return { message: savedMessage, run };
     });
+
+    // Best-effort: bump chat updatedAt without blocking the user's round trip.
+    queueMicrotask(() => {
+      db.update(chats)
+        .set({ updatedAt: new Date() })
+        .where(eq(chats.id, chatId))
+        .catch((err) => {
+          console.warn("[Chats] Failed to update updatedAt after message+run create:", err?.message || err);
+        });
+    });
+
+    return result;
   }
 
   // Tool Invocation operations
