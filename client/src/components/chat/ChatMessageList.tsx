@@ -240,8 +240,10 @@ export function ChatMessageList({
         );
     }, [showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, streamingContent, variant, realTimePhase, detectedIntent]);
 
-    // Stable key function — streaming message always gets the same key
-    const computeItemKey = useCallback((index: number, msg: Message) => msg.id, []);
+    // Stable key function.
+    // For optimistic messages, `id` is replaced after server ACK; use `clientTempId`
+    // when available to prevent Virtuoso unmount/remount flicker.
+    const computeItemKey = useCallback((index: number, msg: Message) => msg.clientTempId || msg.id, []);
 
     // Render a single item — streaming messages get a specialized renderer
     const renderItem = useCallback((index: number, msg: Message) => {

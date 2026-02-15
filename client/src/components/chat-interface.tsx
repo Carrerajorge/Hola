@@ -756,10 +756,12 @@ export function ChatInterface({
 
   // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
+    const messageKey = (m: any): string => (m?.clientTempId && typeof m.clientTempId === "string" ? m.clientTempId : m.id);
+
     // Start with optimistic messages, then merge prop messages (prop messages take priority)
-    const msgMap = new Map(optimisticMessages.map((m: any) => [m.id, m]));
+    const msgMap = new Map(optimisticMessages.map((m: any) => [messageKey(m), m]));
     // Override with prop messages (they are the source of truth once available)
-    messages.forEach((m: any) => msgMap.set(m.id, m));
+    messages.forEach((m: any) => msgMap.set(messageKey(m), m));
 
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
