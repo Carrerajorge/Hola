@@ -230,12 +230,23 @@ const isTerminalExecNoApi =
 const isTerminalFileNoApi =
   req.method === "POST" && /^\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly);
 
+const isSafePythonAgentReadOnly =
+  req.method === "POST" && (
+    /^\/api\/python-agent\/search$/.test(pathOnly) ||
+    /^\/api\/python-agent\/browse$/.test(pathOnly)
+  );
+
+const isSafeReadOnlyHealth =
+  req.method === "GET" && (/^\/api\/python-agent\/health$/.test(pathOnly) || /^\/api\/python-agent\/status$/.test(pathOnly));
+
 if (
   isTerminalSessionCreate ||
   isTerminalExec ||
   isTerminalFileOp ||
   isTerminalExecNoApi ||
-  isTerminalFileNoApi
+  isTerminalFileNoApi ||
+  isSafePythonAgentReadOnly ||
+  isSafeReadOnlyHealth
 ) {
   return next();
 }
