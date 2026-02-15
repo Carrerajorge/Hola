@@ -122,7 +122,7 @@ jobs:
               echo "⚠️ Removing stale git lock: .git/index.lock"
               rm -f .git/index.lock
             fi
-            git fetch origin main
+            git fetch --depth=1 origin main
             git checkout --force "${TARGET_SHA}"
 
             CURRENT_SHA="$(git rev-parse --short HEAD)"
@@ -409,7 +409,7 @@ jobs:
               echo "⚠️ Removing stale git lock: .git/index.lock"
               rm -f .git/index.lock
             fi
-            git fetch origin main
+            git fetch --depth=1 origin main
             git checkout --force "${TARGET_SHA}"
 
             CURRENT_SHA="$(git rev-parse --short HEAD)"
