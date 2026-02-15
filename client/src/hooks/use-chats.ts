@@ -747,6 +747,7 @@ export function useChats() {
   const [isLoading, setIsLoading] = useState(true);
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
+  const recoveringFailedQueueRef = useRef(false);
 
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
@@ -931,6 +932,168 @@ export function useChats() {
     }
   }, []);
 
+  const recoverFailedMessageQueue = useCallback(async () => {
+    if (recoveringFailedQueueRef.current) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+    const failedQueue = safeReadFailedQueue();
+    if (failedQueue.length === 0) return;
+
+    recoveringFailedQueueRef.current = true;
+    try {
+      console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
+
+      const setDeliveryByRequestId = (chatId: string, requestId: string, patch: Partial<Message>) => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => {
+              if (m.role !== "user") return m;
+              if (m.requestId !== requestId) return m;
+              if (patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered") {
+                return { ...m, ...patch, deliveryStatus: "delivered" };
+              }
+              return { ...m, ...patch };
+            })
+          };
+        }));
+      };
+
+      const reconcileMessageIdByRequestId = (chatId: string, requestId: string, serverId: string) => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+
+          let changed = false;
+          let tempId: string | null = null;
+
+          let updated = chat.messages.map(m => {
+            if (m.role === "user" && m.requestId === requestId) {
+              changed = true;
+              tempId = m.clientTempId || m.id;
+              return {
+                ...m,
+                id: serverId,
+                clientTempId: tempId || m.clientTempId,
+                deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
+                deliveryError: undefined,
+              };
+            }
+            return m;
+          });
+
+          if (!changed || !tempId) return chat;
+
+          updated = updated.map(m => {
+            if (m.userMessageId === tempId) {
+              return { ...m, userMessageId: serverId };
+            }
+            return m;
+          });
+
+          const hasAssistantReply = updated.some(
+            (m) => m.role === "assistant" && m.userMessageId === serverId
+          );
+          if (hasAssistantReply) {
+            updated = updated.map((m) => {
+              if (m.role !== "user") return m;
+              if (m.requestId !== requestId) return m;
+              if (m.deliveryStatus === "error") return m;
+              return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+            });
+          }
+
+          const byId = new Map<string, Message>();
+          for (const msg of updated) {
+            const existing = byId.get(msg.id);
+            if (!existing) {
+              byId.set(msg.id, msg);
+              continue;
+            }
+            byId.set(msg.id, { ...existing, ...msg });
+          }
+
+          return { ...chat, messages: Array.from(byId.values()) };
+        }));
+      };
+
+      const remaining: FailedMessageQueueItem[] = [];
+      for (const queued of failedQueue) {
+        if (!queued?.chatId || !queued?.requestId) continue;
+        if (queued.chatId.startsWith(PENDING_CHAT_PREFIX)) continue;
+        if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) continue;
+
+        // If present in local UI, reflect that we're retrying.
+        setDeliveryByRequestId(queued.chatId, queued.requestId, {
+          deliveryStatus: "sending",
+          deliveryError: undefined,
+        });
+
+        try {
+          const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
+            body: JSON.stringify({
+              role: queued.role,
+              content: queued.content,
+              requestId: queued.requestId,
+              clientRequestId: queued.clientRequestId,
+              attachments: queued.attachments,
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json().catch(() => null);
+            const serverMessage = (data as any)?.message ?? data;
+            if (serverMessage?.id && typeof serverMessage.id === "string") {
+              reconcileMessageIdByRequestId(queued.chatId, queued.requestId, serverMessage.id);
+            } else {
+              setDeliveryByRequestId(queued.chatId, queued.requestId, {
+                deliveryStatus: "sent",
+                deliveryError: undefined,
+              });
+            }
+
+            markRequestComplete(queued.requestId);
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+
+          const errText = await res.text().catch(() => "");
+          setDeliveryByRequestId(queued.chatId, queued.requestId, {
+            deliveryStatus: "error",
+            deliveryError: errText || `HTTP ${res.status}`,
+          });
+
+          const retryable =
+            res.status >= 500 ||
+            res.status === 408 ||
+            res.status === 429 ||
+            res.status === 401;
+
+          if (retryable) {
+            remaining.push(queued); // Retry next time / when network recovers.
+          } else {
+            console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
+          }
+        } catch (err) {
+          setDeliveryByRequestId(queued.chatId, queued.requestId, {
+            deliveryStatus: "error",
+            deliveryError: err instanceof Error ? err.message : String(err),
+          });
+          remaining.push(queued); // Network error, retry next time.
+        }
+      }
+
+      safeWriteFailedQueue(remaining);
+    } catch (e) {
+      console.warn("[FailedQueue] Error processing recovery queue:", e);
+    } finally {
+      recoveringFailedQueueRef.current = false;
+    }
+  }, []);
+
   // Fetch details for active chat when selected
   useEffect(() => {
     if (activeChatId && !isPendingChat(activeChatId)) {
@@ -1081,167 +1244,35 @@ export function useChats() {
       }
 
       setIsLoading(false);
-
-      // Recover failed message saves from previous session (best-effort).
-      // This keeps messages visible with an error state and retries in background so
-      // a reload doesn't permanently strand a user's "Enviar".
-      try {
-        const failedQueue = safeReadFailedQueue();
-        if (failedQueue.length > 0) {
-          console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
-
-          const setDeliveryByRequestId = (chatId: string, requestId: string, patch: Partial<Message>) => {
-            setChats(prev => prev.map(chat => {
-              if (chat.id !== chatId) return chat;
-              return {
-                ...chat,
-                messages: chat.messages.map(m => {
-                  if (m.role !== "user") return m;
-                  if (m.requestId !== requestId) return m;
-                  if (patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered") {
-                    return { ...m, ...patch, deliveryStatus: "delivered" };
-                  }
-                  return { ...m, ...patch };
-                })
-              };
-            }));
-          };
-
-          const reconcileMessageIdByRequestId = (chatId: string, requestId: string, serverId: string) => {
-            setChats(prev => prev.map(chat => {
-              if (chat.id !== chatId) return chat;
-
-              let changed = false;
-              let tempId: string | null = null;
-
-              let updated = chat.messages.map(m => {
-                if (m.role === "user" && m.requestId === requestId) {
-                  changed = true;
-                  tempId = m.clientTempId || m.id;
-                  return {
-                    ...m,
-                    id: serverId,
-                    clientTempId: tempId || m.clientTempId,
-                    deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
-                    deliveryError: undefined,
-                  };
-                }
-                return m;
-              });
-
-              if (!changed || !tempId) return chat;
-
-              updated = updated.map(m => {
-                if (m.userMessageId === tempId) {
-                  return { ...m, userMessageId: serverId };
-                }
-                return m;
-              });
-
-              const hasAssistantReply = updated.some(
-                (m) => m.role === "assistant" && m.userMessageId === serverId
-              );
-              if (hasAssistantReply) {
-                updated = updated.map((m) => {
-                  if (m.role !== "user") return m;
-                  if (m.requestId !== requestId) return m;
-                  if (m.deliveryStatus === "error") return m;
-                  return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
-                });
-              }
-
-              const byId = new Map<string, Message>();
-              for (const msg of updated) {
-                const existing = byId.get(msg.id);
-                if (!existing) {
-                  byId.set(msg.id, msg);
-                  continue;
-                }
-                byId.set(msg.id, { ...existing, ...msg });
-              }
-
-              return { ...chat, messages: Array.from(byId.values()) };
-            }));
-          };
-
-          const remaining: FailedMessageQueueItem[] = [];
-          for (const queued of failedQueue) {
-            if (!queued?.chatId || !queued?.requestId) continue;
-            if (queued.chatId.startsWith(PENDING_CHAT_PREFIX)) continue;
-            if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) continue;
-
-            // If present in local UI, reflect that we're retrying.
-            setDeliveryByRequestId(queued.chatId, queued.requestId, {
-              deliveryStatus: "sending",
-              deliveryError: undefined,
-            });
-
-            try {
-              const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-                credentials: "include",
-                body: JSON.stringify({
-                  role: queued.role,
-                  content: queued.content,
-                  requestId: queued.requestId,
-                  clientRequestId: queued.clientRequestId,
-                  attachments: queued.attachments,
-                }),
-              });
-
-              if (res.ok) {
-                const data = await res.json().catch(() => null);
-                const serverMessage = (data as any)?.message ?? data;
-                if (serverMessage?.id && typeof serverMessage.id === "string") {
-                  reconcileMessageIdByRequestId(queued.chatId, queued.requestId, serverMessage.id);
-                } else {
-                  setDeliveryByRequestId(queued.chatId, queued.requestId, {
-                    deliveryStatus: "sent",
-                    deliveryError: undefined,
-                  });
-                }
-
-                markRequestComplete(queued.requestId);
-                removeFailedMessageFromRecoveryQueue(queued.requestId);
-                continue;
-              }
-
-              const errText = await res.text().catch(() => "");
-              setDeliveryByRequestId(queued.chatId, queued.requestId, {
-                deliveryStatus: "error",
-                deliveryError: errText || `HTTP ${res.status}`,
-              });
-
-              const retryable =
-                res.status >= 500 ||
-                res.status === 408 ||
-                res.status === 429 ||
-                res.status === 401;
-
-              if (retryable) {
-                remaining.push(queued); // Retry next time / when network recovers.
-              } else {
-                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
-              }
-            } catch (err) {
-              setDeliveryByRequestId(queued.chatId, queued.requestId, {
-                deliveryStatus: "error",
-                deliveryError: err instanceof Error ? err.message : String(err),
-              });
-              remaining.push(queued); // Network error, retry next time.
-            }
-          }
-
-          safeWriteFailedQueue(remaining);
-        }
-      } catch (e) {
-        console.warn("[FailedQueue] Error processing recovery queue:", e);
-      }
+      void recoverFailedMessageQueue();
     };
 
     initChats();
   }, []);
+
+  // Retry failed (queued) message saves when connectivity is restored or the tab becomes active.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleOnline = () => {
+      if (!isLoading) {
+        void recoverFailedMessageQueue();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (!isLoading && document.visibilityState === "visible") {
+        void recoverFailedMessageQueue();
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isLoading, recoverFailedMessageQueue]);
 
   // Allows other parts of the app (settings/privacy) to request a full server refresh.
   useEffect(() => {
