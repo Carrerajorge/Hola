@@ -211,6 +211,35 @@ export async function preExecutionIntentGuard(
 
   guardStats.analyzed += 1;
 
+  // --- BYPASS: terminal endpoints must NOT depend on LLM quota ---
+const pathOnly = (req.originalUrl || req.url || req.path || "").split("?")[0];
+
+const isTerminalSessionCreate =
+  req.method === "POST" && /^\/api\/terminal\/sessions$/.test(pathOnly);
+
+const isTerminalExec =
+  req.method === "POST" && /^\/api\/terminal\/sessions\/[^/]+\/exec$/.test(pathOnly);
+
+const isTerminalFileOp =
+  req.method === "POST" && /^\/api\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly);
+
+// sometimes internal routes appear without /api in logs
+const isTerminalExecNoApi =
+  req.method === "POST" && /^\/terminal\/sessions\/[^/]+\/exec$/.test(pathOnly);
+
+const isTerminalFileNoApi =
+  req.method === "POST" && /^\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly);
+
+if (
+  isTerminalSessionCreate ||
+  isTerminalExec ||
+  isTerminalFileOp ||
+  isTerminalExecNoApi ||
+  isTerminalFileNoApi
+) {
+  return next();
+}
+
   try {
     const brief = await withSpan(
       "execution.intent_guard",
