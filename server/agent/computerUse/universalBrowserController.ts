@@ -2441,86 +2441,97 @@ RULES:
         if (cal) (cal as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
       }).catch(() => {});
 
-      // Wait for calendar to fully render (CoverManager may refresh via AJAX after party size change)
-      let calendarReady = false;
-      for (let i = 0; i < 20; i++) { // up to 10s (20 * 500ms)
-        calendarReady = await page.evaluate((targetDay) => {
-          const dayStr = String(targetDay);
-          // Check if the target day exists and is visible
-          const byDataDay = document.querySelector(`td[data-day="${dayStr}"]`);
-          if (byDataDay && (byDataDay as HTMLElement).offsetParent !== null) return true;
-          const candidates = Array.from(document.querySelectorAll("span.date, a.ui-state-default"));
-          for (const el of candidates) {
-            if ((el.textContent || "").trim() === dayStr && (el as HTMLElement).offsetParent !== null) return true;
-          }
-          return false;
-        }, day).catch(() => false);
-        if (calendarReady) {
-          console.log(`[CalaReservation] Calendar day ${day} visible after ${(i + 1) * 500}ms`);
-          break;
-        }
+      // Wait for calendar strip to render (CoverManager horizontal day strip refreshes via AJAX)
+      for (let i = 0; i < 10; i++) {
+        const hasAnyDay = await page.evaluate(() =>
+          document.querySelectorAll("span.date").length > 0
+        ).catch(() => false);
+        if (hasAnyDay) break;
         await page.waitForTimeout(500).catch(() => {});
       }
-      if (!calendarReady) {
-        console.log(`[CalaReservation] Calendar day ${day} NOT visible after 10s wait`);
-      }
 
-      // First try exact text match via JS to avoid partial matches (e.g., day 2 matching "12", "20", "22")
-      const dateClickedByJs = await page.evaluate((targetDay) => {
+      // Strategy 1: Try to click the day in the visible horizontal strip (span.date elements)
+      let dateClicked = await page.evaluate((targetDay) => {
         const dayStr = String(targetDay);
-        // Priority order: data-day attribute (most reliable), then CoverManager span.date, then jQuery datepicker
-        const byDataDay = document.querySelector(`td[data-day="${dayStr}"] a, td[data-day="${dayStr}"] span`);
-        if (byDataDay && (byDataDay as HTMLElement).offsetParent !== null) {
-          try {
-            (byDataDay as HTMLElement).click();
-            return true;
-          } catch {
-            /* continue */
-          }
-        }
-        const candidates = Array.from(document.querySelectorAll("span.date, a.ui-state-default, td[data-day]"));
+        const candidates = Array.from(document.querySelectorAll("span.date"));
         for (const el of candidates) {
-          const text = (el.textContent || "").trim();
-          if (text === dayStr && (el as HTMLElement).offsetParent !== null) {
+          if ((el.textContent || "").trim() === dayStr && (el as HTMLElement).offsetParent !== null) {
             try {
               (el as HTMLElement).click();
-              return true;
-            } catch {
-              /* continue */
-            }
+              return "strip";
+            } catch { /* continue */ }
           }
         }
-        return false;
-      }, day).catch(() => false);
-      // Fallback: Playwright selector-based click
-      let dateClickedSelector: string | null = null;
-      if (!dateClickedByJs) {
-        dateClickedSelector = await clickFirstVisible([
+        return null;
+      }, day).catch(() => null);
+
+      // Strategy 2: If day not in horizontal strip, open the full calendar (jQuery datepicker)
+      if (!dateClicked) {
+        console.log(`[CalaReservation] Day ${day} not in horizontal strip, opening full calendar...`);
+        // Click the calendar icon to open the datepicker
+        const calIconClicked = await page.evaluate(() => {
+          // CoverManager uses a fa-calendar icon or a container with onclick to toggle datepicker
+          const icon = document.querySelector("i.fa.fa-calendar");
+          if (icon && (icon as HTMLElement).offsetParent !== null) {
+            const clickTarget = icon.closest("a, button, div, span") || icon;
+            (clickTarget as HTMLElement).click();
+            return true;
+          }
+          // Fallback: try to show the datepicker directly
+          const dp = document.querySelector("#datepicker_calendar, .ui-datepicker");
+          if (dp) {
+            (dp as HTMLElement).style.display = "block";
+            return true;
+          }
+          return false;
+        }).catch(() => false);
+
+        if (calIconClicked) {
+          await page.waitForTimeout(800).catch(() => {});
+          // Now try to click the day in the jQuery datepicker table
+          dateClicked = await page.evaluate((targetDay) => {
+            const dayStr = String(targetDay);
+            // jQuery datepicker: table.ui-datepicker-calendar td a.ui-state-default
+            const dpCells = document.querySelectorAll(".ui-datepicker-calendar td a");
+            for (const cell of Array.from(dpCells)) {
+              if ((cell.textContent || "").trim() === dayStr) {
+                try {
+                  (cell as HTMLElement).click();
+                  return "datepicker";
+                } catch { /* continue */ }
+              }
+            }
+            // Also try td[data-day] approach
+            const byDataDay = document.querySelector(`td[data-day="${dayStr}"] a, td[data-day="${dayStr}"] span`);
+            if (byDataDay) {
+              try {
+                (byDataDay as HTMLElement).click();
+                return "datepicker-data";
+              } catch { /* continue */ }
+            }
+            return null;
+          }, day).catch(() => null);
+        }
+      }
+
+      // Strategy 3: Playwright selector-based click as last resort
+      if (!dateClicked) {
+        const selectorClicked = await clickFirstVisible([
+          `span.date:has-text("${day}")`,
+          `.ui-datepicker-calendar td a:has-text("${day}")`,
           `td[data-day="${day}"] a`,
           `td[data-day="${day}"] span`,
-          `span.date.disponibility_sm:has-text("${day}")`,
-          `span.date:has-text("${day}")`,
-          `#datepicker_calendar a.ui-state-default:has-text("${day}")`,
-          `a.ui-state-default:has-text("${day}")`,
         ]);
+        if (selectorClicked) dateClicked = "selector";
       }
-      if (!dateClickedByJs && !dateClickedSelector) {
-        // Log the page state for debugging
+
+      if (!dateClicked) {
         const calState = await page.evaluate(() => {
-          const calEl = document.querySelector("#datepicker_calendar, .ui-datepicker, .calendar-container");
-          const allDays = Array.from(document.querySelectorAll("td[data-day], span.date, a.ui-state-default"));
-          return {
-            calendarFound: !!calEl,
-            calendarVisible: calEl ? (calEl as HTMLElement).offsetParent !== null : false,
-            dayElements: allDays.slice(0, 40).map(el => ({
-              tag: el.tagName,
-              text: (el.textContent || "").trim().slice(0, 10),
-              visible: (el as HTMLElement).offsetParent !== null,
-              dataDay: el.getAttribute?.("data-day"),
-            })),
-          };
-        }).catch(() => ({ calendarFound: false, calendarVisible: false, dayElements: [] }));
-        console.log(`[CalaReservation] Day ${day} click failed. Calendar state:`, JSON.stringify(calState).slice(0, 500));
+          const stripDays = Array.from(document.querySelectorAll("span.date")).map(el => (el.textContent || "").trim());
+          const dpDays = Array.from(document.querySelectorAll(".ui-datepicker-calendar td a")).map(el => (el.textContent || "").trim());
+          return { stripDays, dpDays, dpVisible: !!document.querySelector(".ui-datepicker-calendar")?.closest("[style*='block']") };
+        }).catch(() => ({ stripDays: [], dpDays: [], dpVisible: false }));
+        console.log(`[CalaReservation] Day ${day} click failed. State:`, JSON.stringify(calState));
         return {
           success: false,
           steps,
@@ -2532,6 +2543,7 @@ RULES:
           screenshots,
         };
       }
+      console.log(`[CalaReservation] Day ${day} clicked via ${dateClicked}`);
       await page.waitForTimeout(500).catch(() => {});
       steps.push(`Selected date day: ${day}.`);
       await emitProgress("click", `Fecha seleccionada (día ${day})`, "30%");
