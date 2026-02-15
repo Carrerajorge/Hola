@@ -69,6 +69,14 @@ export interface StreamResult {
 }
 
 function generateRequestId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `req_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 

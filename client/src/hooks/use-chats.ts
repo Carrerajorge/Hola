@@ -395,7 +395,15 @@ async function withRetry<T>(
 
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `req_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // ============================================================================
@@ -523,7 +531,15 @@ export function useRateLimiter() {
 
 // Generate a unique client request ID for run-based idempotency
 export function generateClientRequestId(): string {
-  return `cri_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `cri_${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `cri_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
 // Resolve pending chat ID to real ID if available

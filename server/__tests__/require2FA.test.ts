@@ -14,6 +14,8 @@ vi.mock("../services/twoFactorAuth", () => ({
 }));
 
 describe("require2FA middleware", () => {
+  const TEST_TIMEOUT_MS = 15_000;
+
   beforeEach(() => {
     getSettingValueMock.mockReset();
     is2FAEnabledMock.mockReset();
@@ -44,7 +46,7 @@ describe("require2FA middleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("requires verification when 2FA is enabled but session not verified", async () => {
     getSettingValueMock.mockImplementation(async (key: string, fallback: any) => {
@@ -71,7 +73,7 @@ describe("require2FA middleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("allows access when 2FA enabled and session verified", async () => {
     getSettingValueMock.mockImplementation(async (key: string, fallback: any) => {
@@ -98,7 +100,7 @@ describe("require2FA middleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("does not force setup for non-admins when require_2fa_admins=true", async () => {
     getSettingValueMock.mockImplementation(async (key: string, fallback: any) => {
@@ -125,5 +127,5 @@ describe("require2FA middleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 });

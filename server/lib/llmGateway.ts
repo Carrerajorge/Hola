@@ -301,7 +301,11 @@ class LLMGateway {
 
   // ===== Cache Management =====
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    try {
+      return `req_${crypto.randomUUID()}`;
+    } catch {
+      return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    }
   }
 
   private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string | null {
