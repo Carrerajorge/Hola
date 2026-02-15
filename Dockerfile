@@ -1,50 +1,39 @@
-# ILIAGPT Dockerfile - Optimized
+# ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds
 # Multi-stage build for production
 
 # ============================================
-# Stage 1: Dependencies (All)
+# Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:22-alpine AS deps
+FROM node:22-slim AS builder
 WORKDIR /app
-RUN apk add --no-cache libc6-compat python3 make g++
-COPY package.json package-lock.json ./
-# `npm ci` runs `postinstall`, so ensure any referenced scripts exist in this stage.
-COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-RUN npm ci
 
-# ============================================
-# Stage 2: Build
-# ============================================
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Build-time tooling for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Full deps for build
+COPY package.json package-lock.json ./
+# Ensure mathjax sync script exists before npm ci postinstall hook
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+RUN npm ci \
+  && npm cache clean --force
+
+# Build client and server assets
 COPY . .
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV VITE_APP_VERSION=$APP_VERSION
-# Build client and server
 RUN npm run build
 
-# ============================================
-# Stage 3: Production Dependencies
-# ============================================
-# Use Debian-slim to match the runner stage (native modules like node-pty
-# compiled against glibc won't work on Alpine's musl).
-FROM node:22-slim AS prod-deps
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
-COPY package.json package-lock.json ./
-COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-# Install production dependencies WITH scripts so native modules (e.g. node-pty) build correctly.
-RUN npm ci --omit=dev
+# Convert to production-only deps for runtime images
+RUN npm prune --omit=dev
 
 # ============================================
-# Stage 4: Sandbox Runner
+# Stage 2: Sandbox Runner
 # ============================================
-# Must use Debian-slim to match prod-deps (native modules need glibc).
 FROM node:22-slim AS sandbox-runner
-
 WORKDIR /app
 
 # Bake APP_VERSION into the image so runtime can report the deployed commit SHA
@@ -54,13 +43,14 @@ ENV APP_VERSION=$APP_VERSION
 
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
 RUN apt-get update && apt-get install -y --no-install-recommends docker.io bash \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 ENV NODE_ENV=production
 ENV SANDBOX_RUNNER_PORT=8080
 
-# Prod deps + built artifacts
-COPY --from=prod-deps /app/node_modules ./node_modules
+# Runtime deps + built artifacts
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 
@@ -69,9 +59,8 @@ EXPOSE 8080
 CMD ["node", "dist/sandbox-runner.cjs"]
 
 # ============================================
-# Stage 5: Production Runner
+# Stage 3: Production Runner
 # ============================================
-# Debian-slim base: required for Playwright Chromium (glibc + system libs).
 FROM node:22-slim AS runner
 WORKDIR /app
 
@@ -95,10 +84,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
       libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
       libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
-  && rm -rf /var/lib/apt/lists/*
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Copy prod dependencies only (with ownership)
-COPY --chown=iliagpt:nodejs --from=prod-deps /app/node_modules ./node_modules
+COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
 # Copy built artifacts
 COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
 COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations

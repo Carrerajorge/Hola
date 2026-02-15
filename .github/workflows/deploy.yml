@@ -137,6 +137,15 @@ jobs:
             export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
+            echo "▸ Reclaiming VPS disk before build..."
+            docker system df
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+
+            echo "▸ Cleaning Docker cache on VPS to prevent build disk exhaustion..."
+            docker builder prune -af || true
+            docker image prune -af || true
+
             compose() {
               # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
               # where stage outputs (deps:/app/node_modules) are not found when multiple
@@ -414,6 +423,15 @@ jobs:
             # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
             export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
+
+            echo "▸ Reclaiming VPS disk before build..."
+            docker system df
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+
+            echo "▸ Cleaning Docker cache on VPS to prevent build disk exhaustion..."
+            docker builder prune -af || true
+            docker image prune -af || true
 
             compose() {
               # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
