@@ -2647,9 +2647,10 @@ export function ChatInterface({
   const waitForPendingUploads = async (): Promise<void> => {
     const promises = Array.from(pendingUploadsRef.current.values());
     if (promises.length > 0) {
-      console.log("[waitForPendingUploads] Waiting for", promises.length, "uploads to complete");
+      if (import.meta.env.DEV) {
+        chatLogger.debug("waitForPendingUploads", { count: promises.length });
+      }
       await Promise.all(promises);
-      console.log("[waitForPendingUploads] All uploads complete");
     }
   };
 
@@ -3203,25 +3204,8 @@ export function ChatInterface({
       return;
     }
 
-    console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
-
-    // Wait for any pending uploads to complete before proceeding
-    if (pendingUploadsRef.current.size > 0) {
-      console.log("[handleSubmit] Waiting for", pendingUploadsRef.current.size, "pending uploads...");
-      await waitForPendingUploads();
-      console.log("[handleSubmit] All uploads complete");
-    }
-
-    // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
-    if (filesStillLoading) {
-      console.log("[handleSubmit] files still loading after wait, returning");
-      toast({
-        title: "Archivos en proceso",
-        description: "Espera a que los archivos terminen de cargarse antes de enviar.",
-        duration: 3000,
-      });
-      return;
+    if (import.meta.env.DEV) {
+      chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
     }
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
@@ -3229,9 +3213,13 @@ export function ChatInterface({
     const hasFiles = uploadedFilesRef.current.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
-    console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
+    if (import.meta.env.DEV) {
+      chatLogger.debug("handleSubmit content check", { hasInput, hasFiles });
+    }
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
-      console.log("[handleSubmit] no content to submit, returning");
+      if (import.meta.env.DEV) {
+        chatLogger.debug("handleSubmit no content, returning");
+      }
       return;
     }
 
@@ -3554,7 +3542,8 @@ export function ChatInterface({
     // When document files are attached, skip generation pattern detection entirely
     // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
     const hasDocumentFiles = uploadedFilesRef.current.some(
-      (f: any) => f.status === "ready" && !(f.type || "").startsWith("image/")
+      // Treat uploading/processing docs as present too; otherwise fast-submit can misroute into generation/edit mode.
+      (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
     );
 
     if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
@@ -4195,18 +4184,24 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately — use auto-generated prompt if user sent only files
     const userInput = input || autoPromptForFiles;
-    const currentUploadedFiles = [...uploadedFilesRef.current];
+    let currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const hadPendingUploadsAtSubmit = pendingUploadsRef.current.size > 0;
 
     // Reset UI state immediately — save files for restoration on error
-    const savedMainFiles = [...uploadedFilesRef.current];
+    let savedMainFiles = [...uploadedFilesRef.current];
     setInput("");
     if (chatId) clearDraft(chatId);
-    setUploadedFiles([]);
+    // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
+    // We'll clear once uploads settle (after optimistic message is already on screen).
+    if (!hadPendingUploadsAtSubmit) {
+      setUploadedFiles([]);
+    }
 
     // Process attachments for message construction
-    const attachments = currentUploadedFiles
-      .filter((f: any) => f.status === "ready" || f.status === "processing")
+    let attachments = currentUploadedFiles
+      // For UI: include anything not in a terminal error state so the message shows files immediately.
+      .filter((f: any) => f?.status !== "error")
       .map((f: any) => ({
         type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
         name: f.name,
@@ -4254,6 +4249,42 @@ export function ChatInterface({
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
+
+    // If there are pending uploads, wait for them before kicking off any backend work.
+    // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
+    if (hadPendingUploadsAtSubmit) {
+      await waitForPendingUploads();
+
+      currentUploadedFiles = [...uploadedFilesRef.current];
+      savedMainFiles = [...currentUploadedFiles];
+      attachments = currentUploadedFiles
+        .filter((f: any) => f.status === "ready" || f.status === "processing")
+        .map((f: any) => ({
+          type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+          name: f.name,
+          documentType: (() => {
+            if (f.type.startsWith("image/")) return undefined;
+            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+            if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+            if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+            return "word";
+          })() as "word" | "excel" | "ppt" | "pdf",
+          mimeType: f.type,
+          imageUrl: f.dataUrl,
+          storagePath: f.storagePath,
+          fileId: f.id,
+          spreadsheetData: f.spreadsheetData,
+        }));
+
+      const nextAttachments = attachments.length > 0 ? attachments : undefined;
+      userMsg.attachments = nextAttachments;
+      setOptimisticMessages((prev: Message[]) =>
+        prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
+      );
+
+      // Now it's safe to clear the composer files (uploads have reached a stable state).
+      setUploadedFiles([]);
+    }
 
     // -------------------------------------------------------------------------
     // 2. ASYNC LOGIC (Agent Mode / Server Request)
