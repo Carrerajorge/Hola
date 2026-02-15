@@ -136,7 +136,10 @@ export const UserMessage = memo(function UserMessage({
                         )}
                         {message.deliveryStatus === "error" && (
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-destructive">
+                                <span
+                                    className="text-[10px] text-destructive"
+                                    title={message.deliveryError || undefined}
+                                >
                                     Error
                                 </span>
                                 {onRetrySend && (

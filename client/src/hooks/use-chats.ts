@@ -143,6 +143,23 @@ const pendingFlushResolvers = new Map<string, Array<(result: { run?: ChatRun; de
 // Idempotency: Track messages being processed to prevent duplicates
 const processingRequestIds = new Set<string>();
 const savedRequestIds = new Set<string>();
+const savedRequestIdOrder: string[] = [];
+const MAX_SAVED_REQUEST_IDS = 5000;
+
+function rememberSavedRequestId(requestId: string): void {
+  if (savedRequestIds.has(requestId)) return;
+  savedRequestIds.add(requestId);
+  savedRequestIdOrder.push(requestId);
+
+  // Prevent unbounded growth in long-lived sessions.
+  if (savedRequestIdOrder.length > MAX_SAVED_REQUEST_IDS) {
+    const excess = savedRequestIdOrder.length - MAX_SAVED_REQUEST_IDS;
+    for (let i = 0; i < excess; i++) {
+      const oldest = savedRequestIdOrder.shift();
+      if (oldest) savedRequestIds.delete(oldest);
+    }
+  }
+}
 
 // Run-based idempotency: Track active runs to prevent duplicate AI calls
 export interface ChatRun {
@@ -572,14 +589,14 @@ export function markRequestProcessing(requestId: string): boolean {
 // Mark a request as completed (persisted - no TTL for long-lived idempotency)
 export function markRequestComplete(requestId: string): void {
   processingRequestIds.delete(requestId);
-  savedRequestIds.add(requestId);
+  rememberSavedRequestId(requestId);
   // No TTL - requestIds stay in savedRequestIds for the session to ensure idempotency
   // Memory is managed by page reload which clears and re-hydrates from server
 }
 
 // Mark a request as persisted (hydrated from server/localStorage - no TTL)
 export function markRequestPersisted(requestId: string): void {
-  savedRequestIds.add(requestId);
+  rememberSavedRequestId(requestId);
   // No TTL - persisted requestIds stay in memory for the session
 }
 
