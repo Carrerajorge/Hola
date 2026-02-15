@@ -114,16 +114,25 @@ jobs:
               fi
             fi
 
-            # ── Checkout exact commit for deterministic deploys ──
+            # Use a fresh git workdir on VPS to avoid metadata write failures under low disk.
+            WORKSPACE_DIR="/tmp/iliagpt-deploy-${TARGET_SHA}"
+            echo "▸ Preparing clean workspace at ${WORKSPACE_DIR}"
+            rm -rf "$WORKSPACE_DIR"
+            mkdir -p "$WORKSPACE_DIR"
+
+            GIT_REPO_URL="$(git remote get-url origin 2>/dev/null || true)"
+            if [ -z "$GIT_REPO_URL" ]; then
+              GIT_REPO_URL="https://github.com/Carrerajorge/Hola.git"
+            fi
+
             echo "▸ Fetching repository and checking out target SHA..."
             echo "▸ TARGET_SHA: ${TARGET_SHA}"
-            # Stale lock files can be left behind by interrupted deploys.
-            if [ -f .git/index.lock ]; then
-              echo "⚠️ Removing stale git lock: .git/index.lock"
-              rm -f .git/index.lock
-            fi
-            git fetch --depth=1 origin main
+            git clone --depth=1 --filter=blob:none --branch main "$GIT_REPO_URL" "$WORKSPACE_DIR"
+            cd "$WORKSPACE_DIR"
             git checkout --force "${TARGET_SHA}"
+            if [ -f "$DEPLOY_PATH/.env.production" ]; then
+              cp "$DEPLOY_PATH/.env.production" .env.production
+            fi
 
             CURRENT_SHA="$(git rev-parse --short HEAD)"
             EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
@@ -405,12 +414,23 @@ jobs:
 
             echo "▸ Fetching repository and checking out target SHA..."
             echo "▸ TARGET_SHA: ${TARGET_SHA}"
-            if [ -f .git/index.lock ]; then
-              echo "⚠️ Removing stale git lock: .git/index.lock"
-              rm -f .git/index.lock
+
+            # Use a fresh git workdir on VPS to avoid metadata write failures under low disk.
+            WORKSPACE_DIR="/tmp/iliagpt-deploy-${TARGET_SHA}"
+            echo "▸ Preparing clean workspace at ${WORKSPACE_DIR}"
+            rm -rf "$WORKSPACE_DIR"
+            mkdir -p "$WORKSPACE_DIR"
+
+            GIT_REPO_URL="$(git remote get-url origin 2>/dev/null || true)"
+            if [ -z "$GIT_REPO_URL" ]; then
+              GIT_REPO_URL="https://github.com/Carrerajorge/Hola.git"
             fi
-            git fetch --depth=1 origin main
+            git clone --depth=1 --filter=blob:none --branch main "$GIT_REPO_URL" "$WORKSPACE_DIR"
+            cd "$WORKSPACE_DIR"
             git checkout --force "${TARGET_SHA}"
+            if [ -f "$DEPLOY_PATH/.env.production" ]; then
+              cp "$DEPLOY_PATH/.env.production" .env.production
+            fi
 
             CURRENT_SHA="$(git rev-parse --short HEAD)"
             EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
