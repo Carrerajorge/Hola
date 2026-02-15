@@ -82,42 +82,51 @@ function getClientKey(req: Request): string {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
 
   // Security: normalize IPv6-mapped IPv4 addresses
-  if (ip.startsWith("::ffff:")) {
-    return ip.slice(7);
+  if (ip.startsWith("::ffff:")) { return ip.slice(7);
   }
 
   return ip;
 }
 
-const consumeLimiter = (limiter: RateLimiterRedis | RateLimiterMemory, req: Request, res: Response, next: NextFunction) => {
-    // Security: if rate limiter not yet initialized (startup race), allow through
-    // but log a warning
-    if (!initialized || !limiter) {
-      console.warn("[RateLimiter] Not yet initialized, allowing request through");
-      return next();
-    }
+const consumeLimiter = (
+  limiter: RateLimiterRedis | RateLimiterMemory,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  // Security: if rate limiter not yet initialized (startup race), allow through
+  if (!initialized || !limiter) {
+    console.warn("[RateLimiter] Not yet initialized, allowing request through");
+    return next();
+  }
 
-    const key = getClientKey(req);
+  // ✅ BYPASS: Terminal file ops (evita 429 y evita romper UI Files)
+  const pathOnly = (req.originalUrl || req.url || req.path || "").split("?")[0];
+  const skipRateLimit =
+    req.method === "POST" &&
+    (/^\/api\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly) ||
+      /^\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly));
 
-    limiter.consume(key)
-        .then(() => {
-            next();
-        })
-        .catch((rateLimiterRes) => {
-            // Security: set standard rate limit headers
-            const retryAfter = Math.round((rateLimiterRes?.msBeforeNext || 60000) / 1000);
-            res.setHeader("Retry-After", String(retryAfter));
-            res.setHeader("X-RateLimit-Limit", String(limiter.points));
-            res.setHeader("X-RateLimit-Remaining", "0");
-            res.setHeader("X-RateLimit-Reset", String(Math.ceil(Date.now() / 1000) + retryAfter));
-            res.status(429).json({
-                status: "error",
-                message: "Too Many Requests",
-                retryAfter,
-            });
-        });
+  if (skipRateLimit) return next();
+
+  const key = getClientKey(req);
+
+  limiter
+    .consume(key)
+    .then(() => next())
+    .catch((rateLimiterRes) => {
+      const retryAfter = Math.round((rateLimiterRes?.msBeforeNext || 60000) / 1000);
+      res.setHeader("Retry-After", String(retryAfter));
+      res.setHeader("X-RateLimit-Limit", String((limiter as any).points));
+      res.setHeader("X-RateLimit-Remaining", "0");
+      res.setHeader("X-RateLimit-Reset", String(Math.ceil(Date.now() / 1000) + retryAfter));
+      res.status(429).json({
+        status: "error",
+        message: "Too Many Requests",
+        retryAfter,
+      });
+    });
 };
-
 export const globalLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterGlobal, req, res, next);
 export const authLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAuth, req, res, next);
 export const aiLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAi, req, res, next);
