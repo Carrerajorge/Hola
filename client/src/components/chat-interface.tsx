@@ -2650,7 +2650,7 @@ export function ChatInterface({
       if (import.meta.env.DEV) {
         chatLogger.debug("waitForPendingUploads", { count: promises.length });
       }
-      await Promise.all(promises);
+      await Promise.allSettled(promises);
     }
   };
 
@@ -4186,7 +4186,12 @@ export function ChatInterface({
     const userInput = input || autoPromptForFiles;
     let currentUploadedFiles = [...uploadedFilesRef.current];
     const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const hadPendingUploadsAtSubmit = pendingUploadsRef.current.size > 0;
+    const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
+      (f: any) => f?.status === "uploading" || f?.status === "processing"
+    );
+    const hadPendingUploadsAtSubmit =
+      pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
+    const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
 
     // Reset UI state immediately — save files for restoration on error
     let savedMainFiles = [...uploadedFilesRef.current];
@@ -4195,7 +4200,8 @@ export function ChatInterface({
     // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
     // We'll clear once uploads settle (after optimistic message is already on screen).
     if (!hadPendingUploadsAtSubmit) {
-      setUploadedFiles([]);
+      // Clear successful uploads immediately; keep only errored ones so user can retry/remove them.
+      setUploadedFiles(failedUploadsAtSubmit);
     }
 
     // Process attachments for message construction
@@ -4257,6 +4263,7 @@ export function ChatInterface({
 
       currentUploadedFiles = [...uploadedFilesRef.current];
       savedMainFiles = [...currentUploadedFiles];
+      const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
       attachments = currentUploadedFiles
         .filter((f: any) => f.status === "ready" || f.status === "processing")
         .map((f: any) => ({
@@ -4282,8 +4289,17 @@ export function ChatInterface({
         prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
       );
 
-      // Now it's safe to clear the composer files (uploads have reached a stable state).
-      setUploadedFiles([]);
+      // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
+      // Keep any failed uploads so the user can retry/remove them.
+      setUploadedFiles(failedAfterWait);
+      if (failedAfterWait.length > 0) {
+        toast({
+          title: "Algunos archivos fallaron",
+          description: `${failedAfterWait.length} archivo(s) no se pudieron subir y no se incluyeron en el mensaje.`,
+          variant: "destructive",
+          duration: 5000,
+        });
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -4292,7 +4308,7 @@ export function ChatInterface({
 
     // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
     // Use captured state (userInput, currentUploadedFiles) not component state
-    const hasAttachedFiles = currentUploadedFiles.length > 0;
+    const hasAttachedFiles = attachments.length > 0;
     const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
 
     if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
