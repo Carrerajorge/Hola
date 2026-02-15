@@ -630,8 +630,12 @@ export class MemStorage implements IStorage {
   }
 
   async getChat(id: string): Promise<Chat | undefined> {
-    const [result] = await dbRead.select().from(chats).where(eq(chats.id, id));
-    return result;
+    const [fromRead] = await dbRead.select().from(chats).where(eq(chats.id, id));
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in write-after-read flows).
+    const [fromPrimary] = await db.select().from(chats).where(eq(chats.id, id));
+    return fromPrimary;
   }
 
   async getChats(userId?: string): Promise<Chat[]> {

@@ -124,9 +124,14 @@ export const UserMessage = memo(function UserMessage({
                                 Enviando...
                             </span>
                         )}
-                        {(message.deliveryStatus === "sent" || message.deliveryStatus === "delivered") && (
+                        {message.deliveryStatus === "sent" && (
                             <span className="text-[10px] text-muted-foreground/60">
                                 Enviado
+                            </span>
+                        )}
+                        {message.deliveryStatus === "delivered" && (
+                            <span className="text-[10px] text-muted-foreground/60">
+                                Entregado
                             </span>
                         )}
                         {message.deliveryStatus === "error" && (

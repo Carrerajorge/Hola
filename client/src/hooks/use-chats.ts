@@ -836,9 +836,25 @@ export function useChats() {
               ...chat,
               stableKey: chat.stableKey || `stable-${chat.id}`, // Ensure stableKey exists
               messages: chat.messages.map((msg: any) => {
-                // Hydrate savedRequestIds from localStorage data
+                // Hydrate savedRequestIds from localStorage data (best-effort).
+                // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
+                // so only treat requestIds as "persisted" when we have evidence it reached the server.
                 if (msg.requestId) {
-                  markRequestPersisted(msg.requestId);
+                  const id = typeof msg.id === "string" ? msg.id : "";
+                  const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
+                  const isUuid =
+                    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+                  const isLikelyPersisted =
+                    deliveryStatus === "sent" ||
+                    deliveryStatus === "delivered" ||
+                    (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
+                    // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
+                    (!deliveryStatus && isUuid);
+
+                  if (isLikelyPersisted) {
+                    markRequestPersisted(msg.requestId);
+                  }
                 }
                 return {
                   ...msg,
@@ -1086,7 +1102,12 @@ export function useChats() {
           ...chat,
           messages: chat.messages.map(m => {
             if (m.id !== tempId && m.clientTempId !== tempId) return m;
-            return { ...m, ...patch };
+            const nextStatus =
+              patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered"
+                ? "delivered"
+                : patch.deliveryStatus;
+            const patchWithStatus = nextStatus ? { ...patch, deliveryStatus: nextStatus } : patch;
+            return { ...m, ...patchWithStatus };
           })
         };
       }));
@@ -1097,14 +1118,14 @@ export function useChats() {
         if (chat.id !== realChatId) return chat;
 
         let changed = false;
-        const updated = chat.messages.map(m => {
+        let updated = chat.messages.map(m => {
           if (m.id === tempId || m.clientTempId === tempId) {
             changed = true;
             return {
               ...m,
               id: serverId,
               clientTempId: tempId,
-              deliveryStatus: "sent",
+              deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
               deliveryError: undefined,
             };
           }
@@ -1116,6 +1137,18 @@ export function useChats() {
         });
 
         if (!changed) return chat;
+
+        const hasAssistantReply = updated.some(
+          (m) => m.role === "assistant" && m.userMessageId === serverId
+        );
+        if (hasAssistantReply) {
+          updated = updated.map((m) => {
+            if (m.role !== "user") return m;
+            if (m.id !== serverId && m.clientTempId !== tempId) return m;
+            if (m.deliveryStatus === "error") return m;
+            return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+          });
+        }
 
         // De-dupe just in case a server-fetched message arrived before reconciliation.
         const byId = new Map<string, Message>();
@@ -1266,7 +1299,12 @@ export function useChats() {
           ...chat,
           messages: chat.messages.map(m => {
             if (m.id !== tempId && m.clientTempId !== tempId) return m;
-            return { ...m, ...patch };
+            const nextStatus =
+              patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered"
+                ? "delivered"
+                : patch.deliveryStatus;
+            const patchWithStatus = nextStatus ? { ...patch, deliveryStatus: nextStatus } : patch;
+            return { ...m, ...patchWithStatus };
           }),
         };
       }));
@@ -1277,14 +1315,14 @@ export function useChats() {
         if (chat.id !== resolvedChatId && chat.id !== chatId) return chat;
 
         let changed = false;
-        const updated = chat.messages.map(m => {
+        let updated = chat.messages.map(m => {
           if (m.id === tempId || m.clientTempId === tempId) {
             changed = true;
             return {
               ...m,
               id: serverId,
               clientTempId: tempId,
-              deliveryStatus: "sent",
+              deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
               deliveryError: undefined,
             };
           }
@@ -1296,6 +1334,19 @@ export function useChats() {
         });
 
         if (!changed) return chat;
+
+        // If an assistant reply already exists for this user message, mark it as delivered.
+        const hasAssistantReply = updated.some(
+          (m) => m.role === "assistant" && m.userMessageId === serverId
+        );
+        if (hasAssistantReply) {
+          updated = updated.map((m) => {
+            if (m.role !== "user") return m;
+            if (m.id !== serverId && m.clientTempId !== tempId) return m;
+            if (m.deliveryStatus === "error") return m;
+            return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+          });
+        }
 
         const byId = new Map<string, Message>();
         for (const msg of updated) {
@@ -1329,6 +1380,18 @@ export function useChats() {
     // so we get a real chatId and can flush the queued messages.
     if (isPending && normalizedMessage.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
+      const setPendingDeliveryPatch = (patch: Partial<Message>) => {
+        setChats(prev => prev.map(chat => {
+          if (chat.id !== chatId) return chat;
+          return {
+            ...chat,
+            messages: chat.messages.map(m => {
+              if (m.id !== tempId && m.clientTempId !== tempId) return m;
+              return { ...m, ...patch };
+            })
+          };
+        }));
+      };
 
       // Optimistically add the message to the pending chat so the UI doesn't look stuck.
       setChats(prev => prev.map(chat => {
@@ -1354,7 +1417,13 @@ export function useChats() {
       }));
 
       const queue = pendingMessageQueue.get(chatId) || [];
-      queue.push(normalizedMessage);
+      const alreadyQueued = queue.some((m) =>
+        (normalizedMessage.requestId && m.requestId === normalizedMessage.requestId) ||
+        (normalizedMessage.clientTempId && m.clientTempId === normalizedMessage.clientTempId)
+      );
+      if (!alreadyQueued) {
+        queue.push(normalizedMessage);
+      }
       pendingMessageQueue.set(chatId, queue);
 
       // Debounce the creation to prevent race conditions if multiple messages are sent quickly.
@@ -1367,7 +1436,18 @@ export function useChats() {
           credentials: "include",
           body: JSON.stringify({ title }),
         });
-        if (!res.ok) return undefined;
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          setPendingDeliveryPatch({
+            deliveryStatus: "error",
+            deliveryError: errText || `HTTP ${res.status}`,
+          });
+          // Release idempotency lock so user can retry.
+          if (normalizedMessage.requestId) {
+            processingRequestIds.delete(normalizedMessage.requestId);
+          }
+          return undefined;
+        }
 
         const newChat = await res.json();
         const realChatId = newChat.id;
@@ -1380,6 +1460,14 @@ export function useChats() {
         return await flushPendingMessages(chatId, realChatId);
       } catch (error) {
         console.error("Error creating chat on first message (forced):", error);
+        setPendingDeliveryPatch({
+          deliveryStatus: "error",
+          deliveryError: error instanceof Error ? error.message : String(error),
+        });
+        // Release idempotency lock so user can retry.
+        if (normalizedMessage.requestId) {
+          processingRequestIds.delete(normalizedMessage.requestId);
+        }
         return undefined;
       } finally {
         chatCreationInProgress.delete(chatId);
@@ -1404,26 +1492,45 @@ export function useChats() {
         const matchId = chat.id === chatId || chat.id === resolvedChatId;
         if (!matchId) return chat;
 
+        const maybeMarkDelivered = (msgs: Message[]): Message[] => {
+          if (normalizedMessage.role !== "assistant" || !normalizedMessage.userMessageId) return msgs;
+          const linkId = normalizedMessage.userMessageId;
+          let changed = false;
+          const patched = msgs.map((m) => {
+            if (m.role !== "user") return m;
+            if (m.id !== linkId && m.clientTempId !== linkId) return m;
+            if (m.deliveryStatus === "error") return m;
+            if (m.deliveryStatus === "delivered") return m;
+            changed = true;
+            return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+          });
+          return changed ? patched : msgs;
+        };
+
         const messageExists = chat.messages.some(m => m.id === tempId || m.clientTempId === tempId);
         if (messageExists) {
           // Retry path: do not mark as complete here. The server ACK is the source of truth.
-          return {
-            ...chat,
-            messages: chat.messages.map(m => (m.id === tempId || m.clientTempId === tempId)
+          const nextMessages = maybeMarkDelivered(
+            chat.messages.map(m => (m.id === tempId || m.clientTempId === tempId)
               ? {
                   ...m,
                   deliveryStatus: normalizedMessage.deliveryStatus,
                   deliveryError: normalizedMessage.deliveryError,
                 }
               : m
-            ),
+            )
+          );
+          return {
+            ...chat,
+            messages: nextMessages,
           };
         }
 
         const isFirstMessage = chat.messages.length === 0;
+        const nextMessages = maybeMarkDelivered([...chat.messages, normalizedMessage]);
         return {
           ...chat,
-          messages: [...chat.messages, normalizedMessage],
+          messages: nextMessages,
           title: isFirstMessage && normalizedMessage.role === "user" ? title : chat.title,
           timestamp: Date.now(),
         };
@@ -1489,12 +1596,14 @@ export function useChats() {
       const totalMs = Math.max(0, t1 - t0);
       if (import.meta.env.DEV) {
         const serverTiming = res.headers.get("server-timing");
+        const traceId = res.headers.get("x-trace-id");
         console.debug("[Perf] send_message", {
           chatId: resolvedChatId,
           tempId,
           role: normalizedMessage.role,
           totalMs: Number(totalMs.toFixed(1)),
           serverTiming,
+          traceId,
         });
       }
 
