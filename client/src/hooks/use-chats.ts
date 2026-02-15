@@ -134,6 +134,9 @@ export interface Chat {
 
 const STORAGE_KEY = "sira-gpt-chats";
 const PENDING_CHAT_PREFIX = "pending-";
+const FAILED_QUEUE_KEY = "ilia_failed_message_queue";
+const MAX_FAILED_QUEUE_ITEMS = 20;
+const MAX_FAILED_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
 const pendingToRealIdMap = new Map<string, string>();
 const pendingMessageQueue = new Map<string, Message[]>();
 const chatCreationInProgress = new Set<string>();
@@ -189,6 +192,65 @@ const retryQueue: RetryItem[] = [];
 const MAX_RETRY_ATTEMPTS = 5;
 const BASE_RETRY_DELAY_MS = 1000; // 1 second
 const MAX_RETRY_DELAY_MS = 16000; // 16 seconds
+
+interface FailedMessageQueueItem {
+  chatId: string;
+  role: "user";
+  content: string;
+  requestId: string;
+  clientRequestId?: string;
+  attachments?: Message["attachments"];
+  localId?: string;
+  timestamp: number;
+}
+
+function safeReadFailedQueue(): FailedMessageQueueItem[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(FAILED_QUEUE_KEY) || "[]";
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeWriteFailedQueue(items: FailedMessageQueueItem[]): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(items.slice(-MAX_FAILED_QUEUE_ITEMS)));
+  } catch {
+    // ignore
+  }
+}
+
+function enqueueFailedMessageForRecovery(chatId: string, message: Message): void {
+  if (!message.requestId) return;
+  if (chatId.startsWith(PENDING_CHAT_PREFIX)) return; // Can't recover a message for a chat that doesn't exist on server.
+  const existing = safeReadFailedQueue();
+  if (existing.some((q) => q?.requestId === message.requestId)) return;
+
+  existing.push({
+    chatId,
+    role: message.role,
+    content: message.content,
+    requestId: message.requestId,
+    clientRequestId: message.clientRequestId,
+    attachments: sanitizeAttachmentsForServer(message.attachments),
+    localId: message.clientTempId || message.id,
+    timestamp: Date.now(),
+  });
+  safeWriteFailedQueue(existing);
+}
+
+function removeFailedMessageFromRecoveryQueue(requestId?: string): void {
+  if (!requestId) return;
+  const existing = safeReadFailedQueue();
+  if (existing.length === 0) return;
+  const filtered = existing.filter((q) => q?.requestId !== requestId);
+  if (filtered.length === existing.length) return;
+  safeWriteFailedQueue(filtered);
+}
 
 // Sync status for UI feedback
 export type SyncStatus = 'idle' | 'saving' | 'saved' | 'error' | 'retrying';
@@ -738,7 +800,7 @@ export function useChats() {
         }
       }
 
-      const messages = (fullChat.messages || []).map((msg: any) => {
+      let messages: Message[] = (fullChat.messages || []).map((msg: any) => {
         if (msg.requestId) markRequestPersisted(msg.requestId);
 
         let hydratedAttachments = msg.attachments;
@@ -790,6 +852,46 @@ export function useChats() {
           retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
         };
       });
+
+      // Merge any locally queued/unsent user messages (persistent outbox) so reloads don't "lose" them
+      // even when the server is reachable and localStorage chat cache is replaced.
+      const persistedRequestIds = new Set<string>();
+      for (const msg of messages) {
+        if (msg.requestId) persistedRequestIds.add(msg.requestId);
+      }
+
+      const failedQueue = safeReadFailedQueue().filter((q) => q?.chatId === chatId);
+      if (failedQueue.length > 0) {
+        for (const queued of failedQueue) {
+          if (!queued?.requestId) continue;
+          if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) {
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+          // If it already exists on the server, the queue entry is stale.
+          if (persistedRequestIds.has(queued.requestId)) {
+            removeFailedMessageFromRecoveryQueue(queued.requestId);
+            continue;
+          }
+          const alreadyInList = messages.some((m) => m.role === "user" && m.requestId === queued.requestId);
+          if (alreadyInList) continue;
+
+          const localId = queued.localId || `local_${queued.requestId}`;
+          messages.push({
+            id: localId,
+            clientTempId: localId,
+            role: "user",
+            content: queued.content,
+            timestamp: new Date(queued.timestamp || Date.now()),
+            requestId: queued.requestId,
+            clientRequestId: queued.clientRequestId,
+            attachments: queued.attachments,
+            deliveryStatus: isRequestProcessing(queued.requestId) ? "sending" : "error",
+            deliveryError: undefined,
+          });
+        }
+        messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      }
 
       setChats(prev => prev.map(c => 
         c.id === chatId ? { ...c, messages } : c
@@ -980,16 +1082,100 @@ export function useChats() {
 
       setIsLoading(false);
 
-      // Recover failed message saves from previous session
-      const FAILED_QUEUE_KEY = 'ilia_failed_message_queue';
+      // Recover failed message saves from previous session (best-effort).
+      // This keeps messages visible with an error state and retries in background so
+      // a reload doesn't permanently strand a user's "Enviar".
       try {
-        const failedQueue = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || '[]');
+        const failedQueue = safeReadFailedQueue();
         if (failedQueue.length > 0) {
           console.log(`[FailedQueue] Recovering ${failedQueue.length} failed message save(s)`);
-          const remaining: any[] = [];
+
+          const setDeliveryByRequestId = (chatId: string, requestId: string, patch: Partial<Message>) => {
+            setChats(prev => prev.map(chat => {
+              if (chat.id !== chatId) return chat;
+              return {
+                ...chat,
+                messages: chat.messages.map(m => {
+                  if (m.role !== "user") return m;
+                  if (m.requestId !== requestId) return m;
+                  if (patch.deliveryStatus === "sent" && m.deliveryStatus === "delivered") {
+                    return { ...m, ...patch, deliveryStatus: "delivered" };
+                  }
+                  return { ...m, ...patch };
+                })
+              };
+            }));
+          };
+
+          const reconcileMessageIdByRequestId = (chatId: string, requestId: string, serverId: string) => {
+            setChats(prev => prev.map(chat => {
+              if (chat.id !== chatId) return chat;
+
+              let changed = false;
+              let tempId: string | null = null;
+
+              let updated = chat.messages.map(m => {
+                if (m.role === "user" && m.requestId === requestId) {
+                  changed = true;
+                  tempId = m.clientTempId || m.id;
+                  return {
+                    ...m,
+                    id: serverId,
+                    clientTempId: tempId || m.clientTempId,
+                    deliveryStatus: m.deliveryStatus === "delivered" ? "delivered" : "sent",
+                    deliveryError: undefined,
+                  };
+                }
+                return m;
+              });
+
+              if (!changed || !tempId) return chat;
+
+              updated = updated.map(m => {
+                if (m.userMessageId === tempId) {
+                  return { ...m, userMessageId: serverId };
+                }
+                return m;
+              });
+
+              const hasAssistantReply = updated.some(
+                (m) => m.role === "assistant" && m.userMessageId === serverId
+              );
+              if (hasAssistantReply) {
+                updated = updated.map((m) => {
+                  if (m.role !== "user") return m;
+                  if (m.requestId !== requestId) return m;
+                  if (m.deliveryStatus === "error") return m;
+                  return { ...m, deliveryStatus: "delivered", deliveryError: undefined };
+                });
+              }
+
+              const byId = new Map<string, Message>();
+              for (const msg of updated) {
+                const existing = byId.get(msg.id);
+                if (!existing) {
+                  byId.set(msg.id, msg);
+                  continue;
+                }
+                byId.set(msg.id, { ...existing, ...msg });
+              }
+
+              return { ...chat, messages: Array.from(byId.values()) };
+            }));
+          };
+
+          const remaining: FailedMessageQueueItem[] = [];
           for (const queued of failedQueue) {
-            // Skip entries older than 24 hours
-            if (Date.now() - queued.timestamp > 24 * 60 * 60 * 1000) continue;
+            if (!queued?.chatId || !queued?.requestId) continue;
+            if (queued.chatId.startsWith(PENDING_CHAT_PREFIX)) continue;
+            if (queued.timestamp && Date.now() - queued.timestamp > MAX_FAILED_QUEUE_AGE_MS) continue;
+
+            // If present in local UI, reflect that we're retrying.
+            setDeliveryByRequestId(queued.chatId, queued.requestId, {
+              deliveryStatus: "sending",
+              deliveryError: undefined,
+            });
+
             try {
               const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
                 method: "POST",
@@ -1001,24 +1187,56 @@ export function useChats() {
                   requestId: queued.requestId,
                   clientRequestId: queued.clientRequestId,
                   attachments: queued.attachments,
-                })
+                }),
               });
+
               if (res.ok) {
-                console.log(`[FailedQueue] Recovered message for chat ${queued.chatId}`);
-              } else if (res.status < 500) {
-                // Client error (4xx) — skip, don't retry
-                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
-              } else {
-                remaining.push(queued); // Retry next time
+                const data = await res.json().catch(() => null);
+                const serverMessage = (data as any)?.message ?? data;
+                if (serverMessage?.id && typeof serverMessage.id === "string") {
+                  reconcileMessageIdByRequestId(queued.chatId, queued.requestId, serverMessage.id);
+                } else {
+                  setDeliveryByRequestId(queued.chatId, queued.requestId, {
+                    deliveryStatus: "sent",
+                    deliveryError: undefined,
+                  });
+                }
+
+                markRequestComplete(queued.requestId);
+                removeFailedMessageFromRecoveryQueue(queued.requestId);
+                continue;
               }
-            } catch {
-              remaining.push(queued); // Network error, retry next time
+
+              const errText = await res.text().catch(() => "");
+              setDeliveryByRequestId(queued.chatId, queued.requestId, {
+                deliveryStatus: "error",
+                deliveryError: errText || `HTTP ${res.status}`,
+              });
+
+              const retryable =
+                res.status >= 500 ||
+                res.status === 408 ||
+                res.status === 429 ||
+                res.status === 401;
+
+              if (retryable) {
+                remaining.push(queued); // Retry next time / when network recovers.
+              } else {
+                console.warn(`[FailedQueue] Skipping message (${res.status}):`, queued.requestId);
+              }
+            } catch (err) {
+              setDeliveryByRequestId(queued.chatId, queued.requestId, {
+                deliveryStatus: "error",
+                deliveryError: err instanceof Error ? err.message : String(err),
+              });
+              remaining.push(queued); // Network error, retry next time.
             }
           }
-          localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(remaining));
+
+          safeWriteFailedQueue(remaining);
         }
       } catch (e) {
-        console.warn('[FailedQueue] Error processing recovery queue:', e);
+        console.warn("[FailedQueue] Error processing recovery queue:", e);
       }
     };
 
@@ -1204,52 +1422,55 @@ export function useChats() {
 
       for (const msg of queuedMessages) {
         const tempId = msg.clientTempId || msg.id;
+        const clientRequestId = msg.role === "user" && !(msg as any).skipRun
+          ? (msg as any).clientRequestId || generateClientRequestId()
+          : undefined;
+
+        const msgToPersist: Message =
+          msg.role === "user" && clientRequestId ? { ...msg, clientRequestId } : msg;
         try {
           // Ensure retry attempts show the right state in UI.
           if (msg.role === "user") {
             setDeliveryPatch(tempId, { deliveryStatus: "sending", deliveryError: undefined });
           }
 
-          const clientRequestId = msg.role === "user" && !(msg as any).skipRun
-            ? (msg as any).clientRequestId || generateClientRequestId()
-            : undefined;
-
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
             credentials: "include",
             body: JSON.stringify({
-              role: msg.role,
-              content: msg.content,
-              requestId: msg.requestId,
+              role: msgToPersist.role,
+              content: msgToPersist.content,
+              requestId: msgToPersist.requestId,
               clientRequestId,
-              userMessageId: msg.userMessageId,
-              attachments: sanitizeAttachmentsForServer(msg.attachments),
-              sources: msg.sources,
-              figmaDiagram: msg.figmaDiagram,
-              googleFormPreview: msg.googleFormPreview,
-              gmailPreview: msg.gmailPreview,
-              generatedImage: msg.generatedImage,
-              webSources: msg.webSources,
-              confidence: msg.confidence,
-              uncertaintyReason: msg.uncertaintyReason,
-              retrievalSteps: msg.retrievalSteps,
+              userMessageId: msgToPersist.userMessageId,
+              attachments: sanitizeAttachmentsForServer(msgToPersist.attachments),
+              sources: msgToPersist.sources,
+              figmaDiagram: msgToPersist.figmaDiagram,
+              googleFormPreview: msgToPersist.googleFormPreview,
+              gmailPreview: msgToPersist.gmailPreview,
+              generatedImage: msgToPersist.generatedImage,
+              webSources: msgToPersist.webSources,
+              confidence: msgToPersist.confidence,
+              uncertaintyReason: msgToPersist.uncertaintyReason,
+              retrievalSteps: msgToPersist.retrievalSteps,
             }),
           });
 
           if (res.ok) {
             const data = await res.json();
-            trackChatMessageSent(realChatId, msg, data?.deduplicated);
+            trackChatMessageSent(realChatId, msgToPersist, data?.deduplicated);
 
             const serverMessage = data?.message ?? data;
             if (serverMessage?.id && typeof serverMessage.id === "string") {
               reconcileMessageId(tempId, serverMessage.id);
-            } else if (msg.role === "user") {
+            } else if (msgToPersist.role === "user") {
               setDeliveryPatch(tempId, { deliveryStatus: "sent", deliveryError: undefined });
             }
 
-            if (msg.requestId) {
-              markRequestComplete(msg.requestId);
+            if (msgToPersist.requestId) {
+              markRequestComplete(msgToPersist.requestId);
+              removeFailedMessageFromRecoveryQueue(msgToPersist.requestId);
             }
 
             if (data.run) {
@@ -1269,27 +1490,40 @@ export function useChats() {
           } else {
             const errText = await res.text().catch(() => "");
             console.error(`Server returned ${res.status} for queued message save`, errText);
-            if (msg.role === "user") {
+            if (msgToPersist.role === "user") {
               setDeliveryPatch(tempId, {
                 deliveryStatus: "error",
                 deliveryError: errText || `HTTP ${res.status}`,
               });
             }
-            if (msg.requestId) {
-              processingRequestIds.delete(msg.requestId);
+            if (msgToPersist.requestId) {
+              processingRequestIds.delete(msgToPersist.requestId);
+            }
+
+            const retryable =
+              res.status >= 500 ||
+              res.status === 408 ||
+              res.status === 429 ||
+              res.status === 401;
+            if (retryable && msgToPersist.role === "user") {
+              enqueueFailedMessageForRecovery(realChatId, msgToPersist);
             }
           }
         } catch (error) {
           console.error("Error flushing queued message:", error);
-          if (msg.role === "user") {
+          if (msgToPersist.role === "user") {
             setDeliveryPatch(tempId, {
               deliveryStatus: "error",
               deliveryError: error instanceof Error ? error.message : String(error),
             });
           }
           // Remove from processing on error so retry is possible
-          if (msg.requestId) {
-            processingRequestIds.delete(msg.requestId);
+          if (msgToPersist.requestId) {
+            processingRequestIds.delete(msgToPersist.requestId);
+          }
+
+          if (msgToPersist.role === "user") {
+            enqueueFailedMessageForRecovery(realChatId, msgToPersist);
           }
         }
       }
@@ -1653,6 +1887,7 @@ export function useChats() {
 
         if (normalizedMessage.requestId) {
           markRequestComplete(normalizedMessage.requestId);
+          removeFailedMessageFromRecoveryQueue(normalizedMessage.requestId);
         }
 
         if (data.run) {
@@ -1686,6 +1921,14 @@ export function useChats() {
       if (normalizedMessage.requestId) {
         processingRequestIds.delete(normalizedMessage.requestId);
       }
+
+      const retryable =
+        res.status === 408 ||
+        res.status === 429 ||
+        res.status === 401;
+      if (retryable && normalizedMessage.role === "user") {
+        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
+      }
       return undefined;
     } catch (error) {
       console.error("Error saving message to server:", error);
@@ -1703,27 +1946,8 @@ export function useChats() {
       }
 
       // Queue failed message save for later recovery.
-      if (normalizedMessage.role === "user" && normalizedMessage.attachments?.length) {
-        try {
-          const FAILED_QUEUE_KEY = "ilia_failed_message_queue";
-          const existing = JSON.parse(localStorage.getItem(FAILED_QUEUE_KEY) || "[]");
-          if (!existing.some((q: any) => q.requestId === normalizedMessage.requestId)) {
-            existing.push({
-              chatId: resolvedChatId,
-              role: normalizedMessage.role,
-              content: normalizedMessage.content,
-              requestId: normalizedMessage.requestId,
-              clientRequestId: (normalizedMessage as any).clientRequestId,
-              attachments: sanitizeAttachmentsForServer(normalizedMessage.attachments),
-              timestamp: Date.now(),
-            });
-            const trimmed = existing.slice(-20);
-            localStorage.setItem(FAILED_QUEUE_KEY, JSON.stringify(trimmed));
-            console.log(`[FailedQueue] Queued message with ${normalizedMessage.attachments.length} attachment(s) for retry`);
-          }
-        } catch (queueError) {
-          console.warn("[FailedQueue] Failed to queue message for retry:", queueError);
-        }
+      if (normalizedMessage.role === "user") {
+        enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
       }
 
       return undefined;
