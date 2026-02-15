@@ -64,8 +64,6 @@ router.get("/capabilities", (req: Request, res: Response) => {
   }
 });
 
-const router = Router();
-
 /**
  * GET /api/openclaw/capabilities/:id
  * Returns a single capability by ID.
