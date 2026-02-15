@@ -192,6 +192,7 @@ const retryQueue: RetryItem[] = [];
 const MAX_RETRY_ATTEMPTS = 5;
 const BASE_RETRY_DELAY_MS = 1000; // 1 second
 const MAX_RETRY_DELAY_MS = 16000; // 16 seconds
+const MESSAGE_SAVE_TIMEOUT_MS = 20000;
 
 interface FailedMessageQueueItem {
   chatId: string;
@@ -431,6 +432,30 @@ function sanitizeAttachmentsForServer(attachments: Message['attachments']): Mess
     }
     return clean as any;
   });
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  if (typeof AbortController === "undefined") {
+    return fetch(url, init);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const externalSignal = init.signal;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // Retry an async operation with exponential backoff and jitter.
@@ -1030,7 +1055,7 @@ export function useChats() {
         });
 
         try {
-          const res = await fetch(`/api/chats/${queued.chatId}/messages`, {
+          const res = await fetchWithTimeout(`/api/chats/${queued.chatId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
             credentials: "include",
@@ -1041,7 +1066,7 @@ export function useChats() {
               clientRequestId: queued.clientRequestId,
               attachments: queued.attachments,
             }),
-          });
+          }, MESSAGE_SAVE_TIMEOUT_MS);
 
           if (res.ok) {
             const data = await res.json().catch(() => null);
@@ -1465,7 +1490,7 @@ export function useChats() {
             setDeliveryPatch(tempId, { deliveryStatus: "sending", deliveryError: undefined });
           }
 
-          const res = await fetch(`/api/chats/${realChatId}/messages`, {
+          const res = await fetchWithTimeout(`/api/chats/${realChatId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
             credentials: "include",
@@ -1486,7 +1511,7 @@ export function useChats() {
               uncertaintyReason: msgToPersist.uncertaintyReason,
               retrievalSteps: msgToPersist.retrievalSteps,
             }),
-          });
+          }, MESSAGE_SAVE_TIMEOUT_MS);
 
           if (res.ok) {
             const data = await res.json();
@@ -1728,12 +1753,12 @@ export function useChats() {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
-        const res = await fetch("/api/chats", {
+        const res = await fetchWithTimeout("/api/chats", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
           body: JSON.stringify({ title }),
-        });
+        }, MESSAGE_SAVE_TIMEOUT_MS);
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
           setPendingDeliveryPatch({
@@ -1861,7 +1886,7 @@ export function useChats() {
       const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
 
       const res = await withRetry(async () => {
-        const response = await fetch(`/api/chats/${resolvedChatId}/messages`, {
+        const response = await fetchWithTimeout(`/api/chats/${resolvedChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
@@ -1882,7 +1907,7 @@ export function useChats() {
             uncertaintyReason: normalizedMessage.uncertaintyReason,
             retrievalSteps: normalizedMessage.retrievalSteps,
           }),
-        });
+        }, MESSAGE_SAVE_TIMEOUT_MS);
         // Retry on network failures and 5xx server errors; don't retry 4xx client errors.
         if (!response.ok && response.status >= 500) {
           throw new Error(`Server error ${response.status}`);
