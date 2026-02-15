@@ -655,7 +655,7 @@ export function Sidebar({
           data-testid="button-whatsapp-connect"
         >
           <MessageSquare className="h-4 w-4" />
-          <span className="flex-1 text-left">WhatsApp (QR)</span>
+          <span className="flex-1 text-left">AppsWebChat (QR)</span>
           <span
             className={cn(
               "h-2.5 w-2.5 rounded-full",
@@ -663,7 +663,7 @@ export function Sidebar({
               (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500',
               waStatus.state === 'disconnected' && 'bg-red-500'
             )}
-            title={`WhatsApp: ${waStatus.state}`}
+            title={`Canales: ${waStatus.state}`}
           />
         </Button>
 

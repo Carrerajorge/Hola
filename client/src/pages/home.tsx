@@ -30,8 +30,8 @@ import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
-const WhatsAppConnectDialogLazy = lazy(() =>
-  import("@/components/whatsapp-connect-dialog").then((m) => ({ default: m.WhatsAppConnectDialog }))
+const ChannelsHubDialogLazy = lazy(() =>
+  import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
 );
 import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
 const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
@@ -739,7 +739,7 @@ export default function Home() {
 
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
-          <WhatsAppConnectDialogLazy
+          <ChannelsHubDialogLazy
             open={isWhatsAppConnectOpen}
             onOpenChange={setIsWhatsAppConnectOpen}
           />
