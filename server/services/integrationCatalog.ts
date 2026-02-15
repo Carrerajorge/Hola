@@ -199,6 +199,30 @@ export const DEFAULT_INTEGRATION_PROVIDERS: Array<{
     category: "communication",
     isActive: "true",
   },
+  {
+    id: "whatsapp_cloud",
+    name: "WhatsApp Cloud API",
+    description: "WhatsApp Business via Meta Cloud API (webhooks + envío de mensajes)",
+    iconUrl: "https://static.whatsapp.net/rsrc.php/v3/y7/r/DSxOAUB0raA.png",
+    authType: "custom",
+    authConfig: {
+      connectionType: "cloud_api",
+    },
+    category: "communication",
+    isActive: "true",
+  },
+  {
+    id: "telegram",
+    name: "Telegram",
+    description: "Bot de Telegram (webhook + envío de mensajes y archivos)",
+    iconUrl: "https://telegram.org/img/t_logo.png",
+    authType: "custom",
+    authConfig: {
+      connectionType: "bot_token",
+    },
+    category: "communication",
+    isActive: "true",
+  },
 ];
 
 export const DEFAULT_INTEGRATION_TOOLS: Array<{
@@ -487,6 +511,26 @@ export const DEFAULT_INTEGRATION_TOOLS: Array<{
     confirmationRequired: "false",
     isActive: "true",
   },
+  {
+    id: "whatsapp_cloud:send_message",
+    providerId: "whatsapp_cloud",
+    name: "Enviar mensaje (Cloud)",
+    description: "Envía un mensaje de WhatsApp vía Cloud API",
+    requiredScopes: [],
+    dataAccessLevel: "write",
+    confirmationRequired: "true",
+    isActive: "true",
+  },
+  {
+    id: "telegram:send_message",
+    providerId: "telegram",
+    name: "Enviar mensaje",
+    description: "Envía un mensaje por Telegram",
+    requiredScopes: [],
+    dataAccessLevel: "write",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
 ];
 
 export async function seedIntegrationCatalog(): Promise<SeedResult> {
@@ -517,4 +561,3 @@ export async function ensureIntegrationCatalogSeeded(): Promise<SeedResult> {
   // Always upsert to ensure new providers/tools are added when the catalog grows
   return seedIntegrationCatalog();
 }
-

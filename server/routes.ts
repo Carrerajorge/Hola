@@ -65,6 +65,9 @@ import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
 import ragMemoryRouter from "./routes/ragMemoryRouter";
 import feedbackRouter from "./routes/feedbackRouter";
+import { createChannelWebhooksRouter } from "./routes/channelWebhooksRouter";
+import { createTelegramIntegrationRouter } from "./routes/telegramIntegrationRouter";
+import { createWhatsAppCloudIntegrationRouter } from "./routes/whatsappCloudIntegrationRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
@@ -561,10 +564,15 @@ export async function registerRoutes(
   app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
+  app.use("/api/integrations/whatsapp/cloud", createWhatsAppCloudIntegrationRouter());
+  app.use("/api/integrations/telegram", createTelegramIntegrationRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
+
+  // External inbound webhooks must live outside /api to bypass CSRF middleware.
+  app.use("/webhooks", createChannelWebhooksRouter());
 
   // Pre-execution intent guard for high-impact mutation endpoints.
   // Mode is controlled by EXECUTION_INTENT_GUARD_MODE=off|monitor|enforce

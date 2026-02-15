@@ -301,6 +301,21 @@ export function log(message: string, source = "express") {
     );
 
     log("Graceful shutdown handler configured");
+
+    // Optional: auto-register Telegram webhook after the server is reachable.
+    if (env.TELEGRAM_AUTO_SET_WEBHOOK && env.TELEGRAM_WEBHOOK_URL && env.TELEGRAM_BOT_TOKEN) {
+      setTimeout(() => {
+        import("./channels/telegram/telegramApi")
+          .then(({ telegramSetWebhook }) =>
+            telegramSetWebhook({
+              webhookUrl: env.TELEGRAM_WEBHOOK_URL as string,
+              secretToken: env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
+            }),
+          )
+          .then(() => log(`[Telegram] Webhook configured: ${env.TELEGRAM_WEBHOOK_URL}`))
+          .catch((e) => log(`[Telegram] Webhook auto-config failed: ${e?.message || e}`));
+      }, 1500);
+    }
   });
 
   // Hardened Server Timeouts (Slowloris Protection)

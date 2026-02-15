@@ -9,6 +9,8 @@ import { UploadJobData } from "./services/uploadQueue";
 import { Logger } from "./lib/logger";
 import { Job } from "bullmq";
 import { syncStripePaidInvoicesToPayments } from "./services/stripePaymentsSyncService";
+import type { ChannelIngestJob } from "./channels/types";
+import { processChannelIngestJob } from "./channels/channelIngestService";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5");
 
@@ -29,6 +31,22 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
     return { processed: true, chunks: 12 };
 }); // No .on() handlers needed here as they are handled in queueFactory or global events if needed, 
 // but we can add them to the worker instance if we want specific logging.
+
+// ==========================================
+// 1.5 Channel Ingest Worker (Telegram / WhatsApp Cloud)
+// ==========================================
+const channelIngestWorker = createWorker<ChannelIngestJob, any>(QUEUE_NAMES.CHANNEL_INGEST, async (job: Job<ChannelIngestJob>) => {
+    Logger.info(`[ChannelIngestJob:${job.id}] Channel=${(job.data as any)?.channel}`);
+    await processChannelIngestJob(job.data);
+    return { ok: true };
+});
+
+if (channelIngestWorker) {
+    channelIngestWorker.on("ready", () => Logger.info("Channel Ingest Worker ready"));
+    channelIngestWorker.on("error", (e: any) => Logger.error("Channel Ingest Worker error", e));
+} else {
+    Logger.warn("Channel Ingest Worker disabled (check REDIS_URL).");
+}
 
 // ==========================================
 // 2. Parallel Processing Worker (The Engine)
