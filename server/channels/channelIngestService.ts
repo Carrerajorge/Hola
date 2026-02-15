@@ -2,8 +2,6 @@ import { and, eq } from "drizzle-orm";
 import { env } from "../config/env";
 import { db } from "../db";
 import { Logger } from "../lib/logger";
-import { chatService, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../services/ChatServiceV2";
-import { conversationMemoryManager } from "../services/conversationMemory";
 import { storage } from "../storage";
 import { chatMessages } from "@shared/schema";
 import type { ChannelIngestJob } from "./types";
@@ -13,9 +11,14 @@ import {
   getOrCreateChannelConversation,
   findWhatsAppCloudAccountByPhoneNumberId,
 } from "./channelStore";
-import { telegramSendMessage } from "./telegram/telegramApi";
-import { sendWhatsAppCloudText } from "./whatsappCloud/whatsappCloudApi";
+import { telegramSendMessage, telegramSendDocument } from "./telegram/telegramApi";
+import { sendWhatsAppCloudText, sendWhatsAppCloudDocument } from "./whatsappCloud/whatsappCloudApi";
 import { evaluateWhatsAppPolicy } from "./whatsappCloud/whatsappPolicy";
+import { createUnifiedRun, executeUnifiedChat } from "../agent/unifiedChatHandler";
+import { MemorySseResponse } from "../integrations/whatsappWebAutoReply";
+import type { Response } from "express";
+import fs from "fs/promises";
+import path from "path";
 
 function isUniqueViolation(err: unknown): boolean {
   return (err as any)?.code === "23505";
@@ -86,6 +89,64 @@ async function upsertAssistantMessage(input: {
 function telegramDisplayName(from: any, fallback: string): string {
   const name = [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim();
   return name || from?.username || fallback;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+const ARTIFACT_MIME_MAP: Record<string, string> = {
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".pdf": "application/pdf",
+};
+
+async function sendChannelArtifacts(
+  memRes: MemorySseResponse,
+  channel: "telegram" | "whatsapp_cloud",
+  recipientId: string,
+  waOpts?: { phoneNumberId: string; accessToken: string },
+): Promise<void> {
+  const artifactEvents = memRes.chunks.filter(
+    (c: any) => c.event === "artifacts" && c.data?.artifacts,
+  );
+  for (const evt of artifactEvents) {
+    const artifacts: Array<{ type?: string; url?: string; name?: string }> =
+      (evt as any).data.artifacts || [];
+    for (const artifact of artifacts) {
+      if (!artifact.name) continue;
+      const filePath = path.join(process.cwd(), "generated_artifacts", artifact.name);
+      try {
+        const fileBuffer = await fs.readFile(filePath);
+        const ext = path.extname(artifact.name).toLowerCase();
+        const mimetype = ARTIFACT_MIME_MAP[ext] || "application/octet-stream";
+        if (channel === "telegram") {
+          await telegramSendDocument(recipientId, fileBuffer, artifact.name, mimetype);
+        } else if (channel === "whatsapp_cloud" && waOpts) {
+          await sendWhatsAppCloudDocument({
+            phoneNumberId: waOpts.phoneNumberId,
+            to: recipientId,
+            fileBuffer,
+            fileName: artifact.name,
+            mimeType: mimetype,
+            accessToken: waOpts.accessToken,
+          });
+        }
+      } catch (fileErr: any) {
+        Logger.error(
+          `[${channel}] Failed to send artifact "${artifact.name}"`,
+          fileErr?.message || fileErr,
+        );
+      }
+    }
+  }
 }
 
 function parseTelegramStartCode(text: string): string | null {
@@ -203,20 +264,31 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
   const already = await getAssistantForUserMessage(userMsg.id);
   if (already) return;
 
-  const history = await conversationMemoryManager.augmentWithHistory(convo.chatId, [
-    { role: "user", content: inbound.text },
-  ]);
+  const messages = [{ role: "user" as const, content: inbound.text }];
 
   let assistantText = "";
+  const memRes = new MemorySseResponse();
   try {
-    const response = await chatService.chat(history, {
-      conversationId: convo.chatId,
+    const unifiedContext = await createUnifiedRun({
+      messages,
+      chatId: convo.chatId,
       userId: convo.userId,
-      useRag: true,
-      provider: DEFAULT_PROVIDER,
-      model: DEFAULT_MODEL,
+      messageId: `tg_msg_${Date.now()}`,
     });
-    assistantText = String(response?.content || "").trim();
+    await withTimeout(
+      executeUnifiedChat(
+        unifiedContext,
+        { messages, chatId: convo.chatId, userId: convo.userId, messageId: `tg_msg_${Date.now()}` },
+        memRes as any as Response,
+      ),
+      120_000,
+      "Telegram AI",
+    );
+    assistantText = memRes.chunks
+      .filter((c: any) => c.event === "chunk" && typeof c.data?.content === "string")
+      .map((c: any) => c.data.content)
+      .join("")
+      .trim();
   } catch (err) {
     Logger.error("[Telegram] LLM processing failed", err);
     assistantText = "Ahora mismo no puedo responder. Intenta de nuevo en unos minutos.";
@@ -240,6 +312,13 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
     await telegramSendMessage(inbound.tgChatId, assistantText);
   } catch (err) {
     Logger.error("[Telegram] Failed to send reply", err);
+  }
+
+  // Send generated artifacts (documents) if any
+  try {
+    await sendChannelArtifacts(memRes, "telegram", inbound.tgChatId);
+  } catch (err) {
+    Logger.error("[Telegram] Failed to send artifacts", err);
   }
 }
 
@@ -367,29 +446,40 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
       continue;
     }
 
-    const history = await conversationMemoryManager.augmentWithHistory(convo.chatId, [
-      { role: "user", content: inbound.text },
-    ]);
-
     const systemPrompt =
       "Eres un asistente de un negocio atendiendo por WhatsApp. " +
       "Tu alcance es: reservas, soporte y seguimiento. " +
       "Responde breve y pide solo los datos minimos necesarios. " +
       "No ofrezcas acciones fuera de esos flujos.";
 
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: inbound.text },
+    ];
+
     let assistantText = "";
+    const memRes = new MemorySseResponse();
     try {
-      const response = await chatService.chat(
-        [{ role: "system", content: systemPrompt }, ...history],
-        {
-          conversationId: convo.chatId,
-          userId: convo.userId,
-          useRag: true,
-          provider: DEFAULT_PROVIDER,
-          model: DEFAULT_MODEL,
-        },
+      const unifiedContext = await createUnifiedRun({
+        messages,
+        chatId: convo.chatId,
+        userId: convo.userId,
+        messageId: `wa_msg_${Date.now()}`,
+      });
+      await withTimeout(
+        executeUnifiedChat(
+          unifiedContext,
+          { messages, chatId: convo.chatId, userId: convo.userId, messageId: `wa_msg_${Date.now()}` },
+          memRes as any as Response,
+        ),
+        120_000,
+        "WhatsApp Cloud AI",
       );
-      assistantText = String(response?.content || "").trim();
+      assistantText = memRes.chunks
+        .filter((c: any) => c.event === "chunk" && typeof c.data?.content === "string")
+        .map((c: any) => c.data.content)
+        .join("")
+        .trim();
     } catch (err) {
       Logger.error("[WhatsAppCloud] LLM processing failed", err);
       assistantText = "Ahora mismo no puedo atender tu solicitud. Intenta de nuevo en unos minutos.";
@@ -420,6 +510,16 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
         });
       } catch (err) {
         Logger.error("[WhatsAppCloud] Failed to send reply", err);
+      }
+
+      // Send generated artifacts (documents) if any
+      try {
+        await sendChannelArtifacts(memRes, "whatsapp_cloud", inbound.from, {
+          phoneNumberId: inbound.phoneNumberId,
+          accessToken,
+        });
+      } catch (err) {
+        Logger.error("[WhatsAppCloud] Failed to send artifacts", err);
       }
     }
   }

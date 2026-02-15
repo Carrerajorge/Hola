@@ -44,6 +44,31 @@ export async function telegramSendMessage(chatId: string, text: string): Promise
   }
 }
 
+export async function telegramSendDocument(
+  chatId: string,
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  caption?: string,
+): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
+  const url = `${TELEGRAM_API_BASE}/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`;
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("document", new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), fileName);
+  if (caption) {
+    form.append("caption", caption.slice(0, 1024));
+  }
+  const resp = await fetch(url, { method: "POST", body: form });
+  const json = (await resp.json().catch(() => null)) as any;
+  if (!resp.ok || !json?.ok) {
+    const desc = json?.description ? String(json.description) : `HTTP ${resp.status}`;
+    throw new Error(`Telegram API error (sendDocument): ${desc}`);
+  }
+}
+
 export async function telegramSetWebhook(input: {
   webhookUrl: string;
   secretToken?: string;
