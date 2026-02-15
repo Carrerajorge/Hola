@@ -131,6 +131,7 @@ import { errorHandler } from "./middleware/error";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
+import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
@@ -726,6 +727,9 @@ export async function registerRoutes(
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
   app.use(auditMiddleware); // Capture metrics for all requests
+
+  // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
+  app.use("/api/device-control", createDeviceControlRouter());
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());

@@ -3,10 +3,7 @@
  * Endpoints for querying, verifying, and reporting on all 500 capabilities.
  */
 
-import { Router, Request, Response, NextFunction } from "express";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { requireAdmin as requireAdminMiddleware } from "./admin/utils";
+import { Router, Request, Response } from "express";
 import {
   OPENCLAW_500,
   getOpenClawStats,
@@ -32,211 +29,7 @@ import {
 } from "../services/openClaw1000Service";
 
 
-const execFileAsync = promisify(execFile);
-
-const OPENCLAW_CLI_BINARY = process.env.OPENCLAW_CLI_BINARY || "openclaw";
-const OPENCLAW_BRIDGE_ENABLED = (process.env.OPENCLAW_BRIDGE_ENABLED ?? "true").toLowerCase() !== "false";
-const OPENCLAW_DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.OPENCLAW_DEFAULT_TIMEOUT_MS || "30000", 10);
-
-type CliRunResult = {
-  ok: boolean;
-  stdout?: unknown;
-  stderr?: string;
-  command: string;
-  args: string[];
-  raw?: string;
-};
-
 const router = Router();
-
-function parseCliOutput(output: string): unknown {
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-
-  try {
-    return JSON.parse(trimmed);
-  } catch (_e) {
-    // CLI may print logs before JSON. Try the last non-empty JSON-ish line.
-    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        return JSON.parse(lines[i]);
-      } catch (_inner) {
-        // noop
-      }
-    }
-    return null;
-  }
-}
-
-async function runOpenClawCli(args: string[], timeoutMs = OPENCLAW_DEFAULT_TIMEOUT_MS): Promise<CliRunResult> {
-  if (!OPENCLAW_BRIDGE_ENABLED) {
-    throw new Error("OpenClaw bridge is disabled. Set OPENCLAW_BRIDGE_ENABLED=true to enable.");
-  }
-
-  const command = `${OPENCLAW_CLI_BINARY}`;
-
-  const { stdout, stderr } = await execFileAsync(OPENCLAW_CLI_BINARY, args, {
-    timeout: timeoutMs,
-    maxBuffer: 12 * 1024 * 1024,
-    env: {
-      ...process.env,
-    },
-  });
-
-  const parsed = parseCliOutput(stdout.toString());
-
-  return {
-    ok: true,
-    stdout: parsed !== null ? parsed : undefined,
-    stderr: stderr?.toString() || undefined,
-    command,
-    args,
-    raw: parsed === null ? stdout.toString() : undefined,
-  };
-}
-
-function enforceJsonArg(args: string[]) {
-  if (!args.includes("--json")) {
-    return [...args, "--json"];
-  }
-  return args;
-}
-
-function requireBridgeEnabled(_req: Request, res: Response, next: NextFunction) {
-  if (!OPENCLAW_BRIDGE_ENABLED) {
-    return res.status(503).json({
-      success: false,
-      error: "OpenClaw bridge disabled",
-    });
-  }
-  return next();
-}
-
-// ===== OpenClaw bridge: node control operations (functionality only) =====
-router.get("/bridge/health", requireAdminMiddleware, requireBridgeEnabled, async (_req, res) => {
-  try {
-    const r = await runOpenClawCli(["nodes", "status", "--json"]);
-    res.json({ success: true, source: "cli", ...r });
-  } catch (error: any) {
-    const message = error?.message || "OpenClaw CLI unavailable";
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-router.get("/bridge/nodes", requireAdminMiddleware, requireBridgeEnabled, async (_req, res) => {
-  try {
-    const r = await runOpenClawCli(enforceJsonArg(["nodes", "list"]));
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to list nodes" });
-  }
-});
-
-
-router.get("/bridge/nodes/pending", requireAdminMiddleware, requireBridgeEnabled, async (_req, res) => {
-  try {
-    const r = await runOpenClawCli(enforceJsonArg(["nodes", "pending"]));
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to list pending node requests" });
-  }
-});
-
-router.get("/bridge/nodes/status", requireAdminMiddleware, requireBridgeEnabled, async (_req, res) => {
-  try {
-    const r = await runOpenClawCli(enforceJsonArg(["nodes", "status"]));
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to get node status" });
-  }
-});
-
-
-router.get("/bridge/nodes/:node", requireAdminMiddleware, requireBridgeEnabled, async (req, res) => {
-  try {
-    const node = req.params.node;
-    if (!node) {
-      return res.status(400).json({ success: false, error: "node is required" });
-    }
-    const r = await runOpenClawCli(enforceJsonArg(["nodes", "describe", "--node", node]));
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to describe node" });
-  }
-});
-
-router.post("/bridge/nodes/:node/invoke", requireAdminMiddleware, requireBridgeEnabled, async (req, res) => {
-  try {
-    const node = req.params.node;
-    const { command, params = {}, invokeTimeoutMs, timeoutMs } = req.body || {};
-
-    if (!node) {
-      return res.status(400).json({ success: false, error: "node is required" });
-    }
-    if (typeof command !== "string" || !command.trim()) {
-      return res.status(400).json({ success: false, error: "command is required" });
-    }
-
-    const safeParams = typeof params === "object" && params !== null ? JSON.stringify(params) : "{}";
-    const args = enforceJsonArg(["nodes", "invoke", "--node", node, "--command", command, "--params", safeParams]);
-
-    if (Number.isFinite(invokeTimeoutMs)) {
-      args.push("--invoke-timeout", String(Number(invokeTimeoutMs)));
-    }
-
-    const r = await runOpenClawCli(args, Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : OPENCLAW_DEFAULT_TIMEOUT_MS);
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to invoke node command" });
-  }
-});
-
-router.post("/bridge/nodes/:node/run", requireAdminMiddleware, requireBridgeEnabled, async (req, res) => {
-  try {
-    const node = req.params.node;
-    const { raw, commandTimeoutMs, timeoutMs, invokeTimeoutMs } = req.body || {};
-
-    if (!node) {
-      return res.status(400).json({ success: false, error: "node is required" });
-    }
-    if (typeof raw !== "string" || !raw.trim()) {
-      return res.status(400).json({ success: false, error: "raw is required" });
-    }
-
-    const args = enforceJsonArg(["nodes", "run", "--node", node, "--raw", raw]);
-
-    if (Number.isFinite(commandTimeoutMs)) {
-      args.push("--command-timeout", String(Math.max(1, Number(commandTimeoutMs))));
-    }
-    if (Number.isFinite(invokeTimeoutMs)) {
-      args.push("--invoke-timeout", String(Math.max(1, Number(invokeTimeoutMs))));
-    }
-
-    const r = await runOpenClawCli(args, Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : OPENCLAW_DEFAULT_TIMEOUT_MS);
-    res.json({ success: true, ...r });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message || "Failed to run node raw command" });
-  }
-});
-
-router.get("/bridge/openclaw-caps", requireAdminMiddleware, async (_req, res) => {
-  res.json({
-    success: true,
-    enabled: OPENCLAW_BRIDGE_ENABLED,
-    cliBinary: OPENCLAW_CLI_BINARY,
-    defaultTimeoutMs: OPENCLAW_DEFAULT_TIMEOUT_MS,
-    supported: [
-      "nodes/list",
-      "nodes/status",
-      "nodes/describe",
-      "nodes/pending",
-      "nodes/invoke",
-      "nodes/run",
-      "bridge/health",
-    ],
-  });
-});
 
 /**
  * GET /api/openclaw/capabilities
@@ -270,6 +63,8 @@ router.get("/capabilities", (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+const router = Router();
 
 /**
  * GET /api/openclaw/capabilities/:id
