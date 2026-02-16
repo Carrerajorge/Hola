@@ -164,6 +164,100 @@ function rememberSavedRequestId(requestId: string): void {
   }
 }
 
+function safeReadLocalChatsFromStorage(storageKey: string): Chat[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const restored: Chat[] = parsed.map((chat: any) => ({
+      ...chat,
+      stableKey: chat?.stableKey || `stable-${chat?.id}`,
+      messages: Array.isArray(chat?.messages)
+        ? chat.messages.map((msg: any) => {
+            // Hydrate savedRequestIds from localStorage data (best-effort).
+            // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
+            // so only treat requestIds as "persisted" when we have evidence it reached the server.
+            if (msg?.requestId) {
+              const id = typeof msg.id === "string" ? msg.id : "";
+              const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
+              const isUuid =
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+              const isLikelyPersisted =
+                deliveryStatus === "sent" ||
+                deliveryStatus === "delivered" ||
+                (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
+                // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
+                (!deliveryStatus && isUuid);
+
+              if (isLikelyPersisted) {
+                markRequestPersisted(msg.requestId);
+              }
+            }
+
+            const hydrated: Message = {
+              ...msg,
+              timestamp: new Date(msg.timestamp),
+            };
+
+            // A "sending" message can't actually be in-flight across a reload.
+            // Treat it as retryable and queue it for recovery so it won't stay stuck forever.
+            if (
+              hydrated.role === "user" &&
+              hydrated.requestId &&
+              hydrated.deliveryStatus === "sending" &&
+              typeof chat?.id === "string" &&
+              !chat.id.startsWith(PENDING_CHAT_PREFIX)
+            ) {
+              enqueueFailedMessageForRecovery(chat.id, hydrated);
+              hydrated.deliveryStatus = "error";
+              hydrated.deliveryError = hydrated.deliveryError || "No se pudo confirmar el envío. Reintenta.";
+            }
+
+            return hydrated;
+          })
+        : [],
+    }));
+
+    return restored;
+  } catch (e) {
+    console.warn("[localStorage] Failed to parse chats cache:", e);
+    return [];
+  }
+}
+
+function mergeServerChatsWithLocal(serverChats: Chat[], localChats: Chat[]): Chat[] {
+  const localById = new Map<string, Chat>();
+  for (const c of localChats) {
+    if (c?.id) localById.set(c.id, c);
+  }
+
+  const pendingChats = localChats.filter(
+    (c) => typeof c?.id === "string" && c.id.startsWith(PENDING_CHAT_PREFIX)
+  );
+
+  const mergedServerChats = serverChats.map((serverChat) => {
+    const local = localById.get(serverChat.id);
+    return {
+      ...serverChat,
+      stableKey: local?.stableKey || serverChat.stableKey || `stable-${serverChat.id}`,
+      messages: local?.messages?.length ? local.messages : serverChat.messages,
+    };
+  });
+
+  const byId = new Map<string, Chat>();
+  for (const chat of [...pendingChats, ...mergedServerChats]) {
+    if (!chat?.id) continue;
+    const existing = byId.get(chat.id);
+    byId.set(chat.id, existing ? { ...existing, ...chat } : chat);
+  }
+
+  return Array.from(byId.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+}
+
 // Run-based idempotency: Track active runs to prevent duplicate AI calls
 export interface ChatRun {
   id: string;
@@ -1131,148 +1225,48 @@ export function useChats() {
   }, [activeChatId, fetchChatDetails, chats]);
 
   useEffect(() => {
+    let cancelled = false;
     const initChats = async () => {
       setIsLoading(true);
 
+      // 1) Hydrate from localStorage immediately for instant UI (no blank/skeleton if we have cache).
+      const restored = safeReadLocalChatsFromStorage(STORAGE_KEY);
+      if (!cancelled && restored.length > 0) {
+        setChats(restored);
+        if (!userHasSelectedRef.current) {
+          setActiveChatId((prev) => prev || restored[0]?.id || null);
+        }
+        setIsLoading(false);
+      }
+
+      // 2) Fetch authoritative server list in background and merge (preserve pending chats + cached messages).
       const serverChats = await loadChatsFromServer();
+      if (cancelled) return;
 
-      // IMPORTANT: an empty array is still a valid server response (authoritative).
-      // Only fall back to localStorage when the server request failed (null).
       if (serverChats) {
-        setChats(serverChats);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
-        } catch (e) {
-          console.warn("Failed to cache chats to localStorage:", e);
-          localStorage.removeItem(STORAGE_KEY);
-        }
-        // Only auto-select first chat if user hasn't manually selected/deselected
-        if (!userHasSelectedRef.current && !activeChatId && serverChats.length > 0) {
-          setActiveChatId(serverChats[0]?.id || null);
-        }
-      } else {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            const restored = parsed.map((chat: any) => ({
-              ...chat,
-              stableKey: chat.stableKey || `stable-${chat.id}`, // Ensure stableKey exists
-              messages: chat.messages.map((msg: any) => {
-                // Hydrate savedRequestIds from localStorage data (best-effort).
-                // IMPORTANT: localStorage may include optimistic/failed messages that were never persisted,
-                // so only treat requestIds as "persisted" when we have evidence it reached the server.
-                if (msg.requestId) {
-                  const id = typeof msg.id === "string" ? msg.id : "";
-                  const deliveryStatus = typeof msg.deliveryStatus === "string" ? msg.deliveryStatus : undefined;
-                  const isUuid =
-                    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-
-                  const isLikelyPersisted =
-                    deliveryStatus === "sent" ||
-                    deliveryStatus === "delivered" ||
-                    (deliveryStatus !== "error" && deliveryStatus !== "sending" && isUuid) ||
-                    // Back-compat: older messages won't have deliveryStatus, but server IDs are UUIDs.
-                    (!deliveryStatus && isUuid);
-
-                  if (isLikelyPersisted) {
-                    markRequestPersisted(msg.requestId);
-                  }
-                }
-                return {
-                  ...msg,
-                  timestamp: new Date(msg.timestamp)
-                };
-              })
-            }));
-
-            // CRITICAL FIX: Reconcile pending chats that were never synced to server
-            // This happens when user creates a chat, sends a message, but the server sync fails
-            const pendingChats = restored.filter((c: Chat) => c.id.startsWith(PENDING_CHAT_PREFIX) && c.messages.length > 0);
-            if (pendingChats.length > 0) {
-              console.log(`[Reconcile] Found ${pendingChats.length} pending chats to sync`);
-
-              // Reconcile each pending chat asynchronously but sequentially to avoid session conflicts
-              (async () => {
-                for (const pendingChat of pendingChats) {
-                  try {
-                    // Get first user message for title
-                    const firstUserMsg = pendingChat.messages.find((m: Message) => m.role === 'user');
-                    const title = firstUserMsg?.content?.slice(0, 50) + (firstUserMsg?.content && firstUserMsg.content.length > 50 ? '...' : '') || 'Nuevo Chat';
-
-                    // Create chat with all messages in a single atomic request
-                    const messagesToSync = pendingChat.messages.map((msg: Message) => ({
-                      role: msg.role,
-                      content: msg.content,
-                      requestId: msg.requestId,
-                      userMessageId: msg.userMessageId,
-                      attachments: sanitizeAttachmentsForServer(msg.attachments)
-                    }));
-
-                    const res = await fetch("/api/chats", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-                      credentials: "include",
-                      body: JSON.stringify({ title, messages: messagesToSync })
-                    });
-
-                    if (res.ok) {
-                      const serverChat = await res.json();
-                      const realChatId = serverChat.id;
-                      const wasAlreadyExisting = serverChat.alreadyExists;
-
-                      console.log(`[Reconcile] ${wasAlreadyExisting ? 'Found existing' : 'Created'} server chat ${realChatId} for pending ${pendingChat.id} with ${messagesToSync.length} messages`);
-
-                      // Map pending ID to real ID
-                      pendingToRealIdMap.set(pendingChat.id, realChatId);
-
-                      // Update chat ID in state
-                      setChats(prev => prev.map(c =>
-                        c.id === pendingChat.id ? { ...c, id: realChatId } : c
-                      ));
-
-                      // Update active chat ID if it was the pending one
-                      setActiveChatId(prev => prev === pendingChat.id ? realChatId : prev);
-
-                      // Remove pending chat from localStorage after successful sync
-                      const stored = localStorage.getItem(STORAGE_KEY);
-                      if (stored) {
-                        try {
-                          const storedChats = JSON.parse(stored);
-                          const updatedStoredChats = storedChats.filter((c: Chat) => c.id !== pendingChat.id);
-                          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedStoredChats));
-                        } catch (e) {
-                          // Ignore localStorage errors
-                        }
-                      }
-
-                      console.log(`[Reconcile] Successfully synced pending chat to ${realChatId}`);
-                    } else {
-                      console.warn(`[Reconcile] Failed to create chat on server:`, await res.text());
-                    }
-                  } catch (err) {
-                    console.error(`[Reconcile] Error reconciling pending chat ${pendingChat.id}:`, err);
-                  }
-                }
-              })();
-            }
-
-            setChats(restored);
-            // Only auto-select first chat if user hasn't manually selected/deselected
-            if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {
-              setActiveChatId(restored[0]?.id || null);
-            }
-          } catch (e) {
-            console.error("Failed to parse local chats", e);
-          }
+        const merged = mergeServerChatsWithLocal(serverChats, restored);
+        setChats(merged);
+        // Only auto-select if user hasn't manually selected/deselected.
+        if (!userHasSelectedRef.current) {
+          setActiveChatId((prev) => {
+            if (prev && merged.some((c) => c.id === prev)) return prev;
+            return merged[0]?.id || null;
+          });
         }
       }
 
-      setIsLoading(false);
+      // If we had no cache, finish loading once server attempt completes (success or fail).
+      if (restored.length === 0) {
+        setIsLoading(false);
+      }
+
       void recoverFailedMessageQueue();
     };
 
-    initChats();
+    void initChats();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Retry failed (queued) message saves when connectivity is restored or the tab becomes active.
@@ -1308,21 +1302,15 @@ export function useChats() {
           const serverChats = await loadChatsFromServer();
           if (!serverChats) return;
 
-          setChats(serverChats);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
-          } catch (e) {
-            console.warn("Failed to cache chats to localStorage:", e);
-            localStorage.removeItem(STORAGE_KEY);
-          }
+          setChats((prev) => mergeServerChatsWithLocal(serverChats, prev));
 
           // If the active chat disappeared (archived/deleted), pick a sane fallback.
-          if (activeChatId && !serverChats.some((c) => c.id === activeChatId)) {
-            setActiveChatId(serverChats[0]?.id || null);
-          }
-          if (!activeChatId && !userHasSelectedRef.current) {
-            setActiveChatId(serverChats[0]?.id || null);
-          }
+          setActiveChatId((prev) => {
+            if (prev?.startsWith(PENDING_CHAT_PREFIX)) return prev;
+            if (prev && serverChats.some((c) => c.id === prev)) return prev;
+            if (!userHasSelectedRef.current) return serverChats[0]?.id || null;
+            return prev || null;
+          });
         } finally {
           setIsLoading(false);
         }

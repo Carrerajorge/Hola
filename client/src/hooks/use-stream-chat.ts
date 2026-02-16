@@ -205,6 +205,33 @@ export function useStreamChat(deps: StreamChatDeps) {
       setAiState("thinking");
       setAiProcessSteps?.([]);
 
+      const nowMs = (): number =>
+        (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const streamStartedAtMs = nowMs();
+      let firstChunkAtMs: number | null = null;
+      let traceId: string | null = null;
+      let serverTimingHeader: string | null = null;
+      let serverTimingsFromEvent: any = null;
+      const logPerf = (status: string, extra: Record<string, any> = {}) => {
+        if (!import.meta.env.DEV) return;
+        const finishedAtMs = nowMs();
+        const totalMs = Math.max(0, finishedAtMs - streamStartedAtMs);
+        const firstTokenMs =
+          firstChunkAtMs === null ? null : Math.max(0, firstChunkAtMs - streamStartedAtMs);
+        const streamingMs =
+          firstChunkAtMs === null ? 0 : Math.max(0, finishedAtMs - firstChunkAtMs);
+        console.debug("[Perf] stream_chat", {
+          status,
+          traceId,
+          totalMs: Number(totalMs.toFixed(1)),
+          firstTokenMs: firstTokenMs === null ? null : Number(firstTokenMs.toFixed(1)),
+          streamingMs: Number(streamingMs.toFixed(1)),
+          serverTiming: serverTimingHeader || undefined,
+          serverTimings: serverTimingsFromEvent || undefined,
+          ...extra,
+        });
+      };
+
       let fullContent = "";
       let response: Response | undefined;
 
@@ -216,6 +243,8 @@ export function useStreamChat(deps: StreamChatDeps) {
           body: JSON.stringify(body),
           signal: combinedSignal,
         });
+        traceId = response.headers.get("x-trace-id") || response.headers.get("x-request-id");
+        serverTimingHeader = response.headers.get("server-timing");
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
@@ -230,6 +259,40 @@ export function useStreamChat(deps: StreamChatDeps) {
           };
 
           finalize(errorMsg);
+          logPerf("http_error", { httpStatus: response.status });
+          return { ok: false, content: "", message: errorMsg, response, error };
+        }
+
+        // Some flows return JSON (e.g. idempotent "already_done"/"already_processing") instead of SSE.
+        // In that case, do NOT attempt to parse as SSE; just reset UI state and return.
+        const contentType = response.headers.get("Content-Type") || "";
+        if (contentType.includes("application/json")) {
+          const jsonData = await response.json().catch(() => null);
+          const status = jsonData?.status;
+          serverTimingsFromEvent = jsonData?.timings || null;
+          if (status === "already_done" || status === "already_processing" || status === "claim_failed") {
+            flushNow();
+            streamingContentRef.current = "";
+            pendingContentRef.current = null;
+            setStreamingContent("");
+            setAiState("idle");
+            setAiProcessSteps?.([]);
+            logPerf("idempotent_status", { streamStatus: status || "json" });
+            return { ok: true, content: "", response };
+          }
+
+          const error = new Error(
+            jsonData?.error || jsonData?.message || `Unexpected JSON response (${status || "json"})`
+          );
+          const errorMsg = buildErrorMessage?.(error, messageId) ?? {
+            id: messageId,
+            role: "assistant" as const,
+            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+          };
+          finalize(errorMsg);
+          logPerf("json_error", { streamStatus: status || "json" });
           return { ok: false, content: "", message: errorMsg, response, error };
         }
 
@@ -243,6 +306,7 @@ export function useStreamChat(deps: StreamChatDeps) {
             timestamp: new Date(),
             requestId: generateRequestId(),
           });
+          logPerf("no_reader");
           return { ok: false, content: "", response, error };
         }
 
@@ -300,6 +364,9 @@ export function useStreamChat(deps: StreamChatDeps) {
               if (currentEventType === "chunk" || currentEventType === "text") {
                 const content = data.content || "";
                 if (content) {
+                  if (firstChunkAtMs === null) {
+                    firstChunkAtMs = nowMs();
+                  }
                   fullContent += content;
                   streamingContentRef.current = fullContent;
                   // RAF-throttled update
@@ -353,6 +420,7 @@ export function useStreamChat(deps: StreamChatDeps) {
               // Terminal: done/finish
               if (currentEventType === "done" || currentEventType === "finish") {
                 streamDone = true;
+                serverTimingsFromEvent = data?.timings || serverTimingsFromEvent;
 
                 const msg = buildFinalMessage?.(fullContent, data, messageId) ?? {
                   id: messageId,
@@ -365,6 +433,7 @@ export function useStreamChat(deps: StreamChatDeps) {
                 };
 
                 finalize(msg);
+                logPerf("done", { contentLength: fullContent.length });
                 return { ok: true, content: fullContent, message: msg, response };
               }
 
@@ -394,6 +463,7 @@ export function useStreamChat(deps: StreamChatDeps) {
           };
 
           finalize(msg);
+          logPerf("stream_end_without_done", { contentLength: fullContent.length });
           return { ok: true, content: fullContent, message: msg, response };
         }
 
@@ -407,13 +477,16 @@ export function useStreamChat(deps: StreamChatDeps) {
             requestId: generateRequestId(),
           };
           finalize(msg);
+          logPerf("empty_stream");
           return { ok: false, content: "", message: msg, response };
         }
 
+        logPerf("already_finalized");
         return { ok: true, content: fullContent, response };
 
       } catch (err: any) {
         if (err.name === "AbortError") {
+          logPerf("aborted", { contentLength: fullContent.length });
           return { ok: false, content: fullContent, response, error: err };
         }
 
@@ -431,6 +504,7 @@ export function useStreamChat(deps: StreamChatDeps) {
           finalize(errorMsg);
         }
 
+        logPerf("stream_error", { error: err?.message || String(err) });
         return { ok: false, content: fullContent, message: errorMsg, response, error: err };
       } finally {
         if (abortControllerRef.current === controller) {
@@ -438,7 +512,7 @@ export function useStreamChat(deps: StreamChatDeps) {
         }
       }
     },
-    [abort, finalize, scheduleFlush, setAiState, setAiProcessSteps, streamingContentRef, setStreamingContent]
+    [abort, finalize, scheduleFlush, flushNow, setAiState, setAiProcessSteps, streamingContentRef, setStreamingContent]
   );
 
   // Cleanup on unmount

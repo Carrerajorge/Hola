@@ -672,6 +672,52 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
   router.post("/chat/stream", async (req, res) => {
     const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const streamStartMs = performance.now();
+    const stageTimings: Record<string, number> = {};
+    let firstTokenAtMs: number | null = null;
+    let timingReported = false;
+    const roundMs = (value: number): number => Number(Math.max(0, value).toFixed(1));
+    const recordStage = (stage: string, stageStartMs: number): void => {
+      stageTimings[stage] = roundMs(performance.now() - stageStartMs);
+    };
+    const markFirstToken = (): void => {
+      if (firstTokenAtMs === null) {
+        firstTokenAtMs = performance.now();
+      }
+    };
+    const buildTimingPayload = (): Record<string, number | null> => {
+      const now = performance.now();
+      const totalMs = roundMs(now - streamStartMs);
+      const processingMs =
+        firstTokenAtMs === null
+          ? totalMs
+          : roundMs(firstTokenAtMs - streamStartMs);
+      const streamingMs =
+        firstTokenAtMs === null
+          ? 0
+          : roundMs(now - firstTokenAtMs);
+
+      return {
+        ...stageTimings,
+        totalMs,
+        processingMs,
+        firstTokenMs: firstTokenAtMs === null ? null : roundMs(firstTokenAtMs - streamStartMs),
+        streamingMs,
+      };
+    };
+    const reportTimings = (status: string): Record<string, number | null> => {
+      const timings = buildTimingPayload();
+      if (!timingReported) {
+        timingReported = true;
+        console.log("[Perf][chat_stream]", {
+          traceId: requestId,
+          status,
+          ...timings,
+        });
+      }
+      return timings;
+    };
+
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let isConnectionClosed = false;
     let claimedRun: any = null;
@@ -702,6 +748,59 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      // Claim run as early as possible (before any expensive routing/search work).
+      // This avoids duplicate processing and ensures idempotency responses are true JSON
+      // (before SSE headers are sent).
+      if (runId && chatId && !claimedRun) {
+        const claimStageStart = performance.now();
+        const existingRun = await storage.getChatRun(runId);
+        if (!existingRun) {
+          recordStage("run_claim_ms", claimStageStart);
+          return res.status(404).json({
+            error: "Run not found",
+            traceId: requestId,
+            timings: reportTimings("run_not_found"),
+          });
+        }
+
+        if (existingRun.status === "processing") {
+          recordStage("run_claim_ms", claimStageStart);
+          console.log(`[Run] Run ${runId} is already being processed, returning status`);
+          return res.json({
+            status: "already_processing",
+            run: existingRun,
+            traceId: requestId,
+            timings: reportTimings("already_processing"),
+          });
+        }
+        if (existingRun.status === "done") {
+          recordStage("run_claim_ms", claimStageStart);
+          console.log(`[Run] Run ${runId} already completed`);
+          return res.json({
+            status: "already_done",
+            run: existingRun,
+            traceId: requestId,
+            timings: reportTimings("already_done"),
+          });
+        }
+        if (existingRun.status === "failed") {
+          console.log(`[Run] Run ${runId} previously failed`);
+        }
+
+        claimedRun = await storage.claimPendingRun(chatId, existingRun.clientRequestId);
+        recordStage("run_claim_ms", claimStageStart);
+        if (!claimedRun || claimedRun.id !== runId) {
+          console.log(`[Run] Failed to claim run ${runId} - may have been claimed by another request`);
+          return res.json({
+            status: "claim_failed",
+            message: "Run already claimed or not pending",
+            traceId: requestId,
+            timings: reportTimings("claim_failed"),
+          });
+        }
+        console.log(`[Run] Successfully claimed run ${runId}`);
       }
 
       const provider = (
@@ -746,6 +845,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
 
@@ -782,6 +882,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           ? "De nada. ¿Necesitas algo más?"
           : "Hola. ¿En qué puedo ayudarte?";
 
+        markFirstToken();
         writeSse(res, 'chunk', {
           content,
           sequence: 1,
@@ -793,6 +894,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           requestId,
           runId: runId || requestId,
           latencyMode,
+          traceId: requestId,
+          timings: reportTimings("greeting_fast_path"),
           timestamp: Date.now(),
         });
         return res.end();
@@ -835,6 +938,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             enableFallback: true,
           });
 
+          markFirstToken();
           writeSse(res, 'chunk', {
             content: quick.content || "",
             sequence: 1,
@@ -847,6 +951,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             requestId,
             runId: runId || requestId,
             latencyMode,
+            traceId: requestId,
+            timings: reportTimings("simple_fast_path"),
             timestamp: Date.now(),
             provider: quick.provider,
             model: quick.model,
@@ -859,10 +965,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       // Load user settings after the stream is already open to reduce perceived latency.
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+      const userSettingsStageStart = performance.now();
       try {
         userSettings = await storage.getUserSettings(effectiveUserId);
       } catch (e) {
         console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
+      } finally {
+        recordStage("user_settings_ms", userSettingsStageStart);
       }
 
       const featureFlags = {
@@ -1193,7 +1302,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // If runId provided, claim the pending run (idempotent processing)
-      if (runId && chatId) {
+      if (runId && chatId && !claimedRun) {
         const existingRun = await storage.getChatRun(runId);
         if (!existingRun) {
           return res.status(404).json({ error: "Run not found" });
@@ -1234,6 +1343,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
       }
@@ -1568,6 +1678,7 @@ ${attachmentContext}`;
 
       // Ensure chat exists so we can persist messages (critical for memory)
       const effectiveChatIdForPersistence = chatId || conversationId || `chat_${Date.now()}`;
+      const ensureChatStageStart = performance.now();
       try {
         const existingChat = await storage.getChat(effectiveChatIdForPersistence);
         if (!existingChat) {
@@ -1580,12 +1691,15 @@ ${attachmentContext}`;
       } catch (e) {
         // Best-effort: if chat creation fails, streaming can still proceed, but memory will degrade.
         console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
+      } finally {
+        recordStage("ensure_chat_ms", ensureChatStageStart);
       }
 
       // Persist the latest user message (best-effort). Without this, server-side memory is empty.
       // Skip if a run was claimed - the user message was already created atomically with the run
       // via createUserMessageAndRun in the /chats/:id/messages endpoint.
       let persistedUserMessageId: string | null = claimedRun?.userMessageId || null;
+      const persistUserStageStart = performance.now();
       if (!claimedRun) {
         try {
           if (userMessageText && effectiveChatIdForPersistence) {
@@ -1690,6 +1804,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to persist user message (best-effort):', e);
         }
       }
+      recordStage("persist_user_ms", persistUserStageStart);
 
       // For claimed runs (run-based flow), the user message was already persisted
       // via createUserMessageAndRun, but conversationDocuments were not created.
@@ -1753,6 +1868,7 @@ ${attachmentContext}`;
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)
       let assistantMessageId: string | null = null;
+      const assistantPlaceholderStageStart = performance.now();
       try {
         const assistantMessage = await storage.createChatMessage({
           chatId: effectiveChatIdForPersistence,
@@ -1772,6 +1888,8 @@ ${attachmentContext}`;
         }
       } catch (e) {
         console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
+      } finally {
+        recordStage("assistant_placeholder_ms", assistantPlaceholderStageStart);
       }
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
@@ -1895,6 +2013,9 @@ ${attachmentContext}`;
           // Use the real response from the agent loop (not a placeholder)
           // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
           fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
+          if (fullContent.trim()) {
+            markFirstToken();
+          }
           agentLoopHandled = true;
           console.log(`[Stream] Agent loop completed, fullContent length: ${fullContent.length}`);
         } catch (agentError: any) {
@@ -1925,6 +2046,7 @@ ${attachmentContext}`;
       }
 
       if (!agentLoopHandled) {
+      const modelStreamStageStart = performance.now();
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
@@ -1950,6 +2072,9 @@ ${attachmentContext}`;
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
 
+        if (chunk.content) {
+          markFirstToken();
+        }
         fullContent += chunk.content;
         lastAckSequence = chunk.sequenceId;
 
@@ -1970,6 +2095,8 @@ ${attachmentContext}`;
             intent: unifiedContext?.requestSpec.intent,
             latencyLane: resolvedLane,
             webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            traceId: requestId,
+            timings: buildTimingPayload(),
             timestamp: Date.now(),
             ...sessionMetadata
           });
@@ -1982,6 +2109,7 @@ ${attachmentContext}`;
       // Ensure buffer is fully flushed after loop and clean up listener
       writer.finalize();
       req.removeListener("close", onClose);
+      recordStage("model_stream_ms", modelStreamStageStart);
       } // end if (!agentLoopHandled)
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
@@ -1991,6 +2119,7 @@ ${attachmentContext}`;
         fullContent = fallbackContent;
 
         if (!isConnectionClosed) {
+          markFirstToken();
           const nextSeq = lastAckSequence + 1;
           lastAckSequence = nextSeq;
           writeSse(res, 'chunk', {
@@ -2005,6 +2134,7 @@ ${attachmentContext}`;
       }
 
       // Update assistant message with full content + webSources
+      const finalizePersistenceStageStart = performance.now();
       if (assistantMessageId) {
         try {
           const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
@@ -2026,6 +2156,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to finalize assistant message (best-effort):', e);
         }
       }
+      recordStage("finalize_persistence_ms", finalizePersistenceStageStart);
 
       // Mark run as done if we claimed one
       if (claimedRun) {
@@ -2043,6 +2174,7 @@ ${attachmentContext}`;
       }
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
+      const finalTimings = reportTimings("completed");
 
       if (!isConnectionClosed) {
         if (unifiedContext?.isAgenticMode) {
@@ -2063,6 +2195,8 @@ ${attachmentContext}`;
           assistantMessageId,
           latencyLane: resolvedLane,
           webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now()
         });
 
@@ -2077,6 +2211,8 @@ ${attachmentContext}`;
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
           durationMs,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now(),
           ...sessionMetadata
         });
@@ -2120,11 +2256,14 @@ ${attachmentContext}`;
       }
 
       const errorRunId = claimedRun?.id || requestId;
+      const errorTimings = reportTimings("error");
       if (!isConnectionClosed) {
         writeSse(res, 'error', {
           error: error.message,
           requestId,
           runId: errorRunId,
+          traceId: requestId,
+          timings: errorTimings,
           timestamp: Date.now()
         });
 
@@ -2136,7 +2275,10 @@ ${attachmentContext}`;
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
-      if (!isConnectionClosed) {
+      if (!timingReported) {
+        reportTimings(isConnectionClosed ? "connection_closed" : "ended");
+      }
+      if (!isConnectionClosed && !(res as any).writableEnded) {
         res.end();
       }
     }

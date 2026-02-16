@@ -1456,6 +1456,9 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const analysisAbortControllerRef = useRef<AbortController | null>(null);
+  // Avoid stale `chatId` captures inside long async flows.
+  const latestChatIdRef = useRef<string | null>(chatId || null);
+  latestChatIdRef.current = chatId || null;
   const streamIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<AiState>("idle");
@@ -1490,6 +1493,22 @@ export function ChatInterface({
     window.dispatchEvent(new CustomEvent("refresh-chat-title", {
       detail: { chatId: targetChatId, delay: 2500 }
     }));
+  }, []);
+
+  const waitForStableChatId = useCallback(async (opts?: { timeoutMs?: number; signal?: AbortSignal }) => {
+    const timeoutMs = opts?.timeoutMs ?? 8000;
+    const signal = opts?.signal;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (signal?.aborted) return null;
+      const current = latestChatIdRef.current;
+      if (current) {
+        const resolved = resolveRealChatId(current);
+        if (resolved && !resolved.startsWith("pending-")) return resolved;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return null;
   }, []);
 
   // Measure composer height and set CSS variable for proper layout
@@ -1596,13 +1615,115 @@ export function ChatInterface({
     }
   }, []);
 
-  const handleUserRetrySend = useCallback((msg: Message) => {
-    onSendMessage({
+  const handleUserRetrySend = useCallback(async (msg: Message) => {
+    if (!msg || msg.role !== "user") return;
+
+    // Avoid starting a second stream while one is active (it will look broken and can abort in-flight work).
+    if (aiStateRef.current !== "idle") {
+      toast({
+        title: "Espera un momento",
+        description: "Hay una respuesta en curso. Cancélala o espera para reintentar.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    const msgKey = msg.clientTempId || msg.id;
+
+    // 1) Re-persist the user message (idempotent by requestId/clientRequestId) so delivery state updates.
+    const persistPromise = onSendMessage({
       ...msg,
       deliveryStatus: "sending",
       deliveryError: undefined,
+    }).catch((err) => {
+      console.warn("[retry] Failed to persist user message:", err);
+      return undefined;
     });
-  }, [onSendMessage]);
+
+    const persisted = await persistPromise;
+    const effectiveRunId: string | undefined = persisted?.run?.id;
+
+    // 2) Ensure we stream against the REAL chatId (never a synthetic fallback).
+    const stableChatId = (persisted?.run?.chatId as string | undefined) || await waitForStableChatId({ timeoutMs: 8000 });
+    if (!stableChatId) {
+      toast({
+        title: "Error",
+        description: "No se pudo crear/confirmar el chat para reintentar. Verifica tu conexión e intenta de nuevo.",
+        variant: "destructive",
+        duration: 5000,
+      });
+      onSendMessage({
+        ...msg,
+        deliveryStatus: "error",
+        deliveryError: "No se pudo crear/confirmar el chat para reintentar.",
+      });
+      return;
+    }
+
+    const idx = displayMessages.findIndex((m: any) => (m?.clientTempId || m?.id) === msgKey);
+    const historyMsgs = idx >= 0 ? displayMessages.slice(0, idx + 1) : [...displayMessages, msg];
+    const history = historyMsgs.map((m: any) => ({ role: m.role, content: m.content }));
+
+    // Keep attachments lightweight: strip base64/data fields and send only metadata.
+    const streamAttachments = (msg.attachments || [])
+      .map((att: any) => ({
+        type: att?.type === "image" ? "image" : "document",
+        name: att?.name,
+        mimeType: att?.mimeType || att?.type,
+        storagePath: att?.storagePath,
+        fileId: att?.fileId || att?.id,
+        // Do NOT send imageUrl/content/dataUrl here.
+      }))
+      .filter((att: any) => !!att?.name);
+
+    const result = await streamChat.stream("/api/chat/stream", {
+      chatId: stableChatId,
+      body: {
+        messages: history,
+        conversationId: stableChatId,
+        chatId: stableChatId,
+        runId: effectiveRunId,
+        attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+        docTool: selectedDocTool || null,
+        provider: selectedProvider,
+        model: selectedModel,
+        latencyMode,
+      },
+      buildFinalMessage: (fullContent, data, messageId) => ({
+        id: messageId || `assistant-${Date.now()}`,
+        role: "assistant",
+        content: fullContent || "No se recibió respuesta del servidor.",
+        timestamp: new Date(),
+        requestId: data?.requestId || generateRequestId(),
+        userMessageId: msgKey,
+        artifact: data?.artifact,
+        webSources: data?.webSources,
+      }),
+      buildErrorMessage: (error, messageId) => ({
+        id: messageId || `error-${Date.now()}`,
+        role: "assistant",
+        content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: msgKey,
+      }),
+    });
+
+    if (result.ok) {
+      requestTitleRefresh(stableChatId);
+    }
+  }, [
+    displayMessages,
+    latencyMode,
+    onSendMessage,
+    requestTitleRefresh,
+    selectedDocTool,
+    selectedModel,
+    selectedProvider,
+    streamChat,
+    toast,
+    waitForStableChatId,
+  ]);
 
   const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -3563,19 +3684,27 @@ export function ChatInterface({
       }
 
       // Add user message to chat
-      const userMsgId = Date.now().toString();
+      const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const userMsg: Message = {
         id: userMsgId,
+        clientTempId: userMsgId,
         role: "user",
         content: generationInput,
         timestamp: new Date(),
         requestId: generateRequestId(),
+        clientRequestId: generateClientRequestId(),
+        status: "pending",
+        deliveryStatus: "sending",
+        deliveryError: undefined,
       };
-      // Show message immediately (optimistic update)
-      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
-      onSendMessage(userMsg);
+	      // Show message immediately (optimistic update)
+	      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+	      const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
+	        console.warn("[handleSubmit] Failed to persist generation user message:", err);
+	        return undefined;
+	      });
 
-      try {
+	      try {
         // Only fetch image context if we have an edit pattern (not for generation-only requests)
         // This prevents misrouting generation requests like "agrega una conclusión" to image edit
         let lastImageBase64: string | null = null;
@@ -3666,33 +3795,68 @@ export function ChatInterface({
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
 
-        // Ensure abort controller is active
-        if (!abortControllerRef.current) {
-          abortControllerRef.current = new AbortController();
-        }
+	        // Ensure abort controller is active
+	        if (!abortControllerRef.current) {
+	          abortControllerRef.current = new AbortController();
+	        }
 
-        try {
-          const response = await fetch("/api/chat/stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
-              chatId,
-              conversationId: chatId,
-              provider: selectedProvider,
-              model: selectedModel,
-              lastImageBase64,
-              lastImageId,
-              latencyMode,
+		        try {
+			          const persisted = await persistGenerationUserMessagePromise;
+			          const effectiveRunId: string | undefined = persisted?.run?.id;
+			          const runChatId: string | undefined = persisted?.run?.chatId;
+
+			          if (!effectiveRunId) {
+			            toast({
+			              title: "Error al guardar tu mensaje",
+			              description: "No pudimos confirmar el envío. Reintenta.",
+			              variant: "destructive",
+			              duration: 5000,
+			            });
+			            setAiState("idle");
+			            setAiProcessSteps([]);
+			            abortControllerRef.current = null;
+			            return;
+			          }
+
+			          const effectiveChatIdForStream = runChatId || await waitForStableChatId({
+			            timeoutMs: 8000,
+			            signal: abortControllerRef.current.signal,
+			          });
+		          if (!effectiveChatIdForStream) {
+		            toast({
+		              title: "Error",
+		              description: "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
+		              variant: "destructive",
+		              duration: 5000,
+		            });
+		            setAiState("idle");
+		            setAiProcessSteps([]);
+		            abortControllerRef.current = null;
+		            return;
+		          }
+
+		          const response = await fetch("/api/chat/stream", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	            credentials: "include",
+	            body: JSON.stringify({
+		              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+		              chatId: effectiveChatIdForStream,
+		              conversationId: effectiveChatIdForStream,
+		              runId: effectiveRunId,
+		              provider: selectedProvider,
+		              model: selectedModel,
+		              lastImageBase64,
+		              lastImageId,
+		              latencyMode,
             }),
             signal: abortControllerRef.current.signal
           });
 
-          if (!response.ok) {
-            if (response.status === 402) {
-              const errorData = await response.json();
-              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
+	          if (!response.ok) {
+	            if (response.status === 402) {
+	              const errorData = await response.json();
+	              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
                 setQuotaInfo(errorData.quota);
                 setShowPricingModal(true);
                 setAiState("idle");
@@ -3700,11 +3864,33 @@ export function ChatInterface({
                 return;
               }
             }
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `Error ${response.status}`);
-          }
+	            const errorData = await response.json().catch(() => ({}));
+	            throw new Error(errorData.error || `Error ${response.status}`);
+	          }
 
-          setAiState("responding");
+	          // If the server indicates the run was already handled, don't try to parse SSE.
+	          const contentType = response.headers.get("Content-Type") || "";
+	          if (contentType.includes("application/json")) {
+	            const jsonData = await response.json().catch(() => null);
+	            const status = jsonData?.status;
+	            if (status === "already_done" || status === "already_processing") {
+	              console.log("[Generation SSE] Run already processed, skipping streaming");
+	              setAiState("idle");
+	              setAiProcessSteps([]);
+	              abortControllerRef.current = null;
+	              return;
+	            }
+	            if (status === "claim_failed") {
+	              console.log("[Generation SSE] Run claim failed, skipping streaming");
+	              setAiState("idle");
+	              setAiProcessSteps([]);
+	              abortControllerRef.current = null;
+	              return;
+	            }
+	            throw new Error(jsonData?.error || jsonData?.message || `Respuesta inesperada del servidor (${status || "json"})`);
+	          }
+
+	          setAiState("responding");
 
           const reader = response.body?.getReader();
           if (!reader) throw new Error("No response body");
@@ -3712,10 +3898,11 @@ export function ChatInterface({
           const decoder = new TextDecoder();
           let buffer = "";
           let fullContent = "";
-          let currentEventType = "chunk"; // Default start
-          let streamComplete = false;
+	          let currentEventType = "chunk"; // Default start
+	          let streamComplete = false;
+            let didFinalize = false;
 
-          while (!streamComplete) {
+	          while (!streamComplete) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -3729,83 +3916,98 @@ export function ChatInterface({
 
               if (trimmedLine.startsWith("event: ")) {
                 currentEventType = trimmedLine.slice(7).trim();
-              } else if (trimmedLine.startsWith("data: ")) {
-                const dataStr = trimmedLine.slice(6);
-                if (dataStr === "[DONE]") {
-                  streamComplete = true;
-                  continue;
-                }
+	              } else if (trimmedLine.startsWith("data: ")) {
+	                const dataStr = trimmedLine.slice(6);
+	                if (dataStr === "[DONE]") {
+	                  streamComplete = true;
+	                  continue;
+	                }
 
-                try {
-                  const data = JSON.parse(dataStr);
-
-                  if (currentEventType === "chunk" || currentEventType === "text") {
-                    const content = data.content || "";
-                    if (content) {
-                      fullContent += content;
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
-                    }
-                  } else if (currentEventType === "production_start") {
-                    setAiState("agent_working");
-                    setAiProcessSteps([{
-                      id: "init",
-                      step: "init",
-                      title: `Iniciando producción: ${data.topic || "Documento"}`,
-                      status: "pending",
-                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                    }]);
-                  } else if (currentEventType === "production_event") {
-                    setAiProcessSteps((prev: any[]) => {
-                      const newSteps = [...prev];
-                      const lastStep = newSteps[newSteps.length - 1];
-                      if (lastStep && lastStep.status === "pending" && data.message) {
-                        // Update generic pending step
-                        lastStep.title = data.message;
-                      } else {
-                        // Add new step log
-                        newSteps.push({
-                          id: `step-${Date.now()}`,
-                          title: data.message || "Procesando...",
-                          status: "pending",
-                          description: data.stage
-                        });
-                      }
-                      return newSteps;
-                    });
-                  } else if (currentEventType === "production_complete") {
-                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-                  } else if (currentEventType === "done" || currentEventType === "finish") {
-                    streamComplete = true;
-                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
-
-                    streamTransition.finalize({
-                      id: (Date.now() + 1).toString(),
-                      role: "assistant",
-                      content: fullContent,
-                      timestamp: new Date(),
-                      requestId: data.requestId || generateRequestId(),
-                      userMessageId: userMsgId,
-                      artifact: data.artifact,
-                      webSources: data.webSources,
-                    });
-
-                    // Request AI-generated title refresh after streaming completes
-                    requestTitleRefresh(chatId);
-                  } else if (currentEventType === "error" || currentEventType === "production_error") {
-                    throw new Error(data.message || data.error || "Stream error");
+                  let data: any;
+                  try {
+                    data = JSON.parse(dataStr);
+                  } catch (parseError) {
+                    console.warn("SSE parse error:", parseError);
+                    continue;
                   }
-                } catch (parseError) {
-                  console.warn("SSE parse error:", parseError);
-                }
-              }
-            }
-          }
 
-        } catch (error: any) {
-          if (error.name === "AbortError") return;
-          console.error("[Generation] Stream Error:", error);
-          streamTransition.finalize({
+	                  if (currentEventType === "chunk" || currentEventType === "text") {
+	                    const content = data.content || "";
+	                    if (content) {
+	                      fullContent += content;
+	                      streamingContentRef.current = fullContent;
+	                      setStreamingContent(fullContent);
+	                    }
+	                  } else if (currentEventType === "production_start") {
+	                    setAiState("agent_working");
+	                    setAiProcessSteps([{
+	                      id: "init",
+	                      step: "init",
+	                      title: `Iniciando producción: ${data.topic || "Documento"}`,
+	                      status: "pending",
+	                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+	                    }]);
+	                  } else if (currentEventType === "production_event") {
+	                    setAiProcessSteps((prev: any[]) => {
+	                      const newSteps = [...prev];
+	                      const lastStep = newSteps[newSteps.length - 1];
+	                      if (lastStep && lastStep.status === "pending" && data.message) {
+	                        // Update generic pending step
+	                        lastStep.title = data.message;
+	                      } else {
+	                        // Add new step log
+	                        newSteps.push({
+	                          id: `step-${Date.now()}`,
+	                          title: data.message || "Procesando...",
+	                          status: "pending",
+	                          description: data.stage
+	                        });
+	                      }
+	                      return newSteps;
+	                    });
+	                  } else if (currentEventType === "production_complete") {
+	                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+	                  } else if (currentEventType === "done" || currentEventType === "finish") {
+	                    streamComplete = true;
+	                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+
+	                    streamTransition.finalize({
+	                      id: (Date.now() + 1).toString(),
+	                      role: "assistant",
+	                      content: fullContent || "No se recibió respuesta del servidor.",
+	                      timestamp: new Date(),
+	                      requestId: data.requestId || generateRequestId(),
+	                      userMessageId: userMsgId,
+	                      artifact: data.artifact,
+	                      webSources: data.webSources,
+	                    });
+                      didFinalize = true;
+	
+	                    // Request AI-generated title refresh after streaming completes
+	                    requestTitleRefresh(effectiveChatIdForStream);
+	                  } else if (currentEventType === "error" || currentEventType === "production_error") {
+	                    throw new Error(data.message || data.error || "Stream error");
+	                  }
+	              }
+	            }
+	          }
+
+            if (!didFinalize) {
+              streamTransition.finalize({
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent || "No se recibió respuesta del servidor.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              });
+              requestTitleRefresh(effectiveChatIdForStream);
+            }
+
+	        } catch (error: any) {
+	          if (error.name === "AbortError") return;
+	          console.error("[Generation] Stream Error:", error);
+	          streamTransition.finalize({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
@@ -3814,11 +4016,12 @@ export function ChatInterface({
             userMessageId: userMsgId,
           });
         }
-      } catch (error) {
-        console.error("[handleSubmit] Top-level error:", error);
-        setAiState("idle");
-      }
-    } // Close if ((isGenerationRequest ...
+	      } catch (error) {
+	        console.error("[handleSubmit] Top-level error:", error);
+	        setAiState("idle");
+	      }
+        return;
+	    } // Close if ((isGenerationRequest ...
 
 
     // Check if this is a Super Agent research request with sources
@@ -4528,11 +4731,14 @@ export function ChatInterface({
 
     // Send user message — fire-and-forget (don't block stream start)
     try {
-      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+	      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
 
-      // Fire-and-forget: persist user message in background.
-      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
-      onSendMessage(userMsg);
+	      // Fire-and-forget: persist user message in background.
+	      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
+	      const persistUserMessagePromise = onSendMessage(userMsg).catch((err) => {
+	        console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
+	        return undefined;
+	      });
 
       // Start image detection early (runs in parallel with intent checks below).
       // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
@@ -4603,20 +4809,21 @@ export function ChatInterface({
           { step: "Generando respuesta inteligente", status: "pending" }
         ]);
 
-        try {
-          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
-          fullMessages.push({ role: "user", content: cleanPrompt });
-
-          const chatResponse = await fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              messages: fullMessages,
-              conversationId: chatId,
-              useRag: true
-            })
-          });
+	        try {
+	          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+	          fullMessages.push({ role: "user", content: cleanPrompt });
+	          const stableConversationId = await waitForStableChatId({ timeoutMs: 8000 });
+	
+	          const chatResponse = await fetch("/api/chat", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	            credentials: "include",
+	            body: JSON.stringify({
+	              messages: fullMessages,
+	              conversationId: stableConversationId || chatId,
+	              useRag: true
+	            })
+	          });
 
           setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
             i === 0 ? { ...s, status: "done" as const } :
@@ -4926,10 +5133,39 @@ IMPORTANTE:
           const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
-          // Always use SSE streaming — generate an effective chatId if needed.
-          // Previously gated on `runInfo && chatId` which required awaiting onSendMessage.
-          const effectiveStreamChatId = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-          if (effectiveStreamChatId) {
+	          // Always use SSE streaming — but ONLY against a stable, real chatId.
+	          // Never fall back to a synthetic ID here; that creates "ghost" chats and splits persistence.
+	          const persisted = await persistUserMessagePromise;
+	          const effectiveRunId: string | undefined = persisted?.run?.id;
+	          const runChatId: string | undefined = persisted?.run?.chatId;
+
+	          if (!effectiveRunId) {
+	            toast({
+	              title: "Error al guardar tu mensaje",
+	              description: "No pudimos confirmar el envío. Reintenta.",
+	              variant: "destructive",
+	              duration: 5000,
+	            });
+	            setAiState("idle");
+	            setAiProcessSteps([]);
+	            abortControllerRef.current = null;
+	            return;
+	          }
+
+	          const effectiveStreamChatId = runChatId || await waitForStableChatId({ timeoutMs: 8000, signal: abortControllerRef.current?.signal });
+	          if (!effectiveStreamChatId) {
+	            toast({
+	              title: "Error",
+	              description: "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
+	              variant: "destructive",
+              duration: 5000,
+            });
+            setAiState("idle");
+            setAiProcessSteps([]);
+            abortControllerRef.current = null;
+            return;
+          }
+          {
             // SSE streaming mode - real-time streaming from server
             setAiState("responding");
 
@@ -4978,11 +5214,11 @@ IMPORTANTE:
                 const analyzeResponse = await fetch("/api/analyze", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    messages: finalChatHistory,
-                    attachments: streamAttachments,
-                    conversationId: chatId
-                  }),
+	                  body: JSON.stringify({
+	                    messages: finalChatHistory,
+	                    attachments: streamAttachments,
+	                    conversationId: effectiveStreamChatId
+	                  }),
                   signal: abortControllerRef.current?.signal
                 });
 
@@ -5024,14 +5260,15 @@ IMPORTANTE:
               method: "POST",
               headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
               credentials: "include",
-              body: JSON.stringify({
-                messages: finalChatHistory,
-                conversationId: effectiveStreamChatId,
-                chatId: effectiveStreamChatId,
-                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-                // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null,
-                latencyMode,
+	              body: JSON.stringify({
+	                messages: finalChatHistory,
+	                conversationId: effectiveStreamChatId,
+	                chatId: effectiveStreamChatId,
+	                runId: effectiveRunId,
+	                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+	                // Send selected doc tool for production mode activation
+	                docTool: selectedDocTool || null,
+	                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -5041,20 +5278,29 @@ IMPORTANTE:
               throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
             }
 
-            // Check if response indicates already processed (not SSE)
-            const contentType = response.headers.get("Content-Type") || "";
-            if (contentType.includes("application/json")) {
-              const jsonData = await response.json();
-              if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
-                // Run was already processed, skip streaming
-                console.log("[SSE] Run already processed, skipping streaming");
-                setAiState("idle");
-                setAiProcessSteps([]);
-                agent.complete();
-                abortControllerRef.current = null;
-                return;
-              }
-            }
+	            // Check if response indicates already processed (not SSE)
+	            const contentType = response.headers.get("Content-Type") || "";
+	            if (contentType.includes("application/json")) {
+	              const jsonData = await response.json().catch(() => null);
+	              const status = jsonData?.status;
+	              if (status === "already_done" || status === "already_processing") {
+	                console.log("[SSE] Run already processed, skipping streaming");
+	                setAiState("idle");
+	                setAiProcessSteps([]);
+	                agent.complete();
+	                abortControllerRef.current = null;
+	                return;
+	              }
+	              if (status === "claim_failed") {
+	                console.log("[SSE] Run claim failed, skipping streaming");
+	                setAiState("idle");
+	                setAiProcessSteps([]);
+	                agent.complete();
+	                abortControllerRef.current = null;
+	                return;
+	              }
+	              throw new Error(jsonData?.error || jsonData?.message || `Respuesta inesperada del servidor (${status || "json"})`);
+	            }
 
             // Update steps: mark searching done, generating active
             setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
