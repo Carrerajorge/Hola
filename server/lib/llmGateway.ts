@@ -301,7 +301,11 @@ class LLMGateway {
 
   // ===== Cache Management =====
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    try {
+      return `req_${crypto.randomUUID()}`;
+    } catch {
+      return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    }
   }
 
   private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string | null {
@@ -445,10 +449,14 @@ class LLMGateway {
     })();
 
     let mustKeep: ChatCompletionMessageParam = otherMessages[mustKeepIndex];
+    const isMultimodal = Array.isArray(mustKeep.content);
     let mustKeepText = toText(mustKeep);
-    let mustKeepTokens = estimateTokens(mustKeepText);
+    let mustKeepTokens = isMultimodal
+      ? 500 // Flat estimate for multimodal messages (images are large but most budget is for text)
+      : estimateTokens(mustKeepText);
 
-    if (mustKeepTokens > maxTokens) {
+    if (mustKeepTokens > maxTokens && !isMultimodal) {
+      // Only truncate text messages, not multimodal (would destroy image data)
       mustKeepText = truncateText(mustKeepText, maxTokens);
       mustKeep = { ...mustKeep, content: mustKeepText } as ChatCompletionMessageParam;
       mustKeepTokens = estimateTokens(mustKeepText);
@@ -516,10 +524,42 @@ class LLMGateway {
 
     const geminiMessages: GeminiChatMessage[] = messages
       .filter(m => m.role !== "system")
-      .map(m => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
-      }));
+      .map(m => {
+        const role = m.role === "assistant" ? "model" as const : "user" as const;
+
+        // Handle multimodal content arrays (image_url + text parts)
+        if (Array.isArray(m.content)) {
+          const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+          for (const part of m.content as any[]) {
+            if (part.type === "text") {
+              parts.push({ text: part.text });
+            } else if (part.type === "image_url" && part.image_url?.url) {
+              const url = part.image_url.url as string;
+              const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+              if (dataUriMatch) {
+                parts.push({
+                  inlineData: {
+                    mimeType: dataUriMatch[1],
+                    data: dataUriMatch[2],
+                  },
+                });
+                console.log(`[LLMGateway] convertToGemini: added inlineData image (${dataUriMatch[1]}, ${Math.round(dataUriMatch[2].length / 1024)}KB)`);
+              } else {
+                parts.push({ text: `[Image: ${url}]` });
+                console.warn(`[LLMGateway] convertToGemini: image_url not a data URI, falling back to text placeholder`);
+              }
+            }
+          }
+          if (parts.length === 0) parts.push({ text: "" });
+          console.log(`[LLMGateway] convertToGemini: multimodal message role=${role}, parts=${parts.length} (${parts.filter(p => p.inlineData).length} images, ${parts.filter(p => p.text).length} text)`);
+          return { role, parts };
+        }
+
+        return {
+          role,
+          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        };
+      });
 
     return { messages: geminiMessages, systemInstruction };
   }
@@ -966,13 +1006,40 @@ class LLMGateway {
     return this.anthropicClient;
   }
 
-  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }> } {
+  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: any }> } {
     const systemParts: string[] = [];
-    const out: Array<{ role: "user" | "assistant"; content: string }> = [];
+    const out: Array<{ role: "user" | "assistant"; content: any }> = [];
 
     for (const msg of messages) {
       const role = (msg as any)?.role;
       const contentRaw = (msg as any)?.content;
+
+      // Handle multimodal content arrays with image_url parts
+      if (Array.isArray(contentRaw) && contentRaw.some((p: any) => p?.type === "image_url")) {
+        const anthropicContent: any[] = [];
+        for (const part of contentRaw) {
+          if (part?.type === "text" && part.text?.trim()) {
+            anthropicContent.push({ type: "text", text: part.text });
+          } else if (part?.type === "image_url" && part.image_url?.url) {
+            const url = part.image_url.url as string;
+            const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+            if (dataUriMatch) {
+              anthropicContent.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: dataUriMatch[1],
+                  data: dataUriMatch[2],
+                },
+              });
+            }
+          }
+        }
+        if (anthropicContent.length > 0 && (role === "user" || role === "assistant")) {
+          out.push({ role, content: anthropicContent });
+          continue;
+        }
+      }
 
       const content = typeof contentRaw === "string"
         ? contentRaw

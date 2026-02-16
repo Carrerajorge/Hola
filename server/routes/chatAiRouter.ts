@@ -19,6 +19,7 @@ import { ObjectStorageService } from "../replit_integrations/object_storage/obje
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
 import { createUnifiedRun, hydrateSessionState, emitTraceEvent, SseBufferedWriter, resolveLatencyLane } from "../agent/unifiedChatHandler";
+import { executeAgentLoop } from "../agent/agentExecutor";
 import type { UnifiedChatRequest, UnifiedChatContext, LatencyMode } from "../agent/unifiedChatHandler";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
 import { routeIntent, type IntentResult } from "../services/intentRouter";
@@ -32,6 +33,7 @@ import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
 import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
+import { buildSkillSystemPromptSection, drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -203,7 +205,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id, skillId, skill } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -365,10 +367,29 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
 
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat", {
+          userId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
+      }
+
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      const messagesWithSkill = skillSystemSection
+        ? [{ role: "system" as const, content: skillSystemSection }, ...formattedMessages]
+        : formattedMessages;
 
       // Build gptSession info - prefer contract-based session over legacy gptConfig
       const gptSession = gptSessionContract ? {
@@ -378,7 +399,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         legacyConfig: gptConfig
       } : undefined;
 
-      const response = await chatService.chat(formattedMessages, {
+      const response = await chatService.chat(messagesWithSkill, {
         useRag,
         conversationId,
         userId,
@@ -671,9 +692,74 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
   router.post("/chat/stream", async (req, res) => {
     const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    let heartbeatInterval: NodeJS.Timeout | null = null;
-    let isConnectionClosed = false;
-    let claimedRun: any = null;
+    const streamStartMs = performance.now();
+    const stageTimings: Record<string, number> = {};
+    let firstTokenAtMs: number | null = null;
+    let timingReported = false;
+    const roundMs = (value: number): number => Number(Math.max(0, value).toFixed(1));
+    const recordStage = (stage: string, stageStartMs: number): void => {
+      stageTimings[stage] = roundMs(performance.now() - stageStartMs);
+    };
+    const markFirstToken = (): void => {
+      if (firstTokenAtMs === null) {
+        firstTokenAtMs = performance.now();
+      }
+    };
+    const buildTimingPayload = (): Record<string, number | null> => {
+      const now = performance.now();
+      const totalMs = roundMs(now - streamStartMs);
+      const processingMs =
+        firstTokenAtMs === null
+          ? totalMs
+          : roundMs(firstTokenAtMs - streamStartMs);
+      const streamingMs =
+        firstTokenAtMs === null
+          ? 0
+          : roundMs(now - firstTokenAtMs);
+
+      return {
+        ...stageTimings,
+        totalMs,
+        processingMs,
+        firstTokenMs: firstTokenAtMs === null ? null : roundMs(firstTokenAtMs - streamStartMs),
+        streamingMs,
+      };
+    };
+    const reportTimings = (status: string): Record<string, number | null> => {
+      const timings = buildTimingPayload();
+      if (!timingReported) {
+        timingReported = true;
+        console.log("[Perf][chat_stream]", {
+          traceId: requestId,
+          status,
+          ...timings,
+        });
+      }
+      return timings;
+    };
+
+let heartbeatInterval: NodeJS.Timeout | null = null;
+let isConnectionClosed = false;
+let claimedRun: any = null;
+
+const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
+const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
+
+const buildSkipRunStreamKey = (chatId: string | undefined, clientRequestId?: string, userRequestId?: string): string | null => {
+  if (!chatId || !clientRequestId) {
+    return null;
+  }
+  return `skipRunStream:${chatId}:${clientRequestId}:${userRequestId || ""}`;
+};
+
+const cleanSkipRunStreamDedup = (): void => {
+  const now = Date.now();
+  for (const [key, value] of skipRunStreamDedup.entries()) {
+    if (now - value.startedAt > SKIPRUN_STREAM_DEDUP_TTL_MS) {
+      skipRunStreamDedup.delete(key);
+    }
+  }
+};
 
     try {
       const {
@@ -681,6 +767,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         conversationId,
         runId,
         chatId,
+        clientRequestId: rawClientRequestId,
+        userRequestId: rawUserRequestId,
         attachments,
         gptId,
         model,
@@ -689,10 +777,27 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         docTool,
         forceWebSearch,
         webSearchAuto,
-        latencyMode: rawLatencyMode
+        latencyMode: rawLatencyMode,
+        lastImageBase64,
+        lastImageId,
+        skillId,
+        skill
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+
+      // DEBUG: Log attachments received from frontend
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        console.log(`[Stream] INCOMING ATTACHMENTS (${attachments.length}):`, JSON.stringify(attachments.map((a: any) => ({
+          type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+          fileId: a.fileId, hasContent: !!a.content,
+        }))));
+      } else {
+        console.log(`[Stream] NO ATTACHMENTS in request body. Keys: ${Object.keys(req.body).join(', ')}`);
+      }
+      if (lastImageBase64) {
+        console.log(`[Stream] lastImageBase64 present: ${typeof lastImageBase64 === 'string' ? `${lastImageBase64.substring(0, 50)}... (${lastImageBase64.length} chars)` : typeof lastImageBase64}`);
+      }
 
       // DEBUG: Log all incoming request parameters for docTool verification
       // Avoid externally-controlled format strings: don't interpolate user-controlled values into
@@ -701,6 +806,204 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId: effectiveUserId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat/stream", {
+          requestId,
+          userId: effectiveUserId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
+      }
+
+      const clientRequestId =
+        typeof rawClientRequestId === "string" && rawClientRequestId.trim().length > 0
+          ? rawClientRequestId.trim()
+          : undefined;
+      const userRequestId =
+        typeof rawUserRequestId === "string" && rawUserRequestId.trim().length > 0
+          ? rawUserRequestId.trim()
+          : undefined;
+      const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserTextForRun =
+        typeof latestUserForRun?.content === "string"
+          ? latestUserForRun.content
+          : String(latestUserForRun?.content || "");
+      const sanitizedRunAttachments =
+        attachments && Array.isArray(attachments)
+          ? attachments
+              .map((att: any) => ({
+                id: att?.id || att?.fileId,
+                fileId: att?.fileId,
+                name: att?.name,
+                type: att?.type,
+                mimeType: att?.mimeType || att?.type,
+                size: att?.size,
+                storagePath: att?.storagePath,
+              }))
+              .filter((att: any) => !!att.name)
+          : null;
+
+      // Claim run as early as possible (before any expensive routing/search work).
+      // This avoids duplicate processing and ensures idempotency responses are true JSON
+      // (before SSE headers are sent).
+      if (chatId && !claimedRun && (runId || clientRequestId)) {
+        const claimStageStart = performance.now();
+
+        let existingRun =
+          runId
+            ? await storage.getChatRun(runId)
+            : await storage.getChatRunByClientRequestId(chatId, clientRequestId!);
+
+        // If caller did not provide runId but did provide clientRequestId,
+        // create a lightweight run here so streaming can start.
+        if (!existingRun && !runId && clientRequestId && latestUserTextForRun) {
+          const runPrepStart = performance.now();
+          try {
+            // 1) Prefer linking the run to an already-persisted user message
+            // when /chats/:id/messages used skipRun mode.
+            let runMessageIdStart = performance.now();
+            let runMessageId = userRequestId
+              ? await storage.findMessageByRequestId(userRequestId)
+              : null;
+            recordStage("user_message_lookup_ms", runMessageIdStart);
+            if (runMessageId && runMessageId.chatId === chatId) {
+              const createRunStart = performance.now();
+              const createdRun = await storage.createChatRun({
+                chatId,
+                clientRequestId,
+                userMessageId: runMessageId.id,
+                status: "pending",
+              });
+              existingRun = createdRun;
+              recordStage("run_from_existing_message_ms", createRunStart);
+            }
+
+            // 2) Fallback: create user message + run atomically (legacy first-write path).
+            if (!existingRun && latestUserTextForRun) {
+              // If stream starts before /api/chats finishes, make sure the chat row exists
+              // so createUserMessageAndRun won't fail with FK violations.
+              const existingChat = await storage.getChat(chatId);
+              if (!existingChat) {
+                try {
+                  await storage.createChat({
+                    id: chatId,
+                    title: "New Chat",
+                    userId: effectiveUserId || undefined,
+                  });
+                } catch (chatCreateError: any) {
+                  if (chatCreateError?.code !== "23505") {
+                    throw chatCreateError;
+                  }
+                }
+              }
+
+              const createdRunStart = performance.now();
+              const created = await storage.createUserMessageAndRun(
+                chatId,
+                {
+                  chatId,
+                  role: "user",
+                  content: latestUserTextForRun,
+                  status: "done",
+                  requestId: userRequestId || `${requestId}:user`,
+                  userMessageId: null,
+                  attachments: sanitizedRunAttachments,
+                } as any,
+                clientRequestId
+              );
+              existingRun = created.run;
+              recordStage("create_message_run_ms", createdRunStart);
+            }
+            recordStage("run_prep_ms", runPrepStart);
+          } catch (createRunError: any) {
+            // Unique violation means another concurrent request created it first.
+            if (createRunError?.code !== "23505") {
+              throw createRunError;
+            }
+            existingRun = await storage.getChatRunByClientRequestId(chatId, clientRequestId);
+            recordStage("run_prep_ms", runPrepStart);
+          }
+        }
+
+        if (!existingRun) {
+          recordStage("run_claim_ms", claimStageStart);
+          if (runId) {
+            return res.status(404).json({
+              error: "Run not found",
+              traceId: requestId,
+              timings: reportTimings("run_not_found"),
+            });
+          }
+          // No run found for clientRequestId yet: continue in legacy mode
+          // (best-effort), /chat/stream will still function.
+        } else {
+          if (existingRun.status === "processing") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} is already being processed, returning status`);
+            return res.json({
+              status: "already_processing",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_processing"),
+            });
+          }
+          if (existingRun.status === "done") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} already completed`);
+            return res.json({
+              status: "already_done",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_done"),
+            });
+          }
+          if (existingRun.status === "failed") {
+            console.log(`[Run] Run ${existingRun.id} previously failed`);
+          }
+
+          const claimKey = existingRun.clientRequestId || clientRequestId;
+          claimedRun = await storage.claimPendingRun(chatId, claimKey || undefined);
+          recordStage("run_claim_ms", claimStageStart);
+          if (!claimedRun) {
+            const refreshedRun =
+              runId
+                ? await storage.getChatRun(runId)
+                : (claimKey ? await storage.getChatRunByClientRequestId(chatId, claimKey) : null);
+            if (refreshedRun?.status === "processing") {
+              return res.json({
+                status: "already_processing",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_processing"),
+              });
+            }
+            if (refreshedRun?.status === "done") {
+              return res.json({
+                status: "already_done",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_done"),
+              });
+            }
+            console.log(`[Run] Failed to claim run ${existingRun.id} - may have been claimed by another request`);
+            return res.json({
+              status: "claim_failed",
+              message: "Run already claimed or not pending",
+              traceId: requestId,
+              timings: reportTimings("claim_failed"),
+            });
+          }
+          console.log(`[Run] Successfully claimed run ${claimedRun.id}`);
+        }
       }
 
       const provider = (
@@ -745,6 +1048,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
 
@@ -781,6 +1085,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           ? "De nada. ¿Necesitas algo más?"
           : "Hola. ¿En qué puedo ayudarte?";
 
+        markFirstToken();
         writeSse(res, 'chunk', {
           content,
           sequence: 1,
@@ -792,6 +1097,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           requestId,
           runId: runId || requestId,
           latencyMode,
+          traceId: requestId,
+          timings: reportTimings("greeting_fast_path"),
           timestamp: Date.now(),
         });
         return res.end();
@@ -815,8 +1122,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       ) {
         try {
           const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(userQuery, false);
+          const fastPathSystemPrompt = `${answerFirstPrompt.fullPrompt}${skillSystemSection}`;
           const llmMessages = [
-            { role: "system" as const, content: answerFirstPrompt.fullPrompt },
+            { role: "system" as const, content: fastPathSystemPrompt },
             ...clientMessages.map((m: any) => ({
               role: m.role as "user" | "assistant" | "system",
               content: String(m.content ?? "")
@@ -834,6 +1142,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             enableFallback: true,
           });
 
+          markFirstToken();
           writeSse(res, 'chunk', {
             content: quick.content || "",
             sequence: 1,
@@ -846,6 +1155,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             requestId,
             runId: runId || requestId,
             latencyMode,
+            traceId: requestId,
+            timings: reportTimings("simple_fast_path"),
             timestamp: Date.now(),
             provider: quick.provider,
             model: quick.model,
@@ -858,10 +1169,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       // Load user settings after the stream is already open to reduce perceived latency.
       let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+      const userSettingsStageStart = performance.now();
       try {
         userSettings = await storage.getUserSettings(effectiveUserId);
       } catch (e) {
         console.warn("[Stream] Failed to load user settings:", (e as any)?.message || e);
+      } finally {
+        recordStage("user_settings_ms", userSettingsStageStart);
       }
 
       const featureFlags = {
@@ -1011,51 +1325,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       );
       console.log(`[Stream API] Context augmented: ${clientMessages.length} client msgs -> ${messages.length} total`);
 
-      // DOC TOOL PRODUCTION MODE: When Word/Excel/PPT tool is selected, activate production directly
-      if (featureFlags.canvasEnabled && docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
-        console.log(`[Stream] 🛠️ DOC TOOL PRODUCTION: docTool=${docTool} - activating production mode directly`);
-
-        const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
-        const userMessageText = lastUserMessage?.content || '';
-
-        // Map docTool to corresponding intent
-        const toolToIntent = {
-          'word': 'CREATE_DOCUMENT' as const,
-          'excel': 'CREATE_SPREADSHEET' as const,
-          'ppt': 'CREATE_PRESENTATION' as const
-        };
-
-        const syntheticIntent: IntentResult = {
-          intent: toolToIntent[docTool as keyof typeof toolToIntent] || 'CREATE_DOCUMENT',
-          confidence: 1.0, // Full confidence since user explicitly selected tool
-          slots: {
-            topic: userMessageText
-          },
-          output_format: docTool,
-          language_detected: 'es',
-          normalized_text: userMessageText
-        };
-
-        try {
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
-
-          await handleProductionRequest(
-            {
-              message: userMessageText,
-              userId: effectiveUserId,
-              chatId: effectiveChatId,
-              intentResult: syntheticIntent,
-              locale: 'es',
-            },
-            res
-          );
-
-          // Production handler completed, exit early
-          return;
-        } catch (productionError: any) {
-          console.error('[Stream] DocTool production handler error, falling back to chat:', productionError);
-          // Continue to normal chat flow if production fails
-        }
+      // DOC TOOL: Stream content directly to client editor (real-time rendering)
+      // Previously this routed through handleProductionRequest which generates binary files.
+      // Now we let the normal streaming path handle it — content streams to TipTap/Handsontable/PPT editors.
+      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+        console.log(`[Stream] 📝 DOC TOOL STREAMING: docTool=${docTool} - using real-time editor streaming`);
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
@@ -1160,7 +1434,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               // Production handler completed, exit early
               return;
             } catch (productionError: any) {
-              console.error('[Stream] Production handler error, falling back to chat:', productionError);
+              console.error('[Stream] ❌ Production handler error (first intercept), falling back to chat:', productionError?.message || productionError);
+              console.error('[Stream] ❌ Production error stack:', productionError?.stack);
               // Continue to normal chat flow if production fails
             }
           }
@@ -1231,7 +1506,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       // If runId provided, claim the pending run (idempotent processing)
-      if (runId && chatId) {
+      if (runId && chatId && !claimedRun) {
         const existingRun = await storage.getChatRun(runId);
         if (!existingRun) {
           return res.status(404).json({ error: "Run not found" });
@@ -1272,6 +1547,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.setHeader("X-Request-Id", requestId);
+        res.setHeader("X-Trace-Id", requestId);
         res.setHeader("X-Latency-Mode", latencyMode);
         res.flushHeaders();
       }
@@ -1323,7 +1599,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             if (heartbeatInterval) clearInterval(heartbeatInterval);
             return;
           } catch (productionError: any) {
-            console.error('[Stream] Production handler error, falling back to chat:', productionError);
+            console.error('[Stream] ❌ Production handler error (second intercept), falling back to chat:', productionError?.message || productionError);
+            console.error('[Stream] ❌ Production error stack:', productionError?.stack);
             // Continue to normal chat flow if production fails
           }
         }
@@ -1380,7 +1657,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           // Convert resolved attachments to BatchAttachment format
           // storagePaths were already resolved earlier
           const batchAttachments: BatchAttachment[] = resolvedAttachments
-            .filter((att: any) => att.storagePath || att.content)
+            .filter((att: any) => {
+              if (!(att.storagePath || att.content)) return false;
+              // Exclude image attachments — they are handled by the Vision pipeline below
+              const mime = (att.mimeType || att.type || "").toLowerCase();
+              if (mime.startsWith("image/")) return false;
+              return true;
+            })
             .map((att: any) => ({
               name: att.name || 'document',
               mimeType: att.mimeType || att.type || 'application/octet-stream',
@@ -1388,55 +1671,62 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               content: att.content
             }));
 
-          batchResult = await batchProcessor.processBatch(batchAttachments);
+          // Skip batch processing if all attachments were images (handled by Vision pipeline)
+          if (batchAttachments.length === 0) {
+            console.log(`[Stream] All attachments are images — skipping DocumentBatchProcessor`);
+          } else {
+            batchResult = await batchProcessor.processBatch(batchAttachments);
+          }
 
-          // Log observability metrics per file
-          console.log(`[Stream] Batch processing complete:`, {
-            attachmentsCount: batchResult.attachmentsCount,
-            processedFiles: batchResult.processedFiles,
-            failedFiles: batchResult.failedFiles.length,
-            totalChunks: batchResult.chunks.length,
-            totalTokens: batchResult.totalTokens
-          });
-
-          // Log per-file stats
-          for (const stat of batchResult.stats) {
-            console.log(`[Stream] File stats: ${stat.filename}`, {
-              bytesRead: stat.bytesRead,
-              pagesProcessed: stat.pagesProcessed,
-              tokensExtracted: stat.tokensExtracted,
-              parseTimeMs: stat.parseTimeMs,
-              chunkCount: stat.chunkCount,
-              status: stat.status
+          if (batchResult) {
+            // Log observability metrics per file
+            console.log(`[Stream] Batch processing complete:`, {
+              attachmentsCount: batchResult.attachmentsCount,
+              processedFiles: batchResult.processedFiles,
+              failedFiles: batchResult.failedFiles.length,
+              totalChunks: batchResult.chunks.length,
+              totalTokens: batchResult.totalTokens
             });
-          }
 
-          // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
-          if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
-            const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
-            const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
-            console.error(`[Stream] ${errorMsg}`);
+            // Log per-file stats
+            for (const stat of batchResult.stats) {
+              console.log(`[Stream] File stats: ${stat.filename}`, {
+                bytesRead: stat.bytesRead,
+                pagesProcessed: stat.pagesProcessed,
+                tokensExtracted: stat.tokensExtracted,
+                parseTimeMs: stat.parseTimeMs,
+                chunkCount: stat.chunkCount,
+                status: stat.status
+              });
+            }
 
-            res.write(`event: error\ndata: ${JSON.stringify({
-              type: 'coverage_failure',
-              message: 'No se pudieron procesar todos los archivos solicitados',
-              details: {
-                requested: batchResult.attachmentsCount,
-                processed: batchResult.processedFiles,
-                failedFiles: batchResult.failedFiles
-              },
-              requestId,
-              timestamp: Date.now()
-            })}\n\n`);
+            // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
+            if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
+              const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
+              const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
+              console.error(`[Stream] ${errorMsg}`);
 
-            clearInterval(heartbeatInterval);
-            return res.end();
-          }
+              res.write(`event: error\ndata: ${JSON.stringify({
+                type: 'coverage_failure',
+                message: 'No se pudieron procesar todos los archivos solicitados',
+                details: {
+                  requested: batchResult.attachmentsCount,
+                  processed: batchResult.processedFiles,
+                  failedFiles: batchResult.failedFiles
+                },
+                requestId,
+                timestamp: Date.now()
+              })}\n\n`);
 
-          // Use unified context from batch processor
-          if (batchResult.unifiedContext) {
-            attachmentContext = batchResult.unifiedContext;
-            console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+              clearInterval(heartbeatInterval);
+              return res.end();
+            }
+
+            // Use unified context from batch processor
+            if (batchResult.unifiedContext) {
+              attachmentContext = batchResult.unifiedContext;
+              console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+            }
           }
 
         } catch (batchError: any) {
@@ -1459,6 +1749,126 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      // ── IMAGE VISION SUPPORT ──────────────────────────────────────
+      // Collect image data to inject as multimodal content into the last user message.
+      // Sources: (1) lastImageBase64 from image-edit flow, (2) image attachments uploaded by user.
+      const imagePartsForVision: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+
+      console.log(`[Stream] Vision pipeline: resolvedAttachments=${resolvedAttachments.length}, lastImageBase64=${!!lastImageBase64}, lastImageId=${lastImageId || 'none'}`);
+      if (resolvedAttachments.length > 0) {
+        console.log(`[Stream] Vision pipeline: attachments detail:`, resolvedAttachments.map((a: any) => ({
+          name: a.name, type: a.type, mimeType: a.mimeType, storagePath: a.storagePath, fileId: a.fileId,
+          hasContent: !!a.content,
+        })));
+      }
+
+      // Source 1: Image edit context (lastImageBase64 from frontend)
+      if (lastImageBase64 && typeof lastImageBase64 === "string") {
+        const dataUrl = lastImageBase64.startsWith("data:")
+          ? lastImageBase64
+          : `data:image/png;base64,${lastImageBase64}`;
+        imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
+        console.log(`[Stream] Vision: injecting lastImageBase64 (${Math.round(lastImageBase64.length / 1024)}KB)`);
+      }
+
+      // Source 2: Image attachments (uploaded files with image/* mimeType)
+      if (resolvedAttachments.length > 0) {
+        for (const att of resolvedAttachments) {
+          const mime = (att.mimeType || att.type || "").toLowerCase();
+          console.log(`[Stream] Vision: checking att "${att.name}" mime="${mime}" isImage=${mime.startsWith("image/")}`);
+          if (!mime.startsWith("image/")) continue;
+
+          const storagePath = att.storagePath || "";
+          let imageBuffer: Buffer | null = null;
+
+          // Try GCS (object storage) first — production stores files there
+          try {
+            const objStore = new ObjectStorageService();
+            imageBuffer = await objStore.getObjectEntityBuffer(storagePath);
+            console.log(`[Stream] Vision: loaded image from GCS "${att.name}" (${imageBuffer.length} bytes)`);
+          } catch (gcsErr: any) {
+            console.log(`[Stream] Vision: GCS failed for "${att.name}": ${gcsErr?.message || gcsErr}`);
+          }
+
+          // Local file fallback
+          if (!imageBuffer) {
+            try {
+              const fs = await import("fs/promises");
+              const path = await import("path");
+              let filePath = storagePath;
+              const cwd = process.cwd();
+              console.log(`[Stream] Vision: local fallback for "${att.name}", storagePath="${storagePath}", cwd="${cwd}"`);
+              if (filePath.startsWith("/objects/uploads/")) {
+                filePath = path.default.join(cwd, filePath.replace("/objects/", ""));
+              } else if (filePath.startsWith("/objects/")) {
+                filePath = path.default.join(cwd, filePath.replace("/objects/", ""));
+              } else if (!path.default.isAbsolute(filePath)) {
+                filePath = path.default.join(cwd, "uploads", filePath);
+              }
+              console.log(`[Stream] Vision: resolved filePath="${filePath}"`);
+              // Check if file exists before reading
+              try {
+                const stat = await fs.stat(filePath);
+                console.log(`[Stream] Vision: file exists, size=${stat.size} bytes`);
+              } catch {
+                console.warn(`[Stream] Vision: file NOT found at "${filePath}"`);
+                // Try listing the uploads directory to see what's there
+                try {
+                  const uploadsDir = path.default.join(cwd, "uploads");
+                  const files = await fs.readdir(uploadsDir);
+                  console.log(`[Stream] Vision: uploads dir has ${files.length} files: ${files.slice(0, 10).join(', ')}${files.length > 10 ? '...' : ''}`);
+                } catch (dirErr: any) {
+                  console.warn(`[Stream] Vision: cannot list uploads dir: ${dirErr?.message}`);
+                }
+              }
+              imageBuffer = await fs.readFile(filePath);
+              console.log(`[Stream] Vision: loaded image from local "${att.name}" (${imageBuffer.length} bytes)`);
+            } catch (localErr: any) {
+              console.warn(`[Stream] Vision: failed to load image "${att.name}":`, localErr?.message);
+            }
+          }
+
+          if (imageBuffer) {
+            const base64 = imageBuffer.toString("base64");
+            const dataUrl = `data:${mime};base64,${base64}`;
+            imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
+            console.log(`[Stream] Vision: added image "${att.name}" to multimodal parts (${Math.round(base64.length / 1024)}KB base64)`);
+          } else {
+            console.error(`[Stream] Vision: FAILED to load image "${att.name}" from ANY source — image will NOT be sent to LLM`);
+          }
+        }
+      }
+
+      console.log(`[Stream] Vision: total imagePartsForVision=${imagePartsForVision.length}`);
+
+      // If we have images, convert the last user message to multimodal format
+      if (imagePartsForVision.length > 0) {
+        for (let i = formattedMessages.length - 1; i >= 0; i--) {
+          if (formattedMessages[i].role === "user") {
+            const textContent = typeof formattedMessages[i].content === "string"
+              ? formattedMessages[i].content
+              : JSON.stringify(formattedMessages[i].content);
+            formattedMessages[i] = {
+              role: "user",
+              content: [
+                ...imagePartsForVision,
+                { type: "text", text: textContent },
+              ] as any,
+            };
+            console.log(`[Stream] Vision: converted user message[${i}] to multimodal (${imagePartsForVision.length} images, text="${textContent.substring(0, 100)}")`);
+            break;
+          }
+        }
+
+        // Force deep lane for vision requests (images need more tokens)
+        if (latencyMode === 'fast') {
+          latencyMode = 'deep' as LatencyMode;
+          console.log(`[Stream] Vision: upgraded latency mode to 'deep' for image analysis`);
+        }
+      } else {
+        console.log(`[Stream] Vision: NO images found — proceeding with text-only`);
+      }
 
       // GUARD: Block image generation when attachments are present
       if (hasAttachments && attachmentsCount > 0) {
@@ -1581,7 +1991,19 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}`;
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
+
+      // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
+      // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)
+      if (docTool && ['word', 'excel', 'ppt'].includes(docTool)) {
+        const docSystemPrompts: Record<string, string> = {
+          word: '\n\nMODO DOCUMENTO WORD:\nGenera el contenido del documento en formato Markdown bien estructurado con títulos (#, ##, ###), párrafos, listas, tablas y formato de texto (negrita, cursiva). Escribe contenido completo y profesional. No incluyas bloques de código, instrucciones meta ni explicaciones sobre lo que estás haciendo — solo el contenido del documento.',
+          excel: '\n\nMODO HOJA DE CÁLCULO:\nGenera los datos en formato CSV con cabeceras en la primera fila. Usa comas como separador de columnas y saltos de línea como separador de filas. No incluyas explicaciones ni texto adicional, solo los datos tabulares puros.',
+          ppt: '\n\nMODO PRESENTACIÓN:\nGenera una presentación como JSON array de slides con esta estructura: [{"title":"Título de slide", "bullets":["Punto 1","Punto 2"]}, ...]. No incluyas explicaciones ni bloques de código, solo el JSON puro.',
+        };
+        systemContent += docSystemPrompts[docTool] || '';
+        console.log(`[Stream] 📝 Added docTool system prompt for: ${docTool}`);
+      }
 
       // Debug: uncomment to trace web search injection
       // console.log(`[Stream:Debug] webSearchContextForLLM length: ${webSearchContextForLLM.length}, systemContent length: ${systemContent.length}`);
@@ -1593,6 +2015,7 @@ ${attachmentContext}`;
 
       // Ensure chat exists so we can persist messages (critical for memory)
       const effectiveChatIdForPersistence = chatId || conversationId || `chat_${Date.now()}`;
+      const ensureChatStageStart = performance.now();
       try {
         const existingChat = await storage.getChat(effectiveChatIdForPersistence);
         if (!existingChat) {
@@ -1605,12 +2028,15 @@ ${attachmentContext}`;
       } catch (e) {
         // Best-effort: if chat creation fails, streaming can still proceed, but memory will degrade.
         console.warn('[Stream] Failed to ensure chat exists for persistence:', e);
+      } finally {
+        recordStage("ensure_chat_ms", ensureChatStageStart);
       }
 
       // Persist the latest user message (best-effort). Without this, server-side memory is empty.
       // Skip if a run was claimed - the user message was already created atomically with the run
       // via createUserMessageAndRun in the /chats/:id/messages endpoint.
       let persistedUserMessageId: string | null = claimedRun?.userMessageId || null;
+      const persistUserStageStart = performance.now();
       if (!claimedRun) {
         try {
           if (userMessageText && effectiveChatIdForPersistence) {
@@ -1715,6 +2141,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to persist user message (best-effort):', e);
         }
       }
+      recordStage("persist_user_ms", persistUserStageStart);
 
       // For claimed runs (run-based flow), the user message was already persisted
       // via createUserMessageAndRun, but conversationDocuments were not created.
@@ -1778,6 +2205,7 @@ ${attachmentContext}`;
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)
       let assistantMessageId: string | null = null;
+      const assistantPlaceholderStageStart = performance.now();
       try {
         const assistantMessage = await storage.createChatMessage({
           chatId: effectiveChatIdForPersistence,
@@ -1797,6 +2225,8 @@ ${attachmentContext}`;
         }
       } catch (e) {
         console.warn('[Stream] Failed to create assistant placeholder message (best-effort):', e);
+      } finally {
+        recordStage("assistant_placeholder_ms", assistantPlaceholderStageStart);
       }
 
       const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
@@ -1894,6 +2324,66 @@ ${attachmentContext}`;
         });
       }
 
+      let fullContent = "";
+      let lastAckSequence = -1;
+      let agentLoopHandled = false;
+
+      // ── AGENT LOOP INTERCEPT ──────────────────────────────────
+      // For web_automation intent, route through the agent executor which has
+      // tools like browse_and_act (Playwright), web_search, fetch_url
+      if (unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
+        console.log(`[Stream] 🤖 WEB AUTOMATION: routing through executeAgentLoop with browse_and_act tool`);
+        try {
+          const agentMessages = [
+            { role: "system", content: typeof systemMessage.content === "string" ? systemMessage.content : "" },
+            ...formattedMessages.map((m: any) => ({ role: m.role as string, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }))
+          ];
+
+          const agentResponse = await executeAgentLoop(agentMessages, res, {
+            runId: effectiveRunId,
+            userId: userId || conversationId || "anonymous",
+            chatId: effectiveChatIdForPersistence,
+            requestSpec: unifiedContext.requestSpec,
+            maxIterations: 10
+          });
+
+          // Use the real response from the agent loop (not a placeholder)
+          // The agent loop already wrote chunk SSE events — fullContent is used for DB persistence
+          fullContent = agentResponse || "He procesado tu solicitud de automatización web.";
+          if (fullContent.trim()) {
+            markFirstToken();
+          }
+          agentLoopHandled = true;
+          console.log(`[Stream] Agent loop completed, fullContent length: ${fullContent.length}`);
+        } catch (agentError: any) {
+          console.error(`[Stream] Agent loop error:`, agentError?.message || agentError);
+          // If the agent already sent some chunks (e.g. browse_and_act ran but
+          // the follow-up LLM failed), use whatever was sent as the final content
+          // rather than falling back to a completely different LLM stream.
+          if (fullContent.trim()) {
+            agentLoopHandled = true;
+          } else {
+            // Provide a direct fallback message instead of falling through to
+            // normal streaming which would ignore the browser automation context
+            fullContent = "He intentado realizar la automatización web pero encontré un problema. " +
+              "Puedes intentar de nuevo o describir tu solicitud de otra manera.";
+            agentLoopHandled = true;
+            if (!isConnectionClosed) {
+              writeSse(res, 'chunk', {
+                content: fullContent,
+                sequenceId: lastAckSequence + 1,
+                requestId,
+                runId: effectiveRunId,
+                timestamp: Date.now(),
+              });
+              lastAckSequence++;
+            }
+          }
+        }
+      }
+
+      if (!agentLoopHandled) {
+      const modelStreamStageStart = performance.now();
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
         {
@@ -1905,9 +2395,6 @@ ${attachmentContext}`;
           provider,
         }
       );
-
-      let fullContent = "";
-      let lastAckSequence = -1;
 
       // ── BUFFERED WRITER ────────────────────────────────────────
       // Batch small deltas into ~30ms flushes to reduce res.write()
@@ -1922,6 +2409,9 @@ ${attachmentContext}`;
       for await (const chunk of streamGenerator) {
         if (isConnectionClosed) break;
 
+        if (chunk.content) {
+          markFirstToken();
+        }
         fullContent += chunk.content;
         lastAckSequence = chunk.sequenceId;
 
@@ -1942,6 +2432,8 @@ ${attachmentContext}`;
             intent: unifiedContext?.requestSpec.intent,
             latencyLane: resolvedLane,
             webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+            traceId: requestId,
+            timings: buildTimingPayload(),
             timestamp: Date.now(),
             ...sessionMetadata
           });
@@ -1954,6 +2446,8 @@ ${attachmentContext}`;
       // Ensure buffer is fully flushed after loop and clean up listener
       writer.finalize();
       req.removeListener("close", onClose);
+      recordStage("model_stream_ms", modelStreamStageStart);
+      } // end if (!agentLoopHandled)
 
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.
@@ -1962,6 +2456,7 @@ ${attachmentContext}`;
         fullContent = fallbackContent;
 
         if (!isConnectionClosed) {
+          markFirstToken();
           const nextSeq = lastAckSequence + 1;
           lastAckSequence = nextSeq;
           writeSse(res, 'chunk', {
@@ -1976,6 +2471,7 @@ ${attachmentContext}`;
       }
 
       // Update assistant message with full content + webSources
+      const finalizePersistenceStageStart = performance.now();
       if (assistantMessageId) {
         try {
           const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
@@ -1997,6 +2493,7 @@ ${attachmentContext}`;
           console.warn('[Stream] Failed to finalize assistant message (best-effort):', e);
         }
       }
+      recordStage("finalize_persistence_ms", finalizePersistenceStageStart);
 
       // Mark run as done if we claimed one
       if (claimedRun) {
@@ -2014,6 +2511,7 @@ ${attachmentContext}`;
       }
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
+      const finalTimings = reportTimings("completed");
 
       if (!isConnectionClosed) {
         if (unifiedContext?.isAgenticMode) {
@@ -2034,6 +2532,8 @@ ${attachmentContext}`;
           assistantMessageId,
           latencyLane: resolvedLane,
           webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now()
         });
 
@@ -2048,6 +2548,8 @@ ${attachmentContext}`;
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
           durationMs,
+          traceId: requestId,
+          timings: finalTimings,
           timestamp: Date.now(),
           ...sessionMetadata
         });
@@ -2091,11 +2593,14 @@ ${attachmentContext}`;
       }
 
       const errorRunId = claimedRun?.id || requestId;
+      const errorTimings = reportTimings("error");
       if (!isConnectionClosed) {
         writeSse(res, 'error', {
           error: error.message,
           requestId,
           runId: errorRunId,
+          traceId: requestId,
+          timings: errorTimings,
           timestamp: Date.now()
         });
 
@@ -2107,7 +2612,10 @@ ${attachmentContext}`;
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
-      if (!isConnectionClosed) {
+      if (!timingReported) {
+        reportTimings(isConnectionClosed ? "connection_closed" : "ended");
+      }
+      if (!isConnectionClosed && !(res as any).writableEnded) {
         res.end();
       }
     }

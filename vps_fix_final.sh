@@ -24,7 +24,7 @@ npm run build
 echo "5. ⚙️  Configurando entorno de producción..."
 # Aseguramos que el archivo .env.production tenga los datos críticos
 cat > .env.production <<'EOF'
-PORT=5001
+PORT=5000
 NODE_ENV=production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat
 SESSION_SECRET=7f8a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z
@@ -38,7 +38,7 @@ if [ -f ecosystem.config.cjs ]; then
 else
     echo "   -> Usando comando manual de emergencia"
     # Exportamos variables explícitamente y lanzamos node directo para evitar intermediarios
-    pm2 start "NODE_ENV=production PORT=5001 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat SESSION_SECRET=7f8a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z node dist/index.cjs" --name "michat"
+    pm2 start "NODE_ENV=production PORT=5000 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat SESSION_SECRET=7f8a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z node dist/index.cjs" --name "michat"
 fi
 
 echo "7. 💾 Guardando estado de PM2..."

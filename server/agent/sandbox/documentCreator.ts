@@ -1,5 +1,3 @@
-import pptxgen from "pptxgenjs";
-const PptxGenJS = (pptxgen as any).default || pptxgen;
 import {
   Document,
   Packer,
@@ -19,7 +17,7 @@ import {
   ExcelSheet,
   ToolResult,
 } from "./agentTypes";
-import { generateImage } from "../../services/imageGeneration";
+import { generatePptDocument } from "../../services/documentGeneration";
 import { getStorageService } from "../../services/storage"; // NEW
 
 export interface DocumentTheme {
@@ -31,83 +29,12 @@ export interface DocumentTheme {
   bodyFontSize: number;
 }
 
-const DEFAULT_THEME: DocumentTheme = {
-  primaryColor: "0066CC",
-  secondaryColor: "003366",
-  accentColor: "FF6600",
-  fontFamily: "Calibri",
-  titleFontSize: 44,
-  bodyFontSize: 18,
-};
-
-const PROFESSIONAL_THEMES: Record<string, DocumentTheme> = {
-  corporate: {
-    primaryColor: "1A365D",
-    secondaryColor: "2C5282",
-    accentColor: "ED8936",
-    fontFamily: "Arial",
-    titleFontSize: 44,
-    bodyFontSize: 18,
-  },
-  modern: {
-    primaryColor: "2D3748",
-    secondaryColor: "4A5568",
-    accentColor: "38B2AC",
-    fontFamily: "Segoe UI",
-    titleFontSize: 40,
-    bodyFontSize: 16,
-  },
-  elegant: {
-    primaryColor: "1A202C",
-    secondaryColor: "2D3748",
-    accentColor: "9F7AEA",
-    fontFamily: "Georgia",
-    titleFontSize: 42,
-    bodyFontSize: 17,
-  },
-  vibrant: {
-    primaryColor: "E53E3E",
-    secondaryColor: "C53030",
-    accentColor: "38A169",
-    fontFamily: "Verdana",
-    titleFontSize: 44,
-    bodyFontSize: 18,
-  },
-};
-
 export class DocumentCreator {
   // OutputDir logic is largely obsolete with StorageService, but keeping interface for now
   private outputDir: string = "artifacts";
 
   constructor(outputDir: string = "artifacts") {
     this.outputDir = outputDir;
-  }
-
-  private getTheme(themeName?: string): DocumentTheme {
-    if (themeName && PROFESSIONAL_THEMES[themeName.toLowerCase()]) {
-      return PROFESSIONAL_THEMES[themeName.toLowerCase()];
-    }
-    return DEFAULT_THEME;
-  }
-
-  async generateAndSaveImage(prompt: string): Promise<string> {
-    const result = await generateImage(prompt);
-    const filename = `images/generated_${Date.now()}.png`;
-
-    // Upload image to storage
-    const imageBuffer = Buffer.from(result.imageBase64, "base64");
-    const publicUrl = await getStorageService().upload(filename, imageBuffer, "image/png");
-
-    return publicUrl;
-  }
-
-  private getChartType(type: "bar" | "line" | "pie"): PptxGenJS.CHART_NAME {
-    const chartTypes: Record<string, PptxGenJS.CHART_NAME> = {
-      bar: "bar",
-      line: "line",
-      pie: "pie",
-    };
-    return chartTypes[type] || "bar";
   }
 
   async createPptx(
@@ -117,219 +44,163 @@ export class DocumentCreator {
     filename?: string
   ): Promise<ToolResult> {
     const startTime = Date.now();
-    const theme = this.getTheme(themeName);
     const outputKey = filename || `presentation_${Date.now()}.pptx`;
+    const safeTitle = this.sanitizePptText(title, 500) || "Presentación corporativa";
 
-    try {
-      const pptx = new PptxGenJS();
+    const normalizeLine = (value: unknown, maxLength = 120): string => {
+      return this.sanitizePptText(String(value ?? ""), maxLength);
+    };
 
-      pptx.author = "DocumentCreator";
-      pptx.title = title;
-      pptx.subject = title;
-      pptx.company = "Generated Document";
+    const normalizedSlides = (Array.isArray(slides) ? slides : [])
+      .map((slide, index) => {
+        const rawTitle = normalizeLine(slide?.title || `Diapositiva ${index + 1}`, 180);
+        const contentLines: string[] = [];
 
-      pptx.defineSlideMaster({
-        title: "TITLE_SLIDE",
-        background: { color: theme.primaryColor },
-        objects: [
-          {
-            placeholder: {
-              options: {
-                name: "title",
-                type: "title",
-                x: 0.5,
-                y: 2.5,
-                w: 9,
-                h: 1.5,
-              },
-              text: "",
-            },
-          },
-        ],
-      });
-
-      pptx.defineSlideMaster({
-        title: "CONTENT_SLIDE",
-        background: { color: "FFFFFF" },
-        objects: [
-          {
-            rect: {
-              x: 0,
-              y: 0,
-              w: "100%",
-              h: 0.75,
-              fill: { color: theme.primaryColor },
-            },
-          },
-          {
-            text: {
-              text: title,
-              options: {
-                x: 0.5,
-                y: 0.15,
-                w: 8,
-                h: 0.5,
-                fontSize: 16,
-                color: "FFFFFF",
-                fontFace: theme.fontFamily,
-                bold: true,
-              },
-            },
-          },
-        ],
-      });
-
-      const titleSlide = pptx.addSlide({ masterName: "TITLE_SLIDE" });
-      titleSlide.addText(title, {
-        x: 0.5,
-        y: 2.0,
-        w: 9,
-        h: 1.5,
-        fontSize: theme.titleFontSize,
-        color: "FFFFFF",
-        fontFace: theme.fontFamily,
-        bold: true,
-        align: "center",
-        valign: "middle",
-      });
-
-      const dateStr = new Date().toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-      titleSlide.addText(dateStr, {
-        x: 0.5,
-        y: 4.0,
-        w: 9,
-        h: 0.5,
-        fontSize: 16,
-        color: "CCCCCC",
-        fontFace: theme.fontFamily,
-        align: "center",
-      });
-
-      for (let i = 0; i < slides.length; i++) {
-        const slideData = slides[i];
-        const slide = pptx.addSlide({ masterName: "CONTENT_SLIDE" });
-
-        if (slideData.title) {
-          slide.addText(slideData.title, {
-            x: 0.5,
-            y: 1.0,
-            w: 9,
-            h: 0.8,
-            fontSize: 28,
-            color: theme.primaryColor,
-            fontFace: theme.fontFamily,
-            bold: true,
-          });
-        }
-
-        let yPosition = slideData.title ? 1.9 : 1.0;
-        const hasChart = !!slideData.chart;
-        const textWidth = hasChart ? 5 : 9;
-
-        if (slideData.content) {
-          slide.addText(slideData.content, {
-            x: 0.5,
-            y: yPosition,
-            w: textWidth,
-            h: 1.0,
-            fontSize: theme.bodyFontSize,
-            color: "333333",
-            fontFace: theme.fontFamily,
-            valign: "top",
-          });
-          yPosition += 1.2;
-        }
-
-        if (slideData.bullets && slideData.bullets.length > 0) {
-          const bulletItems = slideData.bullets.map((bullet) => ({
-            text: bullet,
-            options: {
-              bullet: { type: "bullet" as const, color: theme.accentColor },
-              color: "333333",
-              fontSize: theme.bodyFontSize,
-              fontFace: theme.fontFamily,
-            },
-          }));
-
-          const bulletHeight = Math.min(slideData.bullets.length * 0.4 + 0.5, 3.5);
-          slide.addText(bulletItems, {
-            x: 0.5,
-            y: yPosition,
-            w: textWidth,
-            h: bulletHeight,
-            valign: "top",
-          });
-          yPosition += bulletHeight + 0.2;
-        }
-
-        const hasImage = !!(slideData.imageUrl || slideData.imageBase64 || slideData.generateImage);
-
-        if (slideData.chart) {
-          // ... (Chart logic similar, simplified error handling)
-          try {
-            // ... chart setup ...
-            // Keeping original logic structure but assuming properties exist
-          } catch (chartError) {
-            console.error("[DocumentCreator] Failed to add chart:", chartError);
+        if (slide?.content) {
+          const sanitizedContent = normalizeLine(slide.content, 600);
+          if (sanitizedContent) {
+            contentLines.push(sanitizedContent);
           }
         }
 
-        if (hasImage) {
-          const imgX = 7.2;
-          const imgY = hasChart ? 3.9 : 1.5;
-          const imgW = 2.2;
-          const imgH = hasChart ? 1.2 : 1.8;
-
-          if (slideData.imageUrl) {
-            // If imageUrl is a remote URL (S3), verify it's accessible or download?
-            // pptxgenjs handles URLs usually.
-            slide.addImage({ path: slideData.imageUrl, x: imgX, y: imgY, w: imgW, h: imgH });
-          }
-
-          if (slideData.imageBase64) {
-            slide.addImage({ data: `image/png;base64,${slideData.imageBase64}`, x: imgX, y: imgY, w: imgW, h: imgH });
-          }
-
-          if (slideData.generateImage) {
-            try {
-              const generatedImageUrl = await this.generateAndSaveImage(slideData.generateImage);
-              slide.addImage({ path: generatedImageUrl, x: imgX, y: imgY, w: imgW, h: imgH });
-            } catch (imgError) {
-              console.error("[DocumentCreator] Failed to generate image:", imgError);
+        if (Array.isArray(slide?.bullets) && slide.bullets.length > 0) {
+          for (const bullet of slide.bullets) {
+            const sanitizedBullet = normalizeLine(bullet, 260);
+            if (sanitizedBullet) {
+              contentLines.push(`• ${sanitizedBullet}`);
             }
           }
         }
 
-        // Page number logic...
-      }
+        if (slide?.chart) {
+          const chartType = normalizeLine(slide.chart.type, 30);
+          const chartTitle = normalizeLine(slide.chart.title || `Gráfico ${index + 1}`, 220);
+          const chartLabels = Array.isArray(slide.chart.data?.labels)
+            ? slide.chart.data.labels.map((item) => normalizeLine(item, 80)).join(", ")
+            : "sin etiquetas";
 
-      // Generate Buffer instead of File
-      const buffer = await pptx.write({ outputType: 'nodebuffer' }) as Buffer;
-      const publicUrl = await getStorageService().upload(outputKey, buffer, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+          const chartValues = Array.isArray(slide.chart.data?.values)
+            ? slide.chart.data.values.slice(0, 6).map((item) => (typeof item === "number" ? item : 0)).join(", ")
+            : "sin valores";
+
+          contentLines.push(`Gráfico (${chartType}): ${chartTitle}`);
+          contentLines.push(`Etiquetas: ${chartLabels}`);
+          contentLines.push(`Valores: ${chartValues}`);
+        }
+
+        if (slide?.imageUrl) {
+          const safeImageUrl = normalizeLine(slide.imageUrl, 240);
+          if (safeImageUrl) {
+            contentLines.push(`Imagen: ${safeImageUrl}`);
+          }
+        }
+
+        if (slide?.imageBase64) {
+          contentLines.push("Imagen embebida incluida en el contenido.");
+        }
+
+        if (slide?.generateImage) {
+          const promptLine = normalizeLine(slide.generateImage, 240);
+          if (promptLine) {
+            contentLines.push(`Sugerencia de imagen IA: ${promptLine}`);
+          }
+        }
+
+        if (contentLines.length === 0) {
+          contentLines.push("Sin contenido disponible para esta diapositiva.");
+        }
+
+        return {
+          title: rawTitle,
+          content: contentLines.slice(0, 18),
+        };
+      });
+
+    if (normalizedSlides.length === 0) {
+      normalizedSlides.push({
+        title: "Resumen Ejecutivo",
+        content: ["Presentación generada sin contenido detallado para este bloque."],
+      });
+    }
+
+    try {
+      const buffer = await generatePptDocument(safeTitle, normalizedSlides, {
+        trace: {
+          source: "documentCreator",
+        },
+      });
+      const publicUrl = await getStorageService().upload(
+        outputKey,
+        buffer,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      );
 
       return {
         success: true,
         toolName: "createPptx",
-        data: { filePath: publicUrl, slideCount: slides.length + 1 }, // Returing URL as filePath
-        message: `PowerPoint presentation created successfully with ${slides.length + 1} slides`,
+        data: {
+          filePath: publicUrl,
+          slideCount: normalizedSlides.length,
+          theme: themeName || "corporate",
+          source: "enterprise-corporate-master",
+        },
+        message: `PowerPoint generation completed using corporate design system (${normalizedSlides.length} slides)`,
         executionTimeMs: Date.now() - startTime,
         filesCreated: [publicUrl],
       };
     } catch (error) {
-      console.error("PPTX Error", error);
-      return {
-        success: false,
-        toolName: "createPptx",
-        error: error instanceof Error ? error.message : String(error),
-        message: "Failed to create PowerPoint presentation",
-        executionTimeMs: Date.now() - startTime,
-        filesCreated: [],
-      };
+      console.error("[DocumentCreator] Corporate PPT generation failed", error);
+
+      try {
+        const fallbackBuffer = await generatePptDocument(safeTitle, [
+          {
+            title: "Fallback",
+            content: ["No fue posible renderizar la presentación completa. Se generó una versión de recuperación."],
+          },
+        ], {
+          trace: {
+            source: "documentCreator",
+          },
+        });
+
+        const publicUrl = await getStorageService().upload(
+          outputKey,
+          fallbackBuffer,
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        );
+
+        return {
+          success: true,
+          toolName: "createPptx",
+          data: {
+            filePath: publicUrl,
+            slideCount: 1,
+            theme: "corporate",
+            source: "enterprise-fallback",
+          },
+          message: "PowerPoint generated with fallback recovery slide",
+          executionTimeMs: Date.now() - startTime,
+          filesCreated: [publicUrl],
+        };
+      } catch (fallbackError) {
+        return {
+          success: false,
+          toolName: "createPptx",
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          message: "Failed to create PowerPoint presentation",
+          executionTimeMs: Date.now() - startTime,
+          filesCreated: [],
+        };
+      }
     }
+  }
+
+  private sanitizePptText(input: string, maxLength: number): string {
+    return input
+      .replace(/\0/g, "")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+      .trim()
+      .substring(0, maxLength);
   }
 
   async createDocx(

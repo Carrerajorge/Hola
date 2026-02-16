@@ -24,7 +24,7 @@ export const chats = pgTable("chats", {
     endedAt: timestamp("ended_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("chats_user_idx").on(table.userId),
     index("chats_status_idx").on(table.conversationStatus),
     index("chats_flag_idx").on(table.flagStatus),
@@ -62,7 +62,7 @@ export const chatMessages = pgTable("chat_messages", {
     metadata: jsonb("metadata"), // Additional metadata for extensibility
     searchVector: customType<{ data: string }>({ dataType() { return "tsvector"; } })("search_vector"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("chat_messages_chat_idx").on(table.chatId),
     index("chat_messages_request_idx").on(table.requestId),
     index("chat_messages_status_idx").on(table.status),
@@ -96,7 +96,7 @@ export const chatRuns = pgTable("chat_runs", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
     startedAt: timestamp("started_at"), // When processing started
     completedAt: timestamp("completed_at"), // When processing completed
-}, (table) => [
+}, (table: any) => [
     index("chat_runs_chat_idx").on(table.chatId),
     index("chat_runs_status_idx").on(table.status),
     uniqueIndex("chat_runs_client_request_unique").on(table.chatId, table.clientRequestId),
@@ -120,7 +120,7 @@ export const toolInvocations = pgTable("tool_invocations", {
     error: text("error"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
     index("tool_invocations_run_idx").on(table.runId),
     uniqueIndex("tool_invocations_unique").on(table.runId, table.toolCallId),
     index("tool_invocations_run_created_idx").on(table.runId, table.createdAt),
@@ -143,7 +143,7 @@ export const chatShares = pgTable("chat_shares", {
     notificationSent: text("notification_sent").default("false"),
     acceptedAt: timestamp("accepted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("chat_shares_chat_idx").on(table.chatId),
     index("chat_shares_email_idx").on(table.email),
     index("chat_shares_recipient_idx").on(table.recipientUserId),
@@ -165,7 +165,7 @@ export const chatGroupShares = pgTable(
         invitedBy: varchar("invited_by"),
         createdAt: timestamp("created_at").defaultNow().notNull(),
     },
-    (table) => [
+    (table: any) => [
         index("chat_group_shares_chat_idx").on(table.chatId),
         index("chat_group_shares_group_idx").on(table.groupId),
         uniqueIndex("chat_group_shares_chat_group_unique").on(table.chatId, table.groupId),
@@ -186,7 +186,7 @@ export const chatParticipants = pgTable("chat_participants", {
     invitedBy: varchar("invited_by"),
     invitedAt: timestamp("invited_at").defaultNow().notNull(),
     acceptedAt: timestamp("accepted_at"),
-}, (table) => [
+}, (table: any) => [
     index("chat_participants_chat_idx").on(table.chatId),
     index("chat_participants_email_idx").on(table.email),
     uniqueIndex("chat_participants_unique_idx").on(table.chatId, table.email),
@@ -206,7 +206,7 @@ export const responseQualityMetrics = pgTable("response_quality_metrics", {
     feedback: text("feedback"),
     category: text("category"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("response_quality_metrics_run_idx").on(table.runId),
     index("response_quality_metrics_category_idx").on(table.category),
 ]);
@@ -225,7 +225,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
     retryCount: integer("retry_count").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     processedAt: timestamp("processed_at"),
-}, (table) => [
+}, (table: any) => [
     index("offline_message_queue_user_idx").on(table.userId),
     index("offline_message_queue_status_idx").on(table.status),
     index("offline_message_queue_processed_at_idx").on(table.processedAt),

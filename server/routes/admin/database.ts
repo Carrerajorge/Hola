@@ -469,8 +469,8 @@ databaseRouter.post("/query", async (req, res) => {
         }
 
         // Security: Limit query length to prevent DoS
-        if (query.length > 10000) {
-            return res.status(400).json({ error: "Query too long (max 10000 characters)" });
+        if (query.length > MAX_QUERY_LENGTH) {
+            return res.status(400).json({ error: `Query too long. Maximum ${MAX_QUERY_LENGTH} characters allowed.` });
         }
 
         // Security: Only allow SELECT statements (including CTEs with WITH...SELECT)
@@ -484,7 +484,7 @@ databaseRouter.post("/query", async (req, res) => {
             });
         }
 
-        // Block dangerous patterns - comprehensive list for SQL injection prevention
+        // SECURITY FIX #36: Enhanced dangerous patterns list for SQL injection prevention
         const dangerousPatterns = [
             /--/,  // Block SQL single-line comments (check early - bypass vector)
             /\/\*/,  // Block block comments (check early - bypass vector)
@@ -509,6 +509,14 @@ databaseRouter.post("/query", async (req, res) => {
             /\bSET\s+(ROLE|SESSION)/i,  // Block role escalation
             /\bpg_shadow\b/i,  // Block access to password hashes
             /\bpg_authid\b/i,  // Block access to auth data
+            /pg_stat_file/i,
+            /current_setting\s*\(/i,
+            /set_config\s*\(/i,
+            /dblink/i,
+            /pg_execute_server_program/i,
+            // Block comment-based bypass attempts
+            /\/\*[\s\S]*?(DROP|DELETE|UPDATE|INSERT)/i,
+            /--.*?(DROP|DELETE|UPDATE|INSERT)/i,
         ];
         for (const pattern of dangerousPatterns) {
             if (pattern.test(query)) {

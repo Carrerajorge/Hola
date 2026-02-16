@@ -7,6 +7,7 @@ const updateReturningQueue: any[] = [];
 const deleteReturningQueue: any[] = [];
 let lastUpdatePatch: any | null = null;
 const generateSkillFromPromptMock = vi.fn();
+const getOpenClawSkillsRuntimeSnapshotMock = vi.fn();
 
 const dbMock = {
   select: vi.fn(),
@@ -39,6 +40,9 @@ vi.mock("../lib/anonUserHelper", () => ({
   getSecureUserId: () => "user_test",
 }));
 vi.mock("../services/skillGenerator", () => ({ generateSkillFromPrompt: generateSkillFromPromptMock }));
+vi.mock("../services/openclawSkillsRuntimeAdapter", () => ({
+  getOpenClawSkillsRuntimeSnapshot: getOpenClawSkillsRuntimeSnapshotMock,
+}));
 
 async function createTestApp() {
   const { createSkillsRouter } = await import("../routes/skillsRouter");
@@ -55,6 +59,14 @@ describe("skillsRouter", () => {
     updateReturningQueue.length = 0;
     deleteReturningQueue.length = 0;
     lastUpdatePatch = null;
+    getOpenClawSkillsRuntimeSnapshotMock.mockResolvedValue({
+      runtimeAvailable: false,
+      source: "fallback",
+      fallback: true,
+      fetchedAt: new Date("2026-02-16T00:00:00.000Z").toISOString(),
+      skills: [],
+      message: "fallback",
+    });
   });
 
   it("GET /api/skills returns skills (including triggers conversion)", async () => {
@@ -142,6 +154,28 @@ describe("skillsRouter", () => {
         skills: { foo: "bar", activeSkillId: "skill_active_2" },
       });
       expect(lastUpdatePatch?.updatedAt instanceof Date).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it("GET /api/skills/openclaw/runtime returns runtime snapshot (with fallback support)", async () => {
+    getOpenClawSkillsRuntimeSnapshotMock.mockResolvedValueOnce({
+      runtimeAvailable: false,
+      source: "fallback",
+      fallback: true,
+      fetchedAt: new Date("2026-02-16T00:00:00.000Z").toISOString(),
+      skills: [],
+      message: "runtime unavailable",
+    });
+
+    const app = await createTestApp();
+    const { client, close } = await createHttpTestClient(app);
+    try {
+      const res = await client.get("/api/skills/openclaw/runtime");
+      expect(res.status).toBe(200);
+      expect(res.body.fallback).toBe(true);
+      expect(Array.isArray(res.body.skills)).toBe(true);
     } finally {
       await close();
     }

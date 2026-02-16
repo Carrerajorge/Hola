@@ -9,7 +9,7 @@ export const orgSettings = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("org_settings_network_idx").on(table.networkAccessEnabled)]
+  (table: any) => [index("org_settings_network_idx").on(table.networkAccessEnabled)]
 );
 
 export type OrgSettings = typeof orgSettings.$inferSelect;

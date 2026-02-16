@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { generatePptDocument } from "../../services/documentGeneration";
 
 /* ================================================================== */
 /*  DESIGN TOKENS                                                     */
@@ -291,6 +292,81 @@ export class LayoutEngine {
   }
 }
 
+function sanitizePresentationText(value: unknown, maxLength: number): string {
+  return String(value ?? "")
+    .replace(/\0/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim()
+    .substring(0, maxLength);
+}
+
+function findSlideTitle(components: z.infer<typeof SlideComponentSchema>[]): string {
+  const titleComponent = components.find((comp) => comp.type === "title");
+  return titleComponent
+    ? sanitizePresentationText(titleComponent.content, 220)
+    : "";
+}
+
+function extractSlideComponentLines(components: z.infer<typeof SlideComponentSchema>[]): string[] {
+  const lines: string[] = [];
+
+  for (const comp of components) {
+    switch (comp.type) {
+      case "title":
+      case "subtitle":
+      case "body":
+        if (comp.content) {
+          const safeText = sanitizePresentationText(comp.content, 360);
+          if (safeText) lines.push(safeText);
+        }
+        break;
+      case "bullets":
+        if (Array.isArray(comp.content)) {
+          for (const bullet of comp.content.slice(0, 12)) {
+            const safeBullet = sanitizePresentationText(bullet, 220);
+            if (safeBullet) lines.push(`• ${safeBullet}`);
+          }
+        }
+        break;
+      case "image":
+        if (comp.content) {
+          const safeImage = sanitizePresentationText(comp.content, 220);
+          if (safeImage) lines.push(`Imagen: ${safeImage}`);
+        }
+        break;
+      case "chart":
+        if (comp.content) {
+          const safeChart = sanitizePresentationText(comp.content, 260);
+          if (safeChart) lines.push(`Gráfico: ${safeChart}`);
+        }
+        break;
+      case "table":
+        if (Array.isArray(comp.content)) {
+          for (const row of comp.content.slice(0, 5)) {
+            if (Array.isArray(row)) {
+              const safeRow = row
+                .map((cell) => sanitizePresentationText(cell, 90))
+                .filter(Boolean)
+                .join(" | ");
+              if (safeRow) lines.push(`Tabla: ${safeRow}`);
+            }
+          }
+        }
+        break;
+      case "shape":
+        {
+          const safeShape = sanitizePresentationText(comp.content, 120);
+          if (safeShape) lines.push(`Elemento gráfico: ${safeShape}`);
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return lines.slice(0, 30);
+}
+
 /* ================================================================== */
 /*  DOCUMENT GENERATOR                                                */
 /* ================================================================== */
@@ -308,33 +384,50 @@ export class DocumentEngine {
    */
   async generatePresentation(spec: PresentationSpec): Promise<Buffer> {
     const parsed = PresentationSpecSchema.parse(spec);
-    const PptxGenJS = (await import("pptxgenjs")).default;
+    const title = sanitizePresentationText(parsed.title, 500) || "Presentación";
 
-    const pptx = new PptxGenJS();
-    pptx.title = parsed.title;
-    if (parsed.author) pptx.author = parsed.author;
-    if (parsed.subject) pptx.subject = parsed.subject;
-
-    const tokens = DesignTokensSchema.parse(parsed.theme);
-    const layout = new LayoutEngine(tokens);
-
-    for (const slideSpec of parsed.slides) {
-      const slide = pptx.addSlide();
-      const boxes = layout.calculateSlideLayout(slideSpec.components);
-
-      for (let i = 0; i < slideSpec.components.length; i++) {
-        const comp = slideSpec.components[i];
-        const box = boxes[i];
-        this.renderSlideComponent(slide, comp, box, tokens);
-      }
+    const slides = (parsed.slides.length > 0 ? parsed.slides : []).map((slideSpec, index) => {
+      const titleFromComponents = findSlideTitle(slideSpec.components) || `Diapositiva ${index + 1}`;
+      const lines = extractSlideComponentLines(slideSpec.components);
 
       if (slideSpec.notes) {
-        slide.addNotes(slideSpec.notes);
+        const safeNotes = sanitizePresentationText(slideSpec.notes, 320);
+        if (safeNotes) lines.push(`Notas: ${safeNotes}`);
       }
+
+      return {
+        title: sanitizePresentationText(titleFromComponents, 180),
+        content: lines.length > 0 ? lines : ["Sin contenido disponible."],
+      };
+    });
+
+    if (slides.length === 0) {
+      slides.push({
+        title: "Resumen",
+        content: [sanitizePresentationText(title, 260)],
+      });
     }
 
-    const data = await pptx.write({ outputType: "nodebuffer" });
-    return Buffer.from(data as ArrayBuffer);
+    try {
+      return await generatePptDocument(title, slides, {
+        trace: {
+          source: "documentEngine",
+        },
+      });
+    } catch (error: any) {
+      console.warn("[DocumentEngine] Falling back to emergency corporate template:", error);
+      return await generatePptDocument("Presentación", [{
+        title: "Fallback",
+        content: [
+          "No fue posible renderizar la presentación solicitada con el motor de componentes.",
+          `Error: ${sanitizePresentationText(error?.message || error, 240)}`,
+        ],
+      }], {
+        trace: {
+          source: "documentEngine",
+        },
+      });
+    }
   }
 
   /**

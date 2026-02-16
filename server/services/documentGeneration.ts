@@ -305,6 +305,109 @@ const MAX_PPT_CONTENT_ITEM_LENGTH = 5000;
 const MAX_PPT_CONTENT_ITEMS = 20;
 const MAX_PPT_TEXT_ELEMENTS_PER_SLIDE = 50;
 const MAX_PPT_TOTAL_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB total text content
+const MAX_PPT_TITLES_PER_SLIDE = 1;
+const MAX_PPT_TRACE_MESSAGE_LENGTH = 420;
+const PPT_TRACE_ENABLED = process.env.PPT_TRACE_ENABLED === "true" || process.env.NODE_ENV === "development";
+
+type SlideVariant = "cover" | "section" | "content" | "two-column" | "table" | "closing";
+type PptTraceContext = {
+  source?: string;
+  requestId?: string;
+  actor?: string;
+};
+
+interface PptGenerationOptions {
+  trace?: PptTraceContext;
+}
+
+interface PptFallbackContext extends PptTraceContext {
+  traceId: string;
+  reason?: string;
+  requestedSlides?: number;
+  stage?: string;
+}
+
+type PptTraceDetails = Record<string, string | number | boolean | null | undefined>;
+
+function buildPptTraceId(): string {
+  return `ppt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sanitizePptTraceText(value: string | undefined): string {
+  return sanitizePptText(value || "").replace(/\s+/g, " ").trim();
+}
+
+function truncateTraceValue(value: string, maxLength: number): string {
+  if (!value) return "";
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+}
+
+function tracePptEvent(traceId: string, source: string, event: string, details: PptTraceDetails = {}): void {
+  if (!PPT_TRACE_ENABLED) return;
+  const payload = {
+    ts: new Date().toISOString(),
+    traceId,
+    source: sanitizePptTraceText(source) || "generatePptDocument",
+    event,
+    ...details,
+  };
+  console.log(`[ppt-trace] ${JSON.stringify(payload)}`);
+}
+
+function tracePptError(error: unknown): string {
+  if (error instanceof Error) {
+    return truncateTraceValue(sanitizePptTraceText(`${error.name}: ${error.message}`), MAX_PPT_TRACE_MESSAGE_LENGTH);
+  }
+  return truncateTraceValue(sanitizePptTraceText(String(error)), MAX_PPT_TRACE_MESSAGE_LENGTH);
+}
+
+export const CORPORATE_PPT_DESIGN_SYSTEM = {
+  palette: {
+    bg: "F7FAFC",
+    surface: "FFFFFF",
+    surfaceElevated: "EDF2F7",
+    primary: "1F4E79",
+    secondary: "2B6CB0",
+    accent: "38A3A5",
+    text: "1A202C",
+    muted: "64748B",
+    border: "E2E8F0",
+    shadow: "0F172A",
+    tableHeader: "334155",
+    footer: "E5E7EB",
+  },
+  typography: {
+    heading: "Inter",
+    body: "Inter",
+    mono: "Consolas",
+  },
+  spacing: {
+    marginX: 0.55,
+    marginY: 0.45,
+    sectionGap: 0.35,
+    cardGap: 0.28,
+    maxBodyHeight: 4.0,
+  },
+  sizes: {
+    coverTitle: 38,
+    coverSubtitle: 20,
+    title: 34,
+    sectionTitle: 32,
+    body: 18,
+    bodySmall: 14,
+    badge: 10,
+    footer: 9,
+    icon: 14,
+  },
+  components: {
+    gridColumns: 12,
+    gridWidth: 9.0,
+    badgeHeight: 0.22,
+    buttonHeight: 0.45,
+  },
+} as const;
+
+export const CORPORATE_PPT_MASTER_NAME = "ILIACODEX_CORPORATE" as const;
 
 /**
  * Sanitize text content for PPT slides.
@@ -318,97 +421,866 @@ function sanitizePptText(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
 
-export async function generatePptDocument(title: string, slides: { title: string; content: string[] }[]): Promise<Buffer> {
-  // Input validation
-  if (!title || typeof title !== "string") {
-    throw new Error("PPT title is required");
-  }
-  if (title.length > MAX_PPT_TITLE_LENGTH) {
-    throw new Error(`PPT title exceeds maximum length of ${MAX_PPT_TITLE_LENGTH} characters`);
-  }
-  if (!Array.isArray(slides) || slides.length === 0) {
-    throw new Error("At least one slide is required");
-  }
-  if (slides.length > MAX_PPT_SLIDES) {
-    throw new Error(`Too many slides: ${slides.length}. Maximum is ${MAX_PPT_SLIDES}`);
+function normalizePptContent(content: unknown): string[] {
+  if (Array.isArray(content)) {
+    return content
+      .slice(0, MAX_PPT_CONTENT_ITEMS)
+      .map((value) => sanitizePptText(typeof value === "string" ? value : String(value)))
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .map((value) => value.substring(0, MAX_PPT_CONTENT_ITEM_LENGTH));
   }
 
-  // Security: enforce total content size to prevent memory exhaustion
-  let totalContentSize = title.length;
-  for (const slide of slides) {
-    totalContentSize += (slide.title || "").length;
-    if (Array.isArray(slide.content)) {
-      for (const item of slide.content) {
-        totalContentSize += typeof item === "string" ? item.length : String(item).length;
-      }
-    }
-    if (totalContentSize > MAX_PPT_TOTAL_CONTENT_SIZE) {
-      throw new Error(`PPT total content size exceeds maximum of ${MAX_PPT_TOTAL_CONTENT_SIZE / (1024 * 1024)}MB`);
-    }
-  }
+  return [sanitizePptText(typeof content === "string" ? content : String(content))]
+    .map(value => value.trim())
+    .filter(Boolean)
+    .map(value => value.substring(0, MAX_PPT_CONTENT_ITEM_LENGTH));
+}
 
-  const pptx = new PptxGenJS();
-  pptx.title = sanitizePptText(title.substring(0, MAX_PPT_TITLE_LENGTH));
-  pptx.author = "IliaGPT";
-  // Security: don't include user-identifiable info in metadata
-  pptx.company = "";
-  pptx.subject = "";
+export function normalizePptSlides(title: string, slides: { title: string; content: string[] }[]): { title: string; slides: { title: string; content: string[]; variant: SlideVariant; }[] } {
+  const safeTitle = sanitizePptText(typeof title === "string" ? title : "Presentación").substring(0, MAX_PPT_TITLE_LENGTH) || "Presentación";
+  const safeInput = Array.isArray(slides) ? slides : [];
 
-  const titleSlide = pptx.addSlide();
-  titleSlide.addText(sanitizePptText(title.substring(0, MAX_PPT_TITLE_LENGTH)), {
-    x: 0.5,
-    y: 2,
-    w: 9,
-    h: 1.5,
-    fontSize: 44,
-    bold: true,
-    color: "363636",
-    align: "center",
-    fontFace: "Arial",
+  const sanitized = safeInput.slice(0, MAX_PPT_SLIDES).map((slide, index) => {
+    const safeSlideTitle = sanitizePptText(typeof slide.title === "string" ? slide.title : `Slide ${index + 1}`).substring(0, MAX_PPT_TITLE_LENGTH) || `Slide ${index + 1}`;
+    const safeContent = normalizePptContent(slide.content);
+
+    return {
+      title: safeSlideTitle,
+      content: safeContent.length ? safeContent : ["(Sin contenido)"],
+      variant: "content" as SlideVariant,
+    };
   });
 
-  for (const slide of slides) {
-    const s = pptx.addSlide();
-
-    // Sanitize and truncate slide title
-    const slideTitle = sanitizePptText((slide.title || "").substring(0, MAX_PPT_TITLE_LENGTH));
-    s.addText(slideTitle, {
-      x: 0.5,
-      y: 0.3,
-      w: 9,
-      h: 0.8,
-      fontSize: 32,
-      bold: true,
-      color: "363636",
-      fontFace: "Arial",
+  if (sanitized.length === 0) {
+    sanitized.push({
+      title: "Resumen Ejecutivo",
+      content: ["Este documento contiene el contenido base de la presentación solicitada."],
+      variant: "content",
     });
+  }
 
-    // Validate and truncate content items
-    const safeContent = Array.isArray(slide.content)
-      ? slide.content.slice(0, MAX_PPT_CONTENT_ITEMS)
-      : [];
-
-    if (safeContent.length > 0) {
-      const bulletPoints = safeContent.map(text => ({
-        text: sanitizePptText(
-          (typeof text === "string" ? text : String(text)).substring(0, MAX_PPT_CONTENT_ITEM_LENGTH)
-        ),
-        options: { bullet: true, fontSize: 18, color: "666666" },
-      }));
-
-      s.addText(bulletPoints, {
-        x: 0.5,
-        y: 1.3,
-        w: 9,
-        h: 4,
-        fontFace: "Arial",
-        valign: "top",
-      });
+  let totalContentChars = safeTitle.length;
+  for (const slide of sanitized) {
+    totalContentChars += slide.title.length + slide.content.join("|").length;
+    if (totalContentChars > MAX_PPT_TOTAL_CONTENT_SIZE) {
+      slide.content = slide.content.slice(0, Math.max(1, slide.content.length - 1));
+      slide.content[slide.content.length - 1] = `... truncado por límite de generación`;
+      break;
     }
   }
 
-  const buffer = await pptx.write({ outputType: "nodebuffer" });
-  return buffer as Buffer;
+  return { title: safeTitle, slides: sanitized };
+}
+
+function getSlideVariant(index: number, title: string, content: string[]): SlideVariant {
+  const normalizedTitle = title.toLowerCase();
+  const firstText = content.join(" ").toLowerCase();
+
+  if (index === 0) return "cover";
+  if (normalizedTitle.includes("sección") || normalizedTitle.includes("section")) return "section";
+  if (normalizedTitle.includes("conclus") || normalizedTitle.includes("thanks") || normalizedTitle.includes("thank")) return "closing";
+  if (normalizedTitle.length > 72 && content.length <= 1) return "section";
+  if (content.length >= 10) return "two-column";
+
+  const tableLike = content.filter(line => line.includes("|"));
+  if (tableLike.length >= 2) return "table";
+  if (firstText.startsWith("chart:") || firstText.includes("gráfico:") || firstText.includes("chart")) return "content";
+
+  return "content";
+}
+
+export function defineCorporateMaster(pptx: PptxGenJS): void {
+  pptx.defineSlideMaster({
+    title: CORPORATE_PPT_MASTER_NAME,
+    background: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.bg },
+    margin: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+    slideNumber: {
+      x: 9.15,
+      y: 5.35,
+      w: 0.45,
+      h: 0.2,
+      align: "right",
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.footer,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.muted,
+      bold: false,
+      italic: false,
+    },
+    objects: [
+      {
+        rect: {
+          x: 0,
+          y: 0,
+          w: "100%",
+          h: 0.08,
+          fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+          line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+        },
+      },
+      {
+        line: {
+          x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+          y: 5.25,
+          w: 8.9,
+          h: 0,
+          line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.border, width: 1, dashType: "solid" },
+        },
+      },
+      {
+        text: {
+          text: "Iliagpt",
+          options: {
+            x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+            y: 0.14,
+            w: 1.4,
+            h: 0.28,
+            fontSize: 10,
+            bold: true,
+            color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+            fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+            align: "left",
+            valign: "middle",
+          },
+        },
+      },
+      {
+        rect: {
+          x: 0,
+          y: 5.35,
+          w: "100%",
+          h: 0.28,
+          fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.surface },
+          line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.footer },
+        },
+      },
+      {
+        text: {
+          text: "Iliagpt Corporate Theme",
+          options: {
+            x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+            y: 5.42,
+            w: 3,
+            h: 0.2,
+            fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.footer,
+            color: CORPORATE_PPT_DESIGN_SYSTEM.palette.muted,
+            fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+            align: "left",
+          },
+        },
+      },
+    ],
+  });
+}
+
+function addCorporateBadge(slide: PptxGenJS.Slide, text: string): void {
+  slide.addShape("rect", {
+    x: 8.35,
+    y: 5.38,
+    w: 1.3,
+    h: CORPORATE_PPT_DESIGN_SYSTEM.sizes.badge ? 0.2 : 0.22,
+    fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.surfaceElevated },
+    line: {
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.border,
+      width: 0.75,
+    },
+  });
+
+  slide.addText(text, {
+    x: 8.41,
+    y: 5.385,
+    w: 1.18,
+    h: 0.2,
+    align: "center",
+    valign: "middle",
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.badge,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+    bold: true,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+  });
+}
+
+function addCorporateCard(slide: PptxGenJS.Slide, title: string, body: string, yOffset: number): void {
+  slide.addShape("rect", {
+    x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+    y: yOffset,
+    w: 9.0,
+    h: 3.7,
+    fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.surface },
+    line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.border, width: 1 },
+  });
+  slide.addText(title, {
+    x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX + 0.18,
+    y: yOffset + 0.16,
+    w: 8.64,
+    h: 0.4,
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall + 1,
+    bold: true,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+  });
+  slide.addText(body, {
+    x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX + 0.18,
+    y: yOffset + 0.7,
+    w: 8.64,
+    h: 2.6,
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    valign: "top",
+  });
+}
+
+function addCorporateButton(slide: PptxGenJS.Slide, label: string, x: number, y: number, w: number): void {
+  slide.addShape("rect", {
+    x,
+    y,
+    w,
+    h: CORPORATE_PPT_DESIGN_SYSTEM.components.buttonHeight,
+    fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.secondary },
+    line: {
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.secondary,
+      width: 0,
+    },
+  });
+  slide.addText(label, {
+    x,
+    y: y + 0.1,
+    w,
+    h: CORPORATE_PPT_DESIGN_SYSTEM.components.buttonHeight - 0.1,
+    align: "center",
+    fontSize: 12,
+    bold: true,
+    color: "FFFFFF",
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+  });
+}
+
+function addFooter(slide: PptxGenJS.Slide, title: string, slideIndex: number, total: number): void {
+  slide.addText(`Resumen: ${title}`, {
+    x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+    y: 5.05,
+    w: 5.4,
+    h: 0.2,
+    align: "left",
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.footer,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.muted,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    italic: true,
+    valign: "middle",
+  });
+  slide.addText(`${slideIndex}/${total}`, {
+    x: 9.14,
+    y: 5.07,
+    w: 0.65,
+    h: 0.2,
+    align: "right",
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.footer,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.muted,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    valign: "middle",
+  });
+}
+
+function parseSlideTable(lines: string[]): string[][] | null {
+  if (lines.length < 2) return null;
+  const normalized = lines
+    .filter(Boolean)
+    .map((line) => line.trim())
+    .filter(line => line.includes("|"));
+
+  if (normalized.length < 2) return null;
+  const splitRows = normalized.map((line) =>
+    line
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map(cell => cell.trim())
+      .filter(cell => cell.length > 0)
+  );
+
+  const hasSeparator = splitRows.some(row => row.every(cell => /^-+$/.test(cell)));
+  if (!hasSeparator) return null;
+  const columns = Math.max(...splitRows.map(row => row.length));
+  if (columns < 2) return null;
+
+  return splitRows
+    .filter((row, idx) => {
+      if (!row.length || row.every(cell => /^-+$/.test(cell))) return false;
+      if (hasSeparator && splitRows[idx - 1] && splitRows[idx - 1].every(cell => /^-+$/.test(cell))) return false;
+      return true;
+    })
+    .filter(row => row.length > 0)
+    .map(row => {
+      const padded = [...row];
+      while (padded.length < columns) padded.push("");
+      return padded.slice(0, columns);
+    });
+}
+
+function tryParseChartFromLines(lines: string[]): { title: string; labels: string[]; values: number[] } | null {
+  const text = lines.join(" ").trim();
+  if (!/^chart:/i.test(text)) return null;
+
+  const payload = text.replace(/^chart:\s*/i, "");
+  try {
+    const parsed = JSON.parse(payload);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.labels) || !Array.isArray(parsed.values)) return null;
+    const values = parsed.values.map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value));
+    if (!values.length) return null;
+
+    return {
+      title: sanitizePptText(parsed.title || "Métricas").substring(0, 80),
+      labels: parsed.labels.map((label: unknown) => sanitizePptText(String(label)).substring(0, 40)),
+      values,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function renderSlideContent(slide: PptxGenJS.Slide, slideData: { title: string; content: string[]; variant: SlideVariant }, deckTitle: string, index: number, totalSlides: number): void {
+  const bodyY = 1.3;
+  const bodyH = CORPORATE_PPT_DESIGN_SYSTEM.spacing.maxBodyHeight;
+
+  if (slideData.variant === "cover") {
+    slide.addText(slideData.title, {
+      x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+      y: 1.6,
+      w: 9.0,
+      h: 1.4,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.coverTitle,
+      bold: true,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+      align: "left",
+      valign: "middle",
+    });
+
+    const subtitle = slideData.content[0] || deckTitle;
+    slide.addText(subtitle, {
+      x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+      y: 3.15,
+      w: 9.0,
+      h: 1.0,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.coverSubtitle,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+      italic: true,
+      align: "left",
+      valign: "top",
+    });
+
+    addCorporateCard(slide, "Objetivo", `Esta presentación está construida con el tema corporativo IliaGPT: consistencia, tipografía y espaciado unificados en toda la deck.`, 4.2);
+    return;
+  }
+
+  if (slideData.variant === "section") {
+    slide.addShape("rect", {
+      x: 0.55,
+      y: 1.95,
+      w: 8.9,
+      h: 1.2,
+      fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+      line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+    });
+    slide.addText(slideData.title, {
+      x: 0.55,
+      y: 1.95,
+      w: 8.9,
+      h: 1.2,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.sectionTitle,
+      bold: true,
+      color: "FFFFFF",
+      align: "center",
+      valign: "middle",
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+    });
+    return;
+  }
+
+  if (slideData.variant === "closing") {
+    slide.addShape("rect", {
+      x: 0.55,
+      y: 1.2,
+      w: 8.9,
+      h: 3.8,
+      fill: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+      line: { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary },
+    });
+    slide.addText("Gracias", {
+      x: 0.7,
+      y: 2.1,
+      w: 8.5,
+      h: 1.0,
+      fontSize: 56,
+      bold: true,
+      color: "FFFFFF",
+      align: "center",
+      valign: "middle",
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+    });
+    slide.addText("¿Preguntas?", {
+      x: 0.7,
+      y: 3.35,
+      w: 8.5,
+      h: 0.85,
+      fontSize: 30,
+      bold: true,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.surface,
+      align: "center",
+      valign: "middle",
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    });
+    return;
+  }
+
+  addCorporateBadge(slide, "PPTX");
+  addFooter(slide, deckTitle, index + 1, totalSlides);
+
+  const chartData = tryParseChartFromLines(slideData.content);
+  if (chartData && chartData.labels.length && chartData.values.length) {
+    slide.addText(slideData.title, {
+      x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+      y: 0.75,
+      w: 9.0,
+      h: 0.6,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.title,
+      bold: true,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+      align: "left",
+    });
+
+    slide.addChart("bar", [
+      {
+        name: chartData.title,
+        labels: chartData.labels,
+        values: chartData.values,
+      },
+    ], {
+      x: CORPORATE_PPT_DESIGN_SYSTEM.spacing.marginX,
+      y: 1.5,
+      w: 8.9,
+      h: bodyH,
+      showTitle: true,
+      showLegend: true,
+      chartColors: [
+        CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+        CORPORATE_PPT_DESIGN_SYSTEM.palette.accent,
+        CORPORATE_PPT_DESIGN_SYSTEM.palette.secondary,
+      ],
+      catAxisLabelFontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall,
+      valAxisLabelFontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall,
+      chartColorsOpacity: 0.86,
+      barDir: "col",
+      showValue: true,
+      showPercent: false,
+      lineSize: 1,
+      dataLabelPosition: "bestFit",
+      dataLabelFontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall,
+      dataLabelColor: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+      showLabel: true,
+      showDataTable: false,
+      barGrouping: "clustered",
+    } as any);
+    addCorporateButton(slide, "Ver detalles", 8.18, 5.05, 1.27);
+    return;
+  }
+
+  const tableRows = parseSlideTable(slideData.content);
+  if (tableRows && tableRows.length > 0) {
+    slide.addText(slideData.title, {
+      x: 0.55,
+      y: 0.9,
+      w: 9.0,
+      h: 0.6,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.title,
+      bold: true,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+    });
+
+    const tableWithStyles = tableRows.map((row, rowIndex) =>
+      row.map((cell) => ({
+        text: cell,
+        options: {
+          align: rowIndex === 0 ? ("center" as const) : ("left" as const),
+          fontFace: rowIndex === 0 ? CORPORATE_PPT_DESIGN_SYSTEM.typography.heading : CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+          bold: rowIndex === 0,
+          color: rowIndex === 0 ? "FFFFFF" : CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+          fill: rowIndex === 0 ? { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.tableHeader } : undefined,
+          fontSize: rowIndex === 0 ? CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall + 2 : CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall,
+        },
+      }))
+    );
+
+    slide.addTable(tableWithStyles, {
+      x: 0.55,
+      y: 1.65,
+      w: 8.9,
+      h: bodyH,
+      border: { pt: 0.75, color: CORPORATE_PPT_DESIGN_SYSTEM.palette.border },
+      colW: Math.round((CORPORATE_PPT_DESIGN_SYSTEM.components.gridWidth * 100) / Math.max(...tableRows.map(row => row.length))) / 100,
+    } as any);
+    addCorporateButton(slide, "Ver análisis", 8.18, 5.05, 1.27);
+    return;
+  }
+
+  if (slideData.variant === "two-column") {
+    slide.addText(slideData.title, {
+      x: 0.55,
+      y: 0.9,
+      w: 9.0,
+      h: 0.5,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.title,
+      bold: true,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+    });
+
+    const bullets = slideData.content.slice(0, MAX_PPT_TEXT_ELEMENTS_PER_SLIDE).map((text, idx) => ({
+      text: `${idx + 1}. ${text}`,
+      options: {
+        bullet: { type: "number", color: CORPORATE_PPT_DESIGN_SYSTEM.palette.accent },
+        breakLine: true,
+      },
+    }));
+
+    const mid = Math.ceil(bullets.length / 2);
+    const firstColumn = bullets.slice(0, mid);
+    const secondColumn = bullets.slice(mid);
+    slide.addText(firstColumn, {
+      x: 0.55,
+      y: bodyY,
+      w: 4.3,
+      h: bodyH,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+      valign: "top",
+      lineSpacingMultiple: 1.12,
+    });
+    if (secondColumn.length) {
+      slide.addText(secondColumn, {
+        x: 5.15,
+        y: bodyY,
+        w: 4.3,
+        h: bodyH,
+        color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+        fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+        fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+        valign: "top",
+        lineSpacingMultiple: 1.12,
+      });
+    }
+    return;
+  }
+
+  slide.addText(slideData.title, {
+    x: 0.55,
+    y: 0.9,
+    w: 9.0,
+    h: 0.55,
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.title,
+    bold: true,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+  });
+
+  const bullets = slideData.content
+    .slice(0, MAX_PPT_TEXT_ELEMENTS_PER_SLIDE)
+    .map((text) => ({
+      text,
+      options: {
+        bullet: true,
+        color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+      },
+    }));
+
+  slide.addText(bullets, {
+    x: 0.55,
+    y: bodyY,
+    w: 9.0,
+    h: bodyH,
+    fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+    color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+    fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    valign: "top",
+    breakLine: true,
+  });
+}
+
+async function createUltraMinimalFallbackPpt(
+  title: string,
+  slideCount: number,
+  context?: PptFallbackContext
+): Promise<Buffer> {
+  const fallback = new PptxGenJS();
+  const safeTitle = sanitizePptText(title).substring(0, MAX_PPT_TITLE_LENGTH) || "Presentación";
+  const source = sanitizePptTraceText(context?.source || "generatePptDocument");
+  const traceId = context?.traceId || buildPptTraceId();
+
+  fallback.layout = "LAYOUT_16x9";
+  fallback.title = safeTitle;
+
+  const slide = fallback.addSlide();
+  slide.background = { color: "FFFFFF" };
+  slide.addText(safeTitle, {
+    x: 0.8,
+    y: 1.6,
+    w: 8.4,
+    h: 1,
+    fontSize: 32,
+    bold: true,
+    align: "center",
+    color: "1F2937",
+    valign: "middle",
+  });
+  slide.addText("No fue posible aplicar el tema corporativo completo.", {
+    x: 0.8,
+    y: 3,
+    w: 8.4,
+    h: 0.7,
+    fontSize: 16,
+    align: "center",
+    color: "4B5563",
+    valign: "middle",
+  });
+  slide.addText(`Diapositivas solicitadas: ${Math.max(1, slideCount)}`, {
+    x: 0.8,
+    y: 3.9,
+    w: 8.4,
+    h: 0.7,
+    fontSize: 12,
+    align: "center",
+    color: "6B7280",
+  });
+  if (context?.reason) {
+    slide.addText(`Motivo: ${truncateTraceValue(context.reason, 200)}`, {
+      x: 0.8,
+      y: 4.5,
+      w: 8.4,
+      h: 0.7,
+      fontSize: 11,
+      align: "center",
+      color: "6B7280",
+    });
+  }
+  slide.addText(`Origen: ${source}`, {
+    x: 0.2,
+    y: 5.2,
+    w: 9.6,
+    h: 0.2,
+    fontSize: 9,
+    color: "9CA3AF",
+    align: "right",
+  });
+
+  try {
+    const fallbackBuffer = await fallback.write({ outputType: "nodebuffer" });
+    const buffer = Buffer.from(fallbackBuffer as ArrayBuffer);
+    tracePptEvent(traceId, source, "fallback.ultra.minimal.success", {
+      bytes: buffer.length,
+      requestedSlides: context?.requestedSlides || slideCount,
+    });
+    return buffer;
+  } catch (ultraError) {
+    tracePptEvent(traceId, source, "fallback.ultra.minimal.failed", {
+      error: tracePptError(ultraError),
+      requestedSlides: context?.requestedSlides || slideCount,
+    });
+    return Buffer.from("PPTX fallback error");
+  }
+}
+
+async function createSafeFallbackPpt(
+  title: string,
+  slideCount: number,
+  context: PptFallbackContext
+): Promise<Buffer> {
+  const safeTitle = sanitizePptText(title).substring(0, MAX_PPT_TITLE_LENGTH) || "Presentación";
+  const source = sanitizePptTraceText(context?.source || "generatePptDocument");
+  const traceId = context?.traceId || buildPptTraceId();
+
+  try {
+    const fallback = new PptxGenJS();
+    fallback.layout = "LAYOUT_16x9";
+    fallback.title = safeTitle;
+    defineCorporateMaster(fallback);
+    const slide = fallback.addSlide({ masterName: CORPORATE_PPT_MASTER_NAME });
+    slide.background = { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.bg };
+    slide.addText(safeTitle, {
+      x: 0.9,
+      y: 2.2,
+      w: 8.2,
+      h: 1.2,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.sectionTitle,
+      bold: true,
+      align: "center",
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.heading,
+    });
+    slide.addText(`No fue posible aplicar el maquetado de algunas diapositivas. Total de diapositivas pedidas: ${Math.max(1, slideCount)}`, {
+      x: 0.9,
+      y: 3.4,
+      w: 8.2,
+      h: 0.9,
+      fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+      color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+      align: "center",
+      fontFace: CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+    });
+    addCorporateBadge(slide, "Fallback");
+    addFooter(slide, safeTitle, 1, 1);
+
+    const fallbackBuffer = await fallback.write({ outputType: "nodebuffer" });
+    const safeBuffer = Buffer.from(fallbackBuffer as ArrayBuffer);
+    tracePptEvent(traceId, source, "fallback.primary.success", {
+      stage: context.stage || "safe",
+      requestedSlides: context.requestedSlides || slideCount,
+      bytes: safeBuffer.length,
+      error: context.reason || "",
+    });
+    return safeBuffer;
+  } catch (fallbackError) {
+    const safeError = tracePptError(fallbackError);
+    tracePptEvent(traceId, source, "fallback.primary.failed", {
+      stage: context.stage || "safe",
+      requestedSlides: context.requestedSlides || slideCount,
+      error: safeError,
+    });
+    return createUltraMinimalFallbackPpt(safeTitle, slideCount, {
+      traceId,
+      source,
+      reason: safeError,
+      requestedSlides: context.requestedSlides || slideCount,
+      stage: "ultra-minimal",
+      actor: context.actor,
+    });
+  }
+}
+
+export async function generatePptDocument(
+  title: string,
+  slides: { title: string; content: string[] }[],
+  options: PptGenerationOptions = {}
+): Promise<Buffer> {
+  const safeTitle = sanitizePptText(title).substring(0, MAX_PPT_TITLE_LENGTH) || "Presentación";
+  const requestedSlides = Array.isArray(slides) ? slides.length : 0;
+  const source = sanitizePptTraceText(options.trace?.source || "generatePptDocument");
+  const traceId = options.trace?.requestId || buildPptTraceId();
+  const startedAt = Date.now();
+  let normalized: { title: string; slides: { title: string; content: string[]; variant: SlideVariant; }[] };
+
+  tracePptEvent(traceId, source, "request.start", {
+    requestedSlides,
+  });
+
+  try {
+    normalized = normalizePptSlides(safeTitle, slides);
+    const slideCount = Math.max(1, normalized.slides.length);
+    const preparedSlides = normalized.slides.map((slideData, index) => {
+      slideData.variant = getSlideVariant(
+        index,
+        slideData.title,
+        slideData.content
+      );
+      return slideData;
+    });
+
+    tracePptEvent(traceId, source, "request.normalized", {
+      requestedSlides,
+      slideCount: preparedSlides.length,
+      droppedSlides: Math.max(0, requestedSlides - preparedSlides.length),
+    });
+
+    const presentation = new PptxGenJS();
+    presentation.layout = "LAYOUT_16x9";
+    presentation.title = sanitizePptText(normalized.title).substring(0, MAX_PPT_TITLE_LENGTH);
+    presentation.author = "IliaGPT";
+    presentation.company = "";
+    presentation.subject = "";
+    defineCorporateMaster(presentation);
+
+    let fallbackSlides = 0;
+    for (let index = 0; index < preparedSlides.length; index++) {
+      const slide = presentation.addSlide({ masterName: CORPORATE_PPT_MASTER_NAME });
+      const slideData = preparedSlides[index];
+
+      try {
+        slide.background = { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.bg };
+        renderSlideContent(slide, slideData, normalized.title, index, slideCount);
+      } catch (slideError) {
+        fallbackSlides += 1;
+        const safeSlideError = tracePptError(slideError);
+        const safeSlideTitle = sanitizePptText(slideData.title).substring(0, MAX_PPT_TITLE_LENGTH) || `Diapositiva ${index + 1}`;
+
+        console.warn(`[generatePptDocument] Fallback rendering slide ${index + 1}: ${safeSlideError}`);
+        tracePptEvent(traceId, source, "slide.fallback", {
+          slideIndex: index + 1,
+          reason: safeSlideError,
+        });
+
+        slide.background = { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.surface };
+        slide.addText(safeSlideTitle, {
+          x: 0.6,
+          y: 2.35,
+          w: 8.8,
+          h: 0.9,
+          fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.sectionTitle,
+          bold: true,
+          align: "center",
+          color: CORPORATE_PPT_DESIGN_SYSTEM.palette.primary,
+        });
+        slide.addText("No se pudo renderizar esta diapositiva con el formato extendido. Se muestra el contenido mínimo.", {
+          x: 0.6,
+          y: 3.4,
+          w: 8.8,
+          h: 1,
+          fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.body,
+          color: CORPORATE_PPT_DESIGN_SYSTEM.palette.text,
+          align: "center",
+        });
+        slide.addText((slideData.content || [""]).slice(0, MAX_PPT_TITLES_PER_SLIDE).join("\n"), {
+          x: 0.6,
+          y: 4.15,
+          w: 8.8,
+          h: 1,
+          fontSize: CORPORATE_PPT_DESIGN_SYSTEM.sizes.bodySmall,
+          color: CORPORATE_PPT_DESIGN_SYSTEM.palette.muted,
+        });
+        addFooter(slide, safeTitle, index + 1, slideCount);
+        addCorporateBadge(slide, "Recovery");
+      }
+    }
+
+    const buffer = await presentation.write({ outputType: "nodebuffer" });
+    const safeBuffer = buffer as Buffer;
+    tracePptEvent(traceId, source, "request.success", {
+      slideCount: slideCount,
+      fallbackSlides,
+      durationMs: Date.now() - startedAt,
+      bytes: safeBuffer.length,
+    });
+    return safeBuffer;
+  } catch (error) {
+    const safeError = tracePptError(error);
+    tracePptEvent(traceId, source, "request.failed", {
+      requestedSlides,
+      durationMs: Date.now() - startedAt,
+      error: safeError,
+    });
+    return createSafeFallbackPpt(safeTitle, Math.max(1, requestedSlides), {
+      traceId,
+      source,
+      reason: safeError,
+      requestedSlides,
+      stage: "full",
+      actor: options.trace?.actor,
+    });
+  }
 }
 
 export function parseExcelFromText(text: string): any[][] {

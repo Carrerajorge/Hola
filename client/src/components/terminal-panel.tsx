@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react"; 
 import { useTerminalSession, TerminalLine } from "@/hooks/use-terminal-session";
 
 export function TerminalPanel() {
@@ -32,17 +32,10 @@ export function TerminalPanel() {
   const [scriptLanguage, setScriptLanguage] = useState("python");
   const [scriptCode, setScriptCode] = useState("");
 
-  const [remoteHost, setRemoteHost] = useState("");
-  const [remotePort, setRemotePort] = useState("22");
-  const [remoteUsername, setRemoteUsername] = useState("");
-  const [remoteAuthType, setRemoteAuthType] = useState<"password" | "private_key">("password");
-  const [remoteSecret, setRemoteSecret] = useState("");
-  const [remotePassphrase, setRemotePassphrase] = useState("");
-  const [remoteNotes, setRemoteNotes] = useState("");
-  const [remoteError, setRemoteError] = useState<string | null>(null);
-  const [remoteMessage, setRemoteMessage] = useState<string | null>(null);
-  const [remoteLoading, setRemoteLoading] = useState(false);
-  const [isSavingTarget, setIsSavingTarget] = useState(false);
+  const [remoteHost, setRemoteHost] = useState(""); const [remotePort, setRemotePort] = useState("22"); const [remoteUsername, setRemoteUsername] = useState(""); const [remoteAuthType, 
+  setRemoteAuthType] = useState<"password" | "private_key">("password"); const [remoteSecret, setRemoteSecret] = useState(""); const [remotePassphrase, setRemotePassphrase] = useState(""); const 
+  [remoteNotes, setRemoteNotes] = useState(""); const [remoteError, setRemoteError] = useState<string | null>(null); const [remoteMessage, setRemoteMessage] = useState<string | null>(null); const 
+  [remoteLoading, setRemoteLoading] = useState(false); const [isSavingTarget, setIsSavingTarget] = useState(false);
 
   // Execution options
   const [shell, setShell] = useState<"bash" | "zsh" | "powershell" | "sh" | "cmd">("bash");
@@ -51,8 +44,22 @@ export function TerminalPanel() {
   const [dockerImage, setDockerImage] = useState("node:20-alpine");
   const [pendingConfirmation, setPendingConfirmation] = useState<{ command: string; reason?: string } | null>(null);
 
+  // ===== Files UI style hardening (fix global CSS overriding text color) =====
+const filesBtn =
+  "px-2 py-1 rounded border border-white/10 hover:border-white/20 disabled:opacity-50 " +
+  "!text-gray-200 !bg-gray-800/40 hover:!bg-gray-700/50";
+
+const filesBtnPrimary =
+  "px-3 py-1 rounded border border-white/10 hover:border-white/20 disabled:opacity-50 " +
+  "!text-gray-100 !bg-gray-800 hover:!bg-gray-700";
+
+const filesInput =
+  "w-full px-2 py-1 rounded border border-white/10 !bg-gray-900/60 " +
+  "!text-gray-200 placeholder:!text-gray-500 outline-none";
+
+
   // Files tab state
-  const [filePath, setFilePath] = useState<string>(".");
+  const [filePath, setFilePath] = useState<string>("."); 
   const [fileListing, setFileListing] = useState<
     Array<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }>
   >([]);
@@ -60,6 +67,33 @@ export function TerminalPanel() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedFileContent, setSelectedFileContent] = useState<string>("");
   const [filesError, setFilesError] = useState<string | null>(null);
+
+  // ===== REQ-001: Files Navigation (UX) =====
+const [filesPathHistory, setFilesPathHistory] = useState<string[]>(["."]);
+const [filesHistoryIndex, setFilesHistoryIndex] = useState<number>(0);
+
+const filePathRef = useRef(filePath);
+useEffect(() => { filePathRef.current = filePath; }, [filePath]);
+
+const filesHistoryIndexRef = useRef(filesHistoryIndex);
+useEffect(() => { filesHistoryIndexRef.current = filesHistoryIndex; }, [filesHistoryIndex]);
+
+const normalizeFsPath = useCallback(
+  (raw: string) => (raw || ".").replace(/\\+/g, "/").replace(/\/+/g, "/"),
+  []
+);
+
+const getParentFsPath = useCallback(
+  (p: string) => {
+    const norm = normalizeFsPath(p || ".");
+    if (norm === "." || norm === "./") return ".";
+    const cleaned = norm.replace(/^\.\//, "");
+    const parts = cleaned.split("/").filter(Boolean);
+    parts.pop();
+    return parts.length === 0 ? "." : "./" + parts.join("/");
+  },
+  [normalizeFsPath]
+);  
 
   const terminalRef = useRef<HTMLDivElement>(null);
 
@@ -188,37 +222,54 @@ export function TerminalPanel() {
       setRemoteMessage(null);
     }
   }, [deleteRemoteTarget]);
-
-  const loadFileListing = useCallback(async (pathToLoad: string) => {
-    if (isRemoteSession) {
-      setFilesError("File explorer is only available for local sessions");
-      setFileListing([]);
-      return;
-    }
-    if (!state.sessionId) {
-      setFilesError("Start a session to browse files");
-      return;
-    }
-
-    const normalized = (pathToLoad || ".").replace(/\\+/g, "/");
-    setIsLoadingFiles(true);
-    setFilesError(null);
-    try {
-      const result = await fileOperation({ type: "list", path: normalized });
-      if (!result?.success) {
-        throw new Error(result?.error || "Failed to list files");
+ 
+  const loadFileListing = useCallback(
+    async (pathToLoad: string, mode: "push" | "history" = "push") => {
+      if (isRemoteSession) {
+        setFilesError("File explorer is only available for local sessions");
+        setFileListing([]);
+        return;
       }
-      setFileListing(result.data || []);
-      setFilePath(normalized);
-      setSelectedFile(null);
-      setSelectedFileContent("");
-    } catch (error: any) {
-      setFilesError(error.message || "Failed to list files");
-      setFileListing([]);
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  }, [fileOperation, state.sessionId, isRemoteSession]);
+      if (!state.sessionId) {
+        setFilesError("Start a session to browse files");
+        return;
+      }
+
+      const normalized = normalizeFsPath(pathToLoad || ".");
+      setIsLoadingFiles(true);
+      setFilesError(null);
+
+      const prevPath = filePathRef.current;
+
+      try {
+        const result = await fileOperation({ type: "list", path: normalized });
+
+        if (!result?.success) throw new Error(result?.error || "Failed to list files");
+
+        setFileListing(result.data || []);
+        setFilePath(normalized);
+        setSelectedFile(null);
+        setSelectedFileContent("");
+
+        // history push SOLO si corresponde
+        if (mode === "push" && normalized !== prevPath) {
+          setFilesPathHistory((prev) => {
+            const idx = filesHistoryIndexRef.current;
+            const trimmed = prev.slice(0, idx + 1);
+            return [...trimmed, normalized];
+          });
+          setFilesHistoryIndex((i) => i + 1);
+        }
+      } catch (e: any) {
+        setFilesError(e?.message || "Failed to list files");
+        setFileListing([]);
+        setFilePath(prevPath); // vuelve para evitar “parpadeo”
+      } finally {
+        setIsLoadingFiles(false);
+      }
+    },
+    [fileOperation, state.sessionId, isRemoteSession, normalizeFsPath]
+  );
 
   const handleOpenFile = useCallback(async (name: string) => {
     if (isRemoteSession) return;
@@ -253,6 +304,8 @@ export function TerminalPanel() {
       setSelectedFileContent("");
       return;
     }
+    setFilesPathHistory(["."]);
+    setFilesHistoryIndex(0);
     loadFileListing(".");
   }, [state.status, state.sessionId, isRemoteSession, loadFileListing]);
 
@@ -770,17 +823,78 @@ export function TerminalPanel() {
                     value={filePath}
                     onChange={(e) => setFilePath(e.target.value)}
                     onBlur={() => void loadFileListing(filePath || ".")}
-                    className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 w-64 outline-none"
+                    className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs !text-gray-200 w-64 outline-none placeholder:!text-gray-500"
                     spellCheck={false}
                   />
                   <button
                     onClick={() => void loadFileListing(filePath || ".")}
-                    className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 rounded"
+                    className={filesBtnPrimary}
                   >
                     Refresh
                   </button>
                 </div>
               </div>
+		{/* Toolbar Files (REQ-001) */}
+		<div className="flex flex-col gap-2 mb-3">
+		  <div className="flex items-center gap-2">
+		    <button
+		      className={filesBtn}
+		      onClick={() => {
+		        if (filesHistoryIndex <= 0) return;
+		        const next = filesHistoryIndex - 1;
+		        setFilesHistoryIndex(next);
+		        void loadFileListing(filesPathHistory[next], "history");
+		      }}
+		      disabled={filesHistoryIndex <= 0 || isLoadingFiles}
+		    >
+		      ⬅
+		    </button>
+
+		    <button
+		      className={filesBtn}
+		      onClick={() => {
+		        if (filesHistoryIndex >= filesPathHistory.length - 1) return;
+		        const next = filesHistoryIndex + 1;
+		        setFilesHistoryIndex(next);
+		        void loadFileListing(filesPathHistory[next], "history");
+		      }}
+		      disabled={filesHistoryIndex >= filesPathHistory.length - 1 || isLoadingFiles}
+		    >
+		      ➡
+		    </button>
+
+		    <button
+		      className={filesBtn}
+		      onClick={() => void loadFileListing(getParentFsPath(filePath))}
+		      disabled={isLoadingFiles || filePath === "."}
+		    >
+		      ⬆ Subir
+		    </button>
+
+		    <div className="text-xs opacity-80 !text-gray-300">Ruta: {filePath}</div>
+		  </div>
+
+		  <div className="flex items-center gap-2">
+		    <input
+		      className={filesInput}
+		      value={filePath}
+		      onChange={(e) => setFilePath(e.target.value)}
+		      onKeyDown={(e) => {
+		        if (e.key === "Enter") void loadFileListing(filePath || ".");
+		      }}
+                      placeholder="Pega una ruta (ej: ./server o /server)"
+                      disabled={isLoadingFiles}
+		    />
+		    <button
+		      className={filesBtnPrimary}
+		      onClick={() => void loadFileListing(filePath || ".")}
+		      disabled={isLoadingFiles}
+		    >
+		      Ir
+		    </button>
+		  </div>
+		</div> 
+
               <div className="flex-1 overflow-y-auto border border-gray-800 rounded bg-gray-900">
                 {isLoadingFiles && (
                   <div className="p-2 text-xs text-gray-400">Loading...</div>
@@ -789,23 +903,23 @@ export function TerminalPanel() {
                   <div className="p-2 text-xs text-red-400">{filesError}</div>
                 )}
                 {!isLoadingFiles && !filesError && (
-                  <table className="w-full text-xs font-mono">
-                    <thead className="bg-gray-800 text-gray-300">
+                  <table className="w-full text-xs font-mono"> <thead className="bg-gray-800 text-gray-300">
                       <tr>
                         <th className="text-left px-2 py-1 w-6">T</th>
                         <th className="text-left px-2 py-1">Name</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {fileListing.map((entry) => (
-                        <tr
+                      {fileListing.map((entry) => ( <tr
                           key={entry.name}
                           className="hover:bg-gray-800 cursor-pointer"
-                          onClick={() =>
-                            entry.isDirectory
-                              ? void loadFileListing(`${filePath}/${entry.name}`.replace(/\\+/g, "/"))
-                              : void handleOpenFile(entry.name)
-                          }
+                          onClick={() => {
+                            if (entry.isDirectory) {
+                              void loadFileListing(normalizeFsPath(`${filePath}/${entry.name}`));
+                            } else {
+                              void handleOpenFile(entry.name);
+                            } 
+                          }}
                         >
                           <td className="px-2 py-1 text-center text-gray-400">
                             {entry.isDirectory ? "d" : entry.isSymlink ? "l" : "-"}

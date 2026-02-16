@@ -12,7 +12,7 @@ export const workspaceGroupMembers = pgTable(
     userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("workspace_group_members_group_idx").on(table.groupId),
     index("workspace_group_members_user_idx").on(table.userId),
     uniqueIndex("workspace_group_members_group_user_unique").on(table.groupId, table.userId),

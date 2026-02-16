@@ -1,0 +1,956 @@
+client/src/components/activity-feed.tsx(264,36): error TS2339: Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; } | ... 4 more ... | { ...; }'.
+  Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; }'.
+client/src/components/activity-feed.tsx(444,28): error TS2339: Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; } | ... 4 more ... | { ...; }'.
+  Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; }'.
+client/src/components/agent/AgentTraceViewer.tsx(57,45): error TS2339: Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; } | ... 4 more ... | { ...; }'.
+  Property 'animate' does not exist on type '{ icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>; color: string; bg: string; label: string; }'.
+client/src/components/artifact-viewer.tsx(501,11): error TS2339: Property 'highlightedHtml' does not exist on type 'UseAsyncHighlightResult'.
+client/src/components/chat-interface/utils.ts(177,40): error TS2571: Object is of type 'unknown'.
+client/src/components/chat-interface/utils.ts(210,17): error TS2686: 'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.
+client/src/components/chat-interface/utils.ts(210,40): error TS18046: 'element.props' is of type 'unknown'.
+client/src/components/chat-interface/utils.ts(218,39): error TS2339: Property 'children' does not exist on type '{}'.
+client/src/components/chat-interface/utils.ts(219,47): error TS2339: Property 'children' does not exist on type '{}'.
+client/src/components/CitationGraph.tsx(130,19): error TS2345: Argument of type 'DragBehavior<SVGGElement, CitationNode, CitationNode | SubjectPosition>' is not assignable to parameter of type '(selection: Selection<SVGGElement | BaseType, CitationNode, SVGGElement, unknown>) => void'.
+  Types of parameters 'selection' and 'selection' are incompatible.
+    Type 'Selection<SVGGElement | BaseType, CitationNode, SVGGElement, unknown>' is not assignable to type 'Selection<SVGGElement, CitationNode, any, any>'.
+      Types of property 'select' are incompatible.
+        Type '{ <DescElement extends BaseType>(selector: string): Selection<DescElement, CitationNode, SVGGElement, unknown>; <DescElement extends BaseType>(selector: null): Selection<null, undefined, SVGGElement, unknown>; <DescElement extends BaseType>(selector: ValueFn<...>): Selection<...>; }' is not assignable to type '{ <DescElement extends BaseType>(selector: string): Selection<DescElement, CitationNode, any, any>; <DescElement extends BaseType>(selector: null): Selection<null, undefined, any, any>; <DescElement extends BaseType>(selector: ValueFn<...>): Selection<...>; }'.
+          Types of parameters 'selector' and 'selector' are incompatible.
+            Types of parameters 'groups' and 'groups' are incompatible.
+              Type '(SVGGElement | BaseType)[] | ArrayLike<SVGGElement | BaseType>' is not assignable to type 'SVGGElement[] | ArrayLike<SVGGElement>'.
+                Type '(SVGGElement | BaseType)[]' is not assignable to type 'SVGGElement[] | ArrayLike<SVGGElement>'.
+                  Type '(SVGGElement | BaseType)[]' is not assignable to type 'SVGGElement[]'.
+                    Type 'SVGGElement | BaseType' is not assignable to type 'SVGGElement'.
+                      Type 'null' is not assignable to type 'SVGGElement'.
+client/src/components/code-playground.tsx(214,54): error TS2345: Argument of type 'RefObject<HTMLIFrameElement | null>' is not assignable to parameter of type 'RefObject<HTMLIFrameElement>'.
+  Type 'HTMLIFrameElement | null' is not assignable to type 'HTMLIFrameElement'.
+    Type 'null' is not assignable to type 'HTMLIFrameElement'.
+client/src/components/editors/WordEditor.tsx(2,36): error TS2305: Module '"@tiptap/react"' has no exported member 'BubbleMenu'.
+client/src/components/editors/WordEditor.tsx(2,48): error TS2305: Module '"@tiptap/react"' has no exported member 'FloatingMenu'.
+client/src/components/excel-ribbon.tsx(1216,56): error TS2345: Argument of type 'string' is not assignable to parameter of type '"line" | "bar" | "pie"'.
+client/src/components/excel-ribbon.tsx(1222,56): error TS2345: Argument of type 'string' is not assignable to parameter of type '"line" | "bar" | "pie"'.
+client/src/components/excel-ribbon.tsx(1234,56): error TS2345: Argument of type 'string' is not assignable to parameter of type '"line" | "bar" | "pie"'.
+client/src/components/excel-ribbon.tsx(1240,56): error TS2345: Argument of type 'string' is not assignable to parameter of type '"line" | "bar" | "pie"'.
+client/src/components/gpt-builder.tsx(953,39): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+client/src/components/gpt-builder.tsx(955,39): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
+client/src/components/gpt-builder.tsx(1163,84): error TS2339: Property 'creatorUsername' does not exist on type 'Gpt'.
+client/src/components/markdown-renderer.tsx(141,21): error TS2503: Cannot find namespace 'DOMPurify'.
+client/src/components/math-renderer.tsx(171,50): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+client/src/components/media-library-modal.tsx(230,7): error TS2322: Type '({ columnIndex, rowIndex, style, items, selectedId, onSelect, onDelete, onDownload, selectable, columnCount }: { columnIndex: number; rowIndex: number; style: CSSProperties; } & CellProps) => Element | null' is not assignable to type '(props: { ariaAttributes: { "aria-colindex": number; role: "gridcell"; }; columnIndex: number; rowIndex: number; style: CSSProperties; } & { columnIndex: number; rowIndex: number; style: CSSProperties; } & CellProps) => ReactElement<...>'.
+  Type 'Element | null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>>'.
+    Type 'null' is not assignable to type 'ReactElement<unknown, string | JSXElementConstructor<any>>'.
+client/src/components/media-library-modal.tsx(231,7): error TS2739: Type '{ items: MediaItem[]; selectedId: string | null; onSelect: (item: MediaItem) => void; onDelete: (id: string) => void; onDownload: (item: MediaItem) => void; selectable: boolean | undefined; columnCount: number; }' is missing the following properties from type 'ExcludeForbiddenKeys<{ columnIndex: number; rowIndex: number; style: CSSProperties; } & CellProps>': columnIndex, rowIndex, style
+client/src/components/monaco-code-editor.tsx(257,28): error TS2322: Type '{ children: Element; editorType: string; fallbackContent: string; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; }'.
+  Property 'editorType' does not exist on type 'IntrinsicAttributes & { children: ReactNode; }'.
+client/src/components/ppt/canvas/CanvasStage.tsx(132,11): error TS2322: Type '(e: Konva.KonvaEventObject<MouseEvent>) => void' is not assignable to type '(evt: KonvaEventObject<TouchEvent, Node<NodeConfig>>) => void'.
+  Types of parameters 'e' and 'evt' are incompatible.
+    Type 'KonvaEventObject<TouchEvent, Node<NodeConfig>>' is not assignable to type 'KonvaEventObject<MouseEvent, Node<NodeConfig>>'.
+      Type 'TouchEvent' is missing the following properties from type 'MouseEvent': button, buttons, clientX, clientY, and 15 more.
+client/src/components/skeletons.tsx(28,38): error TS2322: Type '{ className: string; style: { width: string | number; }; }' is not assignable to type 'IntrinsicAttributes & SkeletonProps'.
+  Property 'style' does not exist on type 'IntrinsicAttributes & SkeletonProps'.
+client/src/components/skeletons.tsx(131,29): error TS2322: Type '{ key: number; className: string; style: { width: string; }; }' is not assignable to type 'IntrinsicAttributes & SkeletonProps'.
+  Property 'style' does not exist on type 'IntrinsicAttributes & SkeletonProps'.
+client/src/components/skeletons.tsx(152,21): error TS2322: Type '{ key: number; className: string; style: { width: string; marginLeft: number; }; }' is not assignable to type 'IntrinsicAttributes & SkeletonProps'.
+  Property 'style' does not exist on type 'IntrinsicAttributes & SkeletonProps'.
+client/src/components/spreadsheet-editor.tsx(1944,40): error TS2345: Argument of type '(r: number, c: number) => string' is not assignable to parameter of type 'SparseGrid'.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,7): error TS2448: Block-scoped variable 'handleCut' used before its declaration.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,7): error TS2454: Variable 'handleCut' is used before being assigned.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,18): error TS2448: Block-scoped variable 'handleCopy' used before its declaration.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,18): error TS2454: Variable 'handleCopy' is used before being assigned.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,30): error TS2448: Block-scoped variable 'handlePaste' used before its declaration.
+client/src/components/spreadsheet/SpreadsheetEditor.tsx(762,30): error TS2454: Variable 'handlePaste' is used before being assigned.
+client/src/components/spreadsheet/UploadPanel.tsx(296,21): error TS2322: Type 'boolean | null' is not assignable to type 'CheckedState | undefined'.
+  Type 'null' is not assignable to type 'CheckedState | undefined'.
+client/src/components/VirtualizedMessageList.tsx(7,10): error TS2305: Module '"react-window"' has no exported member 'VariableSizeList'.
+client/src/components/VirtualizedMessageList.tsx(7,36): error TS2724: '"react-window"' has no exported member named 'ListChildComponentProps'. Did you mean 'CellComponentProps'?
+client/src/components/VirtualizedMessageList.tsx(8,23): error TS2307: Cannot find module 'react-virtualized-auto-sizer' or its corresponding type declarations.
+client/src/components/VirtualizedMessageList.tsx(223,21): error TS7031: Binding element 'height' implicitly has an 'any' type.
+client/src/components/VirtualizedMessageList.tsx(223,29): error TS7031: Binding element 'width' implicitly has an 'any' type.
+client/src/graphics/three/three-engine.tsx(5,10): error TS2724: '"@/components/error-boundaries"' has no exported member named 'ThreeJSErrorBoundary'. Did you mean 'withErrorBoundary'?
+client/src/graphics/three/three-engine.tsx(120,39): error TS7006: Parameter 'err' implicitly has an 'any' type.
+client/src/graphics/visualization-surface.tsx(25,9): error TS2367: This comparison appears to be unintentional because the types '"svg" | "webgl" | "canvas2d"' and '"auto"' have no overlap.
+client/src/hooks/use-chat-search.ts(22,21): error TS2702: 'Fuse' only refers to a type, but is being used as a namespace here.
+client/src/hooks/use-performance.ts(43,24): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/use-performance.ts(85,24): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/use-performance.ts(105,21): error TS2322: Type 'undefined' is not assignable to type 'Timeout'.
+client/src/hooks/use-performance.ts(152,17): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/use-voice.ts(30,33): error TS2304: Cannot find name 'SpeechRecognition'.
+client/src/hooks/useOptimistic.ts(32,24): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/useOptimistic.ts(64,24): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/useOptimistic.ts(65,25): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/useOptimistic.ts(71,13): error TS2322: Type 'undefined' is not assignable to type 'Timeout'.
+client/src/hooks/useOptimistic.ts(74,9): error TS2322: Type 'undefined' is not assignable to type 'Parameters<T>'.
+client/src/hooks/useOptimistic.ts(138,24): error TS2554: Expected 1 arguments, but got 0.
+client/src/hooks/useOptimistic.ts(158,17): error TS2322: Type 'undefined' is not assignable to type 'Timeout'.
+client/src/hooks/useVoice.ts(81,35): error TS2304: Cannot find name 'SpeechRecognition'.
+client/src/hooks/useVoice.ts(121,39): error TS2552: Cannot find name 'SpeechRecognitionErrorEvent'. Did you mean 'SpeechRecognitionResult'?
+client/src/hooks/useVoice.ts(130,40): error TS2552: Cannot find name 'SpeechRecognitionEvent'. Did you mean 'SpeechRecognitionResult'?
+client/src/lib/accessibility.tsx(216,16): error TS2503: Cannot find namespace 'JSX'.
+client/src/lib/accessibility.tsx(219,10): error TS2604: JSX element type 'Component' does not have any construct or call signatures.
+client/src/lib/accessibility.tsx(219,10): error TS2786: 'Component' cannot be used as a JSX component.
+  Its type 'string | number | symbol' is not a valid JSX element type.
+    Type 'number' is not assignable to type 'ElementType'.
+client/src/lib/accessibility.tsx(320,38): error TS2503: Cannot find namespace 'JSX'.
+client/src/lib/accessibility.tsx(321,13): error TS2604: JSX element type 'Tag' does not have any construct or call signatures.
+client/src/lib/accessibility.tsx(321,13): error TS2786: 'Tag' cannot be used as a JSX component.
+  Its type 'string | number | symbol' is not a valid JSX element type.
+    Type 'number' is not assignable to type 'ElementType'.
+client/src/lib/chatCache.ts(6,48): error TS2307: Cannot find module 'idb' or its corresponding type declarations.
+client/src/lib/chatCache.ts(82,17): error TS7006: Parameter 'db' implicitly has an 'any' type.
+client/src/lib/chatCache.ts(162,27): error TS7006: Parameter 'a' implicitly has an 'any' type.
+client/src/lib/chatCache.ts(162,30): error TS7006: Parameter 'b' implicitly has an 'any' type.
+client/src/lib/content/components/blocks/HeadingBlock.tsx(21,38): error TS2503: Cannot find namespace 'JSX'.
+client/src/lib/content/components/blocks/HeadingBlock.tsx(33,10): error TS2604: JSX element type 'Tag' does not have any construct or call signatures.
+client/src/lib/content/components/blocks/HeadingBlock.tsx(33,10): error TS2786: 'Tag' cannot be used as a JSX component.
+  Its type 'string | number | symbol' is not a valid JSX element type.
+    Type 'number' is not assignable to type 'ElementType'.
+client/src/lib/content/renderers/block-renderer.tsx(343,15): error TS2345: Argument of type '() => () => Promise<void>' is not assignable to parameter of type 'EffectCallback'.
+  Type '() => Promise<void>' is not assignable to type 'void | Destructor'.
+    Type '() => Promise<void>' is not assignable to type 'Destructor'.
+      Type 'Promise<void>' is not assignable to type 'void | { [UNDEFINED_VOID_ONLY]: never; }'.
+client/src/lib/fileUploader.ts(115,7): error TS2531: Object is possibly 'null'.
+client/src/lib/fileUploader.ts(116,7): error TS2531: Object is possibly 'null'.
+client/src/lib/fileUploader.ts(214,30): error TS2339: Property 'storagePath' does not exist on type 'string'.
+client/src/lib/fileUploader.ts(215,20): error TS2339: Property 'fileId' does not exist on type 'string'.
+client/src/lib/fileUploader.ts(216,33): error TS2339: Property 'fileId' does not exist on type 'string'.
+client/src/lib/fileUploader.ts(340,5): error TS2322: Type '{ storagePath: any; fileId: any; }' is not assignable to type 'string'.
+client/src/lib/lazyComponents.tsx(69,7): error TS2322: Type '{ children: Element; componentName: string; loadingComponent: Element; }' is not assignable to type 'IntrinsicAttributes & { children: ReactNode; }'.
+  Property 'componentName' does not exist on type 'IntrinsicAttributes & { children: ReactNode; }'.
+client/src/pages/home.tsx(642,13): error TS2322: Type '(newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => void' is not assignable to type 'Dispatch<SetStateAction<AiState>>'.
+  Types of parameters 'newState' and 'value' are incompatible.
+    Type 'SetStateAction<AiState>' is not assignable to type '"thinking" | "idle" | "responding" | ((prev: "thinking" | "idle" | "responding") => "thinking" | "idle" | "responding")'.
+      Type '"agent_working"' is not assignable to type '"thinking" | "idle" | "responding" | ((prev: "thinking" | "idle" | "responding") => "thinking" | "idle" | "responding")'.
+client/src/pages/home.tsx(645,13): error TS2322: Type 'Dispatch<SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>>' is not assignable to type 'Dispatch<SetStateAction<AiProcessStep[]>>'.
+  Type 'SetStateAction<AiProcessStep[]>' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+    Type 'AiProcessStep[]' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+      Type 'AiProcessStep[]' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }[]'.
+        Type 'AiProcessStep' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }'.
+          Types of property 'step' are incompatible.
+            Type 'string | undefined' is not assignable to type 'string'.
+              Type 'undefined' is not assignable to type 'string'.
+client/src/pages/workspace.tsx(304,15): error TS2322: Type 'Dispatch<SetStateAction<"thinking" | "idle" | "responding">>' is not assignable to type 'Dispatch<SetStateAction<AiState>>'.
+  Type 'SetStateAction<AiState>' is not assignable to type 'SetStateAction<"thinking" | "idle" | "responding">'.
+    Type '"agent_working"' is not assignable to type 'SetStateAction<"thinking" | "idle" | "responding">'.
+client/src/pages/workspace.tsx(306,15): error TS2322: Type 'Dispatch<SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>>' is not assignable to type 'Dispatch<SetStateAction<AiProcessStep[]>>'.
+  Type 'SetStateAction<AiProcessStep[]>' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+    Type 'AiProcessStep[]' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+      Type 'AiProcessStep[]' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }[]'.
+        Type 'AiProcessStep' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }'.
+          Types of property 'step' are incompatible.
+            Type 'string | undefined' is not assignable to type 'string'.
+              Type 'undefined' is not assignable to type 'string'.
+client/src/pages/workspace.tsx(376,19): error TS2322: Type 'Dispatch<SetStateAction<"thinking" | "idle" | "responding">>' is not assignable to type 'Dispatch<SetStateAction<AiState>>'.
+  Type 'SetStateAction<AiState>' is not assignable to type 'SetStateAction<"thinking" | "idle" | "responding">'.
+    Type '"agent_working"' is not assignable to type 'SetStateAction<"thinking" | "idle" | "responding">'.
+client/src/pages/workspace.tsx(378,19): error TS2322: Type 'Dispatch<SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>>' is not assignable to type 'Dispatch<SetStateAction<AiProcessStep[]>>'.
+  Type 'SetStateAction<AiProcessStep[]>' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+    Type 'AiProcessStep[]' is not assignable to type 'SetStateAction<{ step: string; status: "active" | "pending" | "done"; }[]>'.
+      Type 'AiProcessStep[]' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }[]'.
+        Type 'AiProcessStep' is not assignable to type '{ step: string; status: "active" | "pending" | "done"; }'.
+          Types of property 'step' are incompatible.
+            Type 'string | undefined' is not assignable to type 'string'.
+              Type 'undefined' is not assignable to type 'string'.
+client/src/services/pwaManager.ts(234,35): error TS2339: Property 'sync' does not exist on type 'ServiceWorkerRegistration'.
+client/src/services/pwaManager.ts(240,39): error TS2339: Property 'sync' does not exist on type 'ServiceWorkerRegistration'.
+client/src/stores/index.ts(117,55): error TS7006: Parameter 'm' implicitly has an 'any' type.
+client/src/stores/index.ts(127,58): error TS7006: Parameter 'm' implicitly has an 'any' type.
+client/src/stores/index.ts(270,52): error TS7006: Parameter 't' implicitly has an 'any' type.
+client/src/stores/super-agent-store.ts(15,52): error TS2739: Type '{ sessionId: null; isRunning: false; phase: "idle"; contract: null; sources: never[]; sourcesTarget: number; artifacts: never[]; toolCalls: never[]; toolResults: never[]; verify: null; final: null; error: null; iteration: number; progress: null; }' is missing the following properties from type 'SuperAgentState': runId, narration
+client/src/sw.ts(199,9): error TS2353: Object literal may only specify known properties, and 'vibrate' does not exist in type 'NotificationOptions'.
+client/src/sw.ts(246,15): error TS2339: Property 'tag' does not exist on type 'Event'.
+client/src/sw.ts(247,15): error TS2339: Property 'waitUntil' does not exist on type 'Event'.
+client/src/test/testUtils.tsx(7,39): error TS2307: Cannot find module '@testing-library/react' or its corresponding type declarations.
+client/src/test/testUtils.tsx(65,12): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(135,18): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(136,18): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(139,21): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(142,16): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(148,14): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(157,15): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(161,26): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(162,30): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(163,26): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(166,26): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(170,29): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(173,29): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(178,32): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(181,34): error TS2708: Cannot use namespace 'jest' as a value.
+client/src/test/testUtils.tsx(244,18): error TS2694: Namespace 'global.jest' has no exported member 'Mock'.
+client/src/test/testUtils.tsx(247,5): error TS2304: Cannot find name 'expect'.
+client/src/test/testUtils.tsx(248,9): error TS2304: Cannot find name 'expect'.
+client/src/test/testUtils.tsx(253,18): error TS2694: Namespace 'global.jest' has no exported member 'Mock'.
+client/src/test/testUtils.tsx(256,44): error TS7006: Parameter 'call' implicitly has an 'any' type.
+client/src/test/testUtils.tsx(257,5): error TS2304: Cannot find name 'expect'.
+client/src/test/testUtils.tsx(288,15): error TS2307: Cannot find module '@testing-library/react' or its corresponding type declarations.
+client/src/workers/formula-engine.worker.ts(10,43): error TS2554: Expected 0-1 arguments, but got 2.
+server/__tests__/mocks/llmMock.ts(27,24): error TS2304: Cannot find name 'total_sales'.
+server/__tests__/mocks/llmMock.ts(39,27): error TS2304: Cannot find name 'avg_salary'.
+server/agent/agentPipeline.ts(4,41): error TS2459: Module '"./roles/plannerAgent"' declares 'AgentPlan' locally, but it is not exported.
+server/agent/agentPipeline.ts(249,34): error TS7006: Parameter 's' implicitly has an 'any' type.
+server/agent/agentPipeline.ts(249,37): error TS7006: Parameter 'i' implicitly has an 'any' type.
+server/agent/agentPipeline.ts(261,34): error TS7006: Parameter 's' implicitly has an 'any' type.
+server/agent/agentPipeline.ts(261,37): error TS7006: Parameter 'i' implicitly has an 'any' type.
+server/agent/agentPipeline.ts(272,24): error TS7006: Parameter 's' implicitly has an 'any' type.
+server/agent/agentPipeline.ts(302,20): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+server/agent/agentPipeline.ts(409,75): error TS2339: Property 'category' does not exist on type 'RobustIntent'.
+  Property 'category' does not exist on type '"code"'.
+server/agent/agentPipeline.ts(439,9): error TS2353: Object literal may only specify known properties, and 'maxSteps' does not exist in type '{ maxTimeMs?: number | undefined; allowedCapabilities?: string[] | undefined; blockedTools?: string[] | undefined; }'.
+server/agent/agentPipeline.ts(445,37): error TS2554: Expected 2 arguments, but got 1.
+server/agent/agentPipeline.ts(501,11): error TS2740: Type '{ success: boolean; retryCount: number; toolName: string; artifacts: { id: string; name: string; createdAt: Date; type: "data" | "link" | "chart" | "file" | "image" | "document" | "preview"; ... 4 more ...; url?: string | undefined; }[]; ... 4 more ...; output?: any; }[]' is missing the following properties from type 'Map<number, { success: boolean; retryCount: number; toolName: string; artifacts: { id: string; name: string; createdAt: Date; type: "data" | "link" | "chart" | "file" | "image" | "document" | "preview"; ... 4 more ...; url?: string | undefined; }[]; ... 4 more ...; output?: any; }>': clear, delete, get, has, and 3 more.
+server/agent/agentPipeline.ts(508,44): error TS2554: Expected 2 arguments, but got 1.
+server/agent/agentPipeline.ts(554,13): error TS2322: Type 'string | { code: string; message: string; retryable: boolean; }' is not assignable to type 'string | undefined'.
+  Type '{ code: string; message: string; retryable: boolean; }' is not assignable to type 'string'.
+server/agent/agentPipeline.ts(561,22): error TS2322: Type 'string | { code: string; message: string; retryable: boolean; }' is not assignable to type 'string'.
+  Type '{ code: string; message: string; retryable: boolean; }' is not assignable to type 'string'.
+server/agent/agentPipeline.ts(580,13): error TS2322: Type 'string | { code: string; message: string; retryable: boolean; }' is not assignable to type 'string | undefined'.
+  Type '{ code: string; message: string; retryable: boolean; }' is not assignable to type 'string'.
+server/agent/agentPipeline.ts(589,11): error TS2322: Type 'string' is not assignable to type '{ code: string; message: string; retryable: boolean; }'.
+server/agent/agentPipeline.ts(651,7): error TS2353: Object literal may only specify known properties, and 'plan' does not exist in type '{ runId: string; artifacts: { id: string; name: string; createdAt: Date; type: "data" | "link" | "chart" | "file" | "image" | "document" | "preview"; data?: { format: "png" | "jpeg" | "gif" | "webp" | "svg"; width: number; height: number; artifactType: "image"; base64?: string | undefined; } | ... 6 more ... | undef...'.
+server/agent/agentPipeline.ts(666,36): error TS2339: Property 'overallSuccess' does not exist on type '{ issues: { id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }[]; ... 7 more ...; gapsRequiringResearch: { ...; }[]; }'.
+server/agent/agentPipeline.ts(667,40): error TS2339: Property 'confidence' does not exist on type '{ issues: { id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }[]; ... 7 more ...; gapsRequiringResearch: { ...; }[]; }'.
+server/agent/agentPipeline.ts(668,37): error TS2339: Property 'summary' does not exist on type '{ issues: { id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }[]; ... 7 more ...; gapsRequiringResearch: { ...; }[]; }'.
+server/agent/agentPipeline.ts(669,39): error TS2339: Property 'overallSuccess' does not exist on type '{ issues: { id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }[]; ... 7 more ...; gapsRequiringResearch: { ...; }[]; }'.
+server/agent/agentPipeline.ts(670,9): error TS2322: Type '{ id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }[]' is not assignable to type 'string[]'.
+  Type '{ id: string; description: string; type: "unsupported_claim" | "missing_citation" | "invalid_artifact" | "incomplete_coverage" | "conflicting_sources" | "stale_data" | "low_confidence"; ... 4 more ...; affectedStepIndex?: number | undefined; }' is not assignable to type 'string'.
+server/agent/agentPipeline.ts(735,50): error TS2345: Argument of type '{ stepIndex?: number | undefined; tool_name?: string | undefined; command?: string | undefined; output_snippet?: string | undefined; status?: string | undefined; phase?: string | undefined; ... 5 more ...; metadata?: Record<...> | undefined; }' is not assignable to parameter of type 'Partial<Omit<{ event_type: "error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | ... 20 more ... | "heartbeat"; ... 23 more ...; memory?: { ...; } | undefined; }, "event_type" | ... 1 more ... | "timestamp">>'.
+  Types of property 'status' are incompatible.
+    Type 'string | undefined' is not assignable to type '"pending" | "failed" | "running" | "completed" | "cancelled" | "retrying" | undefined'.
+      Type 'string' is not assignable to type '"pending" | "failed" | "running" | "completed" | "cancelled" | "retrying" | undefined'.
+server/agent/artifactRenderer.ts(155,39): error TS2339: Property 'lang' does not exist on type 'PptxGenJS'.
+server/agent/artifactRenderer.ts(227,15): error TS2339: Property 'transition' does not exist on type 'Slide'.
+server/agent/artifactRenderer.ts(593,58): error TS2353: Object literal may only specify known properties, and 'bold' does not exist in type 'IParagraphOptions'.
+server/agent/artifactRenderer.ts(912,5): error TS2322: Type '"none"' is not assignable to type 'BorderStyle'.
+server/agent/artifactRenderer.ts(917,5): error TS2322: Type '{ argb: string; } | undefined' is not assignable to type 'Partial<Color>'.
+  Type 'undefined' is not assignable to type 'Partial<Color>'.
+server/agent/artifactRenderer.ts(963,46): error TS2345: Argument of type '"artifact_validation_failed"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/artifactRenderer.ts(976,46): error TS2345: Argument of type '"tool_start"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/artifactRenderer.ts(1020,9): error TS2353: Object literal may only specify known properties, and 'path' does not exist in type '{ name: string; type: string; id?: string | undefined; data?: any; size?: number | undefined; mimeType?: string | undefined; url?: string | undefined; }'.
+server/agent/artifactRenderer.ts(1031,46): error TS2345: Argument of type '"tool_end"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/artifactRenderer.ts(1050,7): error TS2322: Type 'string' is not assignable to type '{ message: string; code?: string | undefined; retryable?: boolean | undefined; }'.
+server/agent/builderSpec.ts(215,14): error TS7022: 'DocSectionSchema' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+server/agent/builderSpec.ts(222,23): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+server/agent/builderSpec.ts(492,14): error TS2322: Type 'ZodObject<{ id: ZodDefault<ZodString>; type: ZodEnum<["container", "text", "heading", "button", "input", "textarea", "select", "checkbox", "radio", "slider", ... 16 more ..., "flex"]>; props: ZodDefault<...>; events: ZodOptional<...>; conditionalRender: ZodOptional<...>; style: ZodOptional<...>; } & { ...; }, "strip...' is not assignable to type 'ZodType<Component, ZodTypeDef, Component>'.
+  Types of property '_input' are incompatible.
+    Type '{ type: "icon" | "table" | "select" | "input" | "text" | "chart" | "progress" | "button" | "form" | "textarea" | "image" | "switch" | "alert" | "checkbox" | "grid" | "heading" | "list" | ... 9 more ... | "accordion"; ... 5 more ...; conditionalRender?: { ...; } | undefined; }' is not assignable to type 'Component'.
+      Type '{ type: "icon" | "table" | "select" | "input" | "text" | "chart" | "progress" | "button" | "form" | "textarea" | "image" | "switch" | "alert" | "checkbox" | "grid" | "heading" | "list" | ... 9 more ... | "accordion"; ... 5 more ...; conditionalRender?: { ...; } | undefined; }' is not assignable to type '{ id: string; type: "icon" | "table" | "select" | "input" | "text" | "chart" | "progress" | "button" | "form" | "textarea" | "image" | "switch" | "alert" | "checkbox" | "grid" | "heading" | ... 10 more ... | "accordion"; props: Record<...>; style?: Record<...> | undefined; events?: Record<...> | undefined; condition...'.
+        Types of property 'id' are incompatible.
+          Type 'string | undefined' is not assignable to type 'string'.
+            Type 'undefined' is not assignable to type 'string'.
+server/agent/enhancedArtifactRenderer.ts(15,5): error TS2614: Module '"../services/pptTemplateEngine"' has no exported member 'getTheme'. Did you mean to use 'import getTheme from "../services/pptTemplateEngine"' instead?
+server/agent/enhancedArtifactRenderer.ts(18,5): error TS2614: Module '"../services/pptTemplateEngine"' has no exported member 'formatBulletsWithIcons'. Did you mean to use 'import formatBulletsWithIcons from "../services/pptTemplateEngine"' instead?
+server/agent/enhancedArtifactRenderer.ts(55,39): error TS2339: Property 'lang' does not exist on type 'PptxGenJS'.
+server/agent/enhancedArtifactRenderer.ts(80,40): error TS2339: Property 'title' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(129,40): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(131,40): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(139,36): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(141,36): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(176,36): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(206,32): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(208,32): error TS2339: Property 'content' does not exist on type 'SlideLayoutConfig'.
+server/agent/enhancedArtifactRenderer.ts(219,80): error TS2345: Argument of type 'string' is not assignable to parameter of type 'string[]'.
+server/agent/enhancedArtifactRenderer.ts(295,34): error TS2339: Property 'background' does not exist on type '{ titleSlide: SlideStyle; contentSlide: SlideStyle; sectionSlide: SlideStyle; closingSlide: SlideStyle; }'.
+server/agent/enhancedArtifactRenderer.ts(323,43): error TS2554: Expected 1 arguments, but got 2.
+server/agent/eventBus.ts(98,9): error TS2416: Property 'emit' in type 'AgentEventBus' is not assignable to the same property in base type 'EventEmitter<DefaultEventMap>'.
+  Type '(runId: string, eventType: "error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | ... 20 more ... | "heartbeat", options?: Partial<...> | undefined) => Promise<...>' is not assignable to type '<K>(eventName: string | symbol, ...args: AnyRest) => boolean'.
+    Type 'Promise<{ event_type: "error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | ... 19 more ... | "heartbeat"; ... 23 more ...; memory?: { ...; } | undefined; }>' is not assignable to type 'boolean'.
+server/agent/langgraph/agents/OrchestratorAgent.ts(149,46): error TS2345: Argument of type '{ id: string; type: string; description: string; input: Record<string, any>; priority: any; }' is not assignable to parameter of type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }'.
+  Type '{ id: string; type: string; description: string; input: Record<string, any>; priority: any; }' is missing the following properties from type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }': retries, maxRetries
+server/agent/langgraph/index.ts(109,24): error TS2345: Argument of type '"planner"' is not assignable to parameter of type '"__end__" | "__start__"'.
+server/agent/langgraph/index.ts(111,29): error TS2345: Argument of type '"planner"' is not assignable to parameter of type '"__start__"'.
+server/agent/langgraph/index.ts(117,29): error TS2345: Argument of type '"executor"' is not assignable to parameter of type '"__start__"'.
+server/agent/langgraph/index.ts(123,29): error TS2345: Argument of type '"verifier"' is not assignable to parameter of type '"__start__"'.
+server/agent/langgraph/index.ts(129,17): error TS2345: Argument of type '"responder"' is not assignable to parameter of type '"__start__" | "__start__"[]'.
+server/agent/langgraph/index.ts(132,31): error TS2345: Argument of type '"human_approval"' is not assignable to parameter of type '"__start__"'.
+server/agent/langgraph/memory.ts(16,14): error TS2515: Non-abstract class 'PostgresCheckpointer' does not implement inherited abstract member deleteThread from class 'BaseCheckpointSaver<number>'.
+server/agent/langgraph/memory.ts(324,54): error TS2345: Argument of type '{}' is not assignable to parameter of type 'SerializerProtocol'.
+  Type '{}' is missing the following properties from type 'SerializerProtocol': dumpsTyped, loadsTyped
+server/agent/langgraph/nodes.ts(35,39): error TS7006: Parameter 'e' implicitly has an 'any' type.
+server/agent/langgraph/nodes.ts(187,18): error TS2339: Property 'function' does not exist on type 'ChatCompletionMessageToolCall'.
+  Property 'function' does not exist on type 'ChatCompletionMessageCustomToolCall'.
+server/agent/langgraph/nodes.ts(188,29): error TS2339: Property 'function' does not exist on type 'ChatCompletionMessageToolCall'.
+  Property 'function' does not exist on type 'ChatCompletionMessageCustomToolCall'.
+server/agent/langgraph/nodes.ts(255,47): error TS2345: Argument of type 'DynamicStructuredTool<ZodObject<{ content: ZodString; namespace: ZodDefault<ZodOptional<ZodString>>; metadata: ZodOptional<ZodRecord<ZodString, ZodUnknown>>; }, "strip", ZodTypeAny, { ...; }, { ...; }>, { ...; }, { ...; }, string> | ... 98 more ... | DynamicStructuredTool<...>' is not assignable to parameter of type 'DynamicStructuredTool<any, unknown, unknown, any>'.
+  Type 'DynamicStructuredTool<ZodObject<{ content: ZodString; namespace: ZodDefault<ZodOptional<ZodString>>; metadata: ZodOptional<ZodRecord<ZodString, ZodUnknown>>; }, "strip", ZodTypeAny, { ...; }, { ...; }>, { ...; }, { ...; }, string>' is not assignable to type 'DynamicStructuredTool<any, unknown, unknown, any>'.
+    Type 'unknown' is not assignable to type '{ content: string; namespace: string; metadata?: Record<string, unknown> | undefined; }'.
+server/agent/langgraph/nodes.ts(281,33): error TS2349: This expression is not callable.
+  Each member of the union type '(<TInput extends StructuredToolCallInput<ZodObject<{ action: ZodEnum<["set", "get", "delete", "list"]>; sessionId: ZodOptional<ZodString>; key: ZodOptional<ZodString>; value: ZodOptional<...>; ttlSeconds: ZodOptional<...>; }, "strip", ZodTypeAny, { ...; }, { ...; }>, { ...; }>, TConfig extends ToolRunnableConfig | u...' has signatures, but none of those signatures are compatible with each other.
+server/agent/michat-v3/execution/toolRunner.ts(83,73): error TS7006: Parameter 'i' implicitly has an 'any' type.
+server/agent/michat-v3/index.ts(194,35): error TS2345: Argument of type '(p: Record<string, unknown>) => void' is not assignable to parameter of type 'EventHandler'.
+  Types of parameters 'p' and 'payload' are incompatible.
+    Type 'unknown' is not assignable to type 'Record<string, unknown>'.
+server/agent/michat-v3/integration/adapter.ts(143,56): error TS2345: Argument of type '"tool_start"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/michat-v3/integration/adapter.ts(150,56): error TS2345: Argument of type '"tool_end"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/michat-v3/integration/adapter.ts(158,56): error TS2345: Argument of type '"tool_end"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/michat-v3/integration/adapter.ts(167,56): error TS2345: Argument of type '"planning_start"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/michat-v3/integration/adapter.ts(174,56): error TS2345: Argument of type '"run_complete"' is not assignable to parameter of type '"error" | "done" | "tool_output" | "observation" | "verification" | "thinking" | "cancelled" | "task_start" | "plan_created" | "plan_step" | "step_started" | "tool_call" | "tool_call_started" | ... 18 more ... | "heartbeat"'.
+server/agent/orchestration/activityStream.ts(274,29): error TS2339: Property 'details' does not exist on type '{ message: string; code?: string | undefined; retryable?: boolean | undefined; }'.
+server/agent/orchestration/supervisorAgent.ts(544,59): error TS2345: Argument of type '{ id: string; type: string; description: string; input: { previousResults: Record<string, any>; sharedMemory: Record<string, any>; }; priority: "medium" | "high" | "low"; }' is not assignable to parameter of type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }'.
+  Type '{ id: string; type: string; description: string; input: { previousResults: Record<string, any>; sharedMemory: Record<string, any>; }; priority: "medium" | "high" | "low"; }' is missing the following properties from type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }': retries, maxRetries
+server/agent/pipeline/engine.ts(119,40): error TS18048: 'lastResult.output.artifacts.length' is possibly 'undefined'.
+server/agent/pipeline/engine.ts(120,26): error TS18048: 'lastResult' is possibly 'undefined'.
+server/agent/pipeline/engine.ts(120,26): error TS18048: 'lastResult.output' is possibly 'undefined'.
+server/agent/pipeline/engine.ts(120,26): error TS2345: Argument of type 'Artifact[] | undefined' is not assignable to parameter of type 'Artifact[]'.
+  Type 'undefined' is not assignable to type 'Artifact[]'.
+server/agent/pipeline/tools/slides-generate.ts(194,65): error TS2741: Property 'description' is missing in type '{ type: "string"; }' but required in type 'ParameterSchema'.
+server/agent/pipelines/agenticPipeline.ts(735,54): error TS2345: Argument of type '5' is not assignable to parameter of type '50'.
+server/agent/pipelines/agenticPipeline.ts(745,48): error TS2345: Argument of type '5' is not assignable to parameter of type '50'.
+server/agent/pipelines/deterministicPipeline.ts(456,59): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/agent/pipelines/deterministicPipeline.ts(476,51): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/agent/pipelines/deterministicPipeline.ts(572,41): error TS2339: Property 'complete' does not exist on type 'LLMGateway'.
+server/agent/pipelines/deterministicPipeline.ts(727,13): error TS2554: Expected 1 arguments, but got 2.
+server/agent/pipelines/documentAgenticPipeline.ts(1396,23): error TS2322: Type '{ type: "containsText"; operator: "containsText"; text: string; style: { fill: { type: "pattern"; pattern: "solid"; bgColor: { argb: string; }; }; }; }' is not assignable to type 'ConditionalFormattingRule'.
+  Property 'priority' is missing in type '{ type: "containsText"; operator: "containsText"; text: string; style: { fill: { type: "pattern"; pattern: "solid"; bgColor: { argb: string; }; }; }; }' but required in type 'ContainsTextRuleType'.
+server/agent/pipelines/documentAgenticPipeline.ts(1622,59): error TS2345: Argument of type '10' is not assignable to parameter of type '50'.
+server/agent/pipelines/documentAgenticPipeline.ts(1626,49): error TS2345: Argument of type '10' is not assignable to parameter of type '50'.
+server/agent/production/analysisAgent.ts(305,50): error TS7006: Parameter 'kw' implicitly has an 'any' type.
+server/agent/production/blueprintAgent.ts(27,14): error TS7022: 'SectionSchema' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+server/agent/production/blueprintAgent.ts(50,30): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+server/agent/production/consistencyAgent.ts(65,15): error TS2739: Type '{ name: string; description: string; model: string; systemPrompt: string; tools: never[]; maxIterations: number; }' is missing the following properties from type 'BaseAgentConfig': temperature, maxTokens, timeout
+server/agent/production/consistencyAgent.ts(100,17): error TS2353: Object literal may only specify known properties, and 'metadata' does not exist in type '{ success: boolean; duration: number; taskId: string; agentId: string; error?: string | undefined; tokensUsed?: number | undefined; output?: any; toolCalls?: { input: Record<string, any>; duration: number; tool: string; output?: any; }[] | undefined; }'.
+server/agent/production/consistencyAgent.ts(111,17): error TS2353: Object literal may only specify known properties, and 'metadata' does not exist in type '{ success: boolean; duration: number; taskId: string; agentId: string; error?: string | undefined; tokensUsed?: number | undefined; output?: any; toolCalls?: { input: Record<string, any>; duration: number; tool: string; output?: any; }[] | undefined; }'.
+server/agent/production/consistencyAgent.ts(182,17): error TS2322: Type '{ type: "mismatch" | "missing" | "contradiction" | "orphan"; description: string; locations: string[]; }[]' is not assignable to type '{ type: "mismatch" | "missing" | "contradiction"; description: string; locations: string[]; }[]'.
+  Type '{ type: "mismatch" | "missing" | "contradiction" | "orphan"; description: string; locations: string[]; }' is not assignable to type '{ type: "mismatch" | "missing" | "contradiction"; description: string; locations: string[]; }'.
+    Types of property 'type' are incompatible.
+      Type '"mismatch" | "missing" | "contradiction" | "orphan"' is not assignable to type '"mismatch" | "missing" | "contradiction"'.
+        Type '"orphan"' is not assignable to type '"mismatch" | "missing" | "contradiction"'.
+server/agent/production/consistencyAgent.ts(462,32): error TS2353: Object literal may only specify known properties, and 'documents' does not exist in type 'ZodType<any, ZodTypeDef, any>'.
+server/agent/production/consistencyAgent.ts(463,33): error TS2353: Object literal may only specify known properties, and 'report' does not exist in type 'ZodType<any, ZodTypeDef, any>'.
+server/agent/production/consistencyAgent.ts(468,32): error TS2353: Object literal may only specify known properties, and 'claims' does not exist in type 'ZodType<any, ZodTypeDef, any>'.
+server/agent/production/consistencyAgent.ts(469,33): error TS2353: Object literal may only specify known properties, and 'traceMap' does not exist in type 'ZodType<any, ZodTypeDef, any>'.
+server/agent/production/observability.ts(318,56): error TS18048: 'filter.since' is possibly 'undefined'.
+server/agent/production/observability.ts(439,56): error TS18048: 'filter.since' is possibly 'undefined'.
+server/agent/production/workOrderProcessor.ts(19,10): error TS2305: Module '"./types"' has no exported member 'RouterResult'.
+server/agent/production/workOrderProcessor.ts(133,22): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Record<"plan" | "presentation" | "executive_summary" | "analysis" | "report" | "thesis" | "comparison" | "audit" | "proposal", IntentDefaults>'.
+server/agent/production/writingAgent.ts(371,37): error TS7006: Parameter 'kw' implicitly has an 'any' type.
+server/agent/promptUnderstanding/extractor.ts(67,34): error TS2345: Argument of type '{ id: string; verb: string; object: string; params: never[]; dependencies: never[]; }' is not assignable to parameter of type '{ id: string; params: { name: string; source: "default" | "explicit" | "inferred"; value?: any; }[]; dependencies: string[]; verb: string; tool_hints: string[]; object?: string | undefined; }'.
+  Property 'tool_hints' is missing in type '{ id: string; verb: string; object: string; params: never[]; dependencies: never[]; }' but required in type '{ id: string; params: { name: string; source: "default" | "explicit" | "inferred"; value?: any; }[]; dependencies: string[]; verb: string; tool_hints: string[]; object?: string | undefined; }'.
+server/agent/promptUnderstanding/llmExtractor.ts(272,37): error TS2345: Argument of type '{ id: `${string}-${string}-${string}-${string}-${string}`; verb: string; object: string; params: never[]; dependencies: never[]; }' is not assignable to parameter of type '{ id: string; params: { name: string; source: "default" | "explicit" | "inferred"; value?: any; }[]; dependencies: string[]; verb: string; tool_hints: string[]; object?: string | undefined; }'.
+  Property 'tool_hints' is missing in type '{ id: `${string}-${string}-${string}-${string}-${string}`; verb: string; object: string; params: never[]; dependencies: never[]; }' but required in type '{ id: string; params: { name: string; source: "default" | "explicit" | "inferred"; value?: any; }[]; dependencies: string[]; verb: string; tool_hints: string[]; object?: string | undefined; }'.
+server/agent/promptUnderstanding/telemetry.ts(166,58): error TS18048: 'filter.since' is possibly 'undefined'.
+server/agent/registry/agentGovernance.ts(214,117): error TS2345: Argument of type 'AgentGovernanceStateType' is not assignable to parameter of type '"executing" | "planning" | "verifying"'.
+  Type '"failed"' is not assignable to type '"executing" | "planning" | "verifying"'.
+server/agent/registry/orchestrator.ts(274,17): error TS2739: Type '{ id: string; type: string; description: any; input: Record<string, any>; }' is missing the following properties from type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }': priority, retries, maxRetries
+server/agent/registry/orchestrator.ts(350,11): error TS2739: Type '{ id: `${string}-${string}-${string}-${string}-${string}`; type: "code" | "security" | "document" | "research" | "communication" | "data_analysis" | "orchestration" | "browsing" | "testing" | "content_creation"; description: string; input: { ...; }; }' is missing the following properties from type '{ id: string; description: string; type: string; priority: "medium" | "high" | "low" | "critical"; input: Record<string, any>; retries: number; maxRetries: number; timeout?: number | undefined; }': priority, retries, maxRetries
+server/agent/registry/productionWorkflowRunner.ts(509,13): error TS2367: This comparison appears to be unintentional because the types '"running"' and '"cancelled"' have no overlap.
+server/agent/registry/productionWorkflowRunner.ts(509,43): error TS2367: This comparison appears to be unintentional because the types '"running"' and '"timeout"' have no overlap.
+server/agent/registry/registerTools.ts(49,5): error TS2739: Type '{ name: string; description: string; category: "Document" | "Database" | "Security" | "API" | "Web" | "Data" | "Generation" | "Processing" | "Development" | "Diagram" | "Productivity" | ... 7 more ... | "AdvancedSystem"; ... 4 more ...; requiresCredentials: string[]; }' is missing the following properties from type '{ name: string; description: string; tags: string[]; category: string; version: string; author: string; deprecated: boolean; experimental: boolean; implementationStatus: "disabled" | "implemented" | "stub"; requiresCredentials: string[]; }': deprecated, experimental
+server/agent/registry/registerTools.ts(378,64): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+server/agent/registry/registerTools.ts(444,39): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(splitter: { [Symbol.split](string: string, limit?: number | undefined): string[]; }, limit?: number | undefined): string[]', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type '{ [Symbol.split](string: string, limit?: number | undefined): string[]; }'.
+      Type 'undefined' is not assignable to type '{ [Symbol.split](string: string, limit?: number | undefined): string[]; }'.
+  Overload 2 of 2, '(separator: string | RegExp, limit?: number | undefined): string[]', gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'string | RegExp'.
+      Type 'undefined' is not assignable to type 'string | RegExp'.
+server/agent/registry/registerTools.ts(943,38): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+server/agent/registry/registerTools.ts(969,27): error TS18048: 'input.length' is possibly 'undefined'.
+server/agent/registry/registerTools.ts(1216,34): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(iterable: Iterable<unknown> | ArrayLike<unknown>, mapfn: (v: unknown, k: number) => `${string}-${string}-${string}-${string}-${string}`, thisArg?: any): `${string}-${string}-${string}-${string}-${string}`[]', gave the following error.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+  Overload 2 of 4, '(arrayLike: ArrayLike<unknown>, mapfn: (v: unknown, k: number) => `${string}-${string}-${string}-${string}-${string}`, thisArg?: any): `${string}-${string}-${string}-${string}-${string}`[]', gave the following error.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/runController.ts(951,9): error TS2322: Type '{ id: string; runId: string; stepIndex: number; toolName: string; description: string; status: "pending" | "running" | "succeeded" | "failed" | "skipped"; input: unknown; output: unknown; error: string | undefined; startedAt: Date | undefined; completedAt: Date | undefined; retryCount: number; }[]' is not assignable to type '{ id: string; status: "pending" | "succeeded" | "failed" | "running" | "verifying" | "cancelled" | "skipped"; description: string; retryCount: number; runId: string; toolName: string; input: Record<...>; ... 6 more ...; durationMs?: number | undefined; }[]'.
+  Type '{ id: string; runId: string; stepIndex: number; toolName: string; description: string; status: "pending" | "running" | "succeeded" | "failed" | "skipped"; input: unknown; output: unknown; error: string | undefined; startedAt: Date | undefined; completedAt: Date | undefined; retryCount: number; }' is not assignable to type '{ id: string; status: "pending" | "succeeded" | "failed" | "running" | "verifying" | "cancelled" | "skipped"; description: string; retryCount: number; runId: string; toolName: string; input: Record<...>; ... 6 more ...; durationMs?: number | undefined; }'.
+    Types of property 'input' are incompatible.
+      Type 'unknown' is not assignable to type 'Record<string, any>'.
+server/agent/sandbox/documentCreator.ts(118,65): error TS2694: Namespace '"/Users/ale/Desktop/Iliagptcom/node_modules/pptxgenjs/types/index"' has no exported member 'CHART_NAME'.
+server/agent/sandbox/documentCreator.ts(119,48): error TS2694: Namespace '"/Users/ale/Desktop/Iliagptcom/node_modules/pptxgenjs/types/index"' has no exported member 'CHART_NAME'.
+server/agent/sandbox/documentCreator.ts(288,40): error TS2694: Namespace '"/Users/ale/Desktop/Iliagptcom/node_modules/pptxgenjs/types/index"' has no exported member 'OptsChartData'.
+server/agent/sandbox/fileManager.ts(4,23): error TS7016: Could not find a declaration file for module 'mime-types'. '/Users/ale/Desktop/Iliagptcom/node_modules/mime-types/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/mime-types` if it exists or add a new declaration (.d.ts) file containing `declare module 'mime-types';`
+server/agent/sandbox/fileManager.ts(49,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(65,9): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(67,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(79,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(84,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(102,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(109,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(121,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(128,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(146,9): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(148,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(155,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(162,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(173,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(187,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { items: { name: string; path: string; size: number; mimeType: string | null; extension: string; permissions: string; modified: Date | null; created: Date | null; isFile: boolean; isDir: boolean; }[]; count: number; pattern: string | undefined; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(195,9): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(197,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(247,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { exists: boolean; isFile: boolean; isDir: boolean; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(254,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { exists: boolean; isFile: boolean; isDir: boolean; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(266,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(272,9): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(274,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { name: string; path: string; size: number; mimeType: string | null; extension: string; permissions: string; modified: Date | null; created: Date | null; isFile: boolean; isDir: boolean; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(276,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(305,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(325,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(350,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(364,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(374,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: T; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(376,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(385,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(397,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(426,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { results: { name: string; path: string; size: number; mimeType: string | null; extension: string; permissions: string; modified: Date | null; created: Date | null; isFile: boolean; isDir: boolean; }[]; count: number; pattern: string; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(433,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(440,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(465,7): error TS2741: Property 'message' is missing in type '{ success: true; operation: string; path: string; data: { totalSize: number; totalSizeHuman: string; fileCount: number; dirCount: number; }; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/fileManager.ts(477,7): error TS2741: Property 'message' is missing in type '{ success: false; operation: string; path: string; error: string; }' but required in type '{ path: string; message: string; success: boolean; operation: string; data?: any; error?: string | undefined; }'.
+server/agent/sandbox/tools.ts(891,42): error TS2339: Property 'success' does not exist on type 'ImageGenerationResult'.
+server/agent/sandbox/tools.ts(891,65): error TS2339: Property 'imageUrl' does not exist on type 'ImageGenerationResult'.
+server/agent/sandbox/tools.ts(894,34): error TS2339: Property 'imageUrl' does not exist on type 'ImageGenerationResult'.
+server/agent/sandbox/tools.ts(901,66): error TS2339: Property 'error' does not exist on type 'ImageGenerationResult'.
+server/agent/superAgent/academicPipeline.ts(475,24): error TS2367: This comparison appears to be unintentional because the types '"scopus" | "semantic_scholar"' and '"semanticscholar"' have no overlap.
+server/agent/superAgent/scopusClient.ts(402,3): error TS2322: Type '{ id: string; url: string; title: string; snippet: string; domain: string; score: number; fetched: true; content: string; claims: never[]; scopusData: ScopusArticle; }[]' is not assignable to type '{ id: string; title: string; score: number; url: string; domain: string; snippet: string; fetched: boolean; content?: string | undefined; verified?: boolean | undefined; claims?: string[] | undefined; scopusData?: Record<...> | undefined; }[]'.
+  Type '{ id: string; url: string; title: string; snippet: string; domain: string; score: number; fetched: true; content: string; claims: never[]; scopusData: ScopusArticle; }' is not assignable to type '{ id: string; title: string; score: number; url: string; domain: string; snippet: string; fetched: boolean; content?: string | undefined; verified?: boolean | undefined; claims?: string[] | undefined; scopusData?: Record<...> | undefined; }'.
+    Types of property 'scopusData' are incompatible.
+      Type 'ScopusArticle' is not assignable to type 'Record<string, unknown>'.
+        Index signature for type 'string' is missing in type 'ScopusArticle'.
+server/agent/superAgent/signalsPipeline.ts(112,59): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/agent/superAgent/tracing/TraceBus.ts(321,9): error TS2353: Object literal may only specify known properties, and 'queries_current' does not exist in type '{ latency_ms?: number | undefined; articles_collected?: number | undefined; articles_verified?: number | undefined; articles_accepted?: number | undefined; tokens?: number | undefined; cost?: number | undefined; http_status?: number | undefined; bytes_in?: number | undefined; bytes_out?: number | undefined; }'.
+server/agent/teamOrchestrator.ts(151,17): error TS2322: Type 'TaskPlan' is not assignable to type '{ status: "executing"; id: string; originalQuery: string; goal: string; subtasks: SubTask[]; createdAt: Date; progress: number; }'.
+  Types of property 'status' are incompatible.
+    Type '"executing" | "failed" | "planning" | "completed"' is not assignable to type '"executing"'.
+      Type '"failed"' is not assignable to type '"executing"'.
+server/agent/unifiedChatHandler.ts(96,7): error TS2322: Type 'string[]' is not assignable to type '("unknown" | "research" | "chat" | "data_analysis" | "code_generation" | "spreadsheet_creation" | "document_generation" | "presentation_creation" | "web_automation" | "document_analysis" | "multi_step_task" | "image_generation")[]'.
+  Type 'string' is not assignable to type '"unknown" | "research" | "chat" | "data_analysis" | "code_generation" | "spreadsheet_creation" | "document_generation" | "presentation_creation" | "web_automation" | "document_analysis" | "multi_step_task" | "image_generation"'.
+server/agent/unifiedChatHandler.ts(222,5): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+server/agent/unifiedChatHandler.ts(348,19): error TS2339: Property 'type' does not exist on type 'StreamChunk'.
+server/agent/unifiedChatHandler.ts(371,26): error TS2339: Property 'type' does not exist on type 'StreamChunk'.
+server/agent/unifiedChatHandler.ts(373,26): error TS2339: Property 'type' does not exist on type 'StreamChunk'.
+server/agent/unifiedChatHandler.ts(374,33): error TS2339: Property 'error' does not exist on type 'StreamChunk'.
+server/agent/webtool/browserAdapter.ts(62,11): error TS2322: Type '{ url: string; options?: { timeout?: number | undefined; viewport?: { width?: number | undefined; height?: number | undefined; } | undefined; extractContent?: boolean | undefined; takeScreenshot?: boolean | undefined; waitForSelector?: string | undefined; waitForNetworkIdle?: boolean | undefined; waitStrategy?: "loa...' is not assignable to type '{ url: string; options?: { timeout: number; extractContent: boolean; takeScreenshot: boolean; waitForNetworkIdle: boolean; waitStrategy: "load" | "domcontentloaded" | "networkidle" | "commit"; viewport?: { ...; } | undefined; waitForSelector?: string | undefined; scrollPagination?: { ...; } | undefined; } | undefine...'.
+  Types of property 'options' are incompatible.
+    Type '{ timeout?: number | undefined; viewport?: { width?: number | undefined; height?: number | undefined; } | undefined; extractContent?: boolean | undefined; takeScreenshot?: boolean | undefined; waitForSelector?: string | undefined; waitForNetworkIdle?: boolean | undefined; waitStrategy?: "load" | ... 3 more ... | und...' is not assignable to type '{ timeout: number; extractContent: boolean; takeScreenshot: boolean; waitForNetworkIdle: boolean; waitStrategy: "load" | "domcontentloaded" | "networkidle" | "commit"; viewport?: { ...; } | undefined; waitForSelector?: string | undefined; scrollPagination?: { ...; } | undefined; } | undefined'.
+      Type '{ timeout?: number | undefined; viewport?: { width?: number | undefined; height?: number | undefined; } | undefined; extractContent?: boolean | undefined; takeScreenshot?: boolean | undefined; waitForSelector?: string | undefined; waitForNetworkIdle?: boolean | undefined; waitStrategy?: "load" | ... 3 more ... | und...' is not assignable to type '{ timeout: number; extractContent: boolean; takeScreenshot: boolean; waitForNetworkIdle: boolean; waitStrategy: "load" | "domcontentloaded" | "networkidle" | "commit"; viewport?: { ...; } | undefined; waitForSelector?: string | undefined; scrollPagination?: { ...; } | undefined; }'.
+        Types of property 'timeout' are incompatible.
+          Type 'number | undefined' is not assignable to type 'number'.
+            Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/fastFirstPipeline.ts(358,27): error TS2554: Expected 3-5 arguments, but got 2.
+server/agent/webtool/fastFirstPipeline.ts(464,23): error TS2554: Expected 3-5 arguments, but got 2.
+server/agent/webtool/fastFirstPipeline.ts(540,7): error TS2353: Object literal may only specify known properties, and 'metadata' does not exist in type 'StepMetrics'.
+server/agent/webtool/fetchAdapter.ts(62,11): error TS2322: Type '{ url: string; options?: { retries?: number | undefined; headers?: Record<string, string> | undefined; timeout?: number | undefined; respectRobotsTxt?: boolean | undefined; followRedirects?: boolean | undefined; maxRedirects?: number | undefined; } | undefined; }' is not assignable to type '{ url: string; options?: { retries: number; timeout: number; respectRobotsTxt: boolean; followRedirects: boolean; maxRedirects: number; headers?: Record<string, string> | undefined; } | undefined; }'.
+  Types of property 'options' are incompatible.
+    Type '{ retries?: number | undefined; headers?: Record<string, string> | undefined; timeout?: number | undefined; respectRobotsTxt?: boolean | undefined; followRedirects?: boolean | undefined; maxRedirects?: number | undefined; } | undefined' is not assignable to type '{ retries: number; timeout: number; respectRobotsTxt: boolean; followRedirects: boolean; maxRedirects: number; headers?: Record<string, string> | undefined; } | undefined'.
+      Type '{ retries?: number | undefined; headers?: Record<string, string> | undefined; timeout?: number | undefined; respectRobotsTxt?: boolean | undefined; followRedirects?: boolean | undefined; maxRedirects?: number | undefined; }' is not assignable to type '{ retries: number; timeout: number; respectRobotsTxt: boolean; followRedirects: boolean; maxRedirects: number; headers?: Record<string, string> | undefined; }'.
+        Types of property 'retries' are incompatible.
+          Type 'number | undefined' is not assignable to type 'number'.
+            Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/index.ts(49,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/index.ts(50,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+server/agent/webtool/index.ts(51,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+server/agent/webtool/index.ts(52,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+server/agent/webtool/index.ts(53,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+server/agent/webtool/index.ts(54,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/retrievalPipeline.ts(86,64): error TS18048: 'validated.maxResults' is possibly 'undefined'.
+server/agent/webtool/retrievalPipeline.ts(87,72): error TS18048: 'validated.maxResults' is possibly 'undefined'.
+server/agent/webtool/retrievalPipeline.ts(91,74): error TS18048: 'validated.maxResults' is possibly 'undefined'.
+server/agent/webtool/retrievalPipeline.ts(101,69): error TS2345: Argument of type '{ query: string; correlationId?: string | undefined; maxResults?: number | undefined; allowedDomains?: string[] | undefined; includeScholar?: boolean | undefined; preferBrowser?: boolean | undefined; extractReadable?: boolean | undefined; deduplicateByContent?: boolean | undefined; minQualityScore?: number | undefin...' is not assignable to parameter of type '{ query: string; maxResults: number; includeScholar: boolean; preferBrowser: boolean; extractReadable: boolean; deduplicateByContent: boolean; minQualityScore: number; correlationId?: string | undefined; allowedDomains?: string[] | undefined; blockedDomains?: string[] | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/retrievalPipeline.ts(106,67): error TS2345: Argument of type '{ query: string; correlationId?: string | undefined; maxResults?: number | undefined; allowedDomains?: string[] | undefined; includeScholar?: boolean | undefined; preferBrowser?: boolean | undefined; extractReadable?: boolean | undefined; deduplicateByContent?: boolean | undefined; minQualityScore?: number | undefin...' is not assignable to parameter of type '{ query: string; maxResults: number; includeScholar: boolean; preferBrowser: boolean; extractReadable: boolean; deduplicateByContent: boolean; minQualityScore: number; correlationId?: string | undefined; allowedDomains?: string[] | undefined; blockedDomains?: string[] | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/retrievalPipeline.ts(110,82): error TS2345: Argument of type '{ query: string; correlationId?: string | undefined; maxResults?: number | undefined; allowedDomains?: string[] | undefined; includeScholar?: boolean | undefined; preferBrowser?: boolean | undefined; extractReadable?: boolean | undefined; deduplicateByContent?: boolean | undefined; minQualityScore?: number | undefin...' is not assignable to parameter of type '{ query: string; maxResults: number; includeScholar: boolean; preferBrowser: boolean; extractReadable: boolean; deduplicateByContent: boolean; minQualityScore: number; correlationId?: string | undefined; allowedDomains?: string[] | undefined; blockedDomains?: string[] | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/retrievalPipeline.ts(112,64): error TS2345: Argument of type '{ query: string; correlationId?: string | undefined; maxResults?: number | undefined; allowedDomains?: string[] | undefined; includeScholar?: boolean | undefined; preferBrowser?: boolean | undefined; extractReadable?: boolean | undefined; deduplicateByContent?: boolean | undefined; minQualityScore?: number | undefin...' is not assignable to parameter of type '{ query: string; maxResults: number; includeScholar: boolean; preferBrowser: boolean; extractReadable: boolean; deduplicateByContent: boolean; minQualityScore: number; correlationId?: string | undefined; allowedDomains?: string[] | undefined; blockedDomains?: string[] | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/retrievalPipeline.ts(118,80): error TS18048: 'validated.minQualityScore' is possibly 'undefined'.
+server/agent/webtool/searchAdapter.ts(20,11): error TS2322: Type '{ query: string; locale?: string | undefined; maxResults?: number | undefined; includeScholar?: boolean | undefined; }' is not assignable to type '{ query: string; maxResults: number; includeScholar: boolean; locale?: string | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/searchAdapter.ts(27,55): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/agent/webtool/searchAdapter.ts(64,11): error TS2322: Type '{ query: string; locale?: string | undefined; maxResults?: number | undefined; includeScholar?: boolean | undefined; }' is not assignable to type '{ query: string; maxResults: number; includeScholar: boolean; locale?: string | undefined; }'.
+  Types of property 'maxResults' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+server/agent/webtool/searchAdapter.ts(71,59): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/agent/webtool/searchAdapter.ts(75,37): error TS2339: Property 'results' does not exist on type 'SearchResult[]'.
+server/agent/word-pipeline/documentSpec.ts(227,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(228,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(229,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(230,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(231,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(234,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(235,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(236,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(237,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(238,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(239,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(240,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(281,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "light"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(282,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(283,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(288,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(289,3): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/documentSpec.ts(350,42): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/evalHarness.ts(139,41): error TS2345: Argument of type '{ maxIterations: number; enableSemanticCache: boolean; }' is not assignable to parameter of type 'undefined'.
+server/agent/word-pipeline/index.ts(12,56): error TS2344: Type 'Function' does not satisfy the constraint '(...args: any) => any'.
+  Type 'Function' provides no match for the signature '(...args: any): any'.
+server/agent/word-pipeline/index.ts(37,39): error TS2345: Argument of type '{ maxIterations: number | undefined; enableSemanticCache: boolean | undefined; }' is not assignable to parameter of type 'undefined'.
+server/agent/word-pipeline/stages/documentPlanner.ts(18,47): error TS2749: 'SectionTypeSchema' refers to a value, but is being used as a type here. Did you mean 'typeof SectionTypeSchema'?
+server/agent/word-pipeline/stages/documentPlanner.ts(158,142): error TS2741: Property 'useFirstPerson' is missing in type '{ tone: "formal"; detailLevel: "brief"; includeCitations: false; }' but required in type '{ tone: "formal" | "academic" | "technical" | "conversational"; detailLevel: "detailed" | "standard" | "brief" | "comprehensive"; useFirstPerson: boolean; includeCitations: boolean; maxWords?: number | undefined; }'.
+server/agent/word-pipeline/stages/documentPlanner.ts(159,127): error TS2741: Property 'useFirstPerson' is missing in type '{ tone: "formal"; detailLevel: "standard"; includeCitations: true; }' but required in type '{ tone: "formal" | "academic" | "technical" | "conversational"; detailLevel: "detailed" | "standard" | "brief" | "comprehensive"; useFirstPerson: boolean; includeCitations: boolean; maxWords?: number | undefined; }'.
+server/agent/word-pipeline/stages/documentPlanner.ts(160,123): error TS2741: Property 'useFirstPerson' is missing in type '{ tone: "formal"; detailLevel: "detailed"; includeCitations: true; }' but required in type '{ tone: "formal" | "academic" | "technical" | "conversational"; detailLevel: "detailed" | "standard" | "brief" | "comprehensive"; useFirstPerson: boolean; includeCitations: boolean; maxWords?: number | undefined; }'.
+server/agent/word-pipeline/stages/documentPlanner.ts(161,129): error TS2741: Property 'useFirstPerson' is missing in type '{ tone: "formal"; detailLevel: "standard"; includeCitations: true; }' but required in type '{ tone: "formal" | "academic" | "technical" | "conversational"; detailLevel: "detailed" | "standard" | "brief" | "comprehensive"; useFirstPerson: boolean; includeCitations: boolean; maxWords?: number | undefined; }'.
+server/agent/word-pipeline/stages/evidenceBuilder.ts(36,55): error TS2345: Argument of type '10' is not assignable to parameter of type '50'.
+server/agent/word-pipeline/stages/evidenceBuilder.ts(73,67): error TS2345: Argument of type '5' is not assignable to parameter of type '50'.
+server/agent/word-pipeline/stages/evidenceBuilder.ts(81,30): error TS2551: Property 'author' does not exist on type 'SearchResult'. Did you mean 'authors'?
+server/agent/word-pipeline/stages/wordAssembler.ts(28,38): error TS2749: 'HeadingLevel' refers to a value, but is being used as a type here. Did you mean 'typeof HeadingLevel'?
+server/agent/word-pipeline/themeManager.ts(92,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(93,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(94,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(111,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "light"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(112,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(113,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(131,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(132,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(133,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(150,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(151,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(152,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(170,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(171,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(172,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(190,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(191,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "bold"; color: string; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/agent/word-pipeline/themeManager.ts(192,7): error TS2741: Property 'style' is missing in type '{ family: string; size: number; weight: "normal"; }' but required in type '{ size: number; style: "normal" | "italic"; weight: "bold" | "normal" | "light"; family: string; color?: string | undefined; }'.
+server/db.ts(126,15): error TS2503: Cannot find namespace 'pg'.
+server/etl/createTemplate.ts(26,21): error TS2345: Argument of type '{ file: string; chart: string; titles: string[]; fields: string[]; data: { 'Country A': { GDP: number; Population: number; Inflation: number; }; 'Country B': { GDP: number; Population: number; Inflation: number; }; 'Country C': { ...; }; }; chartTitle: string; }' is not assignable to parameter of type 'ChartOptions'.
+  Types of property 'chart' are incompatible.
+    Type 'string' is not assignable to type '"area" | "line" | "bar" | "pie" | "column" | "scatter" | "radar"'.
+server/integrations/calendarIntegration.ts(118,24): error TS7006: Parameter 'e' implicitly has an 'any' type.
+server/lib/circuitBreaker.ts(681,37): error TS2345: Argument of type '"CLOSED"' is not assignable to parameter of type 'CircuitState'.
+server/lib/circuitBreaker.ts(686,37): error TS2345: Argument of type '"HALF_OPEN"' is not assignable to parameter of type 'CircuitState'.
+server/lib/circuitBreaker.ts(691,37): error TS2345: Argument of type '"OPEN"' is not assignable to parameter of type 'CircuitState'.
+server/lib/conversationSummarizer.ts(66,39): error TS2339: Property 'sendMessage' does not exist on type 'LLMGateway'.
+server/lib/gracefulDegradation.ts(219,14): error TS2323: Cannot redeclare exported variable 'DegradationManager'.
+server/lib/gracefulDegradation.ts(824,3): error TS2323: Cannot redeclare exported variable 'DegradationManager'.
+server/lib/gracefulDegradation.ts(824,3): error TS2484: Export declaration conflicts with exported declaration of 'DegradationManager'.
+server/lib/gracefulModelFallback.ts(119,41): error TS2339: Property 'sendMessage' does not exist on type 'LLMGateway'.
+server/lib/modelWarmup.ts(39,24): error TS2339: Property 'sendMessage' does not exist on type 'LLMGateway'.
+server/lib/multiModelVerification.ts(58,20): error TS2339: Property 'sendMessage' does not exist on type 'LLMGateway'.
+server/lib/multiModelVerification.ts(185,20): error TS2339: Property 'sendMessage' does not exist on type 'LLMGateway'.
+server/lib/pareLogger.ts(143,7): error TS2698: Spread types may only be created from object types.
+server/lib/pareTracing.ts(22,26): error TS2693: 'Resource' only refers to a type, but is being used as a value here.
+server/lib/pareTracing.ts(38,16): error TS2339: Property 'addSpanProcessor' does not exist on type 'NodeTracerProvider'.
+server/lib/pareTracing.ts(41,16): error TS2339: Property 'addSpanProcessor' does not exist on type 'NodeTracerProvider'.
+server/lib/pareTracing.ts(188,3): error TS2322: Type '(this: Response, chunk: any, encoding: BufferEncoding, cb?: (() => void) | undefined) => Response' is not assignable to type '{ (cb?: (() => void) | undefined): Response<any, Record<string, any>>; (chunk: any, cb?: (() => void) | undefined): Response<any, Record<string, any>>; (chunk: any, encoding: BufferEncoding, cb?: (() => void) | undefined): Response<...>; }'.
+  Target signature provides too few arguments. Expected 2 or more, but got 1.
+server/lib/prefetchContext.ts(76,24): error TS2339: Property 'messages' does not exist on type '{ id: string; userId: string | null; title: string; gptId: string | null; archived: string | null; hidden: string | null; pinned: string | null; pinnedAt: Date | null; deletedAt: Date | null; ... 8 more ...; updatedAt: Date; }'.
+server/lib/prefetchContext.ts(80,27): error TS2339: Property 'messages' does not exist on type '{ id: string; userId: string | null; title: string; gptId: string | null; archived: string | null; hidden: string | null; pinned: string | null; pinnedAt: Date | null; deletedAt: Date | null; ... 8 more ...; updatedAt: Date; }'.
+server/lib/redisConversationCache.ts(24,25): error TS2769: No overload matches this call.
+  Overload 1 of 8, '(path: string, options: RedisOptions): Redis', gave the following error.
+    Object literal may only specify known properties, and 'retryDelayOnFailover' does not exist in type 'RedisOptions'.
+  Overload 2 of 8, '(port: number, options: RedisOptions): Redis', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'number'.
+  Overload 3 of 8, '(port: number, host: string): Redis', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'number'.
+server/lib/retryUtility.ts(189,36): error TS7016: Could not find a declaration file for module 'opossum'. '/Users/ale/Desktop/Iliagptcom/node_modules/opossum/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/opossum` if it exists or add a new declaration (.d.ts) file containing `declare module 'opossum';`
+server/lib/selfHealing.ts(211,14): error TS2323: Cannot redeclare exported variable 'SelfHealingManager'.
+server/lib/selfHealing.ts(715,10): error TS2323: Cannot redeclare exported variable 'SelfHealingManager'.
+server/lib/selfHealing.ts(715,10): error TS2484: Export declaration conflicts with exported declaration of 'SelfHealingManager'.
+server/lib/sentry.ts(71,37): error TS2307: Cannot find module '@sentry/node' or its corresponding type declarations.
+server/lib/sentry.ts(84,24): error TS7006: Parameter 'event' implicitly has an 'any' type.
+server/lib/telemetry.ts(84,42): error TS2307: Cannot find module '@opentelemetry/sdk-node' or its corresponding type declarations.
+server/lib/telemetry.ts(85,62): error TS2307: Cannot find module '@opentelemetry/auto-instrumentations-node' or its corresponding type declarations.
+server/lib/telemetry.ts(86,17): error TS2339: Property 'Resource' does not exist on type '{ default: typeof import("/Users/ale/Desktop/Iliagptcom/node_modules/@opentelemetry/resources/build/src/index"); detectResources: (config?: ResourceDetectionConfig | undefined) => Resource; ... 8 more ...; defaultServiceName: () => string; }'.
+server/lib/telemetry.ts(94,57): error TS2307: Cannot find module '@opentelemetry/exporter-jaeger' or its corresponding type declarations.
+server/lib/telemetry.ts(101,57): error TS2307: Cannot find module '@opentelemetry/exporter-zipkin' or its corresponding type declarations.
+server/middleware/userRateLimiter.ts(7,69): error TS2307: Cannot find module 'rate-limiter-flexible' or its corresponding type declarations.
+server/middleware/userRateLimiter.ts(127,46): error TS18046: 'error' is of type 'unknown'.
+server/middleware/userRateLimiter.ts(132,74): error TS18046: 'error' is of type 'unknown'.
+server/parsers/csvParser.ts(37,9): error TS2416: Property 'parse' in type 'CsvParser' is not assignable to the same property in base type 'FileParser'.
+  Type '(buffer: Buffer, filename: string) => Promise<CSVParseResult>' is not assignable to type '(content: Buffer, type: DetectedFileType) => Promise<ParsedResult>'.
+    Types of parameters 'filename' and 'type' are incompatible.
+      Type 'DetectedFileType' is not assignable to type 'string'.
+server/pipeline/clarificationPolicy.ts(133,7): error TS2741: Property 'maxAttempts' is missing in type '{ type: "context_unclear"; question: string; priority: "high"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/pipeline/clarificationPolicy.ts(160,7): error TS2741: Property 'maxAttempts' is missing in type '{ type: "intent_ambiguous"; question: string; options: string[]; priority: "medium"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/pipeline/clarificationPolicy.ts(182,7): error TS2741: Property 'maxAttempts' is missing in type '{ type: "entity_missing"; question: string; context: string; priority: "medium"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/pipeline/clarificationPolicy.ts(206,7): error TS2741: Property 'maxAttempts' is missing in type '{ type: "entity_ambiguous"; question: string; options: string[]; priority: "medium"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/pipeline/clarificationPolicy.ts(222,7): error TS2741: Property 'maxAttempts' is missing in type '{ type: "context_unclear"; question: string; priority: "high"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/pipeline/clarificationPolicy.ts(286,11): error TS2741: Property 'maxAttempts' is missing in type '{ type: "context_unclear"; question: string; priority: "medium"; }' but required in type '{ type: "intent_ambiguous" | "entity_missing" | "entity_ambiguous" | "context_unclear" | "multiple_options" | "confirmation_needed"; priority: "medium" | "high" | "low"; question: string; maxAttempts: number; options?: string[] | undefined; context?: string | undefined; }'.
+server/repositories/baseRepository.ts(72,21): error TS2352: Conversion of type 'PgTransaction<NodePgQueryResultHKT, typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index"), ExtractTablesWithRelations<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")>>' to type 'NodePgDatabase<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")> & { $client: Pool; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property '$client' is missing in type 'PgTransaction<NodePgQueryResultHKT, typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index"), ExtractTablesWithRelations<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")>>' but required in type '{ $client: Pool; }'.
+server/routes.ts(243,52): error TS2694: Namespace 'global.Express' has no exported member 'Session'.
+server/routes.ts(1396,18): error TS2339: Property 'roles' does not exist on type 'AuthenticatedUser'.
+server/routes/adminRouter.ts(330,44): error TS2339: Property 'schedule' does not exist on type '{ id: string; name: string; status: string | null; createdAt: Date; type: string; parameters: unknown; fileUrl: string | null; fileSize: number | null; generatedBy: string; scheduledId: string | null; error: string | null; completedAt: Date | null; }'.
+server/routes/adminRouter.ts(337,30): error TS2339: Property 'providers' does not exist on type '{ xai: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; gemini: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; } | { ...; }'.
+  Property 'providers' does not exist on type '{ xai: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; gemini: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; }'.
+server/routes/adminRouter.ts(338,33): error TS2339: Property 'providers' does not exist on type '{ xai: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; gemini: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; } | { ...; }'.
+  Property 'providers' does not exist on type '{ xai: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; gemini: { available: boolean; latencyMs?: number | undefined; error?: string | undefined; }; }'.
+server/routes/adminRouter.ts(899,58): error TS2345: Argument of type '{ value: any; updatedBy: any; id: string; description: string | null; updatedAt: Date; key: string; category: string; valueType: string | null; defaultValue: unknown; isSensitive: string | null; }' is not assignable to parameter of type '{ key: string; category: string; description?: string | null | undefined; value?: Json | undefined; valueType?: string | null | undefined; defaultValue?: Json | undefined; isSensitive?: string | ... 1 more ... | undefined; updatedBy?: string | ... 1 more ... | undefined; }'.
+  Types of property 'defaultValue' are incompatible.
+    Type 'unknown' is not assignable to type 'Json | undefined'.
+server/routes/adminRouter.ts(925,62): error TS2345: Argument of type '{ value: any; updatedBy: any; id: string; description: string | null; updatedAt: Date; key: string; category: string; valueType: string | null; defaultValue: unknown; isSensitive: string | null; }' is not assignable to parameter of type '{ key: string; category: string; description?: string | null | undefined; value?: Json | undefined; valueType?: string | null | undefined; defaultValue?: Json | undefined; isSensitive?: string | ... 1 more ... | undefined; updatedBy?: string | ... 1 more ... | undefined; }'.
+  Types of property 'defaultValue' are incompatible.
+    Type 'unknown' is not assignable to type 'Json | undefined'.
+server/routes/adminRouter.ts(952,9): error TS2322: Type 'unknown' is not assignable to type 'Json | undefined'.
+server/routes/adminRouter.ts(1098,27): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+server/routes/adminRouter.ts(1102,29): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+server/routes/adminRouter.ts(1176,30): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+server/routes/adminRouter.ts(1543,11): error TS2353: Object literal may only specify known properties, and 'internalNotes' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; createdAt?: SQL<unknown> | Date | PgColumn<...> | undefined; ... 15 more ...; endedAt?: SQL<...> | ... 3 more ... | undefined; }'.
+server/routes/adminRouter.ts(2365,46): error TS2345: Argument of type 'Record<string, any>' is not assignable to parameter of type '{ name: string; columns: { key: string; label: string; type?: string | undefined; }[]; type: string; description?: string | null | undefined; createdBy?: string | null | undefined; filters?: { key: string; label: string; type: string; }[] | null | undefined; groupBy?: string[] | ... 1 more ... | undefined; isSystem?...'.
+  Type 'Record<string, any>' is missing the following properties from type '{ name: string; columns: { key: string; label: string; type?: string | undefined; }[]; type: string; description?: string | null | undefined; createdBy?: string | null | undefined; filters?: { key: string; label: string; type: string; }[] | null | undefined; groupBy?: string[] | ... 1 more ... | undefined; isSystem?...': name, columns, type
+server/routes/adminRouter.ts(2559,30): error TS2353: Object literal may only specify known properties, and 'error' does not exist in type '{ rowCount?: number | undefined; aggregates?: Record<string, any> | undefined; }'.
+server/routes/adminRouter.ts(2857,34): error TS2339: Property 'listAllTools' does not exist on type 'ToolRegistryService'.
+server/routes/agentRouter.ts(29,13): error TS2353: Object literal may only specify known properties, and 'id' does not exist in type '{ userId?: string | null | undefined; title?: string | undefined; gptId?: string | null | undefined; archived?: string | null | undefined; hidden?: string | null | undefined; pinned?: string | ... 1 more ... | undefined; ... 8 more ...; endedAt?: Date | ... 1 more ... | undefined; }'.
+server/routes/agentRouter.ts(151,27): error TS2339: Property 'chatId' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(165,28): error TS2339: Property 'summary' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(167,30): error TS2339: Property 'createdAt' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(168,30): error TS2339: Property 'updatedAt' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(258,21): error TS2339: Property 'chatId' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(274,24): error TS2339: Property 'createdAt' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/agentRouter.ts(275,24): error TS2339: Property 'updatedAt' does not exist on type '{ id: string; status: string; error: string | null; completedAt: Date | null; startedAt: Date; conversationId: string | null; routerDecision: string | null; objective: string | null; }'.
+server/routes/chatAiRouter.ts(1042,38): error TS2352: Conversion of type '{ type: "general"; maxTokens: number; }' to type 'Partial<QuestionClassification>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'type' are incompatible.
+    Type '"general"' is not comparable to type 'QuestionType | undefined'.
+server/routes/chatAiRouter.ts(1163,11): error TS18048: 'questionClassification.maxTokens' is possibly 'undefined'.
+server/routes/googleFormsRouter.ts(128,11): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ userId: string; providerId: string; status?: string | null | undefined; email?: string | null | undefined; metadata?: Json | undefined; externalUserId?: string | null | undefined; ... 6 more ...; isDefault?: string | ... 1 more ... | undefined; }>'.
+server/routes/googleFormsRouter.ts(249,13): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ userId: string; providerId: string; status?: string | null | undefined; email?: string | null | undefined; metadata?: Json | undefined; externalUserId?: string | null | undefined; ... 6 more ...; isDefault?: string | ... 1 more ... | undefined; }>'.
+server/routes/libraryRouter.ts(166,9): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ name: string; path: string; userId: string; uuid: string; description?: string | null | undefined; icon?: string | null | undefined; isSystem?: boolean | null | undefined; color?: string | null | undefined; parentId?: number | ... 1 more ... | undefined; }>'.
+server/routes/libraryRouter.ts(276,9): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ name: string; userId: string; uuid: string; description?: string | null | undefined; type?: string | null | undefined; isPublic?: boolean | null | undefined; coverFileId?: number | null | undefined; smartRules?: { ...; } | ... 1 more ... | undefined; }>'.
+server/routes/mfaRouter.ts(24,38): error TS2339: Property 'id' does not exist on type 'User'.
+server/routes/mfaRouter.ts(38,54): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+server/routes/mfaRouter.ts(59,38): error TS2339: Property 'id' does not exist on type 'User'.
+server/routes/mfaRouter.ts(85,21): error TS2561: Object literal may only specify known properties, but 'mfaEnabled' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; status?: string | SQL<unknown> | PgColumn<...> | null | undefined; ... 33 more ...; updatedAt?: SQL<...> | ... 3 more ... | undefined; }'. Did you mean to write 'is2faEnabled'?
+server/routes/mfaRouter.ts(114,24): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(left: PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>, right: string | SQLWrapper): SQL<...>', gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | SQLWrapper'.
+  Overload 2 of 3, '(left: Aliased<number>, right: number | SQLWrapper): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'Aliased<number>'.
+      Type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is missing the following properties from type 'Aliased<number>': sql, fieldAlias
+  Overload 3 of 3, '(left: never, right: unknown): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'never'.
+server/routes/mfaRouter.ts(117,32): error TS2551: Property 'mfaEnabled' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'. Did you mean 'is2faEnabled'?
+server/routes/mfaRouter.ts(117,52): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(122,49): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(127,28): error TS2561: Object literal may only specify known properties, but 'mfaLastVerified' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; status?: string | SQL<unknown> | PgColumn<...> | null | undefined; ... 33 more ...; updatedAt?: SQL<...> | ... 3 more ... | undefined; }'. Did you mean to write 'emailVerified'?
+server/routes/mfaRouter.ts(128,28): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(left: PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>, right: string | SQLWrapper): SQL<...>', gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | SQLWrapper'.
+  Overload 2 of 3, '(left: Aliased<number>, right: number | SQLWrapper): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'Aliased<number>'.
+      Type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is missing the following properties from type 'Aliased<number>': sql, fieldAlias
+  Overload 3 of 3, '(left: never, right: unknown): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'never'.
+server/routes/mfaRouter.ts(134,22): error TS2339: Property 'mfaBackupCodes' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(134,45): error TS2339: Property 'mfaBackupCodes' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(135,79): error TS2339: Property 'mfaBackupCodes' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(139,53): error TS2339: Property 'mfaBackupCodes' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(144,29): error TS2353: Object literal may only specify known properties, and 'mfaBackupCodes' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; status?: string | SQL<unknown> | PgColumn<...> | null | undefined; ... 33 more ...; updatedAt?: SQL<...> | ... 3 more ... | undefined; }'.
+server/routes/mfaRouter.ts(147,32): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(left: PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>, right: string | SQLWrapper): SQL<...>', gave the following error.
+    Argument of type 'number' is not assignable to parameter of type 'string | SQLWrapper'.
+  Overload 2 of 3, '(left: Aliased<number>, right: number | SQLWrapper): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'Aliased<number>'.
+      Type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is missing the following properties from type 'Aliased<number>': sql, fieldAlias
+  Overload 3 of 3, '(left: never, right: unknown): SQL<unknown>', gave the following error.
+    Argument of type 'PgColumn<{ name: "id"; tableName: "users"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, { ...; }>' is not assignable to parameter of type 'never'.
+server/routes/mfaRouter.ts(167,38): error TS2339: Property 'id' does not exist on type 'User'.
+server/routes/mfaRouter.ts(193,22): error TS2551: Property 'mfaEnabled' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'. Did you mean 'is2faEnabled'?
+server/routes/mfaRouter.ts(193,41): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(194,53): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(203,21): error TS2561: Object literal may only specify known properties, but 'mfaEnabled' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; status?: string | SQL<unknown> | PgColumn<...> | null | undefined; ... 33 more ...; updatedAt?: SQL<...> | ... 3 more ... | undefined; }'. Did you mean to write 'is2faEnabled'?
+server/routes/mfaRouter.ts(220,38): error TS2339: Property 'id' does not exist on type 'User'.
+server/routes/mfaRouter.ts(235,32): error TS2551: Property 'mfaEnabled' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'. Did you mean 'is2faEnabled'?
+server/routes/mfaRouter.ts(235,52): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(240,49): error TS2339: Property 'mfaSecret' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(246,61): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+server/routes/mfaRouter.ts(250,24): error TS2353: Object literal may only specify known properties, and 'mfaBackupCodes' does not exist in type '{ id?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; status?: string | SQL<unknown> | PgColumn<...> | null | undefined; ... 33 more ...; updatedAt?: SQL<...> | ... 3 more ... | undefined; }'.
+server/routes/mfaRouter.ts(267,38): error TS2339: Property 'id' does not exist on type 'User'.
+server/routes/mfaRouter.ts(275,21): error TS2561: Object literal may only specify known properties, but 'mfaEnabled' does not exist in type '{ id?: boolean | undefined; username?: boolean | undefined; password?: boolean | undefined; email?: boolean | undefined; firstName?: boolean | undefined; lastName?: boolean | undefined; ... 29 more ...; updatedAt?: boolean | undefined; }'. Did you mean to write 'is2faEnabled'?
+server/routes/mfaRouter.ts(286,31): error TS2551: Property 'mfaEnabled' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'. Did you mean 'is2faEnabled'?
+server/routes/mfaRouter.ts(287,44): error TS2339: Property 'mfaBackupCodes' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'.
+server/routes/mfaRouter.ts(288,36): error TS2551: Property 'mfaLastVerified' does not exist on type '{ id: string; status: string | null; createdAt: Date | null; username: string | null; password: string | null; email: string | null; firstName: string | null; lastName: string | null; ... 27 more ...; updatedAt: Date | null; }'. Did you mean 'emailVerified'?
+server/routes/pythonToolsRouter.ts(97,9): error TS2783: 'success' is specified more than once, so this usage will be overwritten.
+server/routes/ragRouter.ts(10,10): error TS2305: Module '"../services/chatService"' has no exported member 'streamChat'.
+server/routes/registryRouter.ts(430,45): error TS2339: Property 'trace' does not exist on type '{ success: boolean; duration: number; agentName: string; taskId: string; agentId: string; error?: string | undefined; tokensUsed?: number | undefined; output?: any; toolCalls?: { success: boolean; input: Record<...>; duration: number; tool: string; output?: any; }[] | undefined; reasoning?: string | undefined; }'.
+server/routes/registryRouter.ts(431,46): error TS2339: Property 'trace' does not exist on type '{ success: boolean; duration: number; agentName: string; taskId: string; agentId: string; error?: string | undefined; tokensUsed?: number | undefined; output?: any; toolCalls?: { success: boolean; input: Record<...>; duration: number; tool: string; output?: any; }[] | undefined; reasoning?: string | undefined; }'.
+server/routes/registryRouter.ts(442,51): error TS2339: Property 'trace' does not exist on type '{ success: boolean; duration: number; agentName: string; taskId: string; agentId: string; error?: string | undefined; tokensUsed?: number | undefined; output?: any; toolCalls?: { success: boolean; input: Record<...>; duration: number; tool: string; output?: any; }[] | undefined; reasoning?: string | undefined; }'.
+server/routes/superAgentRoutes.ts(180,7): error TS2345: Argument of type '{ role: string; content: string; }[]' is not assignable to parameter of type 'ChatMessage[]'.
+  Type '{ role: string; content: string; }' is not assignable to type 'ChatMessage'.
+    Types of property 'role' are incompatible.
+      Type 'string' is not assignable to type '"user" | "system" | "assistant"'.
+server/routes/superAgentRoutes.ts(253,14): error TS2678: Type '"source"' is not comparable to type '"plan" | "error" | "progress" | "tool_call" | "heartbeat" | "artifact" | "phase_started" | "artifact_generating" | "search_progress" | "filter_progress" | "verify_progress" | ... 8 more ... | "final"'.
+server/routes/superAgentRoutes.ts(259,26): error TS2339: Property 'doi' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(259,44): error TS2339: Property 'title' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(262,26): error TS2339: Property 'doi' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(263,26): error TS2339: Property 'title' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(264,26): error TS2339: Property 'relevance' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(264,50): error TS2339: Property 'score' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(272,15): error TS2353: Object literal may only specify known properties, and 'candidates_found' does not exist in type '{ latency_ms?: number | undefined; articles_collected?: number | undefined; articles_verified?: number | undefined; articles_accepted?: number | undefined; tokens?: number | undefined; cost?: number | undefined; http_status?: number | undefined; bytes_in?: number | undefined; bytes_out?: number | undefined; }'.
+server/routes/superAgentRoutes.ts(283,14): error TS2678: Type '"source_verified"' is not comparable to type '"plan" | "error" | "progress" | "tool_call" | "heartbeat" | "artifact" | "phase_started" | "artifact_generating" | "search_progress" | "filter_progress" | "verify_progress" | ... 8 more ... | "final"'.
+server/routes/superAgentRoutes.ts(285,27): error TS2339: Property 'doi' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(286,62): error TS2339: Property 'doi' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(286,78): error TS2339: Property 'title_similarity' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(304,25): error TS2339: Property 'type' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(305,25): error TS2339: Property 'name' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(306,25): error TS2339: Property 'url' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(306,68): error TS2339: Property 'id' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(325,58): error TS2339: Property 'message' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(327,40): error TS2339: Property 'message' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(337,42): error TS2339: Property 'candidates_found' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(339,35): error TS2339: Property 'provider' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(340,35): error TS2339: Property 'queries_current' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(341,37): error TS2339: Property 'queries_total' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(342,30): error TS2339: Property 'pages_searched' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(343,31): error TS2339: Property 'candidates_found' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(349,28): error TS2339: Property 'phase' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(349,64): error TS2339: Property 'count' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(350,46): error TS2339: Property 'count' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(358,41): error TS2339: Property 'ok' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(360,33): error TS2339: Property 'checked' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(361,28): error TS2339: Property 'ok' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(362,30): error TS2339: Property 'dead' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(368,36): error TS2339: Property 'accepted' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(369,34): error TS2339: Property 'target' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(380,39): error TS2339: Property 'columns_count' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(381,38): error TS2339: Property 'rows_written' does not exist on type '{}'.
+server/routes/superAgentRoutes.ts(382,32): error TS2339: Property 'target' does not exist on type '{}'.
+server/routes/userRouter.ts(780,9): error TS2353: Object literal may only specify known properties, and 'title' does not exist in type '{ name: string; userId: string; description?: string | null | undefined; content?: string | null | undefined; metadata?: Json | undefined; embedding?: string | null | undefined; source?: string | ... 1 more ... | undefined; }'.
+server/routes/wordPipelineRoutes.ts(33,41): error TS2345: Argument of type '{ maxIterations: number; enableSemanticCache: boolean; }' is not assignable to parameter of type 'undefined'.
+server/routes/wordPipelineRoutes.ts(101,39): error TS2345: Argument of type '{ maxIterations: number; enableSemanticCache: boolean; }' is not assignable to parameter of type 'undefined'.
+server/routes/wordPipelineRoutes.ts(290,41): error TS2345: Argument of type '{ maxIterations: number; enableSemanticCache: boolean; }' is not assignable to parameter of type 'undefined'.
+server/routes/wordPipelineRoutes.ts(311,21): error TS2339: Property 'entities' does not exist on type '{ wordCount: number; markdown: string; iteration: number; claims: { id: string; text: string; citations: { id: string; type: "pdf" | "api" | "database" | "web" | "doc" | "user_input"; title: string; ... 5 more ...; publishedDate?: string | undefined; }[]; ... 5 more ...; verificationMethod?: "manual" | ... 3 more .....'.
+server/routes/wordPipelineRoutes.ts(314,51): error TS2345: Argument of type '{ sectionId: string; markdown: string; claims: { id: string; text: string; citations: { id: string; type: "pdf" | "api" | "database" | "web" | "doc" | "user_input"; title: string; accessedAt: string; ... 4 more ...; publishedDate?: string | undefined; }[]; ... 5 more ...; verificationMethod?: "manual" | ... 3 more ....' is not assignable to parameter of type '{ wordCount: number; markdown: string; iteration: number; claims: { id: string; text: string; citations: { id: string; type: "pdf" | "api" | "database" | "web" | "doc" | "user_input"; title: string; ... 5 more ...; publishedDate?: string | undefined; }[]; ... 5 more ...; verificationMethod?: "manual" | ... 3 more .....'.
+  Type '{ sectionId: string; markdown: string; claims: { id: string; text: string; citations: { id: string; type: "pdf" | "api" | "database" | "web" | "doc" | "user_input"; title: string; accessedAt: string; ... 4 more ...; publishedDate?: string | undefined; }[]; ... 5 more ...; verificationMethod?: "manual" | ... 3 more ....' is missing the following properties from type '{ wordCount: number; markdown: string; iteration: number; claims: { id: string; text: string; citations: { id: string; type: "pdf" | "api" | "database" | "web" | "doc" | "user_input"; title: string; ... 5 more ...; publishedDate?: string | undefined; }[]; ... 5 more ...; verificationMethod?: "manual" | ... 3 more .....': iteration, generatedAt
+server/services/advancedExcelBuilder.ts(342,27): error TS2339: Property 'dataValidations' does not exist on type 'Worksheet'.
+server/services/advancedExcelBuilder.ts(351,27): error TS2339: Property 'dataValidations' does not exist on type 'Worksheet'.
+server/services/advancedExcelBuilder.ts(388,25): error TS2353: Object literal may only specify known properties, and 'dataBar' does not exist in type 'DataBarRuleType'.
+server/services/advancedExcelBuilder.ts(437,26): error TS2345: Argument of type '{ formula: string; }' is not assignable to parameter of type 'string'.
+server/services/advancedRAG.ts(511,27): error TS2339: Property 'sectionTitle' does not exist on type '{ id: string; fileId: string; content: string; embedding: number[] | null; pageNumber: number | null; chunkIndex: number; metadata: unknown; }'.
+server/services/agentRunner.ts(354,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/agentRunner.ts(555,57): error TS2345: Argument of type '{ maxResults: number; }' is not assignable to parameter of type 'number'.
+server/services/agentRunner.ts(579,30): error TS2339: Property 'html' does not exist on type '{ status: number; success: boolean; retryCount: number; url: string; headers: Record<string, string>; statusText: string; timing: { durationMs: number; startMs: number; endMs: number; }; ... 4 more ...; contentType?: string | undefined; }'.
+server/services/agentRunner.ts(579,62): error TS2339: Property 'text' does not exist on type '{ status: number; success: boolean; retryCount: number; url: string; headers: Record<string, string>; statusText: string; timing: { durationMs: number; startMs: number; endMs: number; }; ... 4 more ...; contentType?: string | undefined; }'.
+server/services/agentRunner.ts(585,25): error TS2339: Property 'title' does not exist on type '{ status: number; success: boolean; retryCount: number; url: string; headers: Record<string, string>; statusText: string; timing: { durationMs: number; startMs: number; endMs: number; }; ... 4 more ...; contentType?: string | undefined; }'.
+server/services/agentRunner.ts(619,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/agentRunner.ts(683,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/analyticsAggregator.ts(287,37): error TS2345: Argument of type '{ provider: string | undefined; startDate: Date; }' is not assignable to parameter of type 'string'.
+server/services/autoReconciliation.ts(96,52): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ userId?: string | null | undefined; title?: string | undefined; gptId?: string | null | undefined; archived?: string | null | undefined; hidden?: string | null | undefined; pinned?: string | ... 1 more ... | undefined; ... 8 more ...; endedAt?: Date | ... 1 more ... | undefined; }>'.
+server/services/chatService.ts(471,84): error TS2339: Property 'intent' does not exist on type 'PipelineContext'.
+server/services/chatService.ts(480,47): error TS2339: Property 'intent' does not exist on type 'PipelineContext'.
+server/services/chatService.ts(483,48): error TS2339: Property 'intent' does not exist on type 'PipelineContext'.
+server/services/chatService.ts(815,15): error TS2353: Object literal may only specify known properties, and 'pipelineTraceability' does not exist in type 'ChatResponse'.
+server/services/chatService.ts(833,61): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/services/chatService.ts(844,54): error TS2345: Argument of type 'number' is not assignable to parameter of type '50'.
+server/services/chatService.ts(1184,81): error TS2345: Argument of type '15' is not assignable to parameter of type '50'.
+server/services/chatService.ts(1193,74): error TS2345: Argument of type '20' is not assignable to parameter of type '50'.
+server/services/chatService.ts(1549,77): error TS2345: Argument of type '15' is not assignable to parameter of type '50'.
+server/services/chatService.ts(1579,72): error TS2345: Argument of type '20' is not assignable to parameter of type '50'.
+server/services/chatService.ts(1856,121): error TS2339: Property 'title' does not exist on type '{ id: string; name: string; description: string | null; createdAt: Date; updatedAt: Date; userId: string; content: string | null; metadata: unknown; embedding: string | null; source: string | null; }'.
+server/services/chatService.ts(1856,133): error TS2339: Property 'category' does not exist on type '{ id: string; name: string; description: string | null; createdAt: Date; updatedAt: Date; userId: string; content: string | null; metadata: unknown; embedding: string | null; source: string | null; }'.
+server/services/circuitBreaker.ts(6,28): error TS7016: Could not find a declaration file for module 'opossum'. '/Users/ale/Desktop/Iliagptcom/node_modules/opossum/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/opossum` if it exists or add a new declaration (.d.ts) file containing `declare module 'opossum';`
+server/services/collaborativeEditing.ts(11,20): error TS2307: Cannot find module 'yjs' or its corresponding type declarations.
+server/services/collaborativeEditing.ts(116,9): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/conversationStateService.ts(339,7): error TS2322: Type '{ id: string; createdAt: string; fileSize: number | null; metadata: { duration?: number | undefined; encoding?: string | undefined; pageCount?: number | undefined; wordCount?: number | undefined; language?: string | undefined; dimensions?: { ...; } | undefined; customFields?: Record<...> | undefined; } | null; ... 6...' is not assignable to type '{ [key: string]: any; artifactId: string; }[]'.
+  Property 'artifactId' is missing in type '{ id: string; createdAt: string; fileSize: number | null; metadata: { duration?: number | undefined; encoding?: string | undefined; pageCount?: number | undefined; wordCount?: number | undefined; language?: string | undefined; dimensions?: { ...; } | undefined; customFields?: Record<...> | undefined; } | null; ... 6...' but required in type '{ [key: string]: any; artifactId: string; }'.
+server/services/conversationStateService.ts(340,7): error TS2322: Type '{ id: string; mode: string | null; createdAt: string; model: string | null; thumbnailUrl: string | null; prompt: string; imageUrl: string; parentImageId: string | null; editHistory: { prompt: string; timestamp: string; editId: string; model?: string | undefined; }[]; isLatest: string | null; }[]' is not assignable to type '{ [key: string]: any; imageId: string; }[]'.
+  Property 'imageId' is missing in type '{ id: string; mode: string | null; createdAt: string; model: string | null; thumbnailUrl: string | null; prompt: string; imageUrl: string; parentImageId: string | null; editHistory: { prompt: string; timestamp: string; editId: string; model?: string | undefined; }[]; isLatest: string | null; }' but required in type '{ [key: string]: any; imageId: string; }'.
+server/services/cvRenderer.ts(132,27): error TS2339: Property 'text' does not exist on type '{ primary: string; accent: string; }'.
+server/services/cvRenderer.ts(133,53): error TS2339: Property 'text' does not exist on type '{ primary: string; accent: string; }'.
+server/services/cvRenderer.ts(135,27): error TS2339: Property 'background' does not exist on type '{ primary: string; accent: string; }'.
+server/services/cvRenderer.ts(136,59): error TS2339: Property 'background' does not exist on type '{ primary: string; accent: string; }'.
+server/services/dataExport.ts(8,22): error TS7016: Could not find a declaration file for module 'archiver'. '/Users/ale/Desktop/Iliagptcom/node_modules/archiver/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/archiver` if it exists or add a new declaration (.d.ts) file containing `declare module 'archiver';`
+server/services/dataExport.ts(176,17): error TS2322: Type 'unknown' is not assignable to type 'number'.
+server/services/dataExport.ts(177,17): error TS2322: Type 'unknown' is not assignable to type 'string'.
+server/services/dataExport.ts(178,17): error TS2322: Type 'unknown' is not assignable to type 'string'.
+server/services/dataExport.ts(179,17): error TS2322: Type 'unknown' is not assignable to type 'Date'.
+server/services/documentBatchProcessor.ts(113,21): error TS2741: Property 'supportedMimeTypes' is missing in type 'CsvParser' but required in type 'FileParser'.
+server/services/documentBatchProcessor.ts(114,28): error TS2741: Property 'supportedMimeTypes' is missing in type 'CsvParser' but required in type 'FileParser'.
+server/services/documentBatchProcessor.ts(164,7): error TS2345: Argument of type 'CsvParser' is not assignable to parameter of type 'FileParser'.
+  Property 'supportedMimeTypes' is missing in type 'CsvParser' but required in type 'FileParser'.
+server/services/documentIngestion.ts(658,29): error TS2304: Cannot find name 'ocrService'.
+server/services/errorHandling.ts(8,10): error TS2614: Module '"./auditLog"' has no exported member 'audit'. Did you mean to use 'import audit from "./auditLog"' instead?
+server/services/googleDriveService.ts(107,42): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type 'OAuth2Client' is not assignable to type 'string | BaseExternalAccountClient | GoogleAuth<JSONClient> | OAuth2Client | undefined'.
+      Property 'gaxios' is missing in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client' but required in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/@google-cloud/storage/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client'.
+server/services/googleFormsService.ts(54,3): error TS2739: Type 'OAuth2Client' is missing the following properties from type 'OAuth2Client': fetch, addUserProjectAndAuthHeaders
+server/services/googleFormsService.ts(106,25): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(version: "v2"): Oauth2', gave the following error.
+    Argument of type '{ version: string; auth: OAuth2Client; }' is not assignable to parameter of type '"v2"'.
+  Overload 2 of 2, '(options: Options): Oauth2', gave the following error.
+    Type 'OAuth2Client' is not assignable to type 'string | BaseExternalAccountClient | GoogleAuth<JSONClient> | OAuth2Client | undefined'.
+      Property 'gaxios' is missing in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client' but required in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/@google-cloud/storage/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client'.
+server/services/googleFormsService.ts(293,24): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(version: "v1"): Forms', gave the following error.
+    Argument of type '{ version: string; auth: OAuth2Client; }' is not assignable to parameter of type '"v1"'.
+  Overload 2 of 2, '(options: Options): Forms', gave the following error.
+    Type 'OAuth2Client' is not assignable to type 'string | BaseExternalAccountClient | GoogleAuth<JSONClient> | OAuth2Client | undefined'.
+      Property 'gaxios' is missing in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client' but required in type 'import("/Users/ale/Desktop/Iliagptcom/node_modules/@google-cloud/storage/node_modules/google-auth-library/build/src/auth/oauth2client").OAuth2Client'.
+server/services/gptSessionService.ts(155,40): error TS2339: Property 'maxTokensOverride' does not exist on type '{ enforceModel: boolean; modelFallbacks: string[]; allowClientOverride: boolean; maxTokensOverride?: number | undefined; temperatureOverride?: number | undefined; } | { enforceModel: false; modelFallbacks: never[]; }'.
+  Property 'maxTokensOverride' does not exist on type '{ enforceModel: false; modelFallbacks: never[]; }'.
+server/services/gptSessionService.ts(156,42): error TS2339: Property 'temperatureOverride' does not exist on type '{ enforceModel: boolean; modelFallbacks: string[]; allowClientOverride: boolean; maxTokensOverride?: number | undefined; temperatureOverride?: number | undefined; } | { enforceModel: false; modelFallbacks: never[]; }'.
+  Property 'temperatureOverride' does not exist on type '{ enforceModel: false; modelFallbacks: never[]; }'.
+server/services/gptSessionService.ts(157,42): error TS2339: Property 'allowClientOverride' does not exist on type '{ enforceModel: boolean; modelFallbacks: string[]; allowClientOverride: boolean; maxTokensOverride?: number | undefined; temperatureOverride?: number | undefined; } | { enforceModel: false; modelFallbacks: never[]; }'.
+  Property 'allowClientOverride' does not exist on type '{ enforceModel: false; modelFallbacks: never[]; }'.
+server/services/intent-engine/fallbackManager.ts(2,28): error TS7016: Could not find a declaration file for module 'opossum'. '/Users/ale/Desktop/Iliagptcom/node_modules/opossum/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/opossum` if it exists or add a new declaration (.d.ts) file containing `declare module 'opossum';`
+server/services/intent-engine/fallbackManager.ts(78,7): error TS2353: Object literal may only specify known properties, and 'messages' does not exist in type 'ChatCompletionMessageParam[]'.
+server/services/intent-engine/fallbackManager.ts(88,30): error TS2339: Property 'choices' does not exist on type 'LLMResponse'.
+server/services/intent-engine/index.ts(272,9): error TS2740: Type '{ es: { format: string; topic: string; general: string; }; en: { format: string; topic: string; general: string; }; pt: { format: string; topic: string; general: string; }; fr: { format: string; topic: string; general: string; }; de: { ...; }; it: { ...; }; }' is missing the following properties from type 'Record<"id" | "tr" | "fr" | "es" | "en" | "pt" | "de" | "it" | "ar" | "hi" | "ja" | "ko" | "zh" | "ru", Record<string, string>>': id, tr, ar, hi, and 4 more.
+server/services/intent-engine/index.ts(407,11): error TS2740: Type 'Record<string, unknown>' is missing the following properties from type '{ plan: { id: string; steps: { type: "WEB_RESEARCH" | "EVIDENCE_BUILD" | "OUTLINE" | "DRAFT_SECTIONS" | "FACT_VERIFY" | "RENDER_DOCX"; query?: string | undefined; template?: string | undefined; ... 7 more ...; halt_below_rate?: number | undefined; }[]; } | null; ... 7 more ...; requires_research: boolean; }': plan, confidence, intent, output_format, and 5 more.
+server/services/intent-engine/index.ts(420,13): error TS2353: Object literal may only specify known properties, and 'doc_type' does not exist in type '{ length?: "medium" | "long" | "short" | null | undefined; title?: string | undefined; scope?: "all" | "partial" | "specific" | undefined; language?: string | undefined; style?: string | undefined; ... 12 more ...; section_number?: number | undefined; }'.
+server/services/intent-engine/index.ts(431,11): error TS2740: Type 'Record<string, unknown>' is missing the following properties from type '{ plan: { id: string; steps: { type: "WEB_RESEARCH" | "EVIDENCE_BUILD" | "OUTLINE" | "DRAFT_SECTIONS" | "FACT_VERIFY" | "RENDER_DOCX"; query?: string | undefined; template?: string | undefined; ... 7 more ...; halt_below_rate?: number | undefined; }[]; } | null; ... 7 more ...; requires_research: boolean; }': plan, confidence, intent, output_format, and 5 more.
+server/services/intent-engine/multiIntent.ts(351,43): error TS2484: Export declaration conflicts with exported declaration of 'EnhancedMultiIntentPlan'.
+server/services/mfaService.ts(6,31): error TS2307: Cannot find module 'otplib' or its corresponding type declarations.
+server/services/modelFusionEngine.ts(390,27): error TS2677: A type predicate's type must be assignable to its parameter's type.
+  Type 'ModelContribution' is not assignable to type '{ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; } | null'.
+    Type 'ModelContribution' is not assignable to type '{ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; }'.
+      Type 'ModelContribution' is not assignable to type '{ modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; }'.
+        Types of property 'provider' are incompatible.
+          Type '"gemini" | "openai" | "grok"' is not assignable to type '"gemini"'.
+            Type '"openai"' is not assignable to type '"gemini"'.
+server/services/modelFusionEngine.ts(392,37): error TS2345: Argument of type '({ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; } | null)[]' is not assignable to parameter of type 'ModelContribution[]'.
+  Type '{ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; } | null' is not assignable to type 'ModelContribution'.
+    Type 'null' is not assignable to type 'ModelContribution'.
+server/services/modelFusionEngine.ts(393,62): error TS18047: 'c' is possibly 'null'.
+server/services/modelFusionEngine.ts(398,9): error TS2322: Type '({ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; } | null)[]' is not assignable to type 'ModelContribution[]'.
+  Type '{ modelId: string; provider: "grok"; result: string; confidence: number; latencyMs: number; weight: number; } | { modelId: string; provider: "gemini"; result: string; confidence: number; latencyMs: number; weight: number; } | null' is not assignable to type 'ModelContribution'.
+    Type 'null' is not assignable to type 'ModelContribution'.
+server/services/modelFusionEngine.ts(399,74): error TS18047: 'c' is possibly 'null'.
+server/services/pare/intentClassifier.ts(190,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/pare/orchestrator.ts(180,9): error TS2322: Type 'SessionContext' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'SessionContext'.
+server/services/pare/orchestrator.ts(202,7): error TS2345: Argument of type 'SessionContext | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.
+  Type 'SessionContext' is not assignable to type 'Record<string, unknown>'.
+    Index signature for type 'string' is missing in type 'SessionContext'.
+server/services/pare/orchestrator.ts(216,7): error TS2322: Type 'SessionContext' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'SessionContext'.
+server/services/pare/orchestrator.ts(384,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/pare/planGenerator.ts(81,9): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/pare/qualityAssurance.ts(47,63): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+server/services/pare/toolRouter.ts(72,7): error TS2739: Type '{ file_path: string[]; url: string[]; code_snippet: string[]; date_time: string[]; number: string[]; person: string[]; organization: string[]; tool_reference: never[]; data_format: string[]; programming_language: string[]; action_verb: never[]; domain_term: string[]; }' is missing the following properties from type 'Record<"number" | "file_path" | "url" | "organization" | "library" | "person" | "project_name" | "technology" | "code_snippet" | "date_time" | "tool_reference" | "data_format" | "programming_language" | "action_verb" | "domain_term", string[]>': library, project_name, technology
+server/services/pare/toolRouter.ts(274,50): error TS2307: Cannot find module '../../lib/embeddings' or its corresponding type declarations.
+server/services/pdfIndexer.ts(88,37): error TS2339: Property 'default' does not exist on type 'typeof import("/Users/ale/Desktop/Iliagptcom/node_modules/pdf-parse/dist/pdf-parse/esm/index")'.
+server/services/persistentMemory.ts(47,41): error TS2339: Property 'userMemories' does not exist on type '{ readonly sessions: RelationalQueryBuilder<ExtractTablesWithRelations<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")>, { tsName: "sessions"; dbName: "sessions"; columns: { ...; }; relations: never; primaryKey: AnyColumn[]; }>; ... 99 more ...; readonly retrievalTelemetry: RelationalQueryBuilder<...'.
+server/services/persistentMemory.ts(57,45): error TS2345: Argument of type 'SQL<unknown>' is not assignable to parameter of type 'PgTable<TableConfig>'.
+  Type 'SQL<unknown>' is missing the following properties from type 'PgTable<TableConfig>': $inferSelect, $inferInsert
+server/services/persistentMemory.ts(71,13): error TS2740: Type '{ [x: string]: unknown; }' is missing the following properties from type 'UserMemory': id, userId, category, key, and 5 more.
+server/services/persistentMemory.ts(74,46): error TS2345: Argument of type 'SQL<unknown>' is not assignable to parameter of type 'PgTable<TableConfig>'.
+  Type 'SQL<unknown>' is missing the following properties from type 'PgTable<TableConfig>': $inferSelect, $inferInsert
+server/services/persistentMemory.ts(92,13): error TS2740: Type '{ [x: string]: unknown; }' is missing the following properties from type 'UserMemory': id, userId, category, key, and 5 more.
+server/services/persistentMemory.ts(136,30): error TS2339: Property 'userMemories' does not exist on type '{ readonly sessions: RelationalQueryBuilder<ExtractTablesWithRelations<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")>, { tsName: "sessions"; dbName: "sessions"; columns: { ...; }; relations: never; primaryKey: AnyColumn[]; }>; ... 99 more ...; readonly retrievalTelemetry: RelationalQueryBuilder<...'.
+server/services/persistentMemory.ts(142,30): error TS2339: Property 'userMemories' does not exist on type '{ readonly sessions: RelationalQueryBuilder<ExtractTablesWithRelations<typeof import("/Users/ale/Desktop/Iliagptcom/shared/schema/index")>, { tsName: "sessions"; dbName: "sessions"; columns: { ...; }; relations: never; primaryKey: AnyColumn[]; }>; ... 99 more ...; readonly retrievalTelemetry: RelationalQueryBuilder<...'.
+server/services/persistentMemory.ts(283,25): error TS2345: Argument of type 'SQL<unknown>' is not assignable to parameter of type 'PgTable<TableConfig>'.
+  Type 'SQL<unknown>' is missing the following properties from type 'PgTable<TableConfig>': $inferSelect, $inferInsert
+server/services/persistentMemory.ts(304,25): error TS2345: Argument of type 'SQL<unknown>' is not assignable to parameter of type 'PgTable<TableConfig>'.
+  Type 'SQL<unknown>' is missing the following properties from type 'PgTable<TableConfig>': $inferSelect, $inferInsert
+server/services/pistonService.ts(501,11): error TS2322: Type '{ type: string; name: string; data: string | null; mimeType: string | null; }[]' is not assignable to type '{ type: string; name: string; data: string; mimeType: string; }[]'.
+  Type '{ type: string; name: string; data: string | null; mimeType: string | null; }' is not assignable to type '{ type: string; name: string; data: string; mimeType: string; }'.
+    Types of property 'data' are incompatible.
+      Type 'string | null' is not assignable to type 'string'.
+        Type 'null' is not assignable to type 'string'.
+server/services/ragPipeline.ts(161,16): error TS2551: Property 'embedding' does not exist on type 'EmbedContentResponse'. Did you mean 'embeddings'?
+server/services/ragPipeline.ts(162,21): error TS2551: Property 'embedding' does not exist on type 'EmbedContentResponse'. Did you mean 'embeddings'?
+server/services/ragPipeline.ts(219,55): error TS2554: Expected 2 arguments, but got 3.
+server/services/richText/richTextParser.ts(183,7): error TS2322: Type '{ runs: { text: string; style?: { bold?: boolean | undefined; link?: string | undefined; code?: boolean | undefined; color?: string | undefined; fontFamily?: string | undefined; fontSize?: number | undefined; ... 5 more ...; subscript?: boolean | undefined; } | undefined; }[]; }[]' is not assignable to type '{ runs: { text: string; style?: { bold?: boolean | undefined; link?: string | undefined; code?: boolean | undefined; color?: string | undefined; fontFamily?: string | undefined; fontSize?: number | undefined; ... 5 more ...; subscript?: boolean | undefined; } | undefined; }[]; isHeader: boolean; }[]'.
+  Property 'isHeader' is missing in type '{ runs: { text: string; style?: { bold?: boolean | undefined; link?: string | undefined; code?: boolean | undefined; color?: string | undefined; fontFamily?: string | undefined; fontSize?: number | undefined; ... 5 more ...; subscript?: boolean | undefined; } | undefined; }[]; }' but required in type '{ runs: { text: string; style?: { bold?: boolean | undefined; link?: string | undefined; code?: boolean | undefined; color?: string | undefined; fontFamily?: string | undefined; fontSize?: number | undefined; ... 5 more ...; subscript?: boolean | undefined; } | undefined; }[]; isHeader: boolean; }'.
+server/services/richText/universalRenderer.ts(17,3): error TS2459: Module '"./fontRegistry"' declares 'FontRegistry' locally, but it is not exported.
+server/services/richText/universalRenderer.ts(109,20): error TS2540: Cannot assign to 'font' because it is a read-only property.
+server/services/richText/universalRenderer.ts(110,20): error TS2540: Cannot assign to 'shading' because it is a read-only property.
+server/services/richText/universalRenderer.ts(351,4): error TS2749: 'AlignmentType' refers to a value, but is being used as a type here. Did you mean 'typeof AlignmentType'?
+server/services/richText/universalRenderer.ts(353,29): error TS2749: 'AlignmentType' refers to a value, but is being used as a type here. Did you mean 'typeof AlignmentType'?
+server/services/router.ts(211,11): error TS2820: Type '"gemini-2.0-flash"' is not assignable to type 'GeminiModelType | undefined'. Did you mean '"gemini-2.5-flash"'?
+server/services/spreadsheetAnalyzer.ts(143,13): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { size: number | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; ... 10 more ...; pageCount?: number | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ size: number; userId: string; mimeType: string; fileName: string; storageKey: string; status?: string | null | undefined; errorMessage?: string | null | undefined; expiresAt?: Date | null | undefined; checksum?: string | ... 1 more ... | undefined; fileType?: string | ... 1 more ... | undefined; encoding?: string ...' is not assignable to parameter of type '{ size: number | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; ... 10 more ...; pageCount?: number | ... 3 more ... | undefined; }'.
+      Types of property 'status' are incompatible.
+        Type 'string | null | undefined' is not assignable to type 'SQL<unknown> | "pending" | "error" | "scanning" | "ready" | "expired" | Placeholder<string, any> | null | undefined'.
+          Type 'string' is not assignable to type 'SQL<unknown> | "pending" | "error" | "scanning" | "ready" | "expired" | Placeholder<string, any> | null | undefined'.
+  Overload 2 of 2, '(values: { size: number | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; ... 10 more ...; pageCount?: number | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ size: number; userId: string; mimeType: string; fileName: string; storageKey: string; status?: string | null | undefined; errorMessage?: string | null | undefined; expiresAt?: Date | null | undefined; checksum?: string | ... 1 more ... | undefined; fileType?: string | ... 1 more ... | undefined; encoding?: string ...' is not assignable to parameter of type '{ size: number | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; ... 10 more ...; pageCount?: number | ... 3 more ... | undefined; }[]'.
+      Type '{ size: number; userId: string; mimeType: string; fileName: string; storageKey: string; status?: string | null | undefined; errorMessage?: string | null | undefined; expiresAt?: Date | null | undefined; checksum?: string | ... 1 more ... | undefined; fileType?: string | ... 1 more ... | undefined; encoding?: string ...' is missing the following properties from type '{ size: number | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; ... 10 more ...; pageCount?: number | ... 3 more ... | undefined; }[]': length, pop, push, concat, and 35 more.
+server/services/spreadsheetAnalyzer.ts(212,13): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; uploadId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<...>; ... 17 more ...; failedJobs?: number | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ userId: string; uploadId: string; sheetName: string; status?: string | null | undefined; mode?: string | null | undefined; errorMessage?: string | null | undefined; completedAt?: Date | null | undefined; ... 11 more ...; failedJobs?: number | ... 1 more ... | undefined; }' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; uploadId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<...>; ... 17 more ...; failedJobs?: number | ... 3 more ... | undefined; }'.
+      Types of property 'status' are incompatible.
+        Type 'string | null | undefined' is not assignable to type 'SQL<unknown> | "pending" | "generating_code" | "executing" | "succeeded" | "failed" | Placeholder<string, any> | null | undefined'.
+          Type 'string' is not assignable to type 'SQL<unknown> | "pending" | "generating_code" | "executing" | "succeeded" | "failed" | Placeholder<string, any> | null | undefined'.
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; uploadId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<...>; ... 17 more ...; failedJobs?: number | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ userId: string; uploadId: string; sheetName: string; status?: string | null | undefined; mode?: string | null | undefined; errorMessage?: string | null | undefined; completedAt?: Date | null | undefined; ... 11 more ...; failedJobs?: number | ... 1 more ... | undefined; }' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; uploadId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<...>; ... 17 more ...; failedJobs?: number | ... 3 more ... | undefined; }[]'.
+      Type '{ userId: string; uploadId: string; sheetName: string; status?: string | null | undefined; mode?: string | null | undefined; errorMessage?: string | null | undefined; completedAt?: Date | null | undefined; ... 11 more ...; failedJobs?: number | ... 1 more ... | undefined; }' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; uploadId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<...>; ... 17 more ...; failedJobs?: number | ... 3 more ... | undefined; }[]': length, pop, push, concat, and 35 more.
+server/services/spreadsheetAnalyzer.ts(245,13): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { sessionId: string | SQL<unknown> | Placeholder<string, any>; outputType: SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>; ... 4 more ...; order?: number | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ sessionId: string; outputType: string; payload: Json; title?: string | null | undefined; order?: number | null | undefined; }' is not assignable to parameter of type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; outputType: SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>; ... 4 more ...; order?: number | ... 3 more ... | undefined; }'.
+      Types of property 'outputType' are incompatible.
+        Type 'string' is not assignable to type 'SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>'.
+  Overload 2 of 2, '(values: { sessionId: string | SQL<unknown> | Placeholder<string, any>; outputType: SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>; ... 4 more ...; order?: number | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ sessionId: string; outputType: string; payload: Json; title?: string | null | undefined; order?: number | null | undefined; }' is not assignable to parameter of type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; outputType: SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>; ... 4 more ...; order?: number | ... 3 more ... | undefined; }[]'.
+      Type '{ sessionId: string; outputType: string; payload: Json; title?: string | null | undefined; order?: number | null | undefined; }' is missing the following properties from type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; outputType: SQL<unknown> | "table" | "error" | "summary" | "metric" | "chart" | "log" | Placeholder<string, any>; ... 4 more ...; order?: number | ... 3 more ... | undefined; }[]': length, pop, push, concat, and 35 more.
+server/services/spreadsheetAnalyzer.ts(265,13): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { sessionId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<string, any>; id?: string | SQL<unknown> | Placeholder<...> | undefined; ... 5 more ...; generatedCode?: string | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ sessionId: string; sheetName: string; status?: string | null | undefined; error?: string | null | undefined; completedAt?: Date | null | undefined; startedAt?: Date | null | undefined; generatedCode?: string | ... 1 more ... | undefined; }' is not assignable to parameter of type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<string, any>; id?: string | SQL<unknown> | Placeholder<...> | undefined; ... 5 more ...; generatedCode?: string | ... 3 more ... | undefined; }'.
+      Types of property 'status' are incompatible.
+        Type 'string | null | undefined' is not assignable to type 'SQL<unknown> | "done" | "failed" | "queued" | "running" | Placeholder<string, any> | null | undefined'.
+          Type 'string' is not assignable to type 'SQL<unknown> | "done" | "failed" | "queued" | "running" | Placeholder<string, any> | null | undefined'.
+  Overload 2 of 2, '(values: { sessionId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<string, any>; id?: string | SQL<unknown> | Placeholder<...> | undefined; ... 5 more ...; generatedCode?: string | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ sessionId: string; sheetName: string; status?: string | null | undefined; error?: string | null | undefined; completedAt?: Date | null | undefined; startedAt?: Date | null | undefined; generatedCode?: string | ... 1 more ... | undefined; }' is not assignable to parameter of type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<string, any>; id?: string | SQL<unknown> | Placeholder<...> | undefined; ... 5 more ...; generatedCode?: string | ... 3 more ... | undefined; }[]'.
+      Type '{ sessionId: string; sheetName: string; status?: string | null | undefined; error?: string | null | undefined; completedAt?: Date | null | undefined; startedAt?: Date | null | undefined; generatedCode?: string | ... 1 more ... | undefined; }' is missing the following properties from type '{ sessionId: string | SQL<unknown> | Placeholder<string, any>; sheetName: string | SQL<unknown> | Placeholder<string, any>; id?: string | SQL<unknown> | Placeholder<...> | undefined; ... 5 more ...; generatedCode?: string | ... 3 more ... | undefined; }[]': length, pop, push, concat, and 35 more.
+server/services/streamCancellation.ts(225,9): error TS2740: Type 'Response' is missing the following properties from type 'Response<any, Record<string, any>>': sendStatus, links, send, jsonp, and 87 more.
+server/services/tokenRotation.ts(6,17): error TS2307: Cannot find module 'jsonwebtoken' or its corresponding type declarations.
+server/services/toolDiscovery.ts(189,31): error TS18046: 'details' is of type 'unknown'.
+server/services/toolDiscovery.ts(190,38): error TS18046: 'details' is of type 'unknown'.
+server/services/toolDiscovery.ts(190,57): error TS18046: 'details' is of type 'unknown'.
+server/services/toolDiscovery.ts(192,64): error TS18046: 'details' is of type 'unknown'.
+server/services/toolDiscovery.ts(193,62): error TS18046: 'details' is of type 'unknown'.
+server/services/toolDiscovery.ts(193,88): error TS18046: 'details' is of type 'unknown'.
+server/services/toolExecutionEngine.ts(475,35): error TS2349: This expression is not callable.
+  Each member of the union type '(<TInput extends StructuredToolCallInput<ZodObject<{ action: ZodEnum<["set", "get", "delete", "list"]>; sessionId: ZodOptional<ZodString>; key: ZodOptional<ZodString>; value: ZodOptional<...>; ttlSeconds: ZodOptional<...>; }, "strip", ZodTypeAny, { ...; }, { ...; }>, { ...; }>, TConfig extends ToolRunnableConfig | u...' has signatures, but none of those signatures are compatible with each other.
+server/services/toolExecutionEngine.ts(673,3): error TS2484: Export declaration conflicts with exported declaration of 'ToolType'.
+server/services/toolExecutionEngine.ts(674,3): error TS2484: Export declaration conflicts with exported declaration of 'UnifiedToolInfo'.
+server/services/toolExecutionEngine.ts(675,3): error TS2484: Export declaration conflicts with exported declaration of 'ExecutionProgress'.
+server/services/toolExecutionEngine.ts(676,3): error TS2484: Export declaration conflicts with exported declaration of 'ExecutionResult'.
+server/services/toolExecutionEngine.ts(677,3): error TS2484: Export declaration conflicts with exported declaration of 'ExecutionHistoryEntry'.
+server/services/toolExecutionEngine.ts(678,3): error TS2484: Export declaration conflicts with exported declaration of 'ToolAnalytics'.
+server/services/toolExecutionEngine.ts(679,3): error TS2484: Export declaration conflicts with exported declaration of 'EngineAnalytics'.
+server/services/toolExecutionEngine.ts(680,3): error TS2484: Export declaration conflicts with exported declaration of 'ExecutionOptions'.
+server/services/webPushService.ts(6,21): error TS2307: Cannot find module 'web-push' or its corresponding type declarations.
+server/services/webSearch.ts(177,9): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/webSearch.ts(178,9): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/webSearch.ts(187,7): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/webSearch.ts(188,7): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/webSearch.ts(243,45): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/services/webSearch.ts(243,55): error TS2322: Type 'string | null | undefined' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/storage.ts(495,7): error TS2322: Type 'SQL<number>' is not assignable to type 'number'.
+server/storage.ts(1730,75): error TS2339: Property 'isActive' does not exist on type 'PgTableWithColumns<{ name: "company_knowledge"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "company_knowledge"; dataType: "string"; columnType: "PgVarchar"; data: string; driverParam: string; ... 8 more ...; generated: undefined; }, {}, { ...; }>; ... 8 more ...; updatedAt: PgColumn<...>; };...'.
+server/storage.ts(1907,15): error TS2339: Property 'error' does not exist on type 'Partial<{ id: string; status: string | null; createdAt: Date; userId: string; retryCount: number | null; content: unknown; processedAt: Date | null; }>'.
+server/storage.ts(1908,7): error TS2322: Type 'SQL<number>' is not assignable to type 'number'.
+server/storage.ts(1919,32): error TS2353: Object literal may only specify known properties, and 'syncedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; content?: unknown; id?: string | SQL<...> | PgColumn<...> | undefined; status?: string | ... 3 more ... | undefined; createdAt?: SQL<...> | ... 2 more ... | undefined; retryCount?: number | ... 3 more ... | und...'.
+server/stripeClient.ts(51,5): error TS2322: Type '"2025-11-17.clover"' is not assignable to type '"2025-12-15.clover"'.
+shared/schemas/documentSemanticModel.ts(69,14): error TS7022: 'SectionSchema' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.
+shared/schemas/documentSemanticModel.ts(76,28): error TS7024: Function implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.

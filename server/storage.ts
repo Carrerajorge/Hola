@@ -134,6 +134,7 @@ export interface IStorage {
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  getChatMessage(chatId: string, messageId: string): Promise<ChatMessage | undefined>;
   getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string, metadata?: Record<string, any>): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
@@ -629,8 +630,12 @@ export class MemStorage implements IStorage {
   }
 
   async getChat(id: string): Promise<Chat | undefined> {
-    const [result] = await dbRead.select().from(chats).where(eq(chats.id, id));
-    return result;
+    const [fromRead] = await dbRead.select().from(chats).where(eq(chats.id, id));
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in write-after-read flows).
+    const [fromPrimary] = await db.select().from(chats).where(eq(chats.id, id));
+    return fromPrimary;
   }
 
   async getChats(userId?: string): Promise<Chat[]> {
@@ -675,7 +680,14 @@ export class MemStorage implements IStorage {
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const [result] = await db.insert(chatMessages).values(message).returning();
-    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    queueMicrotask(() => {
+      db.update(chats)
+        .set({ updatedAt: new Date() })
+        .where(eq(chats.id, message.chatId))
+        .catch((error) => {
+          console.warn("[Chats] Failed to update chat updatedAt after message create:", error?.message || error);
+        });
+    });
     if (message.role === "user" || message.role === "assistant") {
       queueMicrotask(() => {
         knowledgeBaseService.ingestChatMessage({
@@ -689,6 +701,21 @@ export class MemStorage implements IStorage {
       });
     }
     return result;
+  }
+
+  async getChatMessage(chatId: string, messageId: string): Promise<ChatMessage | undefined> {
+    const [fromRead] = await dbRead
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.id, messageId)));
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db
+      .select()
+      .from(chatMessages)
+      .where(and(eq(chatMessages.chatId, chatId), eq(chatMessages.id, messageId)));
+    return fromPrimary;
   }
 
   async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; before?: Date; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
@@ -856,10 +883,16 @@ export class MemStorage implements IStorage {
   }
 
   async getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined> {
-    const [result] = await dbRead.select().from(chatRuns).where(
+    const [fromRead] = await dbRead.select().from(chatRuns).where(
       and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
     );
-    return result;
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db.select().from(chatRuns).where(
+      and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
+    );
+    return fromPrimary;
   }
 
   async claimPendingRun(chatId: string, clientRequestId?: string): Promise<ChatRun | undefined> {
@@ -912,18 +945,40 @@ export class MemStorage implements IStorage {
   }
 
   async createUserMessageAndRun(chatId: string, message: InsertChatMessage, clientRequestId: string): Promise<{ message: ChatMessage; run: ChatRun }> {
-    return await db.transaction(async (tx) => {
-      const [savedMessage] = await tx.insert(chatMessages).values(message).returning();
-      const [run] = await tx.insert(chatRuns).values({
-        chatId,
-        clientRequestId,
-        userMessageId: savedMessage.id,
-        status: 'pending',
-      }).returning();
-      await tx.update(chatMessages).set({ runId: run.id }).where(eq(chatMessages.id, savedMessage.id));
-      await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-      return { message: { ...savedMessage, runId: run.id }, run };
+    const messageId = message.id || randomUUID();
+    const runId = randomUUID();
+
+    const messageToInsert: InsertChatMessage = {
+      ...message,
+      id: messageId,
+      runId,
+    };
+
+    const runToInsert: InsertChatRun = {
+      id: runId,
+      chatId,
+      clientRequestId,
+      userMessageId: messageId,
+      status: "pending",
+    };
+
+    const result = await db.transaction(async (tx) => {
+      const [savedMessage] = await tx.insert(chatMessages).values(messageToInsert).returning();
+      const [run] = await tx.insert(chatRuns).values(runToInsert).returning();
+      return { message: savedMessage, run };
     });
+
+    // Best-effort: bump chat updatedAt without blocking the user's round trip.
+    queueMicrotask(() => {
+      db.update(chats)
+        .set({ updatedAt: new Date() })
+        .where(eq(chats.id, chatId))
+        .catch((err) => {
+          console.warn("[Chats] Failed to update updatedAt after message+run create:", err?.message || err);
+        });
+    });
+
+    return result;
   }
 
   // Tool Invocation operations
@@ -1008,7 +1063,7 @@ export class MemStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = email.toLowerCase().trim();
-    const [result] = await dbRead.select().from(users).where(sql`LOWER(${users.email}) = ${normalizedEmail}`);
+    const [result] = await dbRead.select().from(users).where(ilike(users.email, normalizedEmail));
     return result;
   }
 
@@ -1172,21 +1227,57 @@ export class MemStorage implements IStorage {
 
   // Sidebar Pinned GPTs
   async getSidebarPinnedGpts(userId: string): Promise<any[]> {
-    const pinnedRecords = await dbRead.select()
-      .from(sidebarPinnedGpts)
-      .where(eq(sidebarPinnedGpts.userId, userId))
-      .orderBy(sidebarPinnedGpts.displayOrder);
+    try {
+      const pinnedRecords = await dbRead.select()
+        .from(sidebarPinnedGpts)
+        .where(eq(sidebarPinnedGpts.userId, userId))
+        .orderBy(sidebarPinnedGpts.displayOrder);
 
-    const gptDetails = await Promise.all(
-      pinnedRecords.map(async (record) => {
-        const gpt = await this.getGpt(record.gptId);
-        return gpt ? { ...record, gpt } : null;
-      })
-    );
+      const gptDetails = await Promise.all(
+        pinnedRecords.map(async (record) => {
+          const gpt = await this.getGpt(record.gptId);
+          return gpt ? { ...record, gpt } : null;
+        })
+      );
 
-    return gptDetails.filter(Boolean);
+      return gptDetails.filter(Boolean);
+    } catch (error) {
+      // Fallback to raw SQL in case Drizzle query compilation fails for this environment.
+      console.error("[storage] sidebarPinnedGpts query failed, falling back to raw SQL", error);
+      const result = await dbRead.execute(sql`
+        SELECT id, user_id, gpt_id, display_order, pinned_at
+        FROM sidebar_pinned_gpts
+        WHERE user_id = ${userId}
+        ORDER BY display_order`
+      );
+
+      const records = result.rows as Array<{
+        id: string;
+        user_id: string;
+        gpt_id: string;
+        display_order: number;
+        pinned_at: Date;
+      }>;
+
+      const gptDetails = await Promise.all(
+        records.map(async (record) => {
+          const gpt = await this.getGpt(record.gpt_id);
+          return gpt
+            ? {
+              id: record.id,
+              userId: record.user_id,
+              gptId: record.gpt_id,
+              displayOrder: record.display_order,
+              pinnedAt: record.pinned_at,
+              gpt,
+            }
+            : null;
+        })
+      );
+
+      return gptDetails.filter(Boolean);
+    }
   }
-
   async pinGptToSidebar(userId: string, gptId: string, displayOrder: number = 0): Promise<any> {
     const existing = await db.select()
       .from(sidebarPinnedGpts)
@@ -1967,9 +2058,14 @@ export class MemStorage implements IStorage {
 
   // Message Idempotency operations
   async findMessageByRequestId(requestId: string): Promise<ChatMessage | null> {
-    const [message] = await dbRead.select().from(chatMessages)
+    const [fromRead] = await dbRead.select().from(chatMessages)
       .where(eq(chatMessages.requestId, requestId));
-    return message || null;
+    if (fromRead) return fromRead;
+
+    // Fallback to primary DB for strong reads (avoid replica lag in idempotency flows).
+    const [fromPrimary] = await db.select().from(chatMessages)
+      .where(eq(chatMessages.requestId, requestId));
+    return fromPrimary || null;
   }
 
   async claimPendingMessage(messageId: string): Promise<ChatMessage | null> {

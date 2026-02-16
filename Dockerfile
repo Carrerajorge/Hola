@@ -1,58 +1,56 @@
-# ILIAGPT Dockerfile - Optimized
+# ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds
 # Multi-stage build for production
 
 # ============================================
-# Stage 1: Dependencies (All)
+# Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:22-alpine AS deps
+FROM node:22-slim AS builder
 WORKDIR /app
-RUN apk add --no-cache libc6-compat python3 make g++
-COPY package.json package-lock.json ./
-# `npm ci` runs `postinstall`, so ensure any referenced scripts exist in this stage.
-COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-RUN npm ci
 
-# ============================================
-# Stage 2: Build
-# ============================================
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Build-time tooling for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3 make g++ \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Full deps for build
+COPY package.json package-lock.json ./
+# Ensure mathjax sync script exists before npm ci postinstall hook
+COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
+RUN npm ci \
+  && npm cache clean --force
+
+# Build client and server assets
 COPY . .
 ARG APP_VERSION=dev
 ENV NODE_ENV=production
 ENV VITE_APP_VERSION=$APP_VERSION
-# Build client and server
 RUN npm run build
 
-# ============================================
-# Stage 3: Production Dependencies
-# ============================================
-FROM node:22-alpine AS prod-deps
-WORKDIR /app
-# Install build tools for native modules (node-pty, etc.)
-RUN apk add --no-cache libc6-compat python3 make g++
-COPY package.json package-lock.json ./
-# Scripts required for postinstall
-COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-# Install production dependencies (allow scripts for native compilation)
-RUN npm ci --only=production
+# Convert to production-only deps for runtime images
+RUN npm prune --omit=dev
 
 # ============================================
-# Stage 4: Sandbox Runner
+# Stage 2: Sandbox Runner
 # ============================================
-FROM node:22-alpine AS sandbox-runner
-
+FROM node:22-slim AS sandbox-runner
 WORKDIR /app
+
+# Bake APP_VERSION into the image so runtime can report the deployed commit SHA
+# even if docker-compose environment expansion is missing/misconfigured.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
-RUN apk add --no-cache docker-cli bash
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io bash \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 ENV NODE_ENV=production
 ENV SANDBOX_RUNNER_PORT=8080
 
-# Prod deps + built artifacts
-COPY --from=prod-deps /app/node_modules ./node_modules
+# Runtime deps + built artifacts
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 
@@ -61,30 +59,50 @@ EXPOSE 8080
 CMD ["node", "dist/sandbox-runner.cjs"]
 
 # ============================================
-# Stage 5: Production Runner
+# Stage 3: Production Runner
 # ============================================
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 
-RUN apk add --no-cache bash
+# Bake APP_VERSION into the image (source of truth for /api/health version).
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 # Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 iliagpt
+RUN groupadd --system --gid 1001 nodejs \
+  && useradd --system --uid 1001 --gid nodejs iliagpt
 
 ENV NODE_ENV=production
 ENV PORT=5000
 
+# Install Playwright Chromium system dependencies + wget for healthcheck.
+# These are the shared libraries Playwright's bundled Chromium needs on Debian.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash \
+      wget ca-certificates fonts-liberation \
+      libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 \
+      libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \
+      libnspr4 libnss3 libpango-1.0-0 libx11-6 libx11-xcb1 \
+      libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 libxshmfence1 xdg-utils \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
 # Copy prod dependencies only (with ownership)
-COPY --chown=iliagpt:nodejs --from=prod-deps /app/node_modules ./node_modules
+COPY --chown=iliagpt:nodejs --from=builder /app/node_modules ./node_modules
 # Copy built artifacts
 COPY --chown=iliagpt:nodejs --from=builder /app/dist ./dist
 COPY --chown=iliagpt:nodejs --from=builder /app/migrations ./migrations
 COPY --chown=iliagpt:nodejs --from=builder /app/client/public ./client/public
 COPY --chown=iliagpt:nodejs --from=builder /app/package.json ./package.json
 
+# Download Playwright's bundled Chromium browser binary.
+# System deps are installed above via apt-get; here we only fetch the browser.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
+RUN node ./node_modules/playwright/cli.js install chromium \
+  && chown -R iliagpt:nodejs /app/.playwright-browsers
+
 # Create temp directories for uploads/sandbox with correct permissions
-# (We only need to chown these specific dirs, files are already owned via COPY)
 RUN mkdir -p /app/uploads /app/artifacts /app/sandbox_workspace /app/data \
   && chown -R iliagpt:nodejs /app/uploads /app/artifacts /app/sandbox_workspace /app/data
 

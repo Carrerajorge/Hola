@@ -1,4 +1,5 @@
 import { Router } from "express";
+import path from "path";
 import { storage } from "../storage";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "../objectStorage";
 import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, HTTP_HEADERS, LIMITS } from "../lib/constants";
@@ -10,6 +11,32 @@ import { sanitizeFilename } from "../services/fileValidation";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "node:path";
+
+// SECURITY FIX #28: Path traversal prevention helper
+function sanitizeFilePath(filePath: string): string | null {
+  // Normalize path to resolve .. and .
+  const normalized = path.normalize(filePath).replace(/\\/g, '/');
+
+  // Block path traversal attempts
+  if (normalized.includes('..') || normalized.startsWith('/') || normalized.includes('\0')) {
+    console.warn(`[Security] Path traversal attempt blocked: ${filePath}`);
+    return null;
+  }
+
+  return normalized;
+}
+
+// SECURITY FIX #29: Validate file names to prevent injection
+function sanitizeFileName(fileName: string): string {
+  // Remove path separators and null bytes
+  let safe = fileName.replace(/[\/\\:\*\?"<>|\x00]/g, '_');
+  // Limit length
+  if (safe.length > 255) {
+    const ext = path.extname(safe);
+    safe = safe.substring(0, 255 - ext.length) + ext;
+  }
+  return safe;
+}
 
 interface MultipartUploadSession {
   uploadId: string;
@@ -58,8 +85,13 @@ function isValidObjectId(objectId: string): boolean {
   if (objectId.includes("..") || objectId.includes("//")) return false;
   if (objectId.includes("\0") || objectId.includes("%00")) return false;
   if (objectId.includes("%2e%2e") || objectId.includes("%2E%2E")) return false;
+  // Block leading slashes to prevent absolute path references
+  if (objectId.startsWith("/")) return false;
   // Only allow safe characters: alphanumeric, dash, underscore, dot, forward slash
   if (!/^[a-zA-Z0-9._\-\/]+$/.test(objectId)) return false;
+  // Verify the normalized path doesn't escape the base directory
+  const normalized = path.normalize(objectId);
+  if (normalized.startsWith("..") || normalized.startsWith("/")) return false;
   return true;
 }
 
@@ -1240,32 +1272,33 @@ export function createFilesRouter() {
   });
 
   // Local file upload handler (development fallback)
-  router.put("/api/local-upload/:objectId", async (req, res) => {
-    try {
-      const { objectId } = req.params;
+	  router.put("/api/local-upload/:objectId", async (req, res) => {
+	    try {
+	      const { objectId } = req.params;
 
-      // Security: validate objectId to prevent path traversal
-      if (!isValidObjectId(objectId)) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
+	      // Security: validate objectId to prevent path traversal
+	      if (!isValidObjectId(objectId)) {
+	        return res.status(400).json({ error: "Invalid object ID" });
+	      }
 
-      const fsSync = await import("fs");
-      const pathMod = await import("path");
+	      const fsSync = await import("fs");
+	      const pathMod = await import("path");
 
       const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
       if (!fsSync.default.existsSync(UPLOADS_DIR)) {
         fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
 
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+	      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
+	      // Security: ensure resolved path stays within uploads directory
+	      const resolvedPath = pathMod.default.resolve(filePath);
+	      const uploadsDir = pathMod.default.resolve(UPLOADS_DIR);
+	      if (!resolvedPath.startsWith(uploadsDir + pathMod.default.sep) && resolvedPath !== uploadsDir) {
+	        console.warn(`[Security] Path traversal attempt: ${objectId}`);
+	        return res.status(400).json({ error: "Invalid path" });
+	      }
 
-      // Security: ensure resolved path stays within uploads directory
-      if (!filePath.startsWith(safePrefix) && filePath !== UPLOADS_DIR) {
-        return res.status(400).json({ error: "Invalid object ID" });
-      }
-
-      const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
+	      const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
 
       const contentLength = parseInt(req.headers['content-length'] || '0');
       if (contentLength > MAX_SIZE) {
@@ -1315,13 +1348,14 @@ export function createFilesRouter() {
       const fsSync = await import("fs");
       const pathMod = await import("path");
 
-      const UPLOADS_DIR = pathMod.default.resolve(process.cwd(), "uploads");
-      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-      const safePrefix = UPLOADS_DIR + pathMod.default.sep;
+      const uploadsDir = pathMod.default.resolve(process.cwd(), "uploads");
+      const filePath = pathMod.default.resolve(uploadsDir, objectId);
+      const safePrefix = uploadsDir + pathMod.default.sep;
 
       // Security: ensure resolved path stays within uploads directory
       if (!filePath.startsWith(safePrefix)) {
-        return res.status(404).json({ error: "File not found" });
+        console.warn(`[Security] Path traversal attempt in local-files: ${objectId}`);
+        return res.status(400).json({ error: "Invalid path" });
       }
 
       if (!fsSync.default.existsSync(filePath)) {

@@ -57,30 +57,18 @@ export const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
         const allowedOrigins = getAllowedOrigins();
 
-        // In production, block requests with no origin (prevents CSRF from non-browser sources)
-        // Exception: allow same-origin API calls which have no Origin header
+        // Requests with no Origin header can happen for same-origin navigations or server-to-server calls.
         if (!origin) {
-            if (isProduction) {
-                // Still allow no-origin for server-to-server/same-origin requests,
-                // but log it for monitoring
-                callback(null, true);
-            } else {
-                callback(null, true);
-            }
+            callback(null, true);
             return;
         }
 
-        // In development, allow localhost origins and validated Replit domains
+        // In development, allow all origins (useful for local testing).
         if (!isProduction) {
-            // Still check against development allowlist rather than blindly allowing all
-            if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) {
-                callback(null, true);
-            } else if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-                // Allow any localhost port in development
-                callback(null, true);
-            } else {
-                callback(null, true); // Permissive in development
+            if (process.env.CORS_DEBUG === 'true') {
+                console.log(`[CORS] Dev mode - allowing origin: ${origin}`);
             }
+            callback(null, true);
             return;
         }
 

@@ -44,6 +44,7 @@ export interface MessageItemProps {
     onSuperAgentCancel?: (messageId: string) => void;
     onSuperAgentRetry?: (messageId: string) => void;
     onQuestionClick?: (question: string) => void;
+    onUserRetrySend?: (message: Message) => void;
 }
 
 export const MessageItem = memo(function MessageItem({
@@ -82,7 +83,8 @@ export const MessageItem = memo(function MessageItem({
     onAgentArtifactPreview,
     onSuperAgentCancel,
     onSuperAgentRetry,
-    onQuestionClick
+    onQuestionClick,
+    onUserRetrySend
 }: MessageItemProps) {
     return (
         <div
@@ -120,6 +122,7 @@ export const MessageItem = memo(function MessageItem({
                         onStartEdit={handleStartEdit}
                         onOpenPreview={handleOpenFileAttachmentPreview}
                         onReopenDocument={handleReopenDocument}
+                        onRetrySend={onUserRetrySend}
                     />
                 ) : message.role === "system" && message.attachments?.some(a => a.type === "document") ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -168,8 +171,11 @@ export const MessageItem = memo(function MessageItem({
 }, (prevProps, nextProps) => {
     return (
         prevProps.message.id === nextProps.message.id &&
+        prevProps.message.clientTempId === nextProps.message.clientTempId &&
         prevProps.message.content === nextProps.message.content &&
         prevProps.message.role === nextProps.message.role &&
+        prevProps.message.deliveryStatus === nextProps.message.deliveryStatus &&
+        prevProps.message.deliveryError === nextProps.message.deliveryError &&
         prevProps.message.agentRun?.status === nextProps.message.agentRun?.status &&
         prevProps.message.agentRun?.eventStream?.length === nextProps.message.agentRun?.eventStream?.length &&
         prevProps.message.documentAnalysis === nextProps.message.documentAnalysis &&

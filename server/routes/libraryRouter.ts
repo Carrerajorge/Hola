@@ -4,6 +4,9 @@ import { libraryService, LibraryServiceError, type FileMetadata } from "../servi
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { db } from "../db";
 import { eq, and, desc, isNull } from "drizzle-orm";
+import { generateWordDocument, generateExcelDocument, generatePptDocument, parseExcelFromText, parseSlidesFromText } from "../services/documentGeneration";
+import fs from "fs";
+import path from "path";
 import {
   libraryFiles,
   libraryFolders,
@@ -28,6 +31,7 @@ import {
   fileIdParamSchema,
   createLibraryItemSchema,
 } from "../schemas/librarySchemas";
+import { MAX_DOC_BODY_SIZE } from "../services/documentSecurity";
 
 export function createLibraryRouter() {
   const router = Router();
@@ -678,6 +682,106 @@ export function createLibraryRouter() {
     } catch (error: any) {
       console.error("Error deleting library item:", error);
       res.status(500).json({ error: "Failed to delete library item" });
+    }
+  });
+
+  // ============================================
+  // SAVE FROM EDITOR — Save AI-generated document to library
+  // ============================================
+  router.post("/api/library/save-from-editor", async (req, res) => {
+    try {
+      const userId = getOrCreateSecureUserId(req);
+      const { title, content, type } = req.body;
+
+      if (!title || !type) {
+        return res.status(400).json({ error: "title, content, and type are required" });
+      }
+
+      if (!['word', 'excel', 'ppt'].includes(type)) {
+        return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
+      }
+
+      const safeTitle = (typeof title === "string" ? title : `${title}`)
+        .replace(/\0/g, "")
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+        .trim()
+        .substring(0, 500) || "Documento";
+
+      const safeContent = (typeof content === "string" ? content : `${content ?? ""}`)
+        .replace(/\0/g, "")
+        .trim()
+        .substring(0, MAX_DOC_BODY_SIZE) || "Contenido";
+
+      // Generate binary document from content
+      let buffer: Buffer;
+      let ext: string;
+      let mimeType: string;
+
+      switch (type) {
+        case "word":
+          buffer = await generateWordDocument(safeTitle, safeContent);
+          ext = "docx";
+          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          break;
+        case "excel": {
+          const excelData = parseExcelFromText(safeContent);
+          buffer = await generateExcelDocument(safeTitle, excelData);
+          ext = "xlsx";
+          mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          break;
+        }
+        case "ppt": {
+          const slides = parseSlidesFromText(safeContent);
+          buffer = await generatePptDocument(safeTitle, slides, {
+            trace: {
+              source: "libraryRouter",
+            },
+          });
+          ext = "pptx";
+          mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+          break;
+        }
+        default:
+          return res.status(400).json({ error: "Unsupported document type" });
+      }
+
+      // Save to local uploads directory
+      const fileUuid = randomUUID();
+      const filename = `${safeTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}_${fileUuid.slice(0, 8)}.${ext}`;
+      const uploadsDir = path.join(process.cwd(), "uploads");
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const filePath = path.join(uploadsDir, fileUuid);
+      await fs.promises.writeFile(filePath, buffer);
+
+      // Save metadata to library database
+      const storagePath = `/objects/uploads/${fileUuid}`;
+      const file = await libraryService.saveFileMetadata(userId, storagePath, {
+        name: `${safeTitle}.${ext}`,
+        originalName: filename,
+        type: "document",
+        mimeType,
+        extension: ext,
+        size: buffer.length,
+        tags: ["ai-generated"],
+      });
+
+      console.log(`[Library] Saved document to library: ${filename} (${buffer.length} bytes) -> ${file.id}`);
+
+      res.json({
+        success: true,
+        file: {
+          id: file.id,
+          uuid: file.uuid,
+          name: file.name,
+          size: buffer.length,
+          type: ext,
+        },
+      });
+    } catch (error: any) {
+      console.error("Error saving document to library:", error);
+      res.status(500).json({ error: "Failed to save document to library" });
     }
   });
 

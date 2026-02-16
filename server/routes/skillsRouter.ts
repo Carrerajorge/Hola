@@ -6,6 +6,7 @@ import { customSkills, users } from "@shared/schema";
 import { generateSkillFromPrompt } from "../services/skillGenerator";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createCustomRateLimiter } from "../middleware/userRateLimiter";
+import { getOpenClawSkillsRuntimeSnapshot } from "../services/openclawSkillsRuntimeAdapter";
 
 const generateSchema = z.object({
   prompt: z.string().min(1).max(2000),
@@ -246,6 +247,25 @@ export function createSkillsRouter(): Router {
     } catch (error: any) {
       console.error("[SkillsRouter] set active error:", error);
       return res.status(503).json({ error: "Database unavailable" });
+    }
+  });
+
+  // GET /api/skills/openclaw/runtime
+  // Returns OpenClaw runtime skills if available; explicit fallback otherwise.
+  router.get("/openclaw/runtime", async (_req, res) => {
+    try {
+      const snapshot = await getOpenClawSkillsRuntimeSnapshot();
+      return res.json(snapshot);
+    } catch (error: any) {
+      console.error("[SkillsRouter] openclaw runtime error:", error);
+      return res.status(200).json({
+        runtimeAvailable: false,
+        source: "fallback",
+        fallback: true,
+        fetchedAt: new Date().toISOString(),
+        skills: [],
+        message: error?.message || "Runtime unavailable",
+      });
     }
   });
 

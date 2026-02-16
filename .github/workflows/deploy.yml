@@ -27,13 +27,15 @@ env:
   VPS_USER: root
   VPS_PORT: "8022"
   DEPLOY_PATH: /opt/hola
-  COMPOSE_PROJECT: iliagpt
+  # IMPORTANT: this must match the production compose project currently serving traffic
+  # (to avoid split-brain volumes like iliagpt_postgres_data vs hola_postgres_data).
+  COMPOSE_PROJECT: hola
 
 jobs:
   # ── CI Gate ─────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true }}
     uses: ./.github/workflows/ci.yml
 
   # ── Manual Deploy ───────────────────────────────────────
@@ -41,15 +43,14 @@ jobs:
     name: Deploy to VPS (Manual)
     runs-on: ubuntu-latest
     needs: [ci]
-    if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.skip_ci == 'true' || needs.ci.result == 'success') }}
-    timeout-minutes: 15
-    # Resolve secrets at the job level (workflow-level `env` + reusable workflows can be finicky).
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && ((github.event.inputs.skip_ci == 'true' || github.event.inputs.skip_ci == true) || needs.ci.result == 'success') }}
+    timeout-minutes: 35
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'hola' }}
     environment:
       name: production
       url: https://iliagpt.com
@@ -57,6 +58,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
+          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
+          # Best-effort only: some hosts firewall/drop probes even when SSH works.
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Setup SSH key
         run: |
@@ -69,7 +80,12 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+          TARGET_SHA="${{ github.sha }}"
+          # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
@@ -79,7 +95,7 @@ jobs:
 
             DEPLOY_PATH="/opt/hola"
             COMPOSE_FILE="docker-compose.prod.yml"
-            PROJECT="iliagpt"
+            PROJECT="hola"
 
             cd "$DEPLOY_PATH"
 
@@ -98,33 +114,116 @@ jobs:
               fi
             fi
 
-            # ── Pull latest code ──
-            echo "▸ Pulling latest code..."
-            git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
+            echo "▸ Reclaiming VPS disk before checkout..."
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+            docker image prune -af || true
+            rm -rf /tmp/*
+            rm -rf /opt/hola/.npm /opt/hola/.cache /tmp/hola-untracked-cache 2>/dev/null || true
+
+            echo "▸ Fetching repository and checking out target SHA..."
+            echo "▸ TARGET_SHA: ${TARGET_SHA}"
+            git fetch --depth=1 --filter=blob:none origin main || git fetch --depth=1 origin main
+            git checkout --force "${TARGET_SHA}"
+
+            CURRENT_SHA="$(git rev-parse --short HEAD)"
+            EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
+            echo "▸ Checked out SHA: ${CURRENT_SHA}"
+            if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then
+              echo "✗ Checked out SHA (${CURRENT_SHA}) does not match expected (${EXPECTED_SHA})"
+              exit 1
+            fi
 
             # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
-            export APP_VERSION="$(git rev-parse --short HEAD)"
+            export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
+            echo "▸ Reclaiming VPS disk before build..."
+            docker system df
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+
+            echo "▸ Cleaning Docker cache on VPS to prevent build disk exhaustion..."
+            docker builder prune -af || true
+            docker image prune -af || true
+
             compose() {
-              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+              # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
+              # where stage outputs (deps:/app/node_modules) are not found when multiple
+              # targets build concurrently on the VPS.
+              COMPOSE_BAKE=0 APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
                 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
             }
 
             # ── Build new images ──
-            echo "▸ Building Docker images..."
-            compose build --no-cache app worker sandbox-runner
+            echo "▸ Building Docker images (no cache)..."
+            # Build sequentially for stability (avoids cross-target stage sharing bugs).
+            compose build --no-cache app
+            compose build --no-cache sandbox-runner
+            compose build --no-cache ocr
 
             # ── Stop old containers (keep DB + Redis running) ──
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
             sleep 5
+            echo "▸ Running database migrations..."
+            compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
+
+            # ── Free app port from legacy/non-compose processes ──
+            echo "▸ Ensuring port 5000 is free..."
+            # Stop any container currently publishing host port 5000 (legacy stacks).
+            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
+            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
+            # Best effort: stop old PM2 process from previous non-docker deployments.
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 delete michat >/dev/null 2>&1 || true
+            fi
+            # Last resort if something non-docker still holds port 5000.
+            if command -v fuser >/dev/null 2>&1; then
+              fuser -k 5000/tcp >/dev/null 2>&1 || true
+            fi
+            # Give Docker a moment to release the port binding.
+            sleep 2
+            if command -v ss >/dev/null 2>&1; then
+              if ss -ltnp 2>/dev/null | grep -qE 'LISTEN\\s+.*:(5000)\\b'; then
+                echo "✗ Port 5000 is still in use after cleanup"
+                ss -ltnp 2>/dev/null | grep -E 'LISTEN\\s+.*:(5000)\\b' || true
+                exit 1
+              fi
+            fi
 
             # ── Start updated containers ──
             echo "▸ Starting updated containers..."
-            compose up -d
+            echo "▸ Removing stale service containers to avoid name conflicts..."
+            # Compose can occasionally get into a bad state where it tries to stop/remove containers
+            # that have already been removed (daemon: "No such container"). Pre-clean service containers
+            # deterministically, then retry once if compose still fails.
+            for svc in ocr app worker sandbox-runner; do
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${PROJECT}" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                | xargs -r docker rm -f || true
+            done
+            docker ps -a --format '{{.ID}} {{.Names}}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | xargs -r docker rm -f || true
+
+            if ! compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner; then
+              echo "⚠️ docker compose up failed; running cleanup + retry..."
+              compose down --remove-orphans || true
+              compose up -d postgres redis
+              sleep 3
+              for svc in ocr app worker sandbox-runner; do
+                docker ps -aq \
+                  --filter "label=com.docker.compose.project=${PROJECT}" \
+                  --filter "label=com.docker.compose.service=${svc}" \
+                  | xargs -r docker rm -f || true
+              done
+              docker ps -a --format '{{.ID}} {{.Names}}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | xargs -r docker rm -f || true
+              compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner
+            fi
 
             # ── Wait for health check ──
             echo "▸ Waiting for health check..."
@@ -142,6 +241,30 @@ jobs:
               sleep 5
             done
 
+            echo "▸ Waiting for OCR service healthcheck..."
+            for i in $(seq 1 30); do
+              if compose exec -T ocr curl -sf http://127.0.0.1:8000/healthz > /dev/null 2>&1; then
+                echo "✓ OCR service is healthy!"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "✗ OCR health check failed after 30 attempts"
+                compose logs --tail=100 ocr
+                exit 1
+              fi
+              echo "  Attempt $i/30 - waiting..."
+              sleep 3
+            done
+
+            echo "▸ OCR smoke test (upload a generated image)..."
+            compose exec -T ocr python -c "import os; from PIL import Image, ImageDraw, ImageFont; fp='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'; font=ImageFont.truetype(fp, 64) if os.path.exists(fp) else ImageFont.load_default(); img=Image.new('RGB',(1200,300),'white'); d=ImageDraw.Draw(img); d.text((30,110),'ILIAGPT OCR smoke test 123', fill='black', font=font); img.save('/tmp/ocr_smoke.png'); print('ok')"
+            OCR_JSON="$(compose exec -T ocr curl -sS -w '\\nTIME_TOTAL=%{time_total}\\n' -F file=@/tmp/ocr_smoke.png 'http://127.0.0.1:8000/v1/ocr?engine=auto&lang=eng')"
+            echo "${OCR_JSON}" | head -n 20
+            if ! echo "${OCR_JSON}" | grep -qi "ILIAGPT"; then
+              echo "✗ OCR smoke test failed (expected output to contain ILIAGPT)"
+              exit 1
+            fi
+
             # ── Cleanup old images ──
             echo "▸ Cleaning up old images..."
             docker image prune -f
@@ -153,39 +276,74 @@ jobs:
             echo "═══════════════════════════════════════════"
             compose ps
             echo ""
-            curl -s http://127.0.0.1:5000/health || true
+
+            HEALTH_JSON="$(curl -sf http://127.0.0.1:5000/api/health)"
+            echo "${HEALTH_JSON}"
+            if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
+              echo "✗ Version mismatch on local health endpoint"
+              exit 1
+            fi
+
+            # Verify the front-end was built with the same APP_VERSION.
+            # sw-cleanup.js is always included first on the landing HTML.
+            SW_CLEANUP="$(curl -sf --max-time 20 http://127.0.0.1:5000/sw-cleanup.js)"
+            if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
+              echo "✗ sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
+              echo "▸ sw-cleanup.js (first 30 lines):"
+              echo "${SW_CLEANUP}" | head -n 30
+              exit 1
+            fi
           DEPLOY_SCRIPT
 
       - name: Verify production
         run: |
-          echo "▸ Verifying https://iliagpt.com..."
+          set -euo pipefail
+          EXPECTED_SHA="${{ github.sha }}"
+          EXPECTED_SHA="${EXPECTED_SHA:0:8}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED_SHA})..."
           sleep 10
           STATUS=$(curl -sI --max-time 15 https://iliagpt.com | head -1 || echo "UNREACHABLE")
           echo "Response: $STATUS"
-          if echo "$STATUS" | grep -qE "200|301|302"; then
-            echo "✓ Production site is live!"
-          else
-            echo "⚠ Warning: Site may not be responding correctly"
+          if ! echo "$STATUS" | grep -qE "200|301|302"; then
+            echo "❌ Production site is not responding correctly"
+            exit 1
           fi
+
+          HEALTH_JSON="$(curl -sf --max-time 20 https://iliagpt.com/api/health)"
+          echo "$HEALTH_JSON"
+          if ! echo "$HEALTH_JSON" | grep -q "\"version\":\"${EXPECTED_SHA}\""; then
+            echo "❌ Production health version mismatch"
+            exit 1
+          fi
+
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js)"
+          if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED_SHA}';"; then
+            echo "❌ Production sw-cleanup.js APP_VERSION mismatch (expected ${EXPECTED_SHA})"
+            echo "▸ sw-cleanup.js (first 30 lines):"
+            echo "${SW_CLEANUP}" | head -n 30
+            exit 1
+          fi
+
+          echo "✓ Production site is live with expected deploy version"
 
       - name: Notify on failure
         if: failure()
         run: |
           echo "::error::Deployment to production FAILED. Check the logs above."
-          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p iliagpt -f docker-compose.prod.yml up -d --build'"
+          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p hola -f docker-compose.prod.yml up -d --build'"
 
   # ── Auto Deploy (after CI) ──────────────────────────────
   deploy_auto:
     name: Deploy to VPS (Auto)
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
       VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
-      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'iliagpt' }}
+      COMPOSE_PROJECT: ${{ secrets.COMPOSE_PROJECT || 'hola' }}
     environment:
       name: production
       url: https://iliagpt.com
@@ -196,6 +354,16 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
+          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
+          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
+          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
+          # Best-effort only: some hosts firewall/drop probes even when SSH works.
+          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
+
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
@@ -205,7 +373,12 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'DEPLOY_SCRIPT'
+          TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
+          # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
+            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "TARGET_SHA='${TARGET_SHA}' bash -s" << 'DEPLOY_SCRIPT'
             set -euo pipefail
 
             echo "═══════════════════════════════════════════"
@@ -215,7 +388,7 @@ jobs:
 
             DEPLOY_PATH="/opt/hola"
             COMPOSE_FILE="docker-compose.prod.yml"
-            PROJECT="iliagpt"
+            PROJECT="hola"
 
             cd "$DEPLOY_PATH"
 
@@ -231,29 +404,105 @@ jobs:
               fi
             fi
 
-            echo "▸ Pulling latest code..."
-            git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
+            echo "▸ Reclaiming VPS disk before checkout..."
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+            docker image prune -af || true
+            rm -rf /tmp/*
+            rm -rf /opt/hola/.npm /opt/hola/.cache /tmp/hola-untracked-cache 2>/dev/null || true
+
+            echo "▸ Fetching repository and checking out target SHA..."
+            echo "▸ TARGET_SHA: ${TARGET_SHA}"
+            git fetch --depth=1 --filter=blob:none origin main || git fetch --depth=1 origin main
+            git checkout --force "${TARGET_SHA}"
+
+            CURRENT_SHA="$(git rev-parse --short HEAD)"
+            EXPECTED_SHA="$(echo "${TARGET_SHA}" | cut -c1-8)"
+            echo "▸ Checked out SHA: ${CURRENT_SHA}"
+            if [ "${CURRENT_SHA}" != "${EXPECTED_SHA}" ]; then
+              echo "✗ Checked out SHA (${CURRENT_SHA}) does not match expected (${EXPECTED_SHA})"
+              exit 1
+            fi
 
             # Use the current git SHA for cache-busting (PWA/SW cleanup) and for /api/health version.
-            export APP_VERSION="$(git rev-parse --short HEAD)"
+            export APP_VERSION="${CURRENT_SHA}"
             echo "▸ APP_VERSION: ${APP_VERSION}"
 
+            echo "▸ Reclaiming VPS disk before build..."
+            docker system df
+            docker system prune -af --volumes || true
+            docker builder prune -af || true
+
+            echo "▸ Cleaning Docker cache on VPS to prevent build disk exhaustion..."
+            docker builder prune -af || true
+            docker image prune -af || true
+
             compose() {
-              APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
+              # Force-disable buildx bake. We've observed intermittent BuildKit/bake failures
+              # where stage outputs (deps:/app/node_modules) are not found when multiple
+              # targets build concurrently on the VPS.
+              COMPOSE_BAKE=0 APP_VERSION="${APP_VERSION}" SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
                 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
             }
 
-            echo "▸ Building Docker images..."
-            compose build --no-cache app worker sandbox-runner
+            echo "▸ Building Docker images (no cache)..."
+            # Build sequentially for stability (avoids cross-target stage sharing bugs).
+            compose build --no-cache app
+            compose build --no-cache sandbox-runner
+            compose build --no-cache ocr
 
             echo "▸ Rolling update: stopping app containers..."
             compose up -d postgres redis
             sleep 5
+            echo "▸ Running database migrations..."
+            compose run --rm -T --no-deps app node dist/migrate.cjs < /dev/null
+
+            echo "▸ Ensuring port 5000 is free..."
+            docker ps --filter "publish=5000" --format '{{.ID}}' | xargs -r docker stop || true
+            docker ps -a --filter "publish=5000" --format '{{.ID}}' | xargs -r docker rm || true
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 delete michat >/dev/null 2>&1 || true
+            fi
+            if command -v fuser >/dev/null 2>&1; then
+              fuser -k 5000/tcp >/dev/null 2>&1 || true
+            fi
+            sleep 2
+            if command -v ss >/dev/null 2>&1; then
+              if ss -ltnp 2>/dev/null | grep -qE 'LISTEN\\s+.*:(5000)\\b'; then
+                echo "✗ Port 5000 is still in use after cleanup"
+                ss -ltnp 2>/dev/null | grep -E 'LISTEN\\s+.*:(5000)\\b' || true
+                exit 1
+              fi
+            fi
 
             echo "▸ Starting updated containers..."
-            compose up -d
+            echo "▸ Removing stale service containers to avoid name conflicts..."
+            for svc in ocr app worker sandbox-runner; do
+              docker ps -aq \
+                --filter "label=com.docker.compose.project=${PROJECT}" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                | xargs -r docker rm -f || true
+            done
+            docker ps -a --format '{{.ID}} {{.Names}}' \
+              | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
+              | xargs -r docker rm -f || true
+
+            if ! compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner; then
+              echo "⚠️ docker compose up failed; running cleanup + retry..."
+              compose down --remove-orphans || true
+              compose up -d postgres redis
+              sleep 3
+              for svc in ocr app worker sandbox-runner; do
+                docker ps -aq \
+                  --filter "label=com.docker.compose.project=${PROJECT}" \
+                  --filter "label=com.docker.compose.service=${svc}" \
+                  | xargs -r docker rm -f || true
+              done
+              docker ps -a --format '{{.ID}} {{.Names}}' \
+                | awk -v p="$PROJECT" '$2 ~ ("^"p"-(ocr|app|worker|sandbox-runner)(-|$)") {print $1}' \
+                | xargs -r docker rm -f || true
+              compose up -d --force-recreate --remove-orphans ocr app worker sandbox-runner
+            fi
 
             echo "▸ Waiting for health check..."
             for i in $(seq 1 30); do
@@ -270,6 +519,30 @@ jobs:
               sleep 5
             done
 
+            echo "▸ Waiting for OCR service healthcheck..."
+            for i in $(seq 1 30); do
+              if compose exec -T ocr curl -sf http://127.0.0.1:8000/healthz > /dev/null 2>&1; then
+                echo "✓ OCR service is healthy!"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "✗ OCR health check failed after 30 attempts"
+                compose logs --tail=100 ocr
+                exit 1
+              fi
+              echo "  Attempt $i/30 - waiting..."
+              sleep 3
+            done
+
+            echo "▸ OCR smoke test (upload a generated image)..."
+            compose exec -T ocr python -c "import os; from PIL import Image, ImageDraw, ImageFont; fp='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'; font=ImageFont.truetype(fp, 64) if os.path.exists(fp) else ImageFont.load_default(); img=Image.new('RGB',(1200,300),'white'); d=ImageDraw.Draw(img); d.text((30,110),'ILIAGPT OCR smoke test 123', fill='black', font=font); img.save('/tmp/ocr_smoke.png'); print('ok')"
+            OCR_JSON="$(compose exec -T ocr curl -sS -w '\\nTIME_TOTAL=%{time_total}\\n' -F file=@/tmp/ocr_smoke.png 'http://127.0.0.1:8000/v1/ocr?engine=auto&lang=eng')"
+            echo "${OCR_JSON}" | head -n 20
+            if ! echo "${OCR_JSON}" | grep -qi "ILIAGPT"; then
+              echo "✗ OCR smoke test failed (expected output to contain ILIAGPT)"
+              exit 1
+            fi
+
             echo "▸ Cleaning up old images..."
             docker image prune -f
 
@@ -279,23 +552,57 @@ jobs:
             echo "═══════════════════════════════════════════"
             compose ps
             echo ""
-            curl -s http://127.0.0.1:5000/health || true
+
+            HEALTH_JSON="$(curl -sf http://127.0.0.1:5000/api/health)"
+            echo "${HEALTH_JSON}"
+            if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
+              echo "✗ Version mismatch on local health endpoint"
+              exit 1
+            fi
+
+            # Verify the front-end was built with the same APP_VERSION.
+            SW_CLEANUP="$(curl -sf --max-time 20 http://127.0.0.1:5000/sw-cleanup.js)"
+            if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${APP_VERSION}';"; then
+              echo "✗ sw-cleanup.js APP_VERSION mismatch (expected ${APP_VERSION})"
+              echo "▸ sw-cleanup.js (first 30 lines):"
+              echo "${SW_CLEANUP}" | head -n 30
+              exit 1
+            fi
           DEPLOY_SCRIPT
 
       - name: Verify production
         run: |
-          echo "▸ Verifying https://iliagpt.com..."
+          set -euo pipefail
+          EXPECTED_SHA="${{ github.event.workflow_run.head_sha }}"
+          EXPECTED_SHA="${EXPECTED_SHA:0:8}"
+          echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED_SHA})..."
           sleep 10
           STATUS=$(curl -sI --max-time 15 https://iliagpt.com | head -1 || echo "UNREACHABLE")
           echo "Response: $STATUS"
-          if echo "$STATUS" | grep -qE "200|301|302"; then
-            echo "✓ Production site is live!"
-          else
-            echo "⚠ Warning: Site may not be responding correctly"
+          if ! echo "$STATUS" | grep -qE "200|301|302"; then
+            echo "❌ Production site is not responding correctly"
+            exit 1
           fi
+
+          HEALTH_JSON="$(curl -sf --max-time 20 https://iliagpt.com/api/health)"
+          echo "$HEALTH_JSON"
+          if ! echo "$HEALTH_JSON" | grep -q "\"version\":\"${EXPECTED_SHA}\""; then
+            echo "❌ Production health version mismatch"
+            exit 1
+          fi
+
+          SW_CLEANUP="$(curl -sf --max-time 20 https://iliagpt.com/sw-cleanup.js)"
+          if ! echo "${SW_CLEANUP}" | grep -q "var APP_VERSION = '${EXPECTED_SHA}';"; then
+            echo "❌ Production sw-cleanup.js APP_VERSION mismatch (expected ${EXPECTED_SHA})"
+            echo "▸ sw-cleanup.js (first 30 lines):"
+            echo "${SW_CLEANUP}" | head -n 30
+            exit 1
+          fi
+
+          echo "✓ Production site is live with expected deploy version"
 
       - name: Notify on failure
         if: failure()
         run: |
           echo "::error::Deployment to production FAILED. Check the logs above."
-          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p iliagpt -f docker-compose.prod.yml up -d --build'"
+          echo "Manual rollback: ssh root@${{ env.VPS_HOST }} 'cd /opt/hola && git checkout HEAD~1 && docker compose -p hola -f docker-compose.prod.yml up -d --build'"

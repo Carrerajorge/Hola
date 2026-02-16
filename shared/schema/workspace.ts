@@ -11,7 +11,7 @@ export const workspaces = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("workspaces_org_idx").on(table.orgId),
     index("workspaces_updated_idx").on(table.updatedAt),
   ]

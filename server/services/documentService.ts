@@ -430,8 +430,12 @@ async function generatePptx(template: DocumentTemplate, data: Record<string, any
   } else {
     slides = [{ title: title, content: ["Content"] }];
   }
-  
-  return generatePptDocument(title, slides);
+
+  return generatePptDocument(title, slides, {
+    trace: {
+      source: "documentService",
+    },
+  });
 }
 
 export async function renderDocument(request: DocumentRenderRequest): Promise<GeneratedDocument> {

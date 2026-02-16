@@ -1,10 +1,9 @@
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from "docx";
-import pptxgenImport from "pptxgenjs";
-const PptxGenJS = (pptxgenImport as any).default || pptxgenImport;
 import { promises as fs } from "fs";
 import path from "path";
+import { generatePptDocument } from "../../services/documentGeneration";
 
 export interface ArtifactMeta {
   id: string;
@@ -78,6 +77,51 @@ export interface CitationsPack {
 }
 
 const ARTIFACTS_DIR = path.join(process.cwd(), "uploads", "artifacts");
+
+function sanitizePptText(value: unknown, maxLength: number): string {
+  return String(value ?? "")
+    .replace(/\0/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim()
+    .substring(0, maxLength);
+}
+
+function toCorporateSlides(spec: PptxSpec): { title: string; content: string[] }[] {
+  const sourceSlides = (spec.slides && spec.slides.length > 0)
+    ? spec.slides
+    : [{ title: "Resumen", bullets: ["Contenido no disponible"] }];
+
+  const normalized = sourceSlides.map((slideSpec, index) => {
+    const title = sanitizePptText(slideSpec.title, 180) || `Diapositiva ${index + 1}`;
+    const content: string[] = [];
+
+    const safeBullets = Array.isArray(slideSpec.bullets) ? slideSpec.bullets : [];
+    for (const bullet of safeBullets.slice(0, 12)) {
+      const safeBullet = sanitizePptText(bullet, 260);
+      if (safeBullet) {
+        content.push(`• ${safeBullet}`);
+      }
+    }
+
+    if (slideSpec.notes) {
+      const safeNotes = sanitizePptText(slideSpec.notes, 240);
+      if (safeNotes) {
+        content.push(`Notas: ${safeNotes}`);
+      }
+    }
+
+    if (content.length === 0) {
+      content.push("Sin contenido disponible.");
+    }
+
+    return {
+      title,
+      content,
+    };
+  });
+
+  return normalized;
+}
 
 async function ensureArtifactsDir(): Promise<void> {
   await fs.mkdir(ARTIFACTS_DIR, { recursive: true });
@@ -271,50 +315,33 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
   const id = randomUUID();
   const filename = `${spec.title.replace(/[^a-zA-Z0-9]/g, "_")}_${id.substring(0, 8)}.pptx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
+  const safeTitle = sanitizePptText(spec.title, 500) || "Presentation";
+  const slides = toCorporateSlides(spec).map((slide) => ({
+    ...slide,
+  }));
 
-  const pptx = new PptxGenJS();
-  pptx.author = spec.metadata?.author || "IliaGPT Super Agent";
-  pptx.subject = spec.metadata?.subject || spec.title;
-  pptx.title = spec.title;
-
-  // Title slide
-  const titleSlide = pptx.addSlide();
-  titleSlide.addText(spec.title, {
-    x: 0.5, y: 1.5, w: 9, h: 2,
-    fontSize: 32, bold: true, color: "1A1A2E",
-    align: "center", valign: "middle",
-  });
-  titleSlide.addText(spec.metadata?.author || "IliaGPT Super Agent", {
-    x: 0.5, y: 4, w: 9, h: 0.5,
-    fontSize: 14, color: "666666",
-    align: "center",
-  });
-
-  // Content slides
-  for (const slideSpec of spec.slides) {
-    const slide = pptx.addSlide();
-
-    slide.addText(slideSpec.title, {
-      x: 0.5, y: 0.3, w: 9, h: 0.8,
-      fontSize: 24, bold: true, color: "1A1A2E",
+  let pptxBuffer: Buffer;
+  try {
+    pptxBuffer = await generatePptDocument(safeTitle, slides, {
+      trace: {
+        source: "superAgent",
+      },
     });
-
-    const bulletText = slideSpec.bullets.map(b => ({
-      text: b,
-      options: { fontSize: 16, color: "333333", bullet: true, breakLine: true } as any,
-    }));
-
-    slide.addText(bulletText, {
-      x: 0.5, y: 1.3, w: 9, h: 3.8,
-      valign: "top",
+  } catch (error: any) {
+    console.warn("[superAgent] Fallback for createPptx:", error);
+    pptxBuffer = await generatePptDocument("Presentación", [{
+      title: "Fallback",
+      content: [
+        "No fue posible renderizar la presentación con el layout solicitado.",
+        `Error: ${sanitizePptText(error?.message || error, 200)}`,
+      ],
+    }], {
+      trace: {
+        source: "superAgent",
+      },
     });
-
-    if (slideSpec.notes) {
-      slide.addNotes(slideSpec.notes);
-    }
   }
 
-  const pptxBuffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
   await fs.writeFile(filepath, pptxBuffer);
 
   const stats = await fs.stat(filepath);

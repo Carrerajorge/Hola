@@ -75,6 +75,35 @@ const envSchema = z.object({
 
   DB_POOL_MAX: z.string().transform(Number).default("20"),
   DB_POOL_MIN: z.string().transform(Number).default("2"),
+
+  // Channels (Telegram / WhatsApp Cloud)
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_WEBHOOK_SECRET_TOKEN: z.string().optional(),
+  TELEGRAM_WEBHOOK_URL: z.string().optional(),
+  TELEGRAM_AUTO_SET_WEBHOOK: boolish.optional(),
+
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  WHATSAPP_APP_SECRET: z.string().optional(),
+  WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_CLOUD_DEFAULT_USER_ID: z.string().optional(),
+
+  // Messenger (Meta)
+  MESSENGER_PAGE_ACCESS_TOKEN: z.string().optional(),
+  MESSENGER_APP_SECRET: z.string().optional(),
+  MESSENGER_VERIFY_TOKEN: z.string().optional(),
+  MESSENGER_DEFAULT_USER_ID: z.string().optional(),
+
+  // WeChat Official Account
+  WECHAT_APP_ID: z.string().optional(),
+  WECHAT_APP_SECRET: z.string().optional(),
+  WECHAT_TOKEN: z.string().optional(),
+  WECHAT_DEFAULT_USER_ID: z.string().optional(),
+
+  // Channel ingest execution mode:
+  // - auto: queue in production when Redis is configured, otherwise in-process
+  // - queue: always enqueue to BullMQ (requires Redis + worker)
+  // - inprocess: process inside web server (best for local dev)
+  CHANNEL_INGEST_MODE: z.enum(["auto", "queue", "inprocess"]).default("auto"),
 });
 
 function validateEnv() {
@@ -145,6 +174,27 @@ function validateEnv() {
     if (data.ADMIN_PASSWORD && data.ADMIN_PASSWORD.length < 12) {
       console.warn("⚠️  WARNING: ADMIN_PASSWORD should be at least 12 characters in production.");
     }
+  }
+
+  // Channel hardening (best-effort warnings; keep optional to avoid breaking deployments
+  // that don't use these connectors).
+  if (data.TELEGRAM_BOT_TOKEN && !data.TELEGRAM_WEBHOOK_SECRET_TOKEN) {
+    console.warn("⚠️  WARNING: TELEGRAM_WEBHOOK_SECRET_TOKEN is not set. Telegram webhook requests won't be authenticated.");
+  }
+  if (data.TELEGRAM_AUTO_SET_WEBHOOK && !data.TELEGRAM_WEBHOOK_URL) {
+    console.warn("⚠️  WARNING: TELEGRAM_AUTO_SET_WEBHOOK=true but TELEGRAM_WEBHOOK_URL is not set. Webhook auto-registration will be skipped.");
+  }
+  if (data.WHATSAPP_VERIFY_TOKEN && !data.WHATSAPP_APP_SECRET) {
+    console.warn("⚠️  WARNING: WHATSAPP_APP_SECRET is not set. WhatsApp Cloud webhook signatures will not be verified.");
+  }
+  if (data.MESSENGER_PAGE_ACCESS_TOKEN && !data.MESSENGER_VERIFY_TOKEN) {
+    console.warn("⚠️  WARNING: MESSENGER_VERIFY_TOKEN is not set. Messenger webhook verification will reject all requests.");
+  }
+  if (data.MESSENGER_PAGE_ACCESS_TOKEN && !data.MESSENGER_APP_SECRET) {
+    console.warn("⚠️  WARNING: MESSENGER_APP_SECRET is not set. Messenger webhook signatures will not be verified.");
+  }
+  if (data.WECHAT_APP_ID && !data.WECHAT_TOKEN) {
+    console.warn("⚠️  WARNING: WECHAT_TOKEN is not set. WeChat webhook requests won't be authenticated.");
   }
 
   return data;

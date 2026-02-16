@@ -59,8 +59,23 @@ app.use(requestLoggerMiddleware);
 // Canonical URL redirect (www -> non-www) - must be before CORS and sessions
 app.use(canonicalUrlMiddleware);
 
-// Compression middleware - should be early to compress all eligible responses
-app.use(compression());
+// Compression middleware - skip SSE streams (text/event-stream) to prevent buffering.
+// compression() buffers output to build compression blocks, which breaks real-time SSE.
+app.use(
+  compression({
+    filter: (req, res) => {
+      if (
+        req.url?.includes("/chat/stream") ||
+        req.url?.includes("/super/stream") ||
+        req.headers.accept === "text/event-stream" ||
+        res.getHeader("Content-Type")?.toString().includes("text/event-stream")
+      ) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 // CORS configuration - must be before other middleware
 app.use(corsMiddleware);
@@ -81,6 +96,14 @@ app.use(requestTracerMiddleware);
 // Defense in Depth
 app.disable("x-powered-by");
 
+// Route-specific body limits (MUST come before global parser)
+// /api/chat/stream needs a higher limit to support inline image base64 for vision
+app.use("/api/chat/stream", express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+  strict: true,
+}));
+
 // Global Body Limit: Reduced to 1MB to prevent DoS
 // For large file uploads, use specific routes with increased limits (e.g. Multer)
 app.use(
@@ -89,10 +112,12 @@ app.use(
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
+    // SECURITY FIX #15: Strict JSON parsing to reject malformed JSON
+    strict: true,
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb', parameterLimit: 1000 }));
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
@@ -284,6 +309,21 @@ export function log(message: string, source = "express") {
     );
 
     log("Graceful shutdown handler configured");
+
+    // Optional: auto-register Telegram webhook after the server is reachable.
+    if (env.TELEGRAM_AUTO_SET_WEBHOOK && env.TELEGRAM_WEBHOOK_URL && env.TELEGRAM_BOT_TOKEN) {
+      setTimeout(() => {
+        import("./channels/telegram/telegramApi")
+          .then(({ telegramSetWebhook }) =>
+            telegramSetWebhook({
+              webhookUrl: env.TELEGRAM_WEBHOOK_URL as string,
+              secretToken: env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
+            }),
+          )
+          .then(() => log(`[Telegram] Webhook configured: ${env.TELEGRAM_WEBHOOK_URL}`))
+          .catch((e) => log(`[Telegram] Webhook auto-config failed: ${e?.message || e}`));
+      }, 1500);
+    }
   });
 
   // Hardened Server Timeouts (Slowloris Protection)

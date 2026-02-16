@@ -16,7 +16,7 @@ export const sessions = pgTable(
         updatedAt: timestamp("updated_at").defaultNow().notNull(),
         lastSeenAt: timestamp("last_seen_at"),
     },
-    (table) => [
+    (table: any) => [
         index("IDX_session_expire").on(table.expire),
         index("sessions_user_idx").on(table.userId),
         index("sessions_user_expire_idx").on(table.userId, table.expire),
@@ -31,7 +31,7 @@ export const magicLinks = pgTable("magic_links", {
     expiresAt: timestamp("expires_at").notNull(),
     used: boolean("used").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("magic_links_token_idx").on(table.token),
     index("magic_links_user_idx").on(table.userId),
 ]);
@@ -46,7 +46,7 @@ export const oauthStates = pgTable("oauth_states", {
     provider: varchar("provider", { length: 50 }).notNull().default("google"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
-}, (table) => [
+}, (table: any) => [
     index("oauth_states_expires_idx").on(table.expiresAt),
 ]);
 
@@ -64,7 +64,7 @@ export const authTokens = pgTable("auth_tokens", {
     scope: text("scope"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("auth_tokens_user_provider_idx").on(table.userId, table.provider),
     uniqueIndex("auth_tokens_unique_user_provider").on(table.userId, table.provider),
 ]);
@@ -127,7 +127,7 @@ export const users = pgTable("users", {
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
     deletedAt: timestamp("deleted_at"),
-}, (table) => [
+}, (table: any) => [
     index("users_role_idx").on(table.role),
     index("users_plan_idx").on(table.plan),
     index("users_status_idx").on(table.status),
@@ -192,7 +192,7 @@ export const userSettings = pgTable("user_settings", {
     privacySettings: jsonb("privacy_settings").$type<z.infer<typeof privacySettingsSchema>>(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("user_settings_user_id_idx").on(table.userId),
 ]);
 
@@ -220,7 +220,7 @@ export const consentLogs = pgTable("consent_logs", {
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("consent_logs_user_idx").on(table.userId),
     index("consent_logs_consent_type_idx").on(table.consentType),
 ]);

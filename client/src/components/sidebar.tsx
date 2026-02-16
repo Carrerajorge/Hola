@@ -37,6 +37,7 @@ import {
   Download,
   MoveRight,
   Brain,
+  MessageCircle,
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -533,6 +534,7 @@ export function Sidebar({
           {/* Chat title and indicators */}
           <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
+            {chat.id.startsWith('wa_') && <MessageCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />}
             <TooltipProvider delayDuration={500}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -633,8 +635,11 @@ export function Sidebar({
           onClick={onOpenSkills}
           data-testid="button-skills"
         >
-          <Zap className="h-4 w-4" />
-          Skills
+          <Zap className="h-4 w-4 shrink-0" />
+          <span className="flex flex-col items-start leading-tight">
+            <span>Skills</span>
+            <span className="text-[10px] font-normal text-muted-foreground">Capacidades modulares de IliaGPT</span>
+          </span>
         </Button>
         <Button
           variant="ghost"
@@ -653,7 +658,7 @@ export function Sidebar({
           data-testid="button-whatsapp-connect"
         >
           <MessageSquare className="h-4 w-4" />
-          <span className="flex-1 text-left">WhatsApp (QR)</span>
+          <span className="flex-1 text-left">AppsWebChat (QR)</span>
           <span
             className={cn(
               "h-2.5 w-2.5 rounded-full",
@@ -661,7 +666,7 @@ export function Sidebar({
               (waStatus.state === 'connecting' || waStatus.state === 'qr' || waStatus.state === 'pairing_code') && 'bg-amber-500',
               waStatus.state === 'disconnected' && 'bg-red-500'
             )}
-            title={`WhatsApp: ${waStatus.state}`}
+            title={`Canales: ${waStatus.state}`}
           />
         </Button>
 

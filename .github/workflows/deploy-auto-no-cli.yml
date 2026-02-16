@@ -1,0 +1,146 @@
+name: Auto Deploy (no local CLI needed)
+
+on:
+  push:
+    branches:
+      - deploy/iliacodex-import
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: deploy/iliacodex-import
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
+      VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      DEPLOY_DIR: ${{ secrets.VPS_DIR || '/root/ILIACODEX' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve branch
+        id: branch
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.branch }}" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          if [ -z "${{ secrets.VPS_SSH_KEY }}" ]; then
+            echo "::error::Missing VPS_SSH_KEY secret"
+            exit 1
+          fi
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p 2222 -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Pick reachable SSH port
+        id: sshport
+        run: |
+          set -euo pipefail
+          for p in 2222 22; do
+            if ssh -i ~/.ssh/deploy_key -p "$p" -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=6 \
+              "${VPS_USER}@${VPS_HOST}" "echo port-$p-ok" >/dev/null 2>&1; then
+              echo "port=$p" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No SSH access on ports 2222 and 22"
+          exit 1
+
+      - name: Deploy to production VPS
+        id: deploy
+        run: |
+          set -euo pipefail
+          SSH_PORT='${{ steps.sshport.outputs.port }}'
+          BRANCH='${{ steps.branch.outputs.branch }}'
+          TARGET_DIR='${{ env.DEPLOY_DIR }}'
+          REPO='https://github.com/Carrerajorge/Hola.git'
+
+          cat > /tmp/deploy-remote.sh <<'REMOTE'
+          set -euo pipefail
+
+          TARGET_DIR="${TARGET_DIR}"
+          BRANCH="${BRANCH}"
+          REPO="${REPO}"
+
+          ensure_repo() {
+            if [ -d "$TARGET_DIR/.git" ]; then
+              cd "$TARGET_DIR"
+              git remote set-url origin "$REPO"
+            else
+              mkdir -p "$(dirname "$TARGET_DIR")"
+              git clone "$REPO" "$TARGET_DIR"
+              cd "$TARGET_DIR"
+            fi
+          }
+
+          rollback_if_needed() {
+            echo "Deploy failed, trying rollback to previous SHA: $PREV_SHA"
+            git checkout "$PREV_SHA"
+            ./deploy_direct.sh || true
+          }
+
+          ensure_repo
+          git fetch origin
+          git checkout "$BRANCH"
+
+          PREV_SHA="$(git rev-parse HEAD)"
+          git pull --ff-only "origin" "$BRANCH"
+
+          export LOCAL_DEPLOY=1
+          export VPS_DIR="$TARGET_DIR"
+          export DEPLOY_BRANCH="$BRANCH"
+
+          if ! ./deploy_direct.sh; then
+            rollback_if_needed
+            exit 1
+          fi
+
+          for i in $(seq 1 25); do
+            if curl -fsS https://iliagpt.com/api/health >/dev/null 2>&1; then
+              echo "Health check OK"
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "Health check failed"
+          rollback_if_needed
+          exit 1
+          REMOTE
+
+          chmod +x /tmp/deploy-remote.sh
+
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+            "${VPS_USER}@${VPS_HOST}" \
+            TARGET_DIR="$TARGET_DIR" BRANCH="$BRANCH" REPO="$REPO" bash -s < /tmp/deploy-remote.sh
+
+      - name: Verify production response
+        if: always()
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -fsS https://iliagpt.com/api/health >/dev/null 2>&1; then
+              echo "production API healthy"
+              exit 0
+            fi
+            echo "retry $i/30"
+            sleep 2
+          done
+          echo "::error::production healthcheck failed"
+          exit 1

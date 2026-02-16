@@ -3,6 +3,7 @@ import {
   generateWordDocument,
   generateExcelDocument,
   generatePptDocument,
+  normalizePptSlides,
   parseExcelFromText,
   parseSlidesFromText
 } from "../services/documentGeneration";
@@ -79,7 +80,7 @@ export function createDocumentsRouter() {
     try {
       const { type, title, content } = req.body;
 
-      if (!type || !title || !content) {
+      if (!type || title === undefined || title === null || content === undefined || content === null) {
         return res.status(400).json({ error: "type, title, and content are required" });
       }
 
@@ -88,12 +89,11 @@ export function createDocumentsRouter() {
         return res.status(400).json({ error: "Invalid document type. Use 'word', 'excel', or 'ppt'" });
       }
 
-      // Validate inputs
-      if (typeof title !== "string" || title.length > 500) {
-        return res.status(400).json({ error: "Title must be a string with max 500 characters" });
-      }
-      if (typeof content !== "string" || content.length > MAX_DOC_BODY_SIZE) {
-        return res.status(400).json({ error: `Content exceeds maximum size of ${MAX_DOC_BODY_SIZE / 1024}KB` });
+      const safeTitle = typeof title === "string" ? title.substring(0, 500) : `${title}`.substring(0, 500);
+      const safeContent = typeof content === "string" ? content.substring(0, MAX_DOC_BODY_SIZE) : `${content}`.substring(0, MAX_DOC_BODY_SIZE);
+
+      if (safeTitle.trim().length === 0) {
+        return res.status(400).json({ error: "title cannot be empty" });
       }
 
       // Acquire concurrency slot
@@ -112,22 +112,22 @@ export function createDocumentsRouter() {
       try {
         switch (type) {
           case "word":
-            buffer = await generateWordDocument(title, content);
-            filename = sanitizeFilename(title, ".docx");
+            buffer = await generateWordDocument(safeTitle, safeContent);
+            filename = sanitizeFilename(safeTitle, ".docx");
             mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             break;
           case "excel": {
-            const excelData = parseExcelFromText(content);
-            buffer = await generateExcelDocument(title, excelData);
-            filename = sanitizeFilename(title, ".xlsx");
+            const excelData = parseExcelFromText(safeContent);
+            buffer = await generateExcelDocument(safeTitle, excelData);
+            filename = sanitizeFilename(safeTitle, ".xlsx");
             mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             break;
           }
           case "ppt": {
-            const slides = parseSlidesFromText(content);
+            const slides = parseSlidesFromText(safeContent);
+            const normalized = normalizePptSlides(safeTitle, slides);
+            const pptReport = validatePptSlides(normalized.slides as { title: string; content: string[] }[]);
 
-            // Validate PPT slides
-            const pptReport = validatePptSlides(slides);
             if (!pptReport.valid) {
               logDocumentEvent({
                 timestamp: new Date().toISOString(),
@@ -135,14 +135,14 @@ export function createDocumentsRouter() {
                 docType: "ppt",
                 details: { errors: pptReport.errors },
               });
-              return res.status(400).json({
-                error: "PPT validation failed",
-                details: pptReport.errors,
-              });
             }
 
-            buffer = await generatePptDocument(title, slides);
-            filename = sanitizeFilename(title, ".pptx");
+            buffer = await generatePptDocument(normalized.title, normalized.slides, {
+              trace: {
+                source: "documentsRouter",
+              },
+            });
+            filename = sanitizeFilename(safeTitle, ".pptx");
             mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
             break;
           }

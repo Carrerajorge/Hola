@@ -23,7 +23,7 @@ ssh "$VPS_USER@$VPS_HOST" "
     else
         echo '⚠️ .env.production roto o inexistente. Creando uno nuevo...'
         cat > .env.production <<EOF
-PORT=5001
+PORT=5000
 NODE_ENV=production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat
 SESSION_SECRET=\$(openssl rand -hex 32)

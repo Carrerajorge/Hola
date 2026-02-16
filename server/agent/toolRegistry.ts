@@ -1518,7 +1518,11 @@ const generateDocumentTool: ToolDefinition = {
 
         case "ppt": {
           const slides = parseSlidesFromText(input.content);
-          buffer = await generatePptDocument(input.title, slides);
+          buffer = await generatePptDocument(input.title, slides, {
+            trace: {
+              source: "toolRegistry",
+            },
+          });
           mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
           extension = "pptx";
           break;

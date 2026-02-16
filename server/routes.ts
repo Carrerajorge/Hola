@@ -65,9 +65,15 @@ import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
 import ragMemoryRouter from "./routes/ragMemoryRouter";
 import feedbackRouter from "./routes/feedbackRouter";
+import { createChannelWebhooksRouter } from "./routes/channelWebhooksRouter";
+import { createTelegramIntegrationRouter } from "./routes/telegramIntegrationRouter";
+import { createWhatsAppCloudIntegrationRouter } from "./routes/whatsappCloudIntegrationRouter";
+import { createMessengerIntegrationRouter } from "./routes/messengerIntegrationRouter";
+import { createWeChatIntegrationRouter } from "./routes/wechatIntegrationRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
+import { hasLogoutMarker, clearLogoutMarker } from "./lib/logoutMarker";
 import requestUnderstandingRoutes from "./routes/requestUnderstandingRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
@@ -91,6 +97,7 @@ import { llmGateway } from "./lib/llmGateway";
 import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { isModelEligibleForPublic } from "./services/modelIntegration";
+import { GEMINI_MODELS_REGISTRY, XAI_MODELS } from "./lib/modelRegistry";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
@@ -111,6 +118,7 @@ import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
@@ -126,11 +134,71 @@ import { errorHandler } from "./middleware/error";
 import { createBrowserControlRouter } from "./routes/browserControlRouter";
 import { createTerminalControlRouter, terminalClients } from "./routes/terminalControlRouter";
 import { createWorkflowRouter } from "./routes/workflowRouter";
+import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+type PublicModelSummary = {
+  id: string;
+  name: string;
+  provider: string;
+  modelId: string;
+  description: string | null;
+  isEnabled: string;
+  enabledAt: Date | string | null;
+  displayOrder: number;
+  icon: string | null;
+  modelType: string;
+  contextWindow: number | null;
+};
+
+const PUBLIC_MODEL_FALLBACKS: ReadonlyArray<PublicModelSummary> = Object.freeze([
+  {
+    id: "fallback-gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    provider: "gemini",
+    modelId: GEMINI_MODELS_REGISTRY.FLASH_25,
+    description: "Modelo rapido y estable",
+    isEnabled: "true",
+    enabledAt: null,
+    displayOrder: 0,
+    icon: null,
+    modelType: "TEXT",
+    contextWindow: 1000000,
+  },
+  {
+    id: "fallback-grok-4.1-fast",
+    name: "Grok 4.1 Fast",
+    provider: "xai",
+    modelId: XAI_MODELS.GROK_4_1_FAST,
+    description: "Modelo rapido con contexto amplio",
+    isEnabled: "true",
+    enabledAt: null,
+    displayOrder: 1,
+    icon: null,
+    modelType: "TEXT",
+    contextWindow: 2000000,
+  },
+]);
+
+function toPublicModelSummary(model: any): PublicModelSummary {
+  return {
+    id: model.id,
+    name: model.name,
+    provider: model.provider,
+    modelId: model.modelId,
+    description: model.description,
+    isEnabled: model.isEnabled,
+    enabledAt: model.enabledAt,
+    displayOrder: model.displayOrder || 0,
+    icon: model.icon,
+    modelType: model.modelType,
+    contextWindow: model.contextWindow,
+  };
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -181,27 +249,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Google login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Google login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Google session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -252,27 +327,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Microsoft login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Microsoft login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Microsoft session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -322,27 +404,34 @@ export async function registerRoutes(
               }
             }
 
-            return (req as any).logIn(user, (loginErr: any) => {
-              if (loginErr) {
-                console.error("[Auth] Auth0 login error:", loginErr);
-                return res.redirect("/login?error=login_failed");
-              }
-
-              // Workaround: persist userId explicitly (robust even if Passport serialization fails).
-              if ((req as any).session) {
-                (req as any).session.authUserId = userId;
-                (req as any).session.passport = (req as any).session.passport || {};
-                (req as any).session.passport.user = user;
-              }
-
-              const sess = (req as any).session;
-              if (sess?.save) {
-                sess.save((saveErr: any) => {
-                  if (saveErr) return next(saveErr);
-                  res.redirect("/?auth=success");
-                });
-                return;
-              }
+	            return (req as any).logIn(user, (loginErr: any) => {
+	              if (loginErr) {
+	                console.error("[Auth] Auth0 login error:", loginErr);
+	                return res.redirect("/login?error=login_failed");
+	              }
+	
+	              // Persist userId explicitly for robust auth across deployments.
+	              // Keep Passport's `session.passport.user` as a string id to ensure deserializeUser works.
+	              const session = (req as any).session as any | undefined;
+	              if (session) {
+	                session.authUserId = String(userId);
+	                session.passport = session.passport || {};
+	                if (typeof session.passport.user !== "string") {
+	                  session.passport.user = String(userId);
+	                }
+	              }
+	
+	              const sess = (req as any).session;
+	              if (sess?.save) {
+	                sess.save((saveErr: any) => {
+	                  if (saveErr) {
+	                    console.error("[Auth] Auth0 session save error:", saveErr);
+	                    return res.redirect("/login?error=session_error");
+	                  }
+	                  res.redirect("/?auth=success");
+	                });
+	                return;
+	              }
 
               res.redirect("/?auth=success");
             });
@@ -391,6 +480,7 @@ export async function registerRoutes(
     }
 
     if (authUserId) {
+      clearLogoutMarker(res);
       // Get fresh role from database
       try {
         const dbUser = await storage.getUser(authUserId);
@@ -410,6 +500,12 @@ export async function registerRoutes(
           isAnonymous: false
         });
       }
+    }
+
+    // If user explicitly logged out, do NOT auto-create/return anonymous identity.
+    // This prevents old frontend bundles from auto-reauthing as anon right after logout.
+    if (hasLogoutMarker(req)) {
+      return res.status(401).json({ message: "Logged out" });
     }
 
     // For anonymous users, bind ID to session (not header) to prevent impersonation
@@ -472,10 +568,37 @@ export async function registerRoutes(
   app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
+  app.use("/api/integrations/whatsapp/cloud", createWhatsAppCloudIntegrationRouter());
+  app.use("/api/integrations/telegram", createTelegramIntegrationRouter());
+  app.use("/api/integrations/messenger", createMessengerIntegrationRouter());
+  app.use("/api/integrations/wechat", createWeChatIntegrationRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
+
+  // External inbound webhooks must live outside /api to bypass CSRF middleware.
+  app.use("/webhooks", createChannelWebhooksRouter());
+
+  // Pre-execution intent guard for high-impact mutation endpoints.
+  // Mode is controlled by EXECUTION_INTENT_GUARD_MODE=off|monitor|enforce
+  // and defaults to enforce when SYSTEM_AUDIT_MODE is enabled.
+  const guardedExecutionPrefixes = [
+    "/api/agent",
+    "/api/orchestrator",
+    "/api/execution",
+    "/api/planning",
+    "/api/python-agent",
+    "/api/browser-control",
+    "/api/terminal",
+    "/api/workflows",
+    "/api/document-analysis",
+    "/api/word-pipeline",
+    "/api/openclaw",
+  ];
+  for (const prefix of guardedExecutionPrefixes) {
+    app.use(prefix, preExecutionIntentGuard);
+  }
 
 
   // ... existing imports ...
@@ -543,6 +666,10 @@ export async function registerRoutes(
     });
   });
 
+  app.get("/api/audit/execution-guard/status", (_req: Request, res: Response) => {
+    res.json(getExecutionIntentGuardStatus());
+  });
+
   // API Documentation
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
@@ -606,6 +733,9 @@ export async function registerRoutes(
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
   app.use(auditMiddleware); // Capture metrics for all requests
+
+  // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
+  app.use("/api/device-control", createDeviceControlRouter());
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
@@ -1079,27 +1209,17 @@ export async function registerRoutes(
       "Expires": "0"
     });
     try {
-	      const allModels = await storage.getAiModels();
-	      const models = allModels
-	        .filter((m: any) => isModelEligibleForPublic(m))
-	        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
-	        .map((m: any) => ({
-	          id: m.id,
-	          name: m.name,
-          provider: m.provider,
-          modelId: m.modelId,
-          description: m.description,
-          isEnabled: m.isEnabled,
-          enabledAt: m.enabledAt,
-          displayOrder: m.displayOrder || 0,
-          icon: m.icon,
-          modelType: m.modelType,
-          contextWindow: m.contextWindow,
-        }));
+      const allModels = await storage.getAiModels();
+      const models = allModels
+        .filter((m: any) => isModelEligibleForPublic(m))
+        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+        .map((m: any) => toPublicModelSummary(m));
       res.json({ models });
     } catch (error: any) {
       console.error("[Models] Error fetching available models:", error);
-      res.status(500).json({ error: error.message });
+      // Defensive fallback for production when DB schema is temporarily behind code.
+      // Keep app shell functional (especially after logout) instead of surfacing 500.
+      res.json({ models: PUBLIC_MODEL_FALLBACKS });
     }
   });
 

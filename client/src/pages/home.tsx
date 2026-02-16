@@ -30,9 +30,10 @@ import { pollingManager } from "@/lib/polling-manager";
 import { queryClient } from "@/lib/queryClient";
 
 const AppsViewLazy = lazy(() => import("@/components/apps-view").then((m) => ({ default: m.AppsView })));
-const WhatsAppConnectDialogLazy = lazy(() =>
-  import("@/components/whatsapp-connect-dialog").then((m) => ({ default: m.WhatsAppConnectDialog }))
+const ChannelsHubDialogLazy = lazy(() =>
+  import("@/components/channels-hub-dialog").then((m) => ({ default: m.ChannelsHubDialog }))
 );
+import { whatsappWebEventStream } from "@/lib/whatsapp-web-events";
 const GptExplorerLazy = lazy(() => import("@/components/gpt-explorer").then((m) => ({ default: m.GptExplorer })));
 const AboutGptDialogLazy = lazy(() =>
   import("@/components/about-gpt-dialog").then((m) => ({ default: m.AboutGptDialog }))
@@ -159,6 +160,18 @@ export default function Home() {
   const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
+  // Document generation state - kept in parent to survive ChatInterface key changes during new chat creation
+  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
+  const [docGenerationState, setDocGenerationState] = useState<{
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
+
   // Wrapper for setAiState that tracks which chat the state belongs to
   const setAiState = useCallback((newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => {
     const resolvedState = typeof newState === 'function' ? newState(aiState) : newState;
@@ -209,6 +222,21 @@ export default function Home() {
   const processingChatIds = useProcessingChatIds();
   const pendingResponseCounts = usePendingBadges();
   const { clearBadge } = useStreamingStore();
+
+  // WhatsApp: listen for mirrored messages and inject chats into the sidebar in real-time.
+  const lastWaRefreshRef = useRef(0);
+  useEffect(() => {
+    const unsub = whatsappWebEventStream.subscribe({
+      onMessage: () => {
+        // Throttle: at most one refresh every 3 seconds to avoid hammering the API
+        const now = Date.now();
+        if (now - lastWaRefreshRef.current < 3000) return;
+        lastWaRefreshRef.current = now;
+        window.dispatchEvent(new Event("refresh-chats"));
+      },
+    });
+    return unsub;
+  }, []);
 
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
@@ -319,6 +347,10 @@ export default function Home() {
     setUiPhase('idle');
     setActiveRunId(null);
 
+    // Reset document generation state
+    setSelectedDocTool(null);
+    setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
+
     // Clear chat references - this triggers new chat mode
     setActiveChatId(null);
     setSelectedProjectId(null);
@@ -361,7 +393,7 @@ export default function Home() {
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
     const result = await addMessage(pendingId, message);
-    const realId = resolveRealChatId(pendingId);
+    const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       setLocation(`/chat/${realId}`, { replace: true });
     }
@@ -370,8 +402,13 @@ export default function Home() {
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {
-    // EMERGENCY DEBUG
-    console.error("[CRITICAL] handleSendMessage in home.tsx called:", { messageContent: message.content?.substring(0, 50), activeChat: activeChat?.id, pendingChatId: pendingChatIdRef.current });
+    if (import.meta.env.DEV) {
+      console.debug("[home] handleSendMessage", {
+        messageContent: message.content?.substring(0, 50),
+        activeChat: activeChat?.id,
+        pendingChatId: pendingChatIdRef.current,
+      });
+    }
     
     // Check for Simulator / Dry-Run command (B4)
     if (message.content.trim().startsWith('/plan ') || message.content.trim().startsWith('/preview ')) {
@@ -707,7 +744,7 @@ export default function Home() {
 
       <Suspense fallback={null}>
         {isWhatsAppConnectOpen ? (
-          <WhatsAppConnectDialogLazy
+          <ChannelsHubDialogLazy
             open={isWhatsAppConnectOpen}
             onOpenChange={setIsWhatsAppConnectOpen}
           />
@@ -770,6 +807,10 @@ export default function Home() {
             activeRunId={activeRunId}
             setActiveRunId={setActiveRunId}
             selectedProjectId={selectedProjectId}
+            selectedDocTool={selectedDocTool}
+            setSelectedDocTool={setSelectedDocTool}
+            docGenerationState={docGenerationState}
+            setDocGenerationState={setDocGenerationState}
           />
           </ChatErrorBoundary>
         )}

@@ -30,7 +30,7 @@ export const aiModels = pgTable("ai_models", {
     displayOrder: integer("display_order").default(0),
     icon: text("icon"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("ai_models_provider_idx").on(table.provider),
     index("ai_models_model_type_idx").on(table.modelType),
     index("ai_models_status_idx").on(table.status),
@@ -60,7 +60,7 @@ export const payments = pgTable("payments", {
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeChargeId: text("stripe_charge_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("payments_user_idx").on(table.userId),
     index("payments_created_at_idx").on(table.createdAt),
     index("payments_status_created_at_idx").on(table.status, table.createdAt),
@@ -95,7 +95,7 @@ export const invoices = pgTable("invoices", {
     stripeHostedInvoiceUrl: text("stripe_hosted_invoice_url"),
     stripeInvoicePdfUrl: text("stripe_invoice_pdf_url"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("invoices_user_idx").on(table.userId),
     index("invoices_payment_idx").on(table.paymentId),
     uniqueIndex("invoices_user_invoice_number_unique_idx").on(table.userId, table.invoiceNumber),
@@ -133,7 +133,7 @@ export const auditLogs = pgTable("audit_logs", {
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("audit_logs_user_idx").on(table.userId),
     index("audit_logs_action_idx").on(table.action),
 ]);
@@ -173,7 +173,7 @@ export const adminAuditLogs = pgTable("admin_audit_logs", {
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("admin_audit_logs_admin_idx").on(table.adminId),
     index("admin_audit_logs_action_idx").on(table.action),
     index("admin_audit_logs_created_idx").on(table.createdAt),
@@ -199,7 +199,7 @@ export const aiModelUsage = pgTable("ai_model_usage", {
     success: text("success").default("true"),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("ai_model_usage_user_idx").on(table.userId),
     index("ai_model_usage_provider_idx").on(table.provider),
     index("ai_model_usage_created_idx").on(table.createdAt),
@@ -223,7 +223,7 @@ export const securityEvents = pgTable("security_events", {
     resolvedBy: varchar("resolved_by").references(() => users.id),
     resolvedAt: timestamp("resolved_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("security_events_user_idx").on(table.userId),
     index("security_events_type_idx").on(table.eventType),
     index("security_events_severity_idx").on(table.severity),
@@ -249,7 +249,7 @@ export const adminReports = pgTable("admin_reports", {
     error: text("error"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
     index("admin_reports_type_idx").on(table.type),
     index("admin_reports_status_idx").on(table.status),
     index("admin_reports_generated_by_idx").on(table.generatedBy),
@@ -280,7 +280,7 @@ export const scheduledReports = pgTable("scheduled_reports", {
     createdBy: varchar("created_by").notNull().references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("scheduled_reports_active_next_idx").on(table.isActive, table.nextRunAt),
 ]);
 
@@ -297,7 +297,7 @@ export const ipBlocklist = pgTable("ip_blocklist", {
     blockedBy: varchar("blocked_by").notNull().references(() => users.id),
     expiresAt: timestamp("expires_at"), // null = permanent
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("ip_blocklist_ip_idx").on(table.ipAddress),
     index("ip_blocklist_expires_idx").on(table.expiresAt),
 ]);
@@ -320,7 +320,7 @@ export const analyticsEvents = pgTable("analytics_events", {
     browser: text("browser"),
     country: text("country"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("analytics_events_user_idx").on(table.userId),
     index("analytics_events_event_idx").on(table.eventName),
     index("analytics_events_created_idx").on(table.createdAt),
@@ -349,7 +349,7 @@ export const providerMetrics = pgTable("provider_metrics", {
     tokensOut: integer("tokens_out").default(0),
     totalCost: text("total_cost").default("0.00"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("provider_metrics_provider_idx").on(table.provider),
     index("provider_metrics_window_idx").on(table.windowStart, table.windowEnd),
 ]);
@@ -370,7 +370,7 @@ export const costBudgets = pgTable("cost_budgets", {
     periodStart: timestamp("period_start").defaultNow().notNull(),
     periodEnd: timestamp("period_end"),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("cost_budgets_provider_idx").on(table.provider),
 ]);
 
@@ -395,7 +395,7 @@ export const remoteShellTargets = pgTable("remote_shell_targets", {
     lastConnectedAt: timestamp("last_connected_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("remote_shell_targets_owner_idx").on(table.ownerId),
     index("remote_shell_targets_host_idx").on(table.host),
     index("remote_shell_targets_created_idx").on(table.createdAt),
@@ -424,7 +424,7 @@ export const apiLogs = pgTable("api_logs", {
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("api_logs_user_idx").on(table.userId),
     index("api_logs_endpoint_idx").on(table.endpoint),
     index("api_logs_created_idx").on(table.createdAt),
@@ -448,7 +448,7 @@ export const kpiSnapshots = pgTable("kpi_snapshots", {
     avgLatencyMs: integer("avg_latency_ms").default(0),
     errorRatePercentage: text("error_rate_percentage").default("0.00"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("kpi_snapshots_created_idx").on(table.createdAt),
 ]);
 
@@ -469,7 +469,7 @@ export const securityPolicies = pgTable("security_policies", {
     createdBy: varchar("created_by"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("security_policies_type_idx").on(table.policyType),
     index("security_policies_enabled_idx").on(table.isEnabled),
     index("security_policies_applied_idx").on(table.appliedTo),
@@ -493,7 +493,7 @@ export const reportTemplates = pgTable("report_templates", {
     isSystem: text("is_system").default("false"),
     createdBy: varchar("created_by"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("report_templates_type_idx").on(table.type),
 ]);
 
@@ -516,7 +516,7 @@ export const generatedReports = pgTable("generated_reports", {
     generatedBy: varchar("generated_by"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     completedAt: timestamp("completed_at"),
-}, (table) => [
+}, (table: any) => [
     index("generated_reports_status_idx").on(table.status),
     index("generated_reports_created_idx").on(table.createdAt),
 ]);
@@ -538,7 +538,7 @@ export const settingsConfig = pgTable("settings_config", {
     isSensitive: text("is_sensitive").default("false"),
     updatedBy: varchar("updated_by"),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("settings_category_idx").on(table.category),
 ]);
 
@@ -577,7 +577,7 @@ export const notificationPreferences = pgTable("notification_preferences", {
     quietHoursEnd: text("quiet_hours_end"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("notification_prefs_user_idx").on(table.userId),
     uniqueIndex("notification_prefs_unique_idx").on(table.userId, table.eventTypeId),
 ]);
@@ -601,7 +601,7 @@ export const notificationLogs = pgTable("notification_logs", {
     sentAt: timestamp("sent_at"),
     deliveredAt: timestamp("delivered_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("notification_logs_user_idx").on(table.userId),
     index("notification_logs_event_idx").on(table.eventId),
     uniqueIndex("notification_logs_idempotency_idx").on(table.eventId, table.channel),

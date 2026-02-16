@@ -14,7 +14,7 @@ export const workspaceRoles = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
+  (table: any) => [
     index("workspace_roles_org_idx").on(table.orgId),
     index("workspace_roles_updated_idx").on(table.updatedAt),
     uniqueIndex("workspace_roles_org_name_unique").on(table.orgId, table.name),

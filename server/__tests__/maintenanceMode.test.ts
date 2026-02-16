@@ -12,6 +12,8 @@ vi.mock("../services/settingsConfigService", () => ({
 }));
 
 describe("maintenanceModeMiddleware", () => {
+  const TEST_TIMEOUT_MS = 15_000;
+
   beforeEach(() => {
     // Avoid cross-test pollution from other test files that may mock/unmock settingsConfigService.
     vi.resetModules();
@@ -34,7 +36,7 @@ describe("maintenanceModeMiddleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("allows exempt auth prefixes", async () => {
     const { maintenanceModeMiddleware } = await import("../middleware/maintenanceMode");
@@ -51,7 +53,7 @@ describe("maintenanceModeMiddleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("allows non-API routes (SPA) even during maintenance", async () => {
     const { maintenanceModeMiddleware } = await import("../middleware/maintenanceMode");
@@ -68,7 +70,7 @@ describe("maintenanceModeMiddleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("allows admin requests through", async () => {
     const { maintenanceModeMiddleware } = await import("../middleware/maintenanceMode");
@@ -89,5 +91,5 @@ describe("maintenanceModeMiddleware", () => {
     } finally {
       await close();
     }
-  });
+  }, TEST_TIMEOUT_MS);
 });

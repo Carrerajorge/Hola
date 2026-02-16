@@ -28,7 +28,7 @@ npm run build
 
 echo "6. Forcing .env.production creation..."
 cat > .env.production <<'EOF'
-PORT=5001
+PORT=5000
 NODE_ENV=production
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat
 SESSION_SECRET=nuclear_launch_detected_secure_key
@@ -38,7 +38,7 @@ echo "7. Starting application..."
 # Using the most basic, robust start command possible
 # Injecting env vars directly to ensure they persist
 pm2 start npm --name "michat" -- start --update-env \
-  PORT=5001 \
+  PORT=5000 \
   NODE_ENV=production \
   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/michat \
   SESSION_SECRET=nuclear_launch_detected_secure_key

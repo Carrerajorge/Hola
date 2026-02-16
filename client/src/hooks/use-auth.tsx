@@ -7,6 +7,18 @@ import type { User } from "@shared/schema";
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
 const ANON_USER_ID_KEY = "siragpt_anon_user_id";
 const ANON_TOKEN_KEY = "siragpt_anon_token";
+const FORCE_SIGNED_OUT_KEY = "siragpt_force_signed_out";
+
+function isAnonymousUser(user: User | null): boolean {
+  if (!user) return false;
+  const anyUser = user as any;
+  if (anyUser?.isAnonymous === true) return true;
+  if (typeof anyUser?.authProvider === "string" && anyUser.authProvider.toLowerCase() === "anonymous") return true;
+  if (typeof user.id === "string" && user.id.startsWith("anon_")) return true;
+  // Some backends surface anonymous users without a dedicated flag; treat known patterns as anon.
+  if (typeof anyUser?.username === "string" && anyUser.username.startsWith("Guest-")) return true;
+  return false;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -103,6 +115,26 @@ function setStoredAnonToken(token: string): void {
   }
 }
 
+function isForcedSignedOut(): boolean {
+  try {
+    return localStorage.getItem(FORCE_SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setForcedSignedOut(enabled: boolean): void {
+  try {
+    if (enabled) {
+      localStorage.setItem(FORCE_SIGNED_OUT_KEY, "1");
+    } else {
+      localStorage.removeItem(FORCE_SIGNED_OUT_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 // --- Fetch Logic ---
 
 async function fetchUser(): Promise<User | null> {
@@ -121,6 +153,7 @@ async function fetchUser(): Promise<User | null> {
     const user = await response.json();
     setStoredUser(user);
     clearAnonUserId();
+    setForcedSignedOut(false);
     return user;
   }
 
@@ -150,14 +183,30 @@ async function fetchUser(): Promise<User | null> {
     }
     return null;
   };
+  
+  const params = new URLSearchParams(window.location.search);
+  const isLoginRoute = window.location.pathname.startsWith("/login");
+  const loggedOut = params.get("logged_out") === "1";
 
   if (response.status === 401 || response.status === 403) {
     clearOldUserData();
+
+    // ✅ Si el usuario se acaba de desloguear o está en /login, NO crear Guest
+    if (loggedOut || isLoginRoute || isForcedSignedOut()) {
+      if (loggedOut) setForcedSignedOut(true);
+      return null;
+    }
+
     return await tryAnonymousIdentity();
   }
 
   console.error("Auth fetch failed:", response.status, response.statusText);
+
+  // ✅ Si está forzado signed-out, no intentes Guest tampoco
+  if (isForcedSignedOut()) return null;
+
   return await tryAnonymousIdentity();
+
 }
 
 // --- Provider Component ---
@@ -177,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const login = useCallback(() => {
-    window.location.href = "/api/login";
+    window.location.href = "/login";
   }, []);
 
   const logout = useCallback(async () => {
@@ -189,11 +238,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors
     }
+    setForcedSignedOut(true);
+    clearAnonUserId();
     setStoredUser(null);
     queryClient.setQueryData(["/api/auth/user"], null);
     queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
     queryClient.clear();
-    window.location.href = "/welcome";
+    window.location.href = "/login?logged_out=1";
   }, [queryClient]);
 
   const refreshAuth = useCallback(async () => {
@@ -203,6 +254,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Force refetch immediately
     await refetch();
   }, [refetch, queryClient]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const forced = isForcedSignedOut();
+    const pathname = window.location.pathname;
+    const publicAuthRoute =
+      pathname === "/" ||
+      [
+        "/login",
+        "/welcome",
+        "/signup",
+        "/terms",
+        "/privacy-policy",
+        "/about",
+        "/learn",
+        "/pricing",
+        "/business",
+        "/download",
+        "/power",
+      ].some((route) => pathname.startsWith(route));
+
+    if (forced && !publicAuthRoute) {
+      window.location.replace("/login?logged_out=1");
+    }
+  }, []);
+
 
   // Handle OAuth Callback Logic
   useEffect(() => {
@@ -228,7 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: user ?? null,
       isLoading,
       isReady: isFetched,
-      isAuthenticated: !!user && !(user as any)?.isAnonymous,
+      isAuthenticated: !!user && !isAnonymousUser(user),
       login,
       logout,
       refreshAuth

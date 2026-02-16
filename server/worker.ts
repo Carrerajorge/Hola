@@ -9,6 +9,8 @@ import { UploadJobData } from "./services/uploadQueue";
 import { Logger } from "./lib/logger";
 import { Job } from "bullmq";
 import { syncStripePaidInvoicesToPayments } from "./services/stripePaymentsSyncService";
+import type { ChannelIngestJob } from "./channels/types";
+import { processChannelIngestJob } from "./channels/channelIngestService";
 
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "5");
 
@@ -29,6 +31,22 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
     return { processed: true, chunks: 12 };
 }); // No .on() handlers needed here as they are handled in queueFactory or global events if needed, 
 // but we can add them to the worker instance if we want specific logging.
+
+// ==========================================
+// 1.5 Channel Ingest Worker (Telegram / WhatsApp Cloud)
+// ==========================================
+const channelIngestWorker = createWorker<ChannelIngestJob, any>(QUEUE_NAMES.CHANNEL_INGEST, async (job: Job<ChannelIngestJob>) => {
+    Logger.info(`[ChannelIngestJob:${job.id}] Channel=${(job.data as any)?.channel}`);
+    await processChannelIngestJob(job.data);
+    return { ok: true };
+});
+
+if (channelIngestWorker) {
+    channelIngestWorker.on("ready", () => Logger.info("Channel Ingest Worker ready"));
+    channelIngestWorker.on("error", (e: any) => Logger.error("Channel Ingest Worker error", e));
+} else {
+    Logger.warn("Channel Ingest Worker disabled (check REDIS_URL).");
+}
 
 // ==========================================
 // 2. Parallel Processing Worker (The Engine)
@@ -89,14 +107,46 @@ const processors: Record<TaskType, (data: any) => Promise<any>> = {
     },
 
     ocr: async (data: { buffer: { type: 'Buffer', data: number[] } }) => {
-        // Tesseract.js implementation
-        const Tesseract = (await import("tesseract.js")).default;
         // Handle Buffer from JSON (Redis serialization)
         const buffer = Buffer.from(data.buffer.data);
 
-        const { data: { text, confidence } } = await Tesseract.recognize(buffer, 'eng');
+        const serviceUrl = process.env.OCR_SERVICE_URL;
 
-        return { text, confidence };
+        // Prefer the decoupled OCR microservice (PaddleOCR primary + Tesseract fallback).
+        if (serviceUrl) {
+            try {
+                const url = new URL("/v1/ocr", serviceUrl);
+                url.searchParams.set("engine", "auto");
+                url.searchParams.set("lang", "eng");
+
+                const isPdf = buffer.subarray(0, 4).toString("ascii") === "%PDF";
+                const filename = isPdf ? "upload.pdf" : "upload.png";
+                const mime = isPdf ? "application/pdf" : "image/png";
+
+                const form = new FormData();
+                form.append("file", new Blob([buffer], { type: mime }), filename);
+
+                const resp = await fetch(url.toString(), { method: "POST", body: form });
+                if (resp.ok) {
+                    const json: any = await resp.json();
+                    const avg = typeof json.avg_confidence === "number" ? json.avg_confidence : undefined;
+                    return {
+                        text: String(json.text ?? ""),
+                        confidence: avg !== undefined ? avg * 100 : undefined,
+                        engine: json.engine ?? "unknown",
+                        timingsMs: json.timings_ms ?? undefined,
+                    };
+                }
+            } catch {
+                // Best-effort: fall back to local OCR.
+            }
+        }
+
+        // Fallback (legacy): Tesseract.js implementation
+        const Tesseract = (await import("tesseract.js")).default;
+        const { data: { text, confidence } } = await Tesseract.recognize(buffer, "eng");
+
+        return { text, confidence, engine: "tesseract.js" };
     },
 
     vision: async (data: { image: string }) => {

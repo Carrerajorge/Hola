@@ -3,7 +3,7 @@ import { Strategy, type VerifyFunction } from "openid-client/passport";
 
 import passport from "passport";
 import session from "express-session";
-import type { Express, RequestHandler } from "express";
+import type { Express, Request, RequestHandler, Response } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
@@ -12,6 +12,7 @@ import { withRetry } from "../../utils/retry";
 import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter";
 import { recordLoginAttempt } from "../../services/twoFactorAuth";
 import { getSettingValue } from "../../services/settingsConfigService";
+import { setLogoutMarker } from "../../lib/logoutMarker";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {
@@ -26,6 +27,82 @@ const AUTH_METRICS = {
 
 export function getAuthMetrics() {
   return { ...AUTH_METRICS };
+}
+
+function isReplitOidcEnabled(): boolean {
+  return String(process.env.REPLIT_OIDC_ENABLED || "").toLowerCase() === "true";
+}
+
+function resolveSessionUserId(req: any): string | null {
+  const direct = req?.user?.claims?.sub || req?.user?.id;
+  if (direct) {
+    return String(direct);
+  }
+
+  const session = req?.session;
+  if (typeof session?.authUserId === "string" && session.authUserId) {
+    return session.authUserId;
+  }
+
+  const passportUser = session?.passport?.user;
+  if (typeof passportUser === "string" && passportUser) {
+    return passportUser;
+  }
+
+  const passportId = passportUser?.claims?.sub || passportUser?.id || passportUser?.sub;
+  if (typeof passportId === "string" && passportId) {
+    return passportId;
+  }
+
+  return null;
+}
+
+function createResilientPgSessionStore(sessionTtl: number) {
+  const pgStore = connectPg(session);
+  const store: any = new pgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: false,
+    ttl: sessionTtl,
+    tableName: "sessions",
+  });
+
+  // Guard against malformed/corrupted rows in the sessions table.
+  // Instead of failing the whole request with 500, drop the bad session
+  // and continue as anonymous.
+  const originalGet = typeof store.get === "function" ? store.get.bind(store) : null;
+  if (originalGet) {
+    store.get = (sid: string, cb: (err: any, sessionData?: any) => void) => {
+      originalGet(sid, (err: any, sessionData: any) => {
+        if (!err) {
+          cb(null, sessionData);
+          return;
+        }
+
+        console.error("[Auth] Session store get failed, clearing corrupt session:", {
+          sid,
+          error: err?.message || err,
+        });
+
+        const finish = () => cb(null, null);
+        if (typeof store.destroy === "function") {
+          store.destroy(sid, (destroyErr: any) => {
+            if (destroyErr) {
+              console.error("[Auth] Failed to destroy corrupt session row:", {
+                sid,
+                error: destroyErr?.message || destroyErr,
+              });
+            }
+            finish();
+          });
+          return;
+        }
+
+        finish();
+      });
+    };
+  }
+
+  return store;
 }
 
 const getOidcConfig = memoize(
@@ -91,19 +168,15 @@ export function getSession() {
   const isTest = process.env.NODE_ENV === "test";
   const isReplitDeployment = !!process.env.REPL_SLUG;
 
+  // SameSite=None is required for some OAuth callback flows (e.g. form_post) where the browser
+  // treats the redirect as cross-site. Only use it when the cookie is Secure.
+  const useNoneSameSite = isReplitDeployment || isProduction;
+
   // Tests should be hermetic and must not require DB migrations just to serve a request.
   // Use the default MemoryStore in test env.
   const sessionStore = isTest
     ? undefined
-    : (() => {
-        const pgStore = connectPg(session);
-        return new pgStore({
-          conString: process.env.DATABASE_URL,
-          createTableIfMissing: false,
-          ttl: sessionTtl,
-          tableName: "sessions",
-        });
-      })();
+    : createResilientPgSessionStore(sessionTtl);
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -115,8 +188,8 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments.
-      sameSite: isReplitDeployment ? "none" as const : "lax" as const,
+      // SameSite=None required for OAuth callback to work (cross-origin redirect)
+      sameSite: useNoneSameSite ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
       // Don't set domain - let browser use host-only cookie for iliagpt.com
@@ -196,256 +269,126 @@ async function upsertUser(claims: any) {
   }
 }
 
+const LEGACY_LOGOUT_FALLBACK_REDIRECT = "/";
+
+function resolvePostLogoutRedirectUri(req: Request): string {
+  const forwardedProto = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const host = forwardedHost || req.get("host") || req.hostname;
+  if (!host) {
+    return LEGACY_LOGOUT_FALLBACK_REDIRECT;
+  }
+
+  const protocol = forwardedProto || req.protocol || "https";
+  return `${protocol}://${host}`;
+}
+
+function redirectAfterLegacyLogout(req: Request, res: Response, oidcConfig: any): void {
+  if (res.headersSent) {
+    return;
+  }
+
+  // Always clear local session cookie.
+  res.clearCookie("siragpt.sid");
+  setLogoutMarker(res);
+
+  try {
+    const replId = process.env.REPL_ID;
+    if (!replId || !oidcConfig) {
+      res.redirect(LEGACY_LOGOUT_FALLBACK_REDIRECT);
+      return;
+    }
+
+    const endSessionUrl = client.buildEndSessionUrl(oidcConfig, {
+      client_id: replId,
+      post_logout_redirect_uri: resolvePostLogoutRedirectUri(req),
+    });
+
+    res.redirect(endSessionUrl.href);
+  } catch (error) {
+    console.error("[Auth] Failed to build end-session URL, falling back to local redirect:", error);
+    res.redirect(LEGACY_LOGOUT_FALLBACK_REDIRECT);
+  }
+}
+
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // In non-Replit production deployments (e.g., VPS), REPL_ID may be unset.
-  // Do not crash the server if OIDC is not configured.
-  if (!process.env.REPL_ID) {
-    console.warn('[Auth] REPL_ID is not set; Replit OIDC auth is disabled.');
+  const replitOidcEnabled = isReplitOidcEnabled();
+  let oidcConfig: any = null;
+
+  // Legacy logout route kept for backward compatibility with older frontend builds.
+  // This must stay available even when Replit OIDC is not configured.
+  app.get("/api/logout", (req, res) => {
+    const destroySessionAndRedirect = (): void => {
+      if (!req.session) {
+        redirectAfterLegacyLogout(req, res, oidcConfig);
+        return;
+      }
+      req.session.destroy((sessionError: any) => {
+        if (sessionError) {
+          console.error("[Auth] Failed to destroy session during /api/logout:", sessionError);
+        }
+        redirectAfterLegacyLogout(req, res, oidcConfig);
+      });
+    };
+
+    try {
+      req.logout((logoutError: any) => {
+        if (logoutError) {
+          console.error("[Auth] req.logout failed during /api/logout:", logoutError);
+        }
+        destroySessionAndRedirect();
+      });
+    } catch (error) {
+      console.error("[Auth] Unexpected /api/logout error:", error);
+      destroySessionAndRedirect();
+    }
+  });
+
+  // Replit OIDC is explicitly disabled by default in this deployment.
+  // Keep routes for backward compatibility but route users to first-party login.
+  app.get("/api/login", authRateLimiter, (req, res) => {
+    return res.redirect("/login");
+  });
+
+  // Legacy callback endpoint from old Replit OIDC integrations.
+  // It is intentionally disabled now; users should authenticate via first-party providers.
+  app.get("/api/callback", authRateLimiter, (_req, res) => {
+    return res.redirect("/login?error=replit_disabled");
+  });
+
+  if (!replitOidcEnabled) {
+    console.log("[Auth] Replit OIDC disabled (REPLIT_OIDC_ENABLED != true).");
     return;
   }
 
-  const config = await getOidcConfig();
+  // Safety: even if toggled on by env accidentally, we keep it disabled in code
+  // to avoid reintroducing external-provider lockups in production.
+  console.warn("[Auth] REPLIT_OIDC_ENABLED=true is ignored; Replit OIDC is permanently disabled.");
+  return;
 
-  const verify: VerifyFunction = async (
-    tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
-    verified: passport.AuthenticateCallback
-  ) => {
-    try {
-      const user: any = {};
-      updateUserSession(user, tokens);
-
-      if (user.claims) {
-        await upsertUser(user.claims);
-      } else {
-        console.error("[Auth] No claims available after token processing - cannot create user");
-        return verified(new Error("No claims available"), undefined);
-      }
-
-      verified(null, user);
-    } catch (error) {
-      console.error("[Auth] Verify callback error:", error);
-      verified(error as Error, undefined);
-    }
-  };
-
-  // Keep track of registered strategies
-  const registeredStrategies = new Set<string>();
-
-  // Helper function to ensure strategy exists for a domain
-  const ensureStrategy = (domain: string) => {
-    const strategyName = `replitauth:${domain}`;
-    if (!registeredStrategies.has(strategyName)) {
-      const strategy = new Strategy(
-        {
-          name: strategyName,
-          config,
-          scope: "openid email profile offline_access",
-          callbackURL: `https://${domain}/api/callback`,
-        },
-        verify
-      );
-      passport.use(strategy);
-      registeredStrategies.add(strategyName);
-    }
-  };
-
-  passport.serializeUser((user: Express.User, cb) => cb(null, user));
-  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
-
-  app.get("/api/login", authRateLimiter, (req, res, next) => {
-    // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
-      console.log('[Auth] Local dev detected (development only), bypassing OIDC login');
-      return res.redirect('/api/callback?code=local_dev_bypass');
-    }
-
-    AUTH_METRICS.loginAttempts++;
-    const startTime = Date.now();
-    console.log(`[Auth] Login initiated from IP: ${req.ip}, hostname: ${req.hostname}`);
-
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
-  });
-
-  app.get("/api/callback", authRateLimiter, async (req, res, next) => {
-    const startTime = Date.now();
-    const requestId = `cb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production' && req.query.code === 'local_dev_bypass') {
-      try {
-        console.log(`[Auth] [${requestId}] Handling local dev bypass callback`);
-        const mockUser = {
-          claims: {
-            sub: 'local-dev-user',
-            email: 'Carrerajorge874@gmail.com',
-            first_name: 'Local',
-            last_name: 'Dev',
-            profile_image_url: `https://ui-avatars.com/api/?name=Local+Dev&background=random`
-          },
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          last_refresh: Date.now()
-        };
-
-        // Ensure user exists in DB
-        console.log(`[Auth] [${requestId}] Upserting mock user...`);
-        await upsertUser(mockUser.claims);
-        console.log(`[Auth] [${requestId}] Mock user upserted. Logging in...`);
-
-        return req.logIn(mockUser, async (loginErr) => {
-          if (loginErr) {
-            console.error(`[Auth] Local login failed:`, loginErr);
-            return res.redirect("/login?error=login_failed");
-          }
-          console.log(`[Auth] [${requestId}] Local dev login successful for ${mockUser.claims.email}`);
-
-          // Mimic the success logic
-          try {
-            // Mock auth storage update or skip it if it fails
-            await authStorage.updateUserLogin(mockUser.claims.sub, {
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-
-            try {
-              await recordLoginAttempt(
-                mockUser.claims.email,
-                mockUser.claims.sub,
-                String(req.ip || req.socket.remoteAddress || "unknown"),
-                String(req.headers["user-agent"] || "unknown"),
-                true
-              );
-            } catch (e) {
-              console.warn("[Auth] Failed to record login_attempts (local dev):", (e as any)?.message || e);
-            }
-          } catch (e) { console.warn("Failed to log local auth audit", e) }
-
-          return res.redirect("/?auth=success");
-        });
-      } catch (error: any) {
-        console.error(`[Auth] [${requestId}] INTERNAL ERROR in local bypass:`, error);
-        return res.status(500).json({ error: error.message, stack: error.stack });
-      }
-    }
-
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
-      if (err) {
-        AUTH_METRICS.loginFailures++;
-        console.error(`[Auth] [${requestId}] Callback error after ${Date.now() - startTime}ms:`, {
-          error: err.message,
-          code: err.code,
-          ip: req.ip,
-        });
-        return res.redirect("/login?error=auth_failed");
-      }
-      if (!user) {
-        AUTH_METRICS.loginFailures++;
-        console.error(`[Auth] [${requestId}] No user returned after ${Date.now() - startTime}ms:`, {
-          info,
-          ip: req.ip,
-        });
-        return res.redirect("/login?error=no_user");
-      }
-      req.logIn(user, async (loginErr) => {
-        if (loginErr) {
-          AUTH_METRICS.loginFailures++;
-          console.error(`[Auth] [${requestId}] Login error after ${Date.now() - startTime}ms:`, {
-            error: loginErr.message,
-            ip: req.ip,
-          });
-          return res.redirect("/login?error=login_failed");
-        }
-
-        AUTH_METRICS.loginSuccess++;
-        AUTH_METRICS.sessionCreations++;
-
-        const userId = user.claims?.sub;
-        const loginDuration = Date.now() - startTime;
-        console.log(`[Auth] [${requestId}] Login successful in ${loginDuration}ms:`, {
-          userId,
-          email: user.claims?.email,
-          ip: req.ip,
-        });
-
-        if (userId) {
-          try {
-            await authStorage.updateUserLogin(userId, {
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-
-            try {
-              await recordLoginAttempt(
-                String(user.claims?.email || "unknown"),
-                userId,
-                String(req.ip || req.socket.remoteAddress || "unknown"),
-                String(req.headers["user-agent"] || "unknown"),
-                true
-              );
-            } catch (e) {
-              console.warn(`[Auth] [${requestId}] Failed to record login_attempts:`, (e as any)?.message || e);
-            }
-
-            await storage.createAuditLog({
-              userId,
-              action: "user_login",
-              resource: "auth",
-              details: {
-                email: user.claims?.email,
-                provider: "google_oauth",
-                duration_ms: loginDuration,
-              },
-              ipAddress: req.ip || req.socket.remoteAddress || null,
-              userAgent: req.headers["user-agent"] || null
-            });
-          } catch (auditError) {
-            console.warn(`[Auth] [${requestId}] Failed to create audit log:`, auditError);
-          }
-        }
-
-        return res.redirect("/?auth=success");
-      });
-    })(req, res, next);
-  });
-
-  app.get("/api/logout", (req, res) => {
-    req.logout(() => {
-      res.redirect(
-        client.buildEndSessionUrl(config, {
-          client_id: process.env.REPL_ID!,
-          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-        }).href
-      );
-    });
-  });
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
-  // If Replit OIDC isn't configured, don't crash on token refresh paths.
-  if (!process.env.REPL_ID) {
-    return res.status(503).json({
-      message: "Authentication is not configured",
-      code: "AUTH_NOT_CONFIGURED",
-    });
-  }
-
+  const fallbackUserId = resolveSessionUserId(req as any);
   const user = req.user as any;
   const requestId = `auth-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
-  if (!req.isAuthenticated() || !user.expires_at) {
+  if (!req.isAuthenticated?.() && !fallbackUserId) {
     return res.status(401).json({
       message: "Unauthorized",
       code: "SESSION_INVALID",
     });
+  }
+
+  // Non-OIDC sessions (email/password, phone, Google/Microsoft/Auth0 passport profiles)
+  // should pass through without any refresh-token requirement.
+  if (!user?.expires_at || !user?.refresh_token) {
+    return next();
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -457,11 +400,11 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
 
   const refreshToken = user.refresh_token;
   if (!refreshToken) {
-    console.warn(`[Auth] [${requestId}] No refresh token available for user:`, user.claims?.sub);
-    return res.status(401).json({
-      message: "Session expired",
-      code: "NO_REFRESH_TOKEN",
-    });
+    return next();
+  }
+
+  if (!isReplitOidcEnabled() || !process.env.REPL_ID) {
+    return next();
   }
 
   if (timeUntilExpiry > 0) {

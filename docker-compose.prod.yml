@@ -1,110 +1,283 @@
-services:
-  app:
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
-    restart: always
-    command: ["node", "dist/index.cjs"]
-    environment:
-      - NODE_ENV=production
-      - PORT=5000
-      - APP_VERSION=${APP_VERSION:-dev}
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
-      - REDIS_URL=redis://redis:6379
-      - AGENT_WORKSPACE_ROOT=/app/sandbox_workspace
-      # Use isolated runner for shell_command execution (no docker socket in app)
-      - SHELL_COMMAND_SANDBOX_MODE=runner
-      - SHELL_COMMAND_RUNNER_URL=http://sandbox-runner:8080
-      - SHELL_COMMAND_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
-    env_file:
-      - .env.production
-    ports:
-      - "5000:5000"
-    volumes:
-      - agent_workspace:/app/sandbox_workspace
-    depends_on:
-      - postgres
-      - redis
-      - sandbox-runner
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5000/health >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
 
-  worker:
+services:
+
+  app:
+
+    image: iliagpt-app:${APP_VERSION:-dev}
+
     build:
+
       context: .
+
       args:
+
         APP_VERSION: ${APP_VERSION:-dev}
-    restart: always
-    command: ["node", "dist/worker.cjs"]
-    environment:
-      - NODE_ENV=production
-      - APP_VERSION=${APP_VERSION:-dev}
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
-      - REDIS_URL=redis://redis:6379
+
+    command: ["node", "dist/index.cjs"]
+
     env_file:
+
       - .env.production
+
+    environment:
+
+      NODE_ENV: production
+
+      # Exposed via /api/health for deploy verification (set by deploy workflow).
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      PORT: "5000"
+
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
+
+      REDIS_URL: redis://redis:6379
+
+      AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
+
+      # Use isolated runner for shell_command execution (no docker socket in app)
+
+      SHELL_COMMAND_SANDBOX_MODE: runner
+
+      SHELL_COMMAND_RUNNER_URL: http://sandbox-runner:8080
+
+      SHELL_COMMAND_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
+
+      OCR_SERVICE_URL: http://ocr:8000
+
+    ports:
+
+      - "5000:5000"
+
+    volumes:
+
+      - agent_workspace:/app/sandbox_workspace
+
     depends_on:
+
       - postgres
+
       - redis
+
+      - sandbox-runner
+
+      - ocr
+
     networks:
+
       - app-network
+
     healthcheck:
+
       disable: true
 
-  postgres:
-    image: pgvector/pgvector:pg15
-    restart: always
+    mem_limit: 2g
+
+    # Chromium (Playwright) needs /dev/shm > 64MB to avoid crashes
+    shm_size: 256m
+
+
+
+  worker:
+
+    image: iliagpt-app:${APP_VERSION:-dev}
+
+    command: ["node", "dist/worker.cjs"]
+
+    env_file:
+
+      - .env.production
+
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: iliagpt
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+
+      NODE_ENV: production
+
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
+
+      REDIS_URL: redis://redis:6379
+
+      OCR_SERVICE_URL: http://ocr:8000
+
+    depends_on:
+
+      - postgres
+
+      - redis
+
+      - ocr
+
     networks:
+
       - app-network
+
+    healthcheck:
+
+      disable: true
+
+    mem_limit: 768m
+
+
+
+  postgres:
+
+    image: pgvector/pgvector:pg15
+
+    environment:
+
+      POSTGRES_USER: postgres
+
+      POSTGRES_PASSWORD: postgres
+
+      POSTGRES_DB: iliagpt
+
+    volumes:
+
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+
+      - app-network
+
+
 
   redis:
+
     image: redis:alpine
-    restart: always
+
     networks:
+
       - app-network
+
+
 
   sandbox-runner:
+
+    image: iliagpt-sandbox-runner:${APP_VERSION:-dev}
+
     build:
+
       context: .
+
       target: sandbox-runner
+
       args:
+
         APP_VERSION: ${APP_VERSION:-dev}
-    restart: always
+
+    env_file:
+
+      - .env.production
+
     environment:
-      - NODE_ENV=production
-      - APP_VERSION=${APP_VERSION:-dev}
-      - SANDBOX_RUNNER_PORT=8080
-      - SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}
-      - AGENT_WORKSPACE_ROOT=/workspace_root
-      - SHELL_COMMAND_DOCKER_IMAGE=debian:bookworm-slim
-      - SHELL_COMMAND_DOCKER_CPUS=1
-      - SHELL_COMMAND_DOCKER_MEMORY=512m
-      - SHELL_COMMAND_DOCKER_PIDS=256
+
+      NODE_ENV: production
+
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      SANDBOX_RUNNER_PORT: "8080"
+
+      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
+
+      AGENT_WORKSPACE_ROOT: /workspace_root
+
+      SHELL_COMMAND_DOCKER_IMAGE: debian:bookworm-slim
+
+      SHELL_COMMAND_DOCKER_CPUS: "1"
+
+      SHELL_COMMAND_DOCKER_MEMORY: 512m
+
+      SHELL_COMMAND_DOCKER_PIDS: "256"
+
     volumes:
+
       - agent_workspace:/workspace_root
+
       - /var/run/docker.sock:/var/run/docker.sock
+
     expose:
+
       - "8080"
+
     networks:
+
       - app-network
 
+
+  ocr:
+
+    image: iliagpt-ocr:${APP_VERSION:-dev}
+
+    build:
+
+      context: .
+
+      dockerfile: ocr_service/Dockerfile
+
+    env_file:
+
+      - .env.production
+
+    environment:
+
+      OCR_HOST: 0.0.0.0
+
+      OCR_PORT: "8000"
+
+      OCR_PREFER_ENGINE: ${OCR_PREFER_ENGINE:-auto}
+
+      OCR_DEFAULT_LANG: ${OCR_DEFAULT_LANG:-eng}
+
+      OCR_DPI: ${OCR_DPI:-300}
+
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-10}
+
+      OCR_MAX_FILE_SIZE_MB: ${OCR_MAX_FILE_SIZE_MB:-15}
+
+      OCR_MAX_CONCURRENT_REQUESTS: ${OCR_MAX_CONCURRENT_REQUESTS:-4}
+
+      OCR_API_KEY: ${OCR_API_KEY:-}
+
+      OCR_LOG_LEVEL: ${OCR_LOG_LEVEL:-INFO}
+
+    expose:
+
+      - "8000"
+
+    volumes:
+
+      - ocr_models:/root/.paddleocr
+
+    networks:
+
+      - app-network
+
+    healthcheck:
+
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1"]
+
+      interval: 10s
+
+      timeout: 3s
+
+      retries: 10
+
+    mem_limit: 1g
+
+
+
 networks:
+
   app-network:
+
     driver: bridge
 
+
+
 volumes:
+
   postgres_data:
+
   agent_workspace:
+
+  ocr_models:

@@ -4,6 +4,7 @@ import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { getFileUploader } from "@/lib/fileUploader";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
@@ -74,7 +75,7 @@ import { ActiveGpt } from "@/types/chat";
 import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, getLastGeneratedImage, storeLastGeneratedImageInfo, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
-import { useBrowserSession } from "@/hooks/use-browser-session";
+import { useBrowserSession, globalStartSseSession, globalUpdateFromSseStep } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
@@ -279,6 +280,27 @@ interface ChatInterfaceProps {
   activeRunId?: string | null;
   setActiveRunId?: React.Dispatch<React.SetStateAction<string | null>>;
   selectedProjectId?: string | null;
+  // Document generation state - kept in parent to survive ChatInterface key changes during new chat creation
+  selectedDocTool?: "word" | "excel" | "ppt" | "figma" | null;
+  setSelectedDocTool?: React.Dispatch<React.SetStateAction<"word" | "excel" | "ppt" | "figma" | null>>;
+  docGenerationState?: {
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  };
+  setDocGenerationState?: React.Dispatch<React.SetStateAction<{
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  }>>;
 }
 
 interface UploadedFile {
@@ -372,7 +394,12 @@ export function ChatInterface({
   setUiPhase: setUiPhaseProp,
   activeRunId: activeRunIdProp,
   setActiveRunId: setActiveRunIdProp,
-  selectedProjectId
+  selectedProjectId,
+  // Document generation state from parent to survive key changes
+  selectedDocTool: selectedDocToolProp,
+  setSelectedDocTool: setSelectedDocToolProp,
+  docGenerationState: docGenerationStateProp,
+  setDocGenerationState: setDocGenerationStateProp,
 }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
@@ -483,13 +510,16 @@ export function ChatInterface({
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
-  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
+  // selectedDocTool: prefer parent prop (survives remount), fallback to local state
+  const [selectedDocToolLocal, setSelectedDocToolLocal] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
+  const selectedDocTool = selectedDocToolProp !== undefined ? selectedDocToolProp : selectedDocToolLocal;
+  const setSelectedDocTool = setSelectedDocToolProp || setSelectedDocToolLocal;
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [latencyMode, setLatencyMode] = useState<"fast" | "deep" | "auto">("auto");
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
-  // DOCX Generation State - for blank page with progress overlay
-  const [docGenerationState, setDocGenerationState] = useState<{
+  // DOCX Generation State - prefer parent prop (survives remount), fallback to local state
+  const [docGenerationStateLocal, setDocGenerationStateLocal] = useState<{
     status: 'idle' | 'generating' | 'ready' | 'error';
     progress: number;
     stage: string;
@@ -498,6 +528,17 @@ export function ChatInterface({
     fileSize: number | null;
     error?: string;
   }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
+  const docGenerationState = docGenerationStateProp !== undefined ? docGenerationStateProp : docGenerationStateLocal;
+  const setDocGenerationState = setDocGenerationStateProp || setDocGenerationStateLocal;
+
+  // DEBUG: Track component mount/unmount to detect remounts
+  useEffect(() => {
+    console.error('[ChatInterface] *** MOUNTED ***', { chatId });
+    return () => {
+      console.error('[ChatInterface] *** UNMOUNTED ***', { chatId: chatIdRef.current });
+    };
+  }, []);
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -521,6 +562,24 @@ export function ChatInterface({
       setSelectedTool(null);
     }
   }, [settings.webSearch, selectedTool]);
+
+  // Auto-open editor when a document tool is selected (Word/Excel/PPT)
+  // This ensures the editor is visible and docInsertContentRef is registered
+  // BEFORE the user sends their first message, so streaming works immediately.
+  useEffect(() => {
+    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool) && !activeDocEditor) {
+      const titleMap: Record<string, string> = {
+        word: 'Nuevo Documento',
+        excel: 'Nueva Hoja de Cálculo',
+        ppt: 'Nueva Presentación',
+      };
+      setActiveDocEditor({
+        type: selectedDocTool as 'word' | 'excel' | 'ppt',
+        title: titleMap[selectedDocTool] || 'Nuevo Documento',
+        content: '',
+      });
+    }
+  }, [selectedDocTool, activeDocEditor]);
 
   useEffect(() => {
     if (!settings.voiceMode) {
@@ -627,7 +686,12 @@ export function ChatInterface({
   useEffect(() => {
     if (optimisticMessages.length > 0 && messages.length > 0) {
       const propsMessageIds = new Set(messages.map(m => m.id));
-      setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !propsMessageIds.has(m.id)));
+      const propsTempIds = new Set(
+        messages.map((m: any) => m.clientTempId).filter((id: any): id is string => typeof id === "string" && id.length > 0)
+      );
+      setOptimisticMessages((prev: Message[]) =>
+        prev.filter((m: any) => !propsMessageIds.has(m.id) && !propsTempIds.has(m.id))
+      );
     }
   }, [messages, optimisticMessages.length]);
 
@@ -692,10 +756,12 @@ export function ChatInterface({
 
   // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
+    const messageKey = (m: any): string => (m?.clientTempId && typeof m.clientTempId === "string" ? m.clientTempId : m.id);
+
     // Start with optimistic messages, then merge prop messages (prop messages take priority)
-    const msgMap = new Map(optimisticMessages.map((m: any) => [m.id, m]));
+    const msgMap = new Map(optimisticMessages.map((m: any) => [messageKey(m), m]));
     // Override with prop messages (they are the source of truth once available)
-    messages.forEach((m: any) => msgMap.set(m.id, m));
+    messages.forEach((m: any) => msgMap.set(messageKey(m), m));
 
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
@@ -1011,17 +1077,25 @@ export function ChatInterface({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const lastScrollTimeRef = useRef<number>(0);
-  const scrollThrottleMs = 300;
+  const scrollThrottleMs = 100; // Reduced from 300ms for snappier scroll-to-bottom during streaming
 
-  const scrollToBottom = useCallback((force = false) => {
+  const scrollToBottom = useCallback((force = false, instant = false) => {
     if (userHasScrolledUp && !force) return;
 
-    requestAnimationFrame(() => {
+    if (instant) {
+      // Instant scroll — no animation delay (used when user sends a message)
       messagesEndRef.current?.scrollIntoView({
-        behavior: 'smooth',
+        behavior: 'auto',
         block: 'end'
       });
-    });
+    } else {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'end'
+        });
+      });
+    }
   }, [userHasScrolledUp]);
 
   const isNearBottom = useCallback(() => {
@@ -1067,7 +1141,7 @@ export function ChatInterface({
 
     if (currentCount > prevCount) {
       setUserHasScrolledUp(false);
-      scrollToBottom(true);
+      scrollToBottom(true, true); // force + instant — no animation lag on new messages
     }
   }, [displayMessages.length, scrollToBottom]);
 
@@ -1382,6 +1456,9 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const analysisAbortControllerRef = useRef<AbortController | null>(null);
+  // Avoid stale `chatId` captures inside long async flows.
+  const latestChatIdRef = useRef<string | null>(chatId || null);
+  latestChatIdRef.current = chatId || null;
   const streamIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<AiState>("idle");
@@ -1416,6 +1493,22 @@ export function ChatInterface({
     window.dispatchEvent(new CustomEvent("refresh-chat-title", {
       detail: { chatId: targetChatId, delay: 2500 }
     }));
+  }, []);
+
+  const waitForStableChatId = useCallback(async (opts?: { timeoutMs?: number; signal?: AbortSignal }) => {
+    const timeoutMs = opts?.timeoutMs ?? 8000;
+    const signal = opts?.signal;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (signal?.aborted) return null;
+      const current = latestChatIdRef.current;
+      if (current) {
+        const resolved = resolveRealChatId(current);
+        if (resolved && !resolved.startsWith("pending-")) return resolved;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return null;
   }, []);
 
   // Measure composer height and set CSS variable for proper layout
@@ -1521,6 +1614,120 @@ export function ChatInterface({
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
   }, []);
+
+  const handleUserRetrySend = useCallback(async (msg: Message) => {
+    if (!msg || msg.role !== "user") return;
+
+    // Avoid starting a second stream while one is active (it will look broken and can abort in-flight work).
+    if (aiStateRef.current !== "idle") {
+      toast({
+        title: "Espera un momento",
+        description: "Hay una respuesta en curso. Cancélala o espera para reintentar.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    const msgKey = msg.clientTempId || msg.id;
+    const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
+
+    // 1) Re-persist the user message (idempotent by requestId/clientRequestId) so delivery state updates.
+    const persistPromise = onSendMessage({
+      ...msg,
+      skipRun: true,
+      deliveryStatus: "sending",
+      deliveryError: undefined,
+    }).catch((err) => {
+      console.warn("[retry] Failed to persist user message:", err);
+      return undefined;
+    });
+
+    const persisted = await persistPromise;
+    const effectiveRunId: string | undefined = persisted?.run?.id;
+
+    // 2) Ensure we stream against the REAL chatId (never a synthetic fallback).
+    const stableChatId = (persisted?.run?.chatId as string | undefined) || resolvedCurrentChatId || await waitForStableChatId({ timeoutMs: 8000 });
+    if (!stableChatId) {
+      toast({
+        title: "Error",
+        description: "No se pudo crear/confirmar el chat para reintentar. Verifica tu conexión e intenta de nuevo.",
+        variant: "destructive",
+        duration: 5000,
+      });
+      onSendMessage({
+        ...msg,
+        deliveryStatus: "error",
+        deliveryError: "No se pudo crear/confirmar el chat para reintentar.",
+      });
+      return;
+    }
+
+    const idx = displayMessages.findIndex((m: any) => (m?.clientTempId || m?.id) === msgKey);
+    const historyMsgs = idx >= 0 ? displayMessages.slice(0, idx + 1) : [...displayMessages, msg];
+    const history = historyMsgs.map((m: any) => ({ role: m.role, content: m.content }));
+
+    // Keep attachments lightweight: strip base64/data fields and send only metadata.
+    const streamAttachments = (msg.attachments || [])
+      .map((att: any) => ({
+        type: att?.type === "image" ? "image" : "document",
+        name: att?.name,
+        mimeType: att?.mimeType || att?.type,
+        storagePath: att?.storagePath,
+        fileId: att?.fileId || att?.id,
+        // Do NOT send imageUrl/content/dataUrl here.
+      }))
+      .filter((att: any) => !!att?.name);
+
+    const result = await streamChat.stream("/api/chat/stream", {
+      chatId: stableChatId,
+      body: {
+        messages: history,
+        conversationId: stableChatId,
+        chatId: stableChatId,
+        runId: effectiveRunId,
+        clientRequestId: msg.clientRequestId,
+        userRequestId: msg.requestId,
+        attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+        docTool: selectedDocTool || null,
+        provider: selectedProvider,
+        model: selectedModel,
+        latencyMode,
+      },
+      buildFinalMessage: (fullContent, data, messageId) => ({
+        id: messageId || `assistant-${Date.now()}`,
+        role: "assistant",
+        content: fullContent || "No se recibió respuesta del servidor.",
+        timestamp: new Date(),
+        requestId: data?.requestId || generateRequestId(),
+        userMessageId: msgKey,
+        artifact: data?.artifact,
+        webSources: data?.webSources,
+      }),
+      buildErrorMessage: (error, messageId) => ({
+        id: messageId || `error-${Date.now()}`,
+        role: "assistant",
+        content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: msgKey,
+      }),
+    });
+
+    if (result.ok) {
+      requestTitleRefresh(stableChatId);
+    }
+  }, [
+    displayMessages,
+    latencyMode,
+    onSendMessage,
+    requestTitleRefresh,
+    selectedDocTool,
+    selectedModel,
+    selectedProvider,
+    streamChat,
+    toast,
+    waitForStableChatId,
+  ]);
 
   const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1754,6 +1961,47 @@ export function ChatInterface({
     }
   }, [editedDocumentContent]);
 
+  // Save document to Biblioteca (library) via server endpoint
+  const handleSaveToLibrary = useCallback(async (doc?: { type: string; title: string; content: string }) => {
+    const docToSave = doc || (activeDocEditor ? {
+      type: activeDocEditor.type,
+      title: activeDocEditor.title,
+      content: editedDocumentContent || activeDocEditor.content,
+    } : null);
+
+    if (!docToSave) return;
+
+    try {
+      const response = await fetch("/api/library/save-from-editor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title: docToSave.title,
+          content: docToSave.content,
+          type: docToSave.type,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save to library");
+      }
+
+      const result = await response.json();
+      toast({
+        title: "Guardado en Biblioteca",
+        description: `${result.file?.name || docToSave.title} se ha guardado correctamente.`,
+      });
+    } catch (error) {
+      console.error("Save to library error:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo guardar el documento en la Biblioteca.",
+        variant: "destructive",
+      });
+    }
+  }, [activeDocEditor, editedDocumentContent, toast]);
+
   const handleDownloadImage = useCallback((imageData: string) => {
     const link = document.createElement("a");
     link.href = imageData;
@@ -1936,6 +2184,30 @@ export function ChatInterface({
           });
         } else if (eventType === "production_complete") {
           setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+        } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+          // Browser automation starting — open the virtual computer panel
+          setAiState("agent_working");
+          globalStartSseSession(data.args?.goal || "Automatización web");
+          setIsBrowserOpen(true);
+        } else if (eventType === "browser_step") {
+          // Real-time browser step with screenshot — update the virtual computer
+          globalUpdateFromSseStep(data);
+          setAiState("agent_working");
+          if (!isBrowserOpen) setIsBrowserOpen(true);
+        } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
+          // Browser automation completed
+          if (data.result?.success) {
+            globalUpdateFromSseStep({
+              stepNumber: data.result.stepsCount || 0,
+              totalSteps: data.result.stepsCount || 0,
+              action: "done",
+              reasoning: "Tarea completada",
+              goalProgress: "100%",
+              screenshot: "",
+              url: "",
+              title: "",
+            });
+          }
         }
       },
       buildFinalMessage: (content, data, messageId) => ({
@@ -2500,15 +2772,16 @@ export function ChatInterface({
   const waitForPendingUploads = async (): Promise<void> => {
     const promises = Array.from(pendingUploadsRef.current.values());
     if (promises.length > 0) {
-      console.log("[waitForPendingUploads] Waiting for", promises.length, "uploads to complete");
-      await Promise.all(promises);
-      console.log("[waitForPendingUploads] All uploads complete");
+      if (import.meta.env.DEV) {
+        chatLogger.debug("waitForPendingUploads", { count: promises.length });
+      }
+      await Promise.allSettled(promises);
     }
   };
 
   // Returns a Promise that resolves when the file reaches a terminal state (ready/error).
-  // First polls fast (250ms) for 5s, then falls back to slow polling (2s).
-  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+  // Prefer persistent WebSocket status updates; fall back to polling when WS is unavailable.
+  const pollFileStatusFastPolling = (fileId: string, trackingId: string): Promise<void> => {
     return new Promise<void>((resolve) => {
       const maxTime = 5000;
       const pollInterval = 250;
@@ -2562,6 +2835,124 @@ export function ChatInterface({
       };
 
       checkStatus();
+    });
+  };
+
+  const pollFileStatusFast = (fileId: string, trackingId: string): Promise<void> => {
+    const uploader = getFileUploader();
+    const wsTimeoutMs = 1500;
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let sawWsEvent = false;
+      let unsubscribe: (() => void) | null = null;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const stillTracked = () => uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+      };
+
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const fallback = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        pollFileStatusFastPolling(fileId, trackingId).then(resolve);
+      };
+
+      if (!stillTracked()) { done(); return; }
+
+      try {
+        unsubscribe = uploader.subscribeToProcessingStatus(fileId, async (data: any) => {
+          if (!sawWsEvent) {
+            sawWsEvent = true;
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+          }
+
+          if (!stillTracked()) { done(); return; }
+
+          if (data?.type === "auth_error") {
+            console.warn("[FileStatus] WS auth_error, falling back to polling");
+            fallback();
+            return;
+          }
+
+          if (data?.type !== "file_status" || data.fileId !== fileId) return;
+
+          if (data.status === "failed") {
+            setUploadedFiles((prev: UploadedFile[]) =>
+              prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
+                ? { ...f, id: fileId, status: "error", error: data.error || (f as any).error }
+                : f))
+            );
+            done();
+            return;
+          }
+
+          if (data.status === "completed") {
+            // Fetch content once (with short retry for eventual consistency).
+            for (let attempt = 0; attempt < 5; attempt++) {
+              try {
+                const contentRes = await fetch(`/api/files/${fileId}/content`);
+                if (contentRes.ok) {
+                  const contentData = await contentRes.json();
+                  if (contentData.status === "ready") {
+                    setUploadedFiles((prev: UploadedFile[]) =>
+                      prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId
+                        ? { ...f, id: fileId, status: "ready", content: contentData.content }
+                        : f))
+                    );
+                    done();
+                    return;
+                  }
+                } else if (contentRes.status !== 202) {
+                  break;
+                }
+              } catch {
+                // ignore and retry
+              }
+              await new Promise(r => setTimeout(r, 250));
+            }
+
+            // If content isn't ready yet, fall back to polling as a safety net.
+            fallback();
+            return;
+          }
+
+          // pending/processing: reflect state (best-effort)
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "processing" } : f))
+          );
+        });
+
+        timeoutId = setTimeout(() => {
+          if (!sawWsEvent) {
+            console.warn("[FileStatus] WS timeout, falling back to polling");
+            fallback();
+          }
+        }, wsTimeoutMs);
+      } catch (error) {
+        console.warn("[FileStatus] WS subscribe failed, falling back to polling:", error);
+        fallback();
+      }
     });
   };
 
@@ -2890,6 +3281,17 @@ export function ChatInterface({
           model: selectedModel || "grok-3",
           latencyMode,
         },
+        onEvent: (eventType, data) => {
+          if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+            setAiState("agent_working");
+            globalStartSseSession(data.args?.goal || "Automatización web");
+            setIsBrowserOpen(true);
+          } else if (eventType === "browser_step") {
+            globalUpdateFromSseStep(data);
+            setAiState("agent_working");
+            if (!isBrowserOpen) setIsBrowserOpen(true);
+          }
+        },
         buildFinalMessage: (content, _lastEvent, messageId) => ({
           id: messageId || `emergency-${Date.now()}`,
           role: "assistant",
@@ -2927,25 +3329,8 @@ export function ChatInterface({
       return;
     }
 
-    console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
-
-    // Wait for any pending uploads to complete before proceeding
-    if (pendingUploadsRef.current.size > 0) {
-      console.log("[handleSubmit] Waiting for", pendingUploadsRef.current.size, "pending uploads...");
-      await waitForPendingUploads();
-      console.log("[handleSubmit] All uploads complete");
-    }
-
-    // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFilesRef.current.some((f: any) => f.status === "uploading" || f.status === "processing");
-    if (filesStillLoading) {
-      console.log("[handleSubmit] files still loading after wait, returning");
-      toast({
-        title: "Archivos en proceso",
-        description: "Espera a que los archivos terminen de cargarse antes de enviar.",
-        duration: 3000,
-      });
-      return;
+    if (import.meta.env.DEV) {
+      chatLogger.debug("handleSubmit called", { inputLength: input.length, selectedTool });
     }
 
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
@@ -2953,9 +3338,13 @@ export function ChatInterface({
     const hasFiles = uploadedFilesRef.current.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
 
-    console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
+    if (import.meta.env.DEV) {
+      chatLogger.debug("handleSubmit content check", { hasInput, hasFiles });
+    }
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
-      console.log("[handleSubmit] no content to submit, returning");
+      if (import.meta.env.DEV) {
+        chatLogger.debug("handleSubmit no content, returning");
+      }
       return;
     }
 
@@ -3024,6 +3413,31 @@ export function ChatInterface({
           forceWebSearch: isWebSearch,
           webSearchAuto: isWebSearch,
           latencyMode,
+        },
+        onEvent: (eventType, data) => {
+          // Handle browser automation events from agent loop
+          if (eventType === "tool_start" && data.toolName === "browse_and_act") {
+            setAiState("agent_working");
+            globalStartSseSession(data.args?.goal || "Automatización web");
+            setIsBrowserOpen(true);
+          } else if (eventType === "browser_step") {
+            globalUpdateFromSseStep(data);
+            setAiState("agent_working");
+            if (!isBrowserOpen) setIsBrowserOpen(true);
+          } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
+            if (data.result?.success) {
+              globalUpdateFromSseStep({
+                stepNumber: data.result.stepsCount || 0,
+                totalSteps: data.result.stepsCount || 0,
+                action: "done",
+                reasoning: "Tarea completada",
+                goalProgress: "100%",
+                screenshot: "",
+                url: "",
+                title: "",
+              });
+            }
+          }
         },
         buildFinalMessage: (fullContent, _lastEvent, messageId) => ({
           id: messageId || `assistant-${Date.now()}`,
@@ -3250,7 +3664,14 @@ export function ChatInterface({
     // which triggers production mode directly on the backend
     const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
 
-    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected) {
+    // When document files are attached, skip generation pattern detection entirely
+    // to let the document analysis path (DATA_MODE / /api/analyze) handle them.
+    const hasDocumentFiles = uploadedFilesRef.current.some(
+      // Treat uploading/processing docs as present too; otherwise fast-submit can misroute into generation/edit mode.
+      (f: any) => f?.status !== "error" && !(f.type || "").startsWith("image/")
+    );
+
+    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected && !hasDocumentFiles) {
       console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
 
       // Set thinking state
@@ -3267,19 +3688,28 @@ export function ChatInterface({
       }
 
       // Add user message to chat
-      const userMsgId = Date.now().toString();
+      const userMsgId = `temp-gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const userMsg: Message = {
         id: userMsgId,
+        clientTempId: userMsgId,
         role: "user",
         content: generationInput,
         timestamp: new Date(),
         requestId: generateRequestId(),
+        clientRequestId: generateClientRequestId(),
+        status: "pending",
+        skipRun: true,
+        deliveryStatus: "sending",
+        deliveryError: undefined,
       };
-      // Show message immediately (optimistic update)
-      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
-      onSendMessage(userMsg);
+	      // Show message immediately (optimistic update)
+	      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+	      const persistGenerationUserMessagePromise = onSendMessage(userMsg).catch((err) => {
+	        console.warn("[handleSubmit] Failed to persist generation user message:", err);
+	        return undefined;
+	      });
 
-      try {
+	      try {
         // Only fetch image context if we have an edit pattern (not for generation-only requests)
         // This prevents misrouting generation requests like "agrega una conclusión" to image edit
         let lastImageBase64: string | null = null;
@@ -3370,33 +3800,67 @@ export function ChatInterface({
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
 
-        // Ensure abort controller is active
-        if (!abortControllerRef.current) {
-          abortControllerRef.current = new AbortController();
-        }
+	        // Ensure abort controller is active
+		        if (!abortControllerRef.current) {
+		          abortControllerRef.current = new AbortController();
+		        }
 
-        try {
-          const response = await fetch("/api/chat/stream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
-              chatId,
-              conversationId: chatId,
-              provider: selectedProvider,
-              model: selectedModel,
-              lastImageBase64,
-              lastImageId,
-              latencyMode,
+		        try {
+            const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
+            const immediateChatId =
+              resolvedCurrentChatId && !resolvedCurrentChatId.startsWith("pending-")
+                ? resolvedCurrentChatId
+                : null;
+            const quickPersisted = await Promise.race<
+              { run?: { id: string; chatId: string } } | undefined
+            >([
+              persistGenerationUserMessagePromise as Promise<{ run?: { id: string; chatId: string } } | undefined>,
+              new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 180)),
+            ]);
+            const effectiveRunId: string | undefined = quickPersisted?.run?.id;
+            const runChatId: string | undefined = quickPersisted?.run?.chatId;
+
+			          const effectiveChatIdForStream = runChatId || immediateChatId || await waitForStableChatId({
+			            timeoutMs: 8000,
+			            signal: abortControllerRef.current.signal,
+			          });
+		          if (!effectiveChatIdForStream) {
+		            toast({
+		              title: "Error",
+		              description: "No se pudo crear/confirmar el chat para generar contenido. Intenta de nuevo.",
+		              variant: "destructive",
+		              duration: 5000,
+		            });
+		            setAiState("idle");
+		            setAiProcessSteps([]);
+		            abortControllerRef.current = null;
+		            return;
+		          }
+
+		          const response = await fetch("/api/chat/stream", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	            credentials: "include",
+		            body: JSON.stringify({
+			              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+			              chatId: effectiveChatIdForStream,
+			              conversationId: effectiveChatIdForStream,
+			              runId: effectiveRunId,
+                    clientRequestId: userMsg.clientRequestId,
+                    userRequestId: userMsg.requestId,
+			              provider: selectedProvider,
+			              model: selectedModel,
+			              lastImageBase64,
+		              lastImageId,
+		              latencyMode,
             }),
             signal: abortControllerRef.current.signal
           });
 
-          if (!response.ok) {
-            if (response.status === 402) {
-              const errorData = await response.json();
-              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
+	          if (!response.ok) {
+	            if (response.status === 402) {
+	              const errorData = await response.json();
+	              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
                 setQuotaInfo(errorData.quota);
                 setShowPricingModal(true);
                 setAiState("idle");
@@ -3404,11 +3868,33 @@ export function ChatInterface({
                 return;
               }
             }
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `Error ${response.status}`);
-          }
+	            const errorData = await response.json().catch(() => ({}));
+	            throw new Error(errorData.error || `Error ${response.status}`);
+	          }
 
-          setAiState("responding");
+	          // If the server indicates the run was already handled, don't try to parse SSE.
+	          const contentType = response.headers.get("Content-Type") || "";
+	          if (contentType.includes("application/json")) {
+	            const jsonData = await response.json().catch(() => null);
+	            const status = jsonData?.status;
+	            if (status === "already_done" || status === "already_processing") {
+	              console.log("[Generation SSE] Run already processed, skipping streaming");
+	              setAiState("idle");
+	              setAiProcessSteps([]);
+	              abortControllerRef.current = null;
+	              return;
+	            }
+	            if (status === "claim_failed") {
+	              console.log("[Generation SSE] Run claim failed, skipping streaming");
+	              setAiState("idle");
+	              setAiProcessSteps([]);
+	              abortControllerRef.current = null;
+	              return;
+	            }
+	            throw new Error(jsonData?.error || jsonData?.message || `Respuesta inesperada del servidor (${status || "json"})`);
+	          }
+
+	          setAiState("responding");
 
           const reader = response.body?.getReader();
           if (!reader) throw new Error("No response body");
@@ -3416,10 +3902,11 @@ export function ChatInterface({
           const decoder = new TextDecoder();
           let buffer = "";
           let fullContent = "";
-          let currentEventType = "chunk"; // Default start
-          let streamComplete = false;
+	          let currentEventType = "chunk"; // Default start
+	          let streamComplete = false;
+            let didFinalize = false;
 
-          while (!streamComplete) {
+	          while (!streamComplete) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -3433,83 +3920,98 @@ export function ChatInterface({
 
               if (trimmedLine.startsWith("event: ")) {
                 currentEventType = trimmedLine.slice(7).trim();
-              } else if (trimmedLine.startsWith("data: ")) {
-                const dataStr = trimmedLine.slice(6);
-                if (dataStr === "[DONE]") {
-                  streamComplete = true;
-                  continue;
-                }
+	              } else if (trimmedLine.startsWith("data: ")) {
+	                const dataStr = trimmedLine.slice(6);
+	                if (dataStr === "[DONE]") {
+	                  streamComplete = true;
+	                  continue;
+	                }
 
-                try {
-                  const data = JSON.parse(dataStr);
-
-                  if (currentEventType === "chunk" || currentEventType === "text") {
-                    const content = data.content || "";
-                    if (content) {
-                      fullContent += content;
-                      streamingContentRef.current = fullContent;
-                      setStreamingContent(fullContent);
-                    }
-                  } else if (currentEventType === "production_start") {
-                    setAiState("agent_working");
-                    setAiProcessSteps([{
-                      id: "init",
-                      step: "init",
-                      title: `Iniciando producción: ${data.topic || "Documento"}`,
-                      status: "pending",
-                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
-                    }]);
-                  } else if (currentEventType === "production_event") {
-                    setAiProcessSteps((prev: any[]) => {
-                      const newSteps = [...prev];
-                      const lastStep = newSteps[newSteps.length - 1];
-                      if (lastStep && lastStep.status === "pending" && data.message) {
-                        // Update generic pending step
-                        lastStep.title = data.message;
-                      } else {
-                        // Add new step log
-                        newSteps.push({
-                          id: `step-${Date.now()}`,
-                          title: data.message || "Procesando...",
-                          status: "pending",
-                          description: data.stage
-                        });
-                      }
-                      return newSteps;
-                    });
-                  } else if (currentEventType === "production_complete") {
-                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
-                  } else if (currentEventType === "done" || currentEventType === "finish") {
-                    streamComplete = true;
-                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
-
-                    streamTransition.finalize({
-                      id: (Date.now() + 1).toString(),
-                      role: "assistant",
-                      content: fullContent,
-                      timestamp: new Date(),
-                      requestId: data.requestId || generateRequestId(),
-                      userMessageId: userMsgId,
-                      artifact: data.artifact,
-                      webSources: data.webSources,
-                    });
-
-                    // Request AI-generated title refresh after streaming completes
-                    requestTitleRefresh(chatId);
-                  } else if (currentEventType === "error" || currentEventType === "production_error") {
-                    throw new Error(data.message || data.error || "Stream error");
+                  let data: any;
+                  try {
+                    data = JSON.parse(dataStr);
+                  } catch (parseError) {
+                    console.warn("SSE parse error:", parseError);
+                    continue;
                   }
-                } catch (parseError) {
-                  console.warn("SSE parse error:", parseError);
-                }
-              }
-            }
-          }
 
-        } catch (error: any) {
-          if (error.name === "AbortError") return;
-          console.error("[Generation] Stream Error:", error);
-          streamTransition.finalize({
+	                  if (currentEventType === "chunk" || currentEventType === "text") {
+	                    const content = data.content || "";
+	                    if (content) {
+	                      fullContent += content;
+	                      streamingContentRef.current = fullContent;
+	                      setStreamingContent(fullContent);
+	                    }
+	                  } else if (currentEventType === "production_start") {
+	                    setAiState("agent_working");
+	                    setAiProcessSteps([{
+	                      id: "init",
+	                      step: "init",
+	                      title: `Iniciando producción: ${data.topic || "Documento"}`,
+	                      status: "pending",
+	                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+	                    }]);
+	                  } else if (currentEventType === "production_event") {
+	                    setAiProcessSteps((prev: any[]) => {
+	                      const newSteps = [...prev];
+	                      const lastStep = newSteps[newSteps.length - 1];
+	                      if (lastStep && lastStep.status === "pending" && data.message) {
+	                        // Update generic pending step
+	                        lastStep.title = data.message;
+	                      } else {
+	                        // Add new step log
+	                        newSteps.push({
+	                          id: `step-${Date.now()}`,
+	                          title: data.message || "Procesando...",
+	                          status: "pending",
+	                          description: data.stage
+	                        });
+	                      }
+	                      return newSteps;
+	                    });
+	                  } else if (currentEventType === "production_complete") {
+	                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
+	                  } else if (currentEventType === "done" || currentEventType === "finish") {
+	                    streamComplete = true;
+	                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
+
+	                    streamTransition.finalize({
+	                      id: (Date.now() + 1).toString(),
+	                      role: "assistant",
+	                      content: fullContent || "No se recibió respuesta del servidor.",
+	                      timestamp: new Date(),
+	                      requestId: data.requestId || generateRequestId(),
+	                      userMessageId: userMsgId,
+	                      artifact: data.artifact,
+	                      webSources: data.webSources,
+	                    });
+                      didFinalize = true;
+	
+	                    // Request AI-generated title refresh after streaming completes
+	                    requestTitleRefresh(effectiveChatIdForStream);
+	                  } else if (currentEventType === "error" || currentEventType === "production_error") {
+	                    throw new Error(data.message || data.error || "Stream error");
+	                  }
+	              }
+	            }
+	          }
+
+            if (!didFinalize) {
+              streamTransition.finalize({
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent || "No se recibió respuesta del servidor.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              });
+              requestTitleRefresh(effectiveChatIdForStream);
+            }
+
+	        } catch (error: any) {
+	          if (error.name === "AbortError") return;
+	          console.error("[Generation] Stream Error:", error);
+	          streamTransition.finalize({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
@@ -3518,11 +4020,12 @@ export function ChatInterface({
             userMessageId: userMsgId,
           });
         }
-      } catch (error) {
-        console.error("[handleSubmit] Top-level error:", error);
-        setAiState("idle");
-      }
-    } // Close if ((isGenerationRequest ...
+	      } catch (error) {
+	        console.error("[handleSubmit] Top-level error:", error);
+	        setAiState("idle");
+	      }
+        return;
+	    } // Close if ((isGenerationRequest ...
 
 
     // Check if this is a Super Agent research request with sources
@@ -3663,18 +4166,23 @@ export function ChatInterface({
                           original_prompt: eventData.topic || ""
                         }
                       };
-                      // DOCX Generation: Set blank page with generating status
-                      if (selectedDocTool === "word" && eventData.deliverables?.includes("word")) {
-                        setDocGenerationState({
-                          status: 'generating',
-                          progress: 0,
-                          stage: 'Iniciando generación...',
-                          downloadUrl: null,
-                          fileName: null,
-                          fileSize: null
-                        });
-                        // Clear editor content to show blank page
-                        setEditedDocumentContent('');
+                      // Document Generation: Set blank page with generating status for any doc type
+                      if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                        const deliverables = eventData.deliverables || [];
+                        const deliverableMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt' };
+                        const matchType = deliverableMap[selectedDocTool];
+                        if (deliverables.includes(matchType) || deliverables.length === 0) {
+                          setDocGenerationState({
+                            status: 'generating',
+                            progress: 0,
+                            stage: 'Iniciando generación...',
+                            downloadUrl: null,
+                            fileName: null,
+                            fileSize: null
+                          });
+                          // Clear editor content to show blank page
+                          setEditedDocumentContent('');
+                        }
                       }
                       break;
                     case "progress":
@@ -3704,8 +4212,8 @@ export function ChatInterface({
                         }
                       };
 
-                      // DOCX Generation: Update progress state (no HTML injection)
-                      if (selectedDocTool === "word") {
+                      // Document Generation: Update progress state for all doc types
+                      if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
                         const stageLabels: Record<string, string> = {
                           intake: "Procesando solicitud...",
                           blueprint: "Diseñando estructura...",
@@ -3756,14 +4264,18 @@ export function ChatInterface({
                         phase: "creating"
                       };
 
-                      // DOCX Generation: Set ready status with download info
-                      if (selectedDocTool === "word" && eventData.type === "word") {
+                      // Document Generation: Set ready status with download info for any doc type
+                      const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
+                      const artifactDocType = docTypeMap[eventData.type] || eventData.type;
+                      const selectedDocTypeNorm = selectedDocTool ? (docTypeMap[selectedDocTool] || selectedDocTool) : null;
+                      if (selectedDocTypeNorm && artifactDocType === selectedDocTypeNorm) {
+                        const defaultNames: Record<string, string> = { word: 'Documento.docx', excel: 'Hoja.xlsx', ppt: 'Presentación.pptx' };
                         setDocGenerationState({
                           status: 'ready',
                           progress: 100,
                           stage: '¡Documento listo!',
                           downloadUrl: eventData.downloadUrl || null,
-                          fileName: eventData.filename || eventData.name || "Documento.docx",
+                          fileName: eventData.filename || eventData.name || defaultNames[artifactDocType] || 'Documento',
                           fileSize: eventData.size || null
                         });
                       }
@@ -3879,18 +4391,30 @@ export function ChatInterface({
     // -------------------------------------------------------------------------
     // Capture state immediately — use auto-generated prompt if user sent only files
     const userInput = input || autoPromptForFiles;
-    const currentUploadedFiles = [...uploadedFilesRef.current];
-    const userMsgId = Date.now().toString();
+    let currentUploadedFiles = [...uploadedFilesRef.current];
+    const userMsgId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const hasUnsettledUploadsAtSubmit = currentUploadedFiles.some(
+      (f: any) => f?.status === "uploading" || f?.status === "processing"
+    );
+    const hadPendingUploadsAtSubmit =
+      pendingUploadsRef.current.size > 0 || hasUnsettledUploadsAtSubmit;
+    const failedUploadsAtSubmit = currentUploadedFiles.filter((f: any) => f?.status === "error");
 
     // Reset UI state immediately — save files for restoration on error
-    const savedMainFiles = [...uploadedFilesRef.current];
+    let savedMainFiles = [...uploadedFilesRef.current];
     setInput("");
     if (chatId) clearDraft(chatId);
-    setUploadedFiles([]);
+    // If uploads are still in flight, don't clear the composer file list yet or we lose upload progress updates.
+    // We'll clear once uploads settle (after optimistic message is already on screen).
+    if (!hadPendingUploadsAtSubmit) {
+      // Clear successful uploads immediately; keep only errored ones so user can retry/remove them.
+      setUploadedFiles(failedUploadsAtSubmit);
+    }
 
     // Process attachments for message construction
-    const attachments = currentUploadedFiles
-      .filter((f: any) => f.status === "ready" || f.status === "processing")
+    let attachments = currentUploadedFiles
+      // For UI: include anything not in a terminal error state so the message shows files immediately.
+      .filter((f: any) => f?.status !== "error")
       .map((f: any) => ({
         type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
         name: f.name,
@@ -3911,22 +4435,80 @@ export function ChatInterface({
     // Construct the User Message object
     const userMsg: Message = {
       id: userMsgId,
+      clientTempId: userMsgId,
       role: "user",
       content: userInput,
       timestamp: new Date(),
       requestId: generateRequestId(),
       clientRequestId: generateClientRequestId(),
       status: 'pending',
+      skipRun: true,
+      deliveryStatus: "sending",
+      deliveryError: undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     // Apply Optimistic Update IMMEDIATELY
+    const optimisticStart = import.meta.env.DEV && typeof performance !== "undefined" ? performance.now() : null;
     setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+    if (optimisticStart !== null) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          console.debug("[Perf] optimistic_render_ms", Math.max(0, performance.now() - optimisticStart).toFixed(1));
+        });
+      });
+    }
 
     // Set initial AI state
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
+
+    // If there are pending uploads, wait for them before kicking off any backend work.
+    // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
+    if (hadPendingUploadsAtSubmit) {
+      await waitForPendingUploads();
+
+      currentUploadedFiles = [...uploadedFilesRef.current];
+      savedMainFiles = [...currentUploadedFiles];
+      const failedAfterWait = currentUploadedFiles.filter((f: any) => f?.status === "error");
+      attachments = currentUploadedFiles
+        .filter((f: any) => f.status === "ready" || f.status === "processing")
+        .map((f: any) => ({
+          type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+          name: f.name,
+          documentType: (() => {
+            if (f.type.startsWith("image/")) return undefined;
+            if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+            if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+            if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+            return "word";
+          })() as "word" | "excel" | "ppt" | "pdf",
+          mimeType: f.type,
+          imageUrl: f.dataUrl,
+          storagePath: f.storagePath,
+          fileId: f.id,
+          spreadsheetData: f.spreadsheetData,
+        }));
+
+      const nextAttachments = attachments.length > 0 ? attachments : undefined;
+      userMsg.attachments = nextAttachments;
+      setOptimisticMessages((prev: Message[]) =>
+        prev.map((m: Message) => (m.id === userMsgId ? { ...m, attachments: nextAttachments } : m))
+      );
+
+      // Now it's safe to clear successful uploads from the composer (uploads have reached a stable state).
+      // Keep any failed uploads so the user can retry/remove them.
+      setUploadedFiles(failedAfterWait);
+      if (failedAfterWait.length > 0) {
+        toast({
+          title: "Algunos archivos fallaron",
+          description: `${failedAfterWait.length} archivo(s) no se pudieron subir y no se incluyeron en el mensaje.`,
+          variant: "destructive",
+          duration: 5000,
+        });
+      }
+    }
 
     // -------------------------------------------------------------------------
     // 2. ASYNC LOGIC (Agent Mode / Server Request)
@@ -3934,7 +4516,7 @@ export function ChatInterface({
 
     // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
     // Use captured state (userInput, currentUploadedFiles) not component state
-    const hasAttachedFiles = currentUploadedFiles.length > 0;
+    const hasAttachedFiles = attachments.length > 0;
     const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
 
     if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
@@ -4154,27 +4736,37 @@ export function ChatInterface({
 
     // Send user message — fire-and-forget (don't block stream start)
     try {
-      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
+	      console.log("[handleSubmit] ABOUT TO CALL onSendMessage (fire-and-forget)");
 
-      // Fire-and-forget: persist user message in background.
-      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
-      onSendMessage(userMsg);
+	      // Fire-and-forget: persist user message in background.
+	      // Previously this was `await`ed, adding 500ms-2s of latency before streaming started.
+	      const persistUserMessagePromise = onSendMessage(userMsg).catch((err) => {
+	        console.warn("[handleSubmit] Failed to persist user message (will still attempt streaming):", err);
+	        return undefined;
+	      });
 
-      // Start image detection early (runs in parallel with intent checks below).
-      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
-      const isImageTool = selectedTool === "image";
-      const imageDetectPromise: Promise<boolean> = (
-        !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles
-      )
-        ? fetch("/api/image/detect", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userInput })
-          })
-            .then(r => r.json())
-            .then(d => !!d.isImageRequest)
-            .catch(() => false)
-        : Promise.resolve(!!isImageTool);
+	      // Start image detection early (runs in parallel with intent checks below).
+	      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+	      const isImageTool = selectedTool === "image";
+        const shouldAutoDetectImage =
+          !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles;
+        const imageDetectController =
+          shouldAutoDetectImage && typeof AbortController !== "undefined"
+            ? new AbortController()
+            : null;
+	      const imageDetectPromise: Promise<boolean> = (
+	        shouldAutoDetectImage
+	      )
+	        ? fetch("/api/image/detect", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify({ message: userInput }),
+              signal: imageDetectController?.signal ?? undefined,
+	          })
+	            .then(r => r.json())
+	            .then(d => !!d.isImageRequest)
+	            .catch(() => false)
+	        : Promise.resolve(!!isImageTool);
 
       // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
       const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -4229,20 +4821,21 @@ export function ChatInterface({
           { step: "Generando respuesta inteligente", status: "pending" }
         ]);
 
-        try {
-          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
-          fullMessages.push({ role: "user", content: cleanPrompt });
-
-          const chatResponse = await fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-            credentials: "include",
-            body: JSON.stringify({
-              messages: fullMessages,
-              conversationId: chatId,
-              useRag: true
-            })
-          });
+	        try {
+	          const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+	          fullMessages.push({ role: "user", content: cleanPrompt });
+	          const stableConversationId = await waitForStableChatId({ timeoutMs: 8000 });
+	
+	          const chatResponse = await fetch("/api/chat", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	            credentials: "include",
+	            body: JSON.stringify({
+	              messages: fullMessages,
+	              conversationId: stableConversationId || chatId,
+	              useRag: true
+	            })
+	          });
 
           setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
             i === 0 ? { ...s, status: "done" as const } :
@@ -4343,9 +4936,19 @@ export function ChatInterface({
       try {
         abortControllerRef.current = new AbortController();
 
-        // Await the image detection that was started in parallel above.
-        // By now it has had time to run during intent checks (~0ms extra wait).
-        let shouldGenerateImage = await imageDetectPromise;
+	        // Await image detection with a strict timeout so chat streaming is not blocked.
+	        // If detection is slow, default to chat mode and continue immediately.
+          const IMAGE_DETECT_TIMEOUT_MS = 180;
+	        const detectResult = await Promise.race<boolean | null>([
+            imageDetectPromise,
+            new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
+          ]);
+          const imageDetectTimedOut = detectResult === null;
+	        let shouldGenerateImage = detectResult ?? false;
+          if (imageDetectTimedOut) {
+            imageDetectController?.abort();
+            console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
+          }
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
@@ -4552,12 +5155,40 @@ IMPORTANTE:
           const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
           const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
-          // Always use SSE streaming — generate an effective chatId if needed.
-          // Previously gated on `runInfo && chatId` which required awaiting onSendMessage.
-          const effectiveStreamChatId = chatId && !chatId.startsWith("pending-") ? chatId : `chat_${Date.now()}`;
-          if (effectiveStreamChatId) {
-            // SSE streaming mode - real-time streaming from server
-            setAiState("responding");
+	          // Always use SSE streaming — but ONLY against a stable, real chatId.
+	          // Never fall back to a synthetic ID here; that creates "ghost" chats and splits persistence.
+            const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
+            const immediateChatId =
+              resolvedCurrentChatId && !resolvedCurrentChatId.startsWith("pending-")
+                ? resolvedCurrentChatId
+                : null;
+            const quickPersisted = await Promise.race<
+              { run?: { id: string; chatId: string } } | undefined
+            >([
+              persistUserMessagePromise as Promise<{ run?: { id: string; chatId: string } } | undefined>,
+              new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 180)),
+            ]);
+	          const effectiveRunId: string | undefined = quickPersisted?.run?.id;
+	          const runChatId: string | undefined = quickPersisted?.run?.chatId;
+	          const effectiveStreamChatId =
+              runChatId ||
+              immediateChatId ||
+              await waitForStableChatId({ timeoutMs: 8000, signal: abortControllerRef.current?.signal });
+	          if (!effectiveStreamChatId) {
+	            toast({
+	              title: "Error",
+	              description: "No se pudo crear/confirmar el chat para enviar este mensaje. Intenta de nuevo.",
+	              variant: "destructive",
+              duration: 5000,
+            });
+            setAiState("idle");
+            setAiProcessSteps([]);
+	            abortControllerRef.current = null;
+	            return;
+	          }
+	          if (effectiveStreamChatId) {
+	            // SSE streaming mode - real-time streaming from server
+	            setAiState("responding");
 
             // Update steps: mark processing done, searching active
             setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
@@ -4575,6 +5206,10 @@ IMPORTANTE:
 
             // Build attachments array for streaming endpoint
             // FIX: Normalize type to match backend schema: "document" | "image" | "file"
+            console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
+              id: f.id, name: f.name, type: f.type, status: f.status,
+              storagePath: f.storagePath, hasContent: !!f.content,
+            })));
             const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
@@ -4585,11 +5220,16 @@ IMPORTANTE:
                 fileId: f.id,
                 content: f.content,
               }));
+            console.log("[handleSubmit] streamAttachments:", JSON.stringify(streamAttachments.map(a => ({
+              type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+              fileId: a.fileId, hasContent: !!a.content,
+            }))));
 
             // Robust document detection using both mimeType AND file extension
             const hasDocumentAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .some(f => isDocumentFile(f.type, f.name));
+            console.log("[handleSubmit] hasDocumentAttachments:", hasDocumentAttachments);
 
             // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
             // Reuse pre-fetched result if available (avoid duplicate network call)
@@ -4604,11 +5244,11 @@ IMPORTANTE:
                 const analyzeResponse = await fetch("/api/analyze", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    messages: finalChatHistory,
-                    attachments: streamAttachments,
-                    conversationId: chatId
-                  }),
+	                  body: JSON.stringify({
+	                    messages: finalChatHistory,
+	                    attachments: streamAttachments,
+	                    conversationId: effectiveStreamChatId
+	                  }),
                   signal: abortControllerRef.current?.signal
                 });
 
@@ -4646,18 +5286,27 @@ IMPORTANTE:
             // DEBUG: Log selectedDocTool value before making request
             console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
-            const response = await fetch("/api/chat/stream", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-              credentials: "include",
-              body: JSON.stringify({
-                messages: finalChatHistory,
-                conversationId: effectiveStreamChatId,
-                chatId: effectiveStreamChatId,
-                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-                // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null,
-                latencyMode,
+	            // Send first image dataUrl as lastImageBase64 for direct vision fallback
+	            // (bypasses storagePath resolution — belt-and-suspenders for production reliability)
+	            const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
+
+	            const response = await fetch("/api/chat/stream", {
+	              method: "POST",
+	              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	              credentials: "include",
+		              body: JSON.stringify({
+		                messages: finalChatHistory,
+		                conversationId: effectiveStreamChatId,
+		                chatId: effectiveStreamChatId,
+		                runId: effectiveRunId,
+                    clientRequestId: userMsg.clientRequestId,
+                    userRequestId: userMsg.requestId,
+		                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+		                // Send image base64 directly for vision (fallback if storagePath fails)
+		                lastImageBase64: firstImageDataUrl,
+		                // Send selected doc tool for production mode activation
+		                docTool: selectedDocTool || null,
+	                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -4667,20 +5316,29 @@ IMPORTANTE:
               throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
             }
 
-            // Check if response indicates already processed (not SSE)
-            const contentType = response.headers.get("Content-Type") || "";
-            if (contentType.includes("application/json")) {
-              const jsonData = await response.json();
-              if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
-                // Run was already processed, skip streaming
-                console.log("[SSE] Run already processed, skipping streaming");
-                setAiState("idle");
-                setAiProcessSteps([]);
-                agent.complete();
-                abortControllerRef.current = null;
-                return;
-              }
-            }
+	            // Check if response indicates already processed (not SSE)
+	            const contentType = response.headers.get("Content-Type") || "";
+	            if (contentType.includes("application/json")) {
+	              const jsonData = await response.json().catch(() => null);
+	              const status = jsonData?.status;
+	              if (status === "already_done" || status === "already_processing") {
+	                console.log("[SSE] Run already processed, skipping streaming");
+	                setAiState("idle");
+	                setAiProcessSteps([]);
+	                agent.complete();
+	                abortControllerRef.current = null;
+	                return;
+	              }
+	              if (status === "claim_failed") {
+	                console.log("[SSE] Run claim failed, skipping streaming");
+	                setAiState("idle");
+	                setAiProcessSteps([]);
+	                agent.complete();
+	                abortControllerRef.current = null;
+	                return;
+	              }
+	              throw new Error(jsonData?.error || jsonData?.message || `Respuesta inesperada del servidor (${status || "json"})`);
+	            }
 
             // Update steps: mark searching done, generating active
             setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
@@ -4705,6 +5363,8 @@ IMPORTANTE:
             let currentEventType = "chunk"; // Track current event type
             let streamComplete = false;
             let streamWebSources: any[] | undefined = undefined; // Capture webSources from done event
+            let streamArtifacts: any[] | null = null; // Capture artifacts from production pipeline
+            let isProductionStream = false; // Track if this was a production pipeline stream
 
             if (!reader) {
               throw new Error("No response body for SSE streaming");
@@ -4747,6 +5407,11 @@ IMPORTANTE:
                     lastSeq = data.sequenceId;
                   }
 
+                  // Handle heartbeat events — keep connection alive, no action needed
+                  if (currentEventType === 'heartbeat') {
+                    continue;
+                  }
+
                   // Handle completion events (done or complete)
                   if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
                     console.debug('[SSE] Stream complete event received');
@@ -4760,8 +5425,183 @@ IMPORTANTE:
                   }
 
                   // Handle error events
-                  if (currentEventType === 'error') {
-                    throw new Error(data.error || 'SSE stream error');
+                  if (currentEventType === 'error' || currentEventType === 'production_error') {
+                    // Update docGenerationState on production error
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      setDocGenerationState((prev: any) => ({
+                        ...prev,
+                        status: 'error',
+                        stage: data.error || data.message || 'Error en la generación',
+                      }));
+                    }
+                    throw new Error(data.error || data.message || 'SSE stream error');
+                  }
+
+                  // Handle production_start event — set generating state and UI
+                  if (currentEventType === 'production_start') {
+                    console.log('[SSE] Production start:', data.topic, data.deliverables);
+                    setAiState("agent_working");
+                    // Set docGenerationState for the overlay
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      setDocGenerationState({
+                        status: 'generating',
+                        progress: 0,
+                        stage: 'Iniciando generación...',
+                        downloadUrl: null,
+                        fileName: null,
+                        fileSize: null,
+                      });
+                      setEditedDocumentContent('');
+                    }
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle production_event — update progress
+                  if (currentEventType === 'production_event') {
+                    console.debug('[SSE] Production event:', data.stage, data.progress);
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      const stageLabels: Record<string, string> = {
+                        intake: "Procesando solicitud...",
+                        blueprint: "Diseñando estructura...",
+                        research: "Investigando contenido...",
+                        analysis: "Analizando información...",
+                        writing: "Redactando documento...",
+                        data: "Procesando datos...",
+                        slides: "Creando diapositivas...",
+                        qa: "Verificando calidad...",
+                        consistency: "Validando consistencia...",
+                        render: "Generando documento final...",
+                      };
+                      setDocGenerationState((prev: any) => ({
+                        ...prev,
+                        status: 'generating',
+                        progress: data.progress || prev.progress,
+                        stage: stageLabels[data.stage] || data.message || prev.stage,
+                      }));
+                    }
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle artifact event — file ready for download
+                  if (currentEventType === 'artifact') {
+                    console.log('[SSE] Artifact received:', data.type, data.filename, data.downloadUrl);
+                    // Store artifact info for the final message
+                    if (!streamArtifacts) streamArtifacts = [];
+                    streamArtifacts.push({
+                      type: data.type,
+                      filename: data.filename,
+                      downloadUrl: data.downloadUrl,
+                      size: data.size,
+                    });
+                    // Update docGenerationState to ready
+                    if (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool)) {
+                      const docTypeMap: Record<string, string> = { word: 'word', excel: 'excel', ppt: 'ppt', xlsx: 'excel', docx: 'word', pptx: 'ppt' };
+                      const artifactDocType = docTypeMap[data.type] || data.type;
+                      const selectedDocTypeNorm = docTypeMap[selectedDocTool] || selectedDocTool;
+                      if (artifactDocType === selectedDocTypeNorm) {
+                        const defaultNames: Record<string, string> = { word: 'Documento.docx', excel: 'Hoja.xlsx', ppt: 'Presentación.pptx' };
+                        setDocGenerationState({
+                          status: 'ready',
+                          progress: 100,
+                          stage: '¡Documento listo!',
+                          downloadUrl: data.downloadUrl || null,
+                          fileName: data.filename || data.name || defaultNames[artifactDocType] || 'Documento',
+                          fileSize: data.size || null,
+                        });
+                      }
+                    }
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle production_complete event
+                  if (currentEventType === 'production_complete') {
+                    console.log('[SSE] Production complete:', data.summary);
+                    isProductionStream = true;
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle browser automation events (tool_start, browser_step, tool_result)
+                  // IMPORTANT: Use global functions (not browserSession.xxx) because
+                  // this async loop may outlive the component mount (ChatInterface remounts
+                  // when a new chat is created). Global functions update a singleton store
+                  // that survives remounts.
+                  if (currentEventType === 'tool_start' && data.toolName === 'browse_and_act') {
+                    console.log('[SSE] 🌐 Browser automation starting:', data.args?.goal);
+                    setAiState("agent_working");
+                    globalStartSseSession(data.args?.goal || "Automatización web");
+                    setIsBrowserOpen(true);
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  if (currentEventType === 'browser_step') {
+                    console.log('[SSE] 🖥️ Browser step:', data.stepNumber, data.action, data.url);
+                    globalUpdateFromSseStep(data);
+                    setAiState("agent_working");
+                    if (!isBrowserOpen) setIsBrowserOpen(true);
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  if (currentEventType === 'tool_result' && data.toolName === 'browse_and_act') {
+                    console.log('[SSE] ✅ Browser automation completed:', data.result?.success);
+                    if (data.result?.success) {
+                      globalUpdateFromSseStep({
+                        stepNumber: data.result.stepsCount || 0,
+                        totalSteps: data.result.stepsCount || 0,
+                        action: "done",
+                        reasoning: "Tarea completada",
+                        goalProgress: "100%",
+                        screenshot: "",
+                        url: "",
+                        title: "",
+                      });
+                    }
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle tool_start / tool_result for other tools (just log)
+                  if (currentEventType === 'tool_start' || currentEventType === 'tool_result') {
+                    console.log(`[SSE] Tool event: ${currentEventType}`, data.toolName);
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle context event (intent detection result)
+                  if (currentEventType === 'context') {
+                    console.log('[SSE] Context:', data.intent, data.isAgenticMode ? '(agentic)' : '');
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle thinking events
+                  if (currentEventType === 'thinking') {
+                    if (data.step && data.message) {
+                      setAiProcessSteps((prev: any[]) => {
+                        const existing = prev.find((s: any) => s.id === data.step);
+                        if (existing) return prev;
+                        return [...prev, {
+                          id: data.step,
+                          step: data.step,
+                          title: data.message,
+                          status: "pending",
+                        }];
+                      });
+                    }
+                    currentEventType = "chunk";
+                    continue;
+                  }
+
+                  // Handle intent event (just log)
+                  if (currentEventType === 'intent') {
+                    console.log('[SSE] Intent:', data.intent, data.confidence);
+                    currentEventType = "chunk";
+                    continue;
                   }
 
                   // Handle chunk events with content
@@ -4805,8 +5645,64 @@ IMPORTANTE:
             }
 
             // Finalize based on mode
-            console.log('[ChatInterface] Finalize check:', { isPptMode, isExcelMode, isWordMode, shouldWriteToDoc, hasInsertFn: !!docInsertContentRef.current, fullContentLength: fullContent.length });
-            if (isPptMode && shouldWriteToDoc) {
+            console.log('[ChatInterface] Finalize check:', { isPptMode, isExcelMode, isWordMode, shouldWriteToDoc, isProductionStream, hasInsertFn: !!docInsertContentRef.current, fullContentLength: fullContent.length, streamArtifacts });
+
+            // PRODUCTION PIPELINE FINALIZATION — bypass normal doc editor streaming
+            if (isProductionStream && streamArtifacts && streamArtifacts.length > 0) {
+              console.log('[ChatInterface] Production pipeline finalization with artifacts:', streamArtifacts);
+              // Use a clean confirmation message — the artifact card below handles file display
+              const typeConfirm: Record<string, string> = { word: 'Documento generado correctamente', excel: 'Hoja de cálculo generada correctamente', ppt: 'Presentación generada correctamente' };
+              const messageContent = `✓ ${typeConfirm[selectedDocTool || 'word'] || 'Documento generado correctamente'}`;
+
+              // Build artifact object for message rendering
+              // Normalize type for message-list rendering: word→document, excel→spreadsheet, ppt→presentation
+              const primaryArtifact = streamArtifacts[0];
+              const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };
+              const normalizedType = artifactTypeMap[primaryArtifact.type] || primaryArtifact.type;
+
+              const prodFinalMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: messageContent,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                artifact: {
+                  type: normalizedType,
+                  filename: primaryArtifact.filename,
+                  downloadUrl: primaryArtifact.downloadUrl,
+                  sizeBytes: primaryArtifact.size,
+                },
+              };
+
+              // Direct finalization: add to optimistic messages + persist via API directly
+              // Do NOT use streamTransition.finalize() which calls onSendMessage() and can
+              // trigger a new chat creation race condition when chatId state has changed.
+              setOptimisticMessages((prev) => [...prev, prodFinalMsg]);
+              streamingContentRef.current = "";
+              setStreamingContent("");
+              setAiState("idle");
+              setAiProcessSteps([]);
+
+              // Persist message directly using the effective stream chatId (which is stable)
+              try {
+                await fetch(`/api/chats/${effectiveStreamChatId}/messages`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({
+                    role: prodFinalMsg.role,
+                    content: prodFinalMsg.content,
+                    requestId: prodFinalMsg.requestId,
+                    userMessageId: prodFinalMsg.userMessageId,
+                    artifact: prodFinalMsg.artifact,
+                  }),
+                });
+              } catch (err) {
+                console.error("[Production] Failed to persist assistant message:", err);
+              }
+              // Do NOT reset selectedDocTool — keep the overlay visible
+            } else if (isPptMode && shouldWriteToDoc && !isProductionStream) {
               pptStreaming.stopStreaming();
 
               const confirmMsg: Message = {
@@ -4818,7 +5714,7 @@ IMPORTANTE:
                 userMessageId: userMsgId,
               };
               await onSendMessage(confirmMsg);
-            } else if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current) {
+            } else if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
               // Excel mode: send raw CSV data to Excel editor for cell-by-cell streaming
               try {
                 console.log('[ChatInterface] Excel streaming: sending', fullContent.length, 'chars to Excel');
@@ -4840,7 +5736,7 @@ IMPORTANTE:
                 userMessageId: userMsgId,
               };
               await onSendMessage(confirmMsg);
-            } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+            } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current && !isProductionStream) {
               try {
                 // Word mode: Cumulative HTML mode
                 const newContentHTML = markdownToTipTap(fullContent);
@@ -5340,10 +6236,10 @@ IMPORTANTE:
         userPlanInfo={userPlanInfo}
       />
       {/* Main Content Area with Side Panel */}
-      {(previewDocument || activeDocEditor) ? (
+      {(previewDocument || activeDocEditor || (selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool))) ? (
         <PanelGroup direction="horizontal" className="flex-1">
           {/* Left Panel: Minimized Chat for Document Mode */}
-          <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
+          <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 25 : 50} minSize={20} maxSize={(activeDocEditor || selectedDocTool) ? 35 : 70}>
             <div className="flex flex-col min-w-0 h-full bg-background/50">
               {/* Compact Header for Document Mode */}
               {activeDocEditor && (
@@ -5386,6 +6282,7 @@ IMPORTANTE:
                 >
                   <ChatMessageList
                     messages={displayMessages}
+                    onUserRetrySend={handleUserRetrySend}
                     variant={activeDocEditor ? "compact" : "default"}
                     editingMessageId={editingMessageId}
                     editContent={editContent}
@@ -5610,7 +6507,7 @@ IMPORTANTE:
           </PanelResizeHandle>
 
           {/* Right: Document Editor Panel */}
-          <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
+          <Panel defaultSize={(activeDocEditor || selectedDocTool) ? 75 : 50} minSize={25}>
             <EditorErrorBoundary>
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "ppt") ? (
@@ -5643,113 +6540,7 @@ IMPORTANTE:
                 />
               ) : (
                 <div className="relative h-full">
-                  {/* Document Generation Overlay - shows on top of blank editor */}
-                  {selectedDocTool === "word" && docGenerationState.status !== 'idle' && (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
-                      <div className="max-w-md w-full mx-8 text-center">
-                        {docGenerationState.status === 'generating' && (
-                          <div className="space-y-6">
-                            {/* Spinner */}
-                            <div className="w-16 h-16 mx-auto border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
-
-                            {/* Stage */}
-                            <div>
-                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                                🚀 Generando Documento
-                              </h3>
-                              <p className="text-gray-600 dark:text-gray-300 text-sm">
-                                {docGenerationState.stage}
-                              </p>
-                            </div>
-
-                            {/* Progress Bar */}
-                            <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
-                              <div
-                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out w-[var(--gen-prog)]"
-                                style={{ '--gen-prog': `${docGenerationState.progress}%` } as React.CSSProperties}
-                              />
-                            </div>
-                            <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>
-
-                            {/* Code Preview */}
-                            <div className="bg-slate-900 rounded-lg p-4 text-left font-mono text-xs text-slate-300">
-                              <div className="text-green-400 mb-1">// Generando código docx...</div>
-                              <span className="text-blue-300">const</span> doc = <span className="text-yellow-300">new</span> Document({"{"}<br />
-                              <span className="text-gray-500">  {"  "}sections: [{"{ children: [...] }"}]</span><br />
-                              {"}"});
-                            </div>
-                          </div>
-                        )}
-
-                        {docGenerationState.status === 'ready' && (
-                          <div className="space-y-6">
-                            {/* Success Icon */}
-                            <div className="text-6xl">✅</div>
-
-                            <div>
-                              <h3 className="text-xl font-bold text-green-600 dark:text-green-400 mb-2">
-                                ¡Documento Generado!
-                              </h3>
-                              <p className="text-gray-600 dark:text-gray-300 text-sm">
-                                Tu documento está listo para descargar
-                              </p>
-                            </div>
-
-                            {/* File Info Card */}
-                            <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-700 rounded-xl p-5">
-                              <div className="flex items-center gap-4">
-                                <div className="bg-white dark:bg-slate-800 rounded-lg p-3 shadow-sm">
-                                  <span className="text-3xl">📄</span>
-                                </div>
-                                <div className="flex-1 text-left">
-                                  <div className="font-semibold text-gray-900 dark:text-white">
-                                    {docGenerationState.fileName}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    {docGenerationState.fileSize ? `${(docGenerationState.fileSize / 1024).toFixed(1)} KB` : 'Listo'}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Download Button */}
-                              {docGenerationState.downloadUrl && (
-                                <a
-                                  href={docGenerationState.downloadUrl}
-                                  download={docGenerationState.fileName || 'documento.docx'}
-                                  className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-                                >
-                                  <span>⬇️</span> Descargar Documento
-                                </a>
-                              )}
-                            </div>
-
-                            {/* Reset Button */}
-                            <button
-                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
-                              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
-                            >
-                              Generar otro documento
-                            </button>
-                          </div>
-                        )}
-
-                        {docGenerationState.status === 'error' && (
-                          <div className="space-y-4">
-                            <div className="text-5xl">❌</div>
-                            <h3 className="text-lg font-semibold text-red-600">Error en generación</h3>
-                            <p className="text-sm text-gray-600">{docGenerationState.error || 'Ocurrió un error al generar el documento'}</p>
-                            <button
-                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
-                              className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
-                            >
-                              Reintentar
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
+                  {/* Word/generic document editor — always visible when activeDocEditor or previewDocument exists */}
                   <EnhancedDocumentEditorLazy
                     key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
                     title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
@@ -5767,6 +6558,7 @@ IMPORTANTE:
                         handleDownloadDocument(previewDocument);
                       }
                     }}
+                    onSaveToLibrary={() => handleSaveToLibrary()}
                     onTextSelect={handleDocTextSelect}
                     onTextDeselect={handleDocTextDeselect}
                     onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
@@ -5794,6 +6586,7 @@ IMPORTANTE:
               >
                 <ChatMessageList
                   messages={displayMessages}
+                  onUserRetrySend={handleUserRetrySend}
                   variant="default"
                   editingMessageId={editingMessageId}
                   editContent={editContent}

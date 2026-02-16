@@ -64,6 +64,7 @@ export interface ChatMessageListProps {
     /** Pre-generated message ID for zero-flicker streaming→final transition.
      *  When provided, the streaming message uses this ID so it matches the finalized message key. */
     streamingMsgId?: string | null;
+    onUserRetrySend?: (message: Message) => void;
 }
 
 export function ChatMessageList({
@@ -108,7 +109,8 @@ export function ChatMessageList({
     onRunComplete,
     uiPhase = 'idle',
     aiProcessSteps = [],
-    streamingMsgId
+    streamingMsgId,
+    onUserRetrySend
 }: ChatMessageListProps) {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -238,8 +240,10 @@ export function ChatMessageList({
         );
     }, [showSuggestedReplies, suggestions, onSelectSuggestedReply, uiPhase, activeRunId, onRunComplete, aiState, streamingContent, variant, realTimePhase, detectedIntent]);
 
-    // Stable key function — streaming message always gets the same key
-    const computeItemKey = useCallback((index: number, msg: Message) => msg.id, []);
+    // Stable key function.
+    // For optimistic messages, `id` is replaced after server ACK; use `clientTempId`
+    // when available to prevent Virtuoso unmount/remount flicker.
+    const computeItemKey = useCallback((index: number, msg: Message) => msg.clientTempId || msg.id, []);
 
     // Render a single item — streaming messages get a specialized renderer
     const renderItem = useCallback((index: number, msg: Message) => {
@@ -274,6 +278,7 @@ export function ChatMessageList({
                     msgIndex={index}
                     totalMessages={mergedMessages.length}
                     variant={variant}
+                    onUserRetrySend={onUserRetrySend}
                     editingMessageId={editingMessageId}
                     editContent={editContent}
                     copiedMessageId={copiedMessageId}
@@ -320,7 +325,7 @@ export function ChatMessageList({
         minimizedDocument, onRestoreDocument, setEditContent,
         onAgentCancel, onAgentRetry, onAgentArtifactPreview,
         onSuperAgentCancel, onSuperAgentRetry, onQuestionClick,
-        effectiveStreamingId, streamingContent
+        effectiveStreamingId, streamingContent, onUserRetrySend
     ]);
 
     return (

@@ -96,7 +96,7 @@ export const conversationStates = pgTable("conversation_states", {
     isActive: text("is_active").default("true"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_states_chat_idx").on(table.chatId),
     index("conversation_states_user_idx").on(table.userId),
     index("conversation_states_version_idx").on(table.chatId, table.version),
@@ -117,7 +117,7 @@ export const conversationStateVersions = pgTable("conversation_state_versions", 
     changeDescription: text("change_description"),
     authorId: varchar("author_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_versions_state_idx").on(table.stateId),
     index("conversation_versions_version_idx").on(table.stateId, table.version),
 ]);
@@ -142,7 +142,7 @@ export const conversationMessages = pgTable("conversation_messages", {
     keywords: text("keywords").array().default([]),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_messages_state_idx").on(table.stateId),
     index("conversation_messages_sequence_idx").on(table.stateId, table.sequence),
     index("conversation_messages_created_idx").on(table.createdAt),
@@ -168,7 +168,7 @@ export const conversationArtifacts = pgTable("conversation_artifacts", {
     metadata: jsonb("metadata").$type<ArtifactMetadata>(),
     processingStatus: text("processing_status").default("pending"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_artifacts_state_idx").on(table.stateId),
     index("conversation_artifacts_message_idx").on(table.messageId),
     index("conversation_artifacts_type_idx").on(table.artifactType),
@@ -197,7 +197,7 @@ export const conversationImages = pgTable("conversation_images", {
     editHistory: jsonb("edit_history").$type<ImageEditHistory[]>().default([]),
     isLatest: text("is_latest").default("true"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_images_state_idx").on(table.stateId),
     index("conversation_images_message_idx").on(table.messageId),
     index("conversation_images_parent_idx").on(table.parentImageId),
@@ -220,7 +220,7 @@ export const conversationContexts = pgTable("conversation_contexts", {
     sentiment: text("sentiment"),
     lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("conversation_contexts_state_idx").on(table.stateId),
     uniqueIndex("conversation_contexts_state_unique").on(table.stateId),
 ]);
@@ -242,7 +242,7 @@ export const memoryFacts = pgTable("memory_facts", {
     validUntil: timestamp("valid_until", { withTimezone: true }),
     metadata: jsonb("metadata").default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("memory_facts_state_idx").on(table.stateId),
     index("memory_facts_type_idx").on(table.factType),
 ]);
@@ -261,7 +261,7 @@ export const runningSummaries = pgTable("running_summaries", {
     lastUpdatedAtTurn: integer("last_updated_at_turn").default(0),
     mainTopics: text("main_topics").array().default([]),
     lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("running_summaries_state_idx").on(table.stateId),
 ]);
 
@@ -277,7 +277,7 @@ export const processedRequests = pgTable("processed_requests", {
     stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
     messageId: varchar("message_id", { length: 100 }),
     processedAt: timestamp("processed_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("processed_requests_request_idx").on(table.requestId),
     index("processed_requests_state_idx").on(table.stateId),
 ]);
@@ -360,7 +360,7 @@ export const retrievalTelemetry = pgTable("retrieval_telemetry", {
     topScores: jsonb("top_scores").default([]),
     retrievalType: varchar("retrieval_type", { length: 50 }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("retrieval_telemetry_state_idx").on(table.stateId),
     index("retrieval_telemetry_request_idx").on(table.requestId),
     index("retrieval_telemetry_created_idx").on(table.createdAt),
@@ -385,7 +385,7 @@ export const semanticMemoryChunks = pgTable("semantic_memory_chunks", {
     lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("semantic_memory_user_idx").on(table.userId),
     index("semantic_memory_type_idx").on(table.type),
     index("semantic_memory_created_idx").on(table.createdAt),

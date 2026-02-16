@@ -44,7 +44,7 @@ export const integrationAccounts = pgTable("integration_accounts", {
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("integration_accounts_user_id_idx").on(table.userId),
     index("integration_accounts_provider_idx").on(table.providerId),
 ]);
@@ -88,7 +88,7 @@ export const integrationPolicies = pgTable("integration_policies", {
     maxParallelCalls: integer("max_parallel_calls").default(3),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("integration_policies_user_id_idx").on(table.userId),
 ]);
 
@@ -111,7 +111,7 @@ export const sharedLinks = pgTable("shared_links", {
     accessCount: integer("access_count").default(0),
     isRevoked: text("is_revoked").default("false"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("shared_links_user_idx").on(table.userId),
     index("shared_links_token_idx").on(table.token),
     index("shared_links_resource_idx").on(table.resourceType, table.resourceId),
@@ -133,7 +133,7 @@ export const gmailOAuthTokens = pgTable("gmail_oauth_tokens", {
     scopes: text("scopes").array().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     index("gmail_oauth_user_idx").on(table.userId),
     uniqueIndex("gmail_oauth_user_email_idx").on(table.userId, table.accountEmail),
 ]);
@@ -155,7 +155,7 @@ export const pareIdempotencyKeys = pgTable("pare_idempotency_keys", {
     status: text("status").$type<PareIdempotencyStatus>().notNull().default('processing'),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at").notNull().default(sql`NOW() + INTERVAL '24 hours'`),
-}, (table) => [
+}, (table: any) => [
     index("pare_idempotency_key_idx").on(table.idempotencyKey),
     index("pare_idempotency_expires_idx").on(table.expiresAt),
 ]);
@@ -175,7 +175,7 @@ export const connectorUsageHourly = pgTable("connector_usage_hourly", {
     failureCount: integer("failure_count").default(0),
     totalLatencyMs: integer("total_latency_ms").default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (table) => [
+}, (table: any) => [
     uniqueIndex("connector_usage_hourly_connector_bucket_idx").on(table.connector, table.hourBucket),
     index("connector_usage_hourly_connector_created_idx").on(table.connector, table.createdAt),
 ]);

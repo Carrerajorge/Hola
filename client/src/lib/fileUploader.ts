@@ -80,6 +80,7 @@ export class ChunkedFileUploader {
   private maxReconnectAttempts = 5;
   private wsListeners: Map<string, (status: any) => void> = new Map();
   private abortController: AbortController | null = null;
+  private wsAuthFailed = false;
 
   constructor() {
     this.initWorker();
@@ -494,6 +495,7 @@ export class ChunkedFileUploader {
   }
 
   private ensureWebSocketConnection(): void {
+    if (this.wsAuthFailed) return;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -511,6 +513,13 @@ export class ChunkedFileUploader {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'auth_error') {
+          this.wsAuthFailed = true;
+          // Notify listeners so callers can fall back (e.g., to polling) instead of hanging.
+          this.wsListeners.forEach((listener) => listener(data));
+          this.ws?.close();
+          return;
+        }
         if (data.type === 'file_status' && data.fileId) {
           const listener = this.wsListeners.get(data.fileId);
           if (listener) {
@@ -523,7 +532,7 @@ export class ChunkedFileUploader {
     };
 
     this.ws.onclose = () => {
-      if (this.wsListeners.size > 0 && this.wsReconnectAttempts < this.maxReconnectAttempts) {
+      if (!this.wsAuthFailed && this.wsListeners.size > 0 && this.wsReconnectAttempts < this.maxReconnectAttempts) {
         this.wsReconnectAttempts++;
         setTimeout(() => this.ensureWebSocketConnection(), 1000 * this.wsReconnectAttempts);
       }

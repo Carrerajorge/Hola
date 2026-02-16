@@ -28,13 +28,13 @@ ssh "$VPS_USER@$VPS_HOST" "
     # 2. Backup existing .env
     cp .env.production .env.production.bak
 
-    # 3. Ensure PORT=5001
+    # 3. Ensure PORT=5000
     if grep -q \"PORT=\" .env.production; then
-        sed -i 's/^PORT=.*/PORT=5001/' .env.production
+        sed -i 's/^PORT=.*/PORT=5000/' .env.production
     else
-        echo \"PORT=5001\" >> .env.production
+        echo \"PORT=5000\" >> .env.production
     fi
-    echo \"✅ Set PORT=5001\"
+    echo \"✅ Set PORT=5000\"
 
     # 4. Check for DATABASE_URL (Critical for start)
     if ! grep -q \"DATABASE_URL=\" .env.production; then

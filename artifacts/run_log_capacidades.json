@@ -1,0 +1,17 @@
+{
+  "run_id": "fb5dad03-233e-4a45-8958-21da7c4d1d04",
+  "timestamp_inicio": "2026-02-12T16:24:43.179904+00:00",
+  "timestamp_fin": "2026-02-12T16:24:50.736722+00:00",
+  "capabilidades_extraidas": 1000,
+  "warnings_count": 2,
+  "warnings": [
+    "Exact duplicate title: 'Reintentos inteligentes' (ID 0250 = ID 0137)",
+    "Exact duplicate title: 'Aislamiento por workspace' (ID 0875 = ID 0146)"
+  ],
+  "archivos_generados": [
+    "/Users/ale/Desktop/ILIACODEX/artifacts/Iliagpt_Matriz_Cobertura_1000.xlsx",
+    "/Users/ale/Desktop/ILIACODEX/artifacts/Iliagpt_Resumen_Capacidades_1000.docx",
+    "/Users/ale/Desktop/ILIACODEX/artifacts/Iliagpt_Executive_2p.pdf",
+    "/Users/ale/Desktop/ILIACODEX/artifacts/run_log_capacidades.json"
+  ]
+}

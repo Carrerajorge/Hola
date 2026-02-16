@@ -11,6 +11,8 @@
  * - Multi-language support
  */
 
+import { generatePptDocument } from "./documentGeneration";
+
 // ============================================
 // TYPES & INTERFACES
 // ============================================
@@ -427,14 +429,38 @@ export class ProfessionalPresentationGenerator {
         slideCount: request.slides.length + 2, // +2 for title and thank you
       };
     } catch (error: any) {
-      return {
-        success: false,
-        filename: "",
-        mimeType: "",
-        sizeBytes: 0,
-        slideCount: 0,
-        error: error.message,
-      };
+      try {
+        const fallback = await generatePptDocument(request.title || "Presentación", [{
+          title: "Fallback",
+          content: [
+            "No fue posible renderizar la presentación con plantillas profesionales.",
+            `Error: ${String(error?.message || error).slice(0, 220)}`,
+          ],
+        }], {
+          trace: {
+            source: "professionalPresentations",
+          },
+        });
+
+        return {
+          success: true,
+          buffer: Buffer.from(fallback),
+          filename: `${this.sanitizeFilename(request.title)}.pptx`,
+          mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          sizeBytes: fallback.length,
+          slideCount: 1,
+          error: "Generado con plantilla de recuperación.",
+        };
+      } catch (fallbackError: any) {
+        return {
+          success: false,
+          filename: "",
+          mimeType: "",
+          sizeBytes: 0,
+          slideCount: 0,
+          error: fallbackError.message || String(fallbackError),
+        };
+      }
     }
   }
 
