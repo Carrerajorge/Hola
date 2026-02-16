@@ -6,6 +6,11 @@ on:
       sha:
         required: true
         type: string
+      allow_publish:
+        description: "Allow image build/push for this invocation"
+        required: false
+        type: boolean
+        default: false
     outputs:
       image_tag:
         description: "The image tag that was pushed"
@@ -32,10 +37,22 @@ jobs:
       app_digest: ${{ steps.build_app.outputs.digest }}
 
     steps:
+      - name: Evaluate build gate
+        id: gate
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" && "${{ inputs.allow_publish }}" == "true" ]]; then
+            echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "reason=Image publishing is allowed." >> "$GITHUB_OUTPUT"
+          else
+            echo "run_build=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Image publishing is disabled for this invocation." >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sha }}
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
 
       - name: Compute image tag
         id: meta
@@ -45,9 +62,11 @@ jobs:
           SHORT_SHA="${SHORT_SHA:0:8}"
           echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -55,10 +74,12 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
 
       - name: Build & push app image (runner stage)
         id: build_app
         uses: docker/build-push-action@v6
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         with:
           context: .
           target: runner
@@ -78,6 +99,7 @@ jobs:
       - name: Build & push sandbox-runner image
         id: build_sandbox
         uses: docker/build-push-action@v6
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         with:
           context: .
           target: sandbox-runner
@@ -95,6 +117,7 @@ jobs:
       - name: Build & push OCR image
         id: build_ocr
         uses: docker/build-push-action@v6
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         with:
           context: .
           file: ocr_service/Dockerfile
@@ -108,6 +131,7 @@ jobs:
           sbom: true
 
       - name: Verify images exist in GHCR
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         run: |
           set -euo pipefail
           TAG="${{ steps.meta.outputs.tag }}"
@@ -126,7 +150,7 @@ jobs:
           echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
 
       - name: Generate build summary
-        if: always()
+        if: ${{ steps.gate.outputs.run_build == 'true' }}
         run: |
           echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -135,3 +159,15 @@ jobs:
           echo "| app | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_app.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| sandbox | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_sandbox.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| ocr | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_ocr.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Skip image build
+        if: ${{ steps.gate.outputs.run_build != 'true' }}
+        run: |
+          echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch  | \`${{ github.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Decision | skip |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reason | ${{ steps.gate.outputs.reason }} |" >> $GITHUB_STEP_SUMMARY
