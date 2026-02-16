@@ -5,6 +5,7 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { db } from "../db";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { generateWordDocument, generateExcelDocument, generatePptDocument, parseExcelFromText, parseSlidesFromText } from "../services/documentGeneration";
+import { DocumentCompiler, type CompilerFormat } from "../agent/documents/compiler";
 import fs from "fs";
 import path from "path";
 import {
@@ -31,7 +32,6 @@ import {
   fileIdParamSchema,
   createLibraryItemSchema,
 } from "../schemas/librarySchemas";
-import { MAX_DOC_BODY_SIZE } from "../services/documentSecurity";
 
 export function createLibraryRouter() {
   const router = Router();
@@ -693,7 +693,7 @@ export function createLibraryRouter() {
       const userId = getOrCreateSecureUserId(req);
       const { title, content, type } = req.body;
 
-      if (!title || !type) {
+      if (!title || !content || !type) {
         return res.status(400).json({ error: "title, content, and type are required" });
       }
 
@@ -701,53 +701,63 @@ export function createLibraryRouter() {
         return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
       }
 
-      const safeTitle = (typeof title === "string" ? title : `${title}`)
-        .replace(/\0/g, "")
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-        .trim()
-        .substring(0, 500) || "Documento";
+      // Generate binary document via DocumentCompiler (unified pipeline)
+      const formatMap: Record<string, CompilerFormat> = { word: "docx", excel: "xlsx", ppt: "pptx" };
+      const compilerFormat = formatMap[type];
+      if (!compilerFormat) {
+        return res.status(400).json({ error: "Unsupported document type" });
+      }
 
-      const safeContent = (typeof content === "string" ? content : `${content ?? ""}`)
-        .replace(/\0/g, "")
-        .trim()
-        .substring(0, MAX_DOC_BODY_SIZE) || "Contenido";
-
-      // Generate binary document from content
+      const compiler = new DocumentCompiler("corporate");
       let buffer: Buffer;
       let ext: string;
       let mimeType: string;
 
-      switch (type) {
-        case "word":
-          buffer = await generateWordDocument(safeTitle, safeContent);
-          ext = "docx";
-          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-          break;
-        case "excel": {
-          const excelData = parseExcelFromText(safeContent);
-          buffer = await generateExcelDocument(safeTitle, excelData);
-          ext = "xlsx";
-          mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-          break;
+      try {
+        const result = await compiler.compileFromText({
+          format: compilerFormat,
+          title,
+          content,
+          theme: "corporate",
+        });
+        buffer = result.buffer;
+        ext = compilerFormat === "pptx" ? "pptx" : compilerFormat === "docx" ? "docx" : "xlsx";
+        mimeType = result.mimeType;
+
+        if (result.metrics.degraded) {
+          console.warn(`[Library] Document compiled in degraded mode: ${result.validation.issues.map(i => i.message).join(", ")}`);
         }
-        case "ppt": {
-          const slides = parseSlidesFromText(safeContent);
-          buffer = await generatePptDocument(safeTitle, slides, {
-            trace: {
-              source: "libraryRouter",
-            },
-          });
-          ext = "pptx";
-          mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-          break;
+      } catch (compilerErr) {
+        // Fallback to legacy generation if compiler fails entirely
+        console.warn(`[Library] Compiler failed, using legacy generation: ${compilerErr instanceof Error ? compilerErr.message : String(compilerErr)}`);
+        switch (type) {
+          case "word":
+            buffer = await generateWordDocument(title, content);
+            ext = "docx";
+            mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            break;
+          case "excel": {
+            const excelData = parseExcelFromText(content);
+            buffer = await generateExcelDocument(title, excelData);
+            ext = "xlsx";
+            mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            break;
+          }
+          case "ppt": {
+            const slides = parseSlidesFromText(content);
+            buffer = await generatePptDocument(title, slides);
+            ext = "pptx";
+            mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            break;
+          }
+          default:
+            return res.status(400).json({ error: "Unsupported document type" });
         }
-        default:
-          return res.status(400).json({ error: "Unsupported document type" });
       }
 
       // Save to local uploads directory
       const fileUuid = randomUUID();
-      const filename = `${safeTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}_${fileUuid.slice(0, 8)}.${ext}`;
+      const filename = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${fileUuid.slice(0, 8)}.${ext}`;
       const uploadsDir = path.join(process.cwd(), "uploads");
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
@@ -758,7 +768,7 @@ export function createLibraryRouter() {
       // Save metadata to library database
       const storagePath = `/objects/uploads/${fileUuid}`;
       const file = await libraryService.saveFileMetadata(userId, storagePath, {
-        name: `${safeTitle}.${ext}`,
+        name: `${title}.${ext}`,
         originalName: filename,
         type: "document",
         mimeType,

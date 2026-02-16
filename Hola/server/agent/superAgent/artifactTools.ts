@@ -5,6 +5,9 @@ import pptxgenImport from "pptxgenjs";
 const PptxGenJS = (pptxgenImport as any).default || pptxgenImport;
 import { promises as fs } from "fs";
 import path from "path";
+import { DocumentCompiler, type CompilerFormat } from "../documents/compiler";
+import { resolveTheme } from "../documents/themes";
+import type { PresentationSpec, DocumentSpec, WorkbookSpec } from "../documents/documentEngine";
 
 export interface ArtifactMeta {
   id: string;
@@ -328,6 +331,161 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
     size: stats.size,
     createdAt: Date.now(),
   };
+}
+
+/* ================================================================== */
+/*  COMPILER-BASED ARTIFACT CREATION                                   */
+/* ================================================================== */
+
+const _compiler = new DocumentCompiler("corporate");
+
+/**
+ * Create any document artifact through the unified compiler.
+ * Falls back to legacy creation functions on compiler error.
+ */
+export async function createArtifactCompiled(
+  format: "xlsx" | "docx" | "pptx",
+  spec: XlsxSpec | DocxSpec | PptxSpec,
+  theme?: string
+): Promise<ArtifactMeta> {
+  await ensureArtifactsDir();
+
+  const id = randomUUID();
+  const filename = `${spec.title.replace(/[^a-zA-Z0-9]/g, "_")}_${id.substring(0, 8)}.${format}`;
+  const filepath = path.join(ARTIFACTS_DIR, filename);
+
+  try {
+    // Convert legacy spec to compiler spec format
+    const compilerSpec = convertLegacyToCompilerSpec(format, spec);
+    const result = await _compiler.compile({
+      format,
+      spec: compilerSpec,
+      theme: theme || "corporate",
+    });
+
+    await fs.writeFile(filepath, result.buffer);
+
+    if (result.metrics.degraded) {
+      console.warn(`[ArtifactTools] Compiled ${format} in degraded mode: ${result.validation.issues.map(i => i.message).join(", ")}`);
+    }
+
+    return {
+      id,
+      type: format,
+      name: filename,
+      path: filepath,
+      downloadUrl: `/api/super/artifacts/${id}/download`,
+      size: result.metrics.sizeBytes,
+      createdAt: Date.now(),
+    };
+  } catch (err) {
+    // Fallback to legacy creation
+    console.warn(`[ArtifactTools] Compiler failed for ${format}, falling back to legacy: ${err instanceof Error ? err.message : String(err)}`);
+    switch (format) {
+      case "xlsx": return createXlsx(spec as XlsxSpec);
+      case "docx": return createDocx(spec as DocxSpec);
+      case "pptx": return createPptx(spec as PptxSpec);
+    }
+  }
+}
+
+function convertLegacyToCompilerSpec(
+  format: string,
+  spec: XlsxSpec | DocxSpec | PptxSpec
+): PresentationSpec | DocumentSpec | WorkbookSpec {
+  switch (format) {
+    case "pptx": {
+      const s = spec as PptxSpec;
+      return {
+        format: "pptx" as const,
+        title: s.title,
+        author: s.metadata?.author,
+        slides: [
+          {
+            type: "cover" as const,
+            components: [
+              { type: "title" as const, content: s.title },
+              { type: "subtitle" as const, content: s.metadata?.author || "IliaGPT" },
+            ],
+          },
+          ...s.slides.map(slide => ({
+            type: "content" as const,
+            components: [
+              { type: "title" as const, content: slide.title },
+              ...(slide.bullets.length > 0
+                ? [{ type: "bullets" as const, content: slide.bullets }]
+                : []),
+            ],
+            notes: slide.notes,
+          })),
+        ],
+      } satisfies PresentationSpec;
+    }
+
+    case "docx": {
+      const s = spec as DocxSpec;
+      const sections: DocumentSpec["sections"] = [];
+      for (const sec of s.sections) {
+        sections.push({
+          type: "heading",
+          level: sec.level,
+          content: sec.heading,
+        });
+        for (const para of sec.paragraphs) {
+          sections.push({ type: "paragraph", content: para });
+        }
+        if (sec.table) {
+          sections.push({
+            type: "table",
+            content: [sec.table.headers, ...sec.table.rows],
+          });
+        }
+        if (sec.citations?.length) {
+          sections.push({
+            type: "bullets",
+            content: sec.citations,
+          });
+        }
+      }
+      return {
+        format: "docx" as const,
+        title: s.title,
+        author: s.metadata?.author,
+        subject: s.metadata?.subject,
+        sections,
+      } satisfies DocumentSpec;
+    }
+
+    case "xlsx": {
+      const s = spec as XlsxSpec;
+      return {
+        format: "xlsx" as const,
+        title: s.title,
+        sheets: s.sheets.map(sheet => ({
+          name: sheet.name.substring(0, 31),
+          columns: sheet.headers.map((h, idx) => ({
+            key: `col_${idx}`,
+            header: h,
+            type: "string" as const,
+            width: Math.max(h.length + 5, 15),
+          })),
+          rows: sheet.data.map(row => {
+            const obj: Record<string, any> = {};
+            row.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
+            return obj;
+          }),
+          formulas: [],
+          filters: true,
+          freezeRow: 1,
+          freezeCol: 0,
+          protection: false,
+        })),
+      } satisfies WorkbookSpec;
+    }
+
+    default:
+      throw new Error(`Unknown format: ${format}`);
+  }
 }
 
 export function packCitations(

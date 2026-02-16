@@ -1,9 +1,13 @@
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from "docx";
+import pptxgenImport from "pptxgenjs";
+const PptxGenJS = (pptxgenImport as any).default || pptxgenImport;
 import { promises as fs } from "fs";
 import path from "path";
-import { generatePptDocument } from "../../services/documentGeneration";
+import { DocumentCompiler, type CompilerFormat } from "../documents/compiler";
+import { resolveTheme } from "../documents/themes";
+import type { PresentationSpec, DocumentSpec, WorkbookSpec } from "../documents/documentEngine";
 
 export interface ArtifactMeta {
   id: string;
@@ -77,51 +81,6 @@ export interface CitationsPack {
 }
 
 const ARTIFACTS_DIR = path.join(process.cwd(), "uploads", "artifacts");
-
-function sanitizePptText(value: unknown, maxLength: number): string {
-  return String(value ?? "")
-    .replace(/\0/g, "")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-    .trim()
-    .substring(0, maxLength);
-}
-
-function toCorporateSlides(spec: PptxSpec): { title: string; content: string[] }[] {
-  const sourceSlides = (spec.slides && spec.slides.length > 0)
-    ? spec.slides
-    : [{ title: "Resumen", bullets: ["Contenido no disponible"] }];
-
-  const normalized = sourceSlides.map((slideSpec, index) => {
-    const title = sanitizePptText(slideSpec.title, 180) || `Diapositiva ${index + 1}`;
-    const content: string[] = [];
-
-    const safeBullets = Array.isArray(slideSpec.bullets) ? slideSpec.bullets : [];
-    for (const bullet of safeBullets.slice(0, 12)) {
-      const safeBullet = sanitizePptText(bullet, 260);
-      if (safeBullet) {
-        content.push(`• ${safeBullet}`);
-      }
-    }
-
-    if (slideSpec.notes) {
-      const safeNotes = sanitizePptText(slideSpec.notes, 240);
-      if (safeNotes) {
-        content.push(`Notas: ${safeNotes}`);
-      }
-    }
-
-    if (content.length === 0) {
-      content.push("Sin contenido disponible.");
-    }
-
-    return {
-      title,
-      content,
-    };
-  });
-
-  return normalized;
-}
 
 async function ensureArtifactsDir(): Promise<void> {
   await fs.mkdir(ARTIFACTS_DIR, { recursive: true });
@@ -315,33 +274,50 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
   const id = randomUUID();
   const filename = `${spec.title.replace(/[^a-zA-Z0-9]/g, "_")}_${id.substring(0, 8)}.pptx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
-  const safeTitle = sanitizePptText(spec.title, 500) || "Presentation";
-  const slides = toCorporateSlides(spec).map((slide) => ({
-    ...slide,
-  }));
 
-  let pptxBuffer: Buffer;
-  try {
-    pptxBuffer = await generatePptDocument(safeTitle, slides, {
-      trace: {
-        source: "superAgent",
-      },
+  const pptx = new PptxGenJS();
+  pptx.author = spec.metadata?.author || "IliaGPT Super Agent";
+  pptx.subject = spec.metadata?.subject || spec.title;
+  pptx.title = spec.title;
+
+  // Title slide
+  const titleSlide = pptx.addSlide();
+  titleSlide.addText(spec.title, {
+    x: 0.5, y: 1.5, w: 9, h: 2,
+    fontSize: 32, bold: true, color: "1A1A2E",
+    align: "center", valign: "middle",
+  });
+  titleSlide.addText(spec.metadata?.author || "IliaGPT Super Agent", {
+    x: 0.5, y: 4, w: 9, h: 0.5,
+    fontSize: 14, color: "666666",
+    align: "center",
+  });
+
+  // Content slides
+  for (const slideSpec of spec.slides) {
+    const slide = pptx.addSlide();
+
+    slide.addText(slideSpec.title, {
+      x: 0.5, y: 0.3, w: 9, h: 0.8,
+      fontSize: 24, bold: true, color: "1A1A2E",
     });
-  } catch (error: any) {
-    console.warn("[superAgent] Fallback for createPptx:", error);
-    pptxBuffer = await generatePptDocument("Presentación", [{
-      title: "Fallback",
-      content: [
-        "No fue posible renderizar la presentación con el layout solicitado.",
-        `Error: ${sanitizePptText(error?.message || error, 200)}`,
-      ],
-    }], {
-      trace: {
-        source: "superAgent",
-      },
+
+    const bulletText = slideSpec.bullets.map(b => ({
+      text: b,
+      options: { fontSize: 16, color: "333333", bullet: true, breakLine: true } as any,
+    }));
+
+    slide.addText(bulletText, {
+      x: 0.5, y: 1.3, w: 9, h: 3.8,
+      valign: "top",
     });
+
+    if (slideSpec.notes) {
+      slide.addNotes(slideSpec.notes);
+    }
   }
 
+  const pptxBuffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
   await fs.writeFile(filepath, pptxBuffer);
 
   const stats = await fs.stat(filepath);
@@ -355,6 +331,161 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
     size: stats.size,
     createdAt: Date.now(),
   };
+}
+
+/* ================================================================== */
+/*  COMPILER-BASED ARTIFACT CREATION                                   */
+/* ================================================================== */
+
+const _compiler = new DocumentCompiler("corporate");
+
+/**
+ * Create any document artifact through the unified compiler.
+ * Falls back to legacy creation functions on compiler error.
+ */
+export async function createArtifactCompiled(
+  format: "xlsx" | "docx" | "pptx",
+  spec: XlsxSpec | DocxSpec | PptxSpec,
+  theme?: string
+): Promise<ArtifactMeta> {
+  await ensureArtifactsDir();
+
+  const id = randomUUID();
+  const filename = `${spec.title.replace(/[^a-zA-Z0-9]/g, "_")}_${id.substring(0, 8)}.${format}`;
+  const filepath = path.join(ARTIFACTS_DIR, filename);
+
+  try {
+    // Convert legacy spec to compiler spec format
+    const compilerSpec = convertLegacyToCompilerSpec(format, spec);
+    const result = await _compiler.compile({
+      format,
+      spec: compilerSpec,
+      theme: theme || "corporate",
+    });
+
+    await fs.writeFile(filepath, result.buffer);
+
+    if (result.metrics.degraded) {
+      console.warn(`[ArtifactTools] Compiled ${format} in degraded mode: ${result.validation.issues.map(i => i.message).join(", ")}`);
+    }
+
+    return {
+      id,
+      type: format,
+      name: filename,
+      path: filepath,
+      downloadUrl: `/api/super/artifacts/${id}/download`,
+      size: result.metrics.sizeBytes,
+      createdAt: Date.now(),
+    };
+  } catch (err) {
+    // Fallback to legacy creation
+    console.warn(`[ArtifactTools] Compiler failed for ${format}, falling back to legacy: ${err instanceof Error ? err.message : String(err)}`);
+    switch (format) {
+      case "xlsx": return createXlsx(spec as XlsxSpec);
+      case "docx": return createDocx(spec as DocxSpec);
+      case "pptx": return createPptx(spec as PptxSpec);
+    }
+  }
+}
+
+function convertLegacyToCompilerSpec(
+  format: string,
+  spec: XlsxSpec | DocxSpec | PptxSpec
+): PresentationSpec | DocumentSpec | WorkbookSpec {
+  switch (format) {
+    case "pptx": {
+      const s = spec as PptxSpec;
+      return {
+        format: "pptx" as const,
+        title: s.title,
+        author: s.metadata?.author,
+        slides: [
+          {
+            type: "cover" as const,
+            components: [
+              { type: "title" as const, content: s.title },
+              { type: "subtitle" as const, content: s.metadata?.author || "IliaGPT" },
+            ],
+          },
+          ...s.slides.map(slide => ({
+            type: "content" as const,
+            components: [
+              { type: "title" as const, content: slide.title },
+              ...(slide.bullets.length > 0
+                ? [{ type: "bullets" as const, content: slide.bullets }]
+                : []),
+            ],
+            notes: slide.notes,
+          })),
+        ],
+      } satisfies PresentationSpec;
+    }
+
+    case "docx": {
+      const s = spec as DocxSpec;
+      const sections: DocumentSpec["sections"] = [];
+      for (const sec of s.sections) {
+        sections.push({
+          type: "heading",
+          level: sec.level,
+          content: sec.heading,
+        });
+        for (const para of sec.paragraphs) {
+          sections.push({ type: "paragraph", content: para });
+        }
+        if (sec.table) {
+          sections.push({
+            type: "table",
+            content: [sec.table.headers, ...sec.table.rows],
+          });
+        }
+        if (sec.citations?.length) {
+          sections.push({
+            type: "bullets",
+            content: sec.citations,
+          });
+        }
+      }
+      return {
+        format: "docx" as const,
+        title: s.title,
+        author: s.metadata?.author,
+        subject: s.metadata?.subject,
+        sections,
+      } satisfies DocumentSpec;
+    }
+
+    case "xlsx": {
+      const s = spec as XlsxSpec;
+      return {
+        format: "xlsx" as const,
+        title: s.title,
+        sheets: s.sheets.map(sheet => ({
+          name: sheet.name.substring(0, 31),
+          columns: sheet.headers.map((h, idx) => ({
+            key: `col_${idx}`,
+            header: h,
+            type: "string" as const,
+            width: Math.max(h.length + 5, 15),
+          })),
+          rows: sheet.data.map(row => {
+            const obj: Record<string, any> = {};
+            row.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
+            return obj;
+          }),
+          formulas: [],
+          filters: true,
+          freezeRow: 1,
+          freezeCol: 0,
+          protection: false,
+        })),
+      } satisfies WorkbookSpec;
+    }
+
+    default:
+      throw new Error(`Unknown format: ${format}`);
+  }
 }
 
 export function packCitations(

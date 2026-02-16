@@ -13,13 +13,14 @@
  */
 
 import { z } from "zod";
-import { generatePptDocument } from "../../services/documentGeneration";
 
 /* ================================================================== */
 /*  DESIGN TOKENS                                                     */
 /* ================================================================== */
 
 export const DesignTokensSchema = z.object({
+  version: z.string().default("1.0.0"),
+  name: z.string().default("default"),
   font: z.object({
     heading: z.string().default("Calibri"),
     body: z.string().default("Calibri"),
@@ -27,24 +28,33 @@ export const DesignTokensSchema = z.object({
     sizeH1: z.number().default(28),
     sizeH2: z.number().default(22),
     sizeH3: z.number().default(18),
+    sizeH4: z.number().default(16),
     sizeBody: z.number().default(12),
     sizeCaption: z.number().default(10),
     sizeMin: z.number().default(8),
+    lineHeight: z.number().default(1.15),
   }).default({}),
   color: z.object({
     primary: z.string().default("#1a73e8"),
     secondary: z.string().default("#34a853"),
     accent: z.string().default("#ea4335"),
     warning: z.string().default("#fbbc04"),
+    info: z.string().default("#4285f4"),
+    success: z.string().default("#34a853"),
     background: z.string().default("#ffffff"),
     surface: z.string().default("#f8f9fa"),
     textPrimary: z.string().default("#202124"),
     textSecondary: z.string().default("#5f6368"),
+    textMuted: z.string().default("#9aa0a6"),
     border: z.string().default("#dadce0"),
     headerBg: z.string().default("#1a73e8"),
     headerFg: z.string().default("#ffffff"),
     zebraOdd: z.string().default("#f8f9fa"),
     zebraEven: z.string().default("#ffffff"),
+    priorityCritical: z.string().default("#FED7D7"),
+    priorityHigh: z.string().default("#FEEBC8"),
+    priorityMedium: z.string().default("#C6F6D5"),
+    priorityLow: z.string().default("#E2E8F0"),
   }).default({}),
   spacing: z.object({
     xs: z.number().default(4),
@@ -55,13 +65,36 @@ export const DesignTokensSchema = z.object({
     xxl: z.number().default(48),
   }).default({}),
   layout: z.object({
-    slideWidth: z.number().default(10),   // inches
-    slideHeight: z.number().default(7.5), // inches
+    slideWidth: z.number().default(10),      // inches
+    slideHeight: z.number().default(5.625),  // 16:9 widescreen default
     marginTop: z.number().default(0.5),
     marginBottom: z.number().default(0.5),
     marginLeft: z.number().default(0.5),
     marginRight: z.number().default(0.5),
     gridColumns: z.number().default(12),
+    pageWidth: z.number().default(8.5),      // DOCX letter width inches
+    pageHeight: z.number().default(11),      // DOCX letter height inches
+  }).default({}),
+  border: z.object({
+    radiusSm: z.number().default(2),
+    radiusMd: z.number().default(4),
+    radiusLg: z.number().default(8),
+    widthThin: z.number().default(1),
+    widthMedium: z.number().default(2),
+  }).default({}),
+  shadow: z.object({
+    sm: z.object({
+      offsetX: z.number().default(1),
+      offsetY: z.number().default(1),
+      blur: z.number().default(2),
+      color: z.string().default("00000033"),
+    }).default({}),
+    md: z.object({
+      offsetX: z.number().default(2),
+      offsetY: z.number().default(2),
+      blur: z.number().default(6),
+      color: z.string().default("00000040"),
+    }).default({}),
   }).default({}),
 });
 export type DesignTokens = z.infer<typeof DesignTokensSchema>;
@@ -290,81 +323,114 @@ export class LayoutEngine {
       overflow: true,
     };
   }
-}
 
-function sanitizePresentationText(value: unknown, maxLength: number): string {
-  return String(value ?? "")
-    .replace(/\0/g, "")
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-    .trim()
-    .substring(0, maxLength);
-}
+  /* ---------------------------------------------------------------- */
+  /*  OVERFLOW: Split content across multiple slides/pages            */
+  /* ---------------------------------------------------------------- */
 
-function findSlideTitle(components: z.infer<typeof SlideComponentSchema>[]): string {
-  const titleComponent = components.find((comp) => comp.type === "title");
-  return titleComponent
-    ? sanitizePresentationText(titleComponent.content, 220)
-    : "";
-}
+  /**
+   * Split an array of slide components into groups that each fit
+   * within the usable slide area. Used when a single slide has
+   * too many components.
+   */
+  splitOverflow(
+    components: z.infer<typeof SlideComponentSchema>[],
+  ): z.infer<typeof SlideComponentSchema>[][] {
+    const { layout } = this.tokens;
+    const usableH = layout.slideHeight - layout.marginTop - layout.marginBottom;
+    const groups: z.infer<typeof SlideComponentSchema>[][] = [];
+    let current: z.infer<typeof SlideComponentSchema>[] = [];
+    let currentHeight = 0;
+    const usableW = layout.slideWidth - layout.marginLeft - layout.marginRight;
 
-function extractSlideComponentLines(components: z.infer<typeof SlideComponentSchema>[]): string[] {
-  const lines: string[] = [];
-
-  for (const comp of components) {
-    switch (comp.type) {
-      case "title":
-      case "subtitle":
-      case "body":
-        if (comp.content) {
-          const safeText = sanitizePresentationText(comp.content, 360);
-          if (safeText) lines.push(safeText);
-        }
-        break;
-      case "bullets":
-        if (Array.isArray(comp.content)) {
-          for (const bullet of comp.content.slice(0, 12)) {
-            const safeBullet = sanitizePresentationText(bullet, 220);
-            if (safeBullet) lines.push(`• ${safeBullet}`);
-          }
-        }
-        break;
-      case "image":
-        if (comp.content) {
-          const safeImage = sanitizePresentationText(comp.content, 220);
-          if (safeImage) lines.push(`Imagen: ${safeImage}`);
-        }
-        break;
-      case "chart":
-        if (comp.content) {
-          const safeChart = sanitizePresentationText(comp.content, 260);
-          if (safeChart) lines.push(`Gráfico: ${safeChart}`);
-        }
-        break;
-      case "table":
-        if (Array.isArray(comp.content)) {
-          for (const row of comp.content.slice(0, 5)) {
-            if (Array.isArray(row)) {
-              const safeRow = row
-                .map((cell) => sanitizePresentationText(cell, 90))
-                .filter(Boolean)
-                .join(" | ");
-              if (safeRow) lines.push(`Tabla: ${safeRow}`);
-            }
-          }
-        }
-        break;
-      case "shape":
-        {
-          const safeShape = sanitizePresentationText(comp.content, 120);
-          if (safeShape) lines.push(`Elemento gráfico: ${safeShape}`);
-        }
-        break;
-      default:
-        break;
+    for (const comp of components) {
+      const h = this.estimateComponentHeight(comp, usableW);
+      if (currentHeight + h > usableH && current.length > 0) {
+        groups.push(current);
+        current = [];
+        currentHeight = 0;
+      }
+      current.push(comp);
+      currentHeight += h + this.tokens.spacing.sm / 72;
     }
+
+    if (current.length > 0) groups.push(current);
+    return groups.length > 0 ? groups : [components];
   }
 
-  return lines.slice(0, 30);
+  /**
+   * Split a table that's too tall across multiple groups.
+   * Each group includes a copy of the header row.
+   */
+  splitTable(
+    rows: any[][],
+    maxRowsPerPage: number,
+  ): { rows: any[][]; includesHeader: boolean }[] {
+    if (rows.length <= 1) return [{ rows, includesHeader: true }];
+
+    const header = rows[0];
+    const dataRows = rows.slice(1);
+    const chunks: { rows: any[][]; includesHeader: boolean }[] = [];
+
+    for (let i = 0; i < dataRows.length; i += maxRowsPerPage) {
+      const chunk = dataRows.slice(i, i + maxRowsPerPage);
+      chunks.push({
+        rows: [header, ...chunk],
+        includesHeader: true,
+      });
+    }
+
+    return chunks.length > 0 ? chunks : [{ rows, includesHeader: true }];
+  }
+
+  /**
+   * Auto-fit text: try decreasing font size until content fits,
+   * with minimum font size from tokens.
+   */
+  autoFitText(
+    text: string,
+    box: LayoutBox,
+    startFontSize: number,
+  ): { fontSize: number; text: string; truncated: boolean } {
+    const minFontSize = this.tokens.font.sizeMin;
+    let fontSize = startFontSize;
+
+    while (fontSize > minFontSize) {
+      const fit = this.checkTextFit(text, box, fontSize);
+      if (fit.fits) {
+        return { fontSize, text, truncated: false };
+      }
+      fontSize -= 1;
+    }
+
+    // At minimum font size, truncate if still doesn't fit
+    const fit = this.checkTextFit(text, box, minFontSize);
+    return {
+      fontSize: minFontSize,
+      text: fit.truncated,
+      truncated: fit.overflow,
+    };
+  }
+
+  /**
+   * Split bullet items into groups that fit within a given height.
+   * Returns arrays of bullet strings, each group fitting one slide.
+   */
+  splitBullets(
+    items: string[],
+    box: LayoutBox,
+    fontSize: number,
+  ): string[][] {
+    const lineHeight = fontSize / 72 * 1.5; // inches per line
+    const maxItems = Math.max(1, Math.floor(box.h / lineHeight));
+    const groups: string[][] = [];
+
+    for (let i = 0; i < items.length; i += maxItems) {
+      groups.push(items.slice(i, i + maxItems));
+    }
+
+    return groups.length > 0 ? groups : [items];
+  }
 }
 
 /* ================================================================== */
@@ -384,50 +450,33 @@ export class DocumentEngine {
    */
   async generatePresentation(spec: PresentationSpec): Promise<Buffer> {
     const parsed = PresentationSpecSchema.parse(spec);
-    const title = sanitizePresentationText(parsed.title, 500) || "Presentación";
+    const PptxGenJS = (await import("pptxgenjs")).default;
 
-    const slides = (parsed.slides.length > 0 ? parsed.slides : []).map((slideSpec, index) => {
-      const titleFromComponents = findSlideTitle(slideSpec.components) || `Diapositiva ${index + 1}`;
-      const lines = extractSlideComponentLines(slideSpec.components);
+    const pptx = new PptxGenJS();
+    pptx.title = parsed.title;
+    if (parsed.author) pptx.author = parsed.author;
+    if (parsed.subject) pptx.subject = parsed.subject;
 
-      if (slideSpec.notes) {
-        const safeNotes = sanitizePresentationText(slideSpec.notes, 320);
-        if (safeNotes) lines.push(`Notas: ${safeNotes}`);
+    const tokens = DesignTokensSchema.parse(parsed.theme);
+    const layout = new LayoutEngine(tokens);
+
+    for (const slideSpec of parsed.slides) {
+      const slide = pptx.addSlide();
+      const boxes = layout.calculateSlideLayout(slideSpec.components);
+
+      for (let i = 0; i < slideSpec.components.length; i++) {
+        const comp = slideSpec.components[i];
+        const box = boxes[i];
+        this.renderSlideComponent(slide, comp, box, tokens);
       }
 
-      return {
-        title: sanitizePresentationText(titleFromComponents, 180),
-        content: lines.length > 0 ? lines : ["Sin contenido disponible."],
-      };
-    });
-
-    if (slides.length === 0) {
-      slides.push({
-        title: "Resumen",
-        content: [sanitizePresentationText(title, 260)],
-      });
+      if (slideSpec.notes) {
+        slide.addNotes(slideSpec.notes);
+      }
     }
 
-    try {
-      return await generatePptDocument(title, slides, {
-        trace: {
-          source: "documentEngine",
-        },
-      });
-    } catch (error: any) {
-      console.warn("[DocumentEngine] Falling back to emergency corporate template:", error);
-      return await generatePptDocument("Presentación", [{
-        title: "Fallback",
-        content: [
-          "No fue posible renderizar la presentación solicitada con el motor de componentes.",
-          `Error: ${sanitizePresentationText(error?.message || error, 240)}`,
-        ],
-      }], {
-        trace: {
-          source: "documentEngine",
-        },
-      });
-    }
+    const data = await pptx.write({ outputType: "nodebuffer" });
+    return Buffer.from(data as ArrayBuffer);
   }
 
   /**
@@ -495,7 +544,8 @@ export class DocumentEngine {
    */
   async generateWorkbook(spec: WorkbookSpec): Promise<Buffer> {
     const parsed = WorkbookSpecSchema.parse(spec);
-    const ExcelJS = (await import("exceljs")).default;
+    const excelMod = await import("exceljs");
+    const ExcelJS = (excelMod as any).default || excelMod;
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = parsed.author || "ILIA Agent";
@@ -605,9 +655,39 @@ export class DocumentEngine {
     return Buffer.from(buffer);
   }
 
-  /* -- Slide Component Renderer ------------------------------------ */
+  /* -- Slide Component Renderer (with graceful degradation) --------- */
 
   private renderSlideComponent(
+    slide: any,
+    comp: z.infer<typeof SlideComponentSchema>,
+    box: LayoutBox,
+    tokens: DesignTokens
+  ): void {
+    try {
+      this.renderSlideComponentInner(slide, comp, box, tokens);
+    } catch (err) {
+      // Graceful degradation: render as plain text fallback
+      console.warn(`[DocumentEngine] Component "${comp.type}" render failed, using fallback: ${err instanceof Error ? err.message : String(err)}`);
+      try {
+        const fallbackText = typeof comp.content === "string"
+          ? comp.content
+          : Array.isArray(comp.content)
+            ? comp.content.map(String).join("\n")
+            : JSON.stringify(comp.content);
+        slide.addText(fallbackText.substring(0, 2000), {
+          x: box.x, y: box.y, w: box.w, h: box.h,
+          fontSize: tokens.font.sizeBody,
+          fontFace: tokens.font.body,
+          color: tokens.color.textSecondary,
+          valign: "top",
+        });
+      } catch {
+        // Even fallback failed — skip this component silently
+      }
+    }
+  }
+
+  private renderSlideComponentInner(
     slide: any,
     comp: z.infer<typeof SlideComponentSchema>,
     box: LayoutBox,
@@ -619,35 +699,45 @@ export class DocumentEngine {
       w: box.w,
       h: box.h,
       fontFace: tokens.font.body,
-      color: tokens.color.textPrimary,
+      color: tokens.color.textPrimary.replace("#", ""),
       fontSize: tokens.font.sizeBody,
       valign: "top" as const,
     };
 
     switch (comp.type) {
-      case "title":
-        slide.addText(String(comp.content || ""), {
+      case "title": {
+        const text = String(comp.content || "");
+        const fitted = this.layoutEngine.autoFitText(text, box, tokens.font.sizeH1);
+        slide.addText(fitted.text, {
           ...baseTextOpts,
-          fontSize: tokens.font.sizeH1,
+          fontSize: fitted.fontSize,
           fontFace: tokens.font.heading,
           bold: true,
           valign: "middle" as const,
+          color: tokens.color.textPrimary.replace("#", ""),
         });
         break;
+      }
 
-      case "subtitle":
-        slide.addText(String(comp.content || ""), {
+      case "subtitle": {
+        const text = String(comp.content || "");
+        const fitted = this.layoutEngine.autoFitText(text, box, tokens.font.sizeH2);
+        slide.addText(fitted.text, {
           ...baseTextOpts,
-          fontSize: tokens.font.sizeH2,
-          color: tokens.color.textSecondary,
+          fontSize: fitted.fontSize,
+          color: tokens.color.textSecondary.replace("#", ""),
           valign: "middle" as const,
         });
         break;
+      }
 
       case "body": {
         const text = String(comp.content || "");
-        const fit = this.layoutEngine.checkTextFit(text, box, tokens.font.sizeBody);
-        slide.addText(fit.truncated, baseTextOpts);
+        const fitted = this.layoutEngine.autoFitText(text, box, tokens.font.sizeBody);
+        slide.addText(fitted.text, {
+          ...baseTextOpts,
+          fontSize: fitted.fontSize,
+        });
         break;
       }
 
@@ -655,7 +745,11 @@ export class DocumentEngine {
         const items = Array.isArray(comp.content) ? comp.content : [comp.content];
         const textItems = items.map((item: string) => ({
           text: String(item),
-          options: { bullet: true, fontSize: tokens.font.sizeBody },
+          options: {
+            bullet: true,
+            fontSize: tokens.font.sizeBody,
+            color: tokens.color.textPrimary.replace("#", ""),
+          },
         }));
         slide.addText(textItems, baseTextOpts);
         break;
@@ -663,28 +757,36 @@ export class DocumentEngine {
 
       case "table": {
         if (Array.isArray(comp.content) && comp.content.length > 0) {
-          const tableRows = comp.content.map((row: any[], rowIdx: number) =>
-            row.map((cell: any) => ({
-              text: String(cell),
+          // Auto-split tables that are too large (max ~15 rows per slide)
+          const maxRowsPerSlide = Math.max(3, Math.floor(box.h / 0.35));
+          const chunks = this.layoutEngine.splitTable(comp.content, maxRowsPerSlide);
+          const firstChunk = chunks[0]; // Only render first chunk on this slide
+
+          const tableRows = firstChunk.rows.map((row: any[], rowIdx: number) =>
+            (Array.isArray(row) ? row : [row]).map((cell: any) => ({
+              text: String(cell).substring(0, 500),
               options: {
-                fontSize: tokens.font.sizeBody - 1,
+                fontSize: Math.max(tokens.font.sizeBody - 2, tokens.font.sizeMin),
                 bold: rowIdx === 0,
                 fill: rowIdx === 0
-                  ? tokens.color.headerBg
+                  ? tokens.color.headerBg.replace("#", "")
                   : rowIdx % 2 === 0
-                    ? tokens.color.zebraOdd
-                    : tokens.color.zebraEven,
-                color: rowIdx === 0 ? tokens.color.headerFg : tokens.color.textPrimary,
+                    ? tokens.color.zebraOdd.replace("#", "")
+                    : tokens.color.zebraEven.replace("#", ""),
+                color: rowIdx === 0
+                  ? tokens.color.headerFg.replace("#", "")
+                  : tokens.color.textPrimary.replace("#", ""),
               },
             }))
           );
 
+          const colCount = firstChunk.rows[0]?.length || 1;
           slide.addTable(tableRows, {
             x: box.x,
             y: box.y,
             w: box.w,
-            colW: Array(comp.content[0]?.length || 1).fill(box.w / (comp.content[0]?.length || 1)),
-            border: { pt: 0.5, color: tokens.color.border },
+            colW: Array(colCount).fill(box.w / colCount),
+            border: { pt: 0.5, color: tokens.color.border.replace("#", "") },
             autoPage: false,
           });
         }
@@ -692,25 +794,40 @@ export class DocumentEngine {
       }
 
       case "image":
-        if (typeof comp.content === "string") {
-          slide.addImage({
-            path: comp.content,
-            x: box.x,
-            y: box.y,
-            w: box.w,
-            h: box.h,
-          });
+        if (typeof comp.content === "string" && comp.content.trim()) {
+          try {
+            slide.addImage({
+              path: comp.content,
+              x: box.x, y: box.y, w: box.w, h: box.h,
+            });
+          } catch {
+            // Image failed — render placeholder
+            slide.addText("[Image]", {
+              ...baseTextOpts,
+              align: "center",
+              valign: "middle" as const,
+              color: tokens.color.textSecondary.replace("#", ""),
+              italic: true,
+            });
+          }
         }
         break;
 
       case "chart":
-        // Charts would need specific PptxGenJS chart config
-        slide.addText("[Chart Placeholder]", {
+        slide.addText("[Chart]", {
           ...baseTextOpts,
           align: "center",
           valign: "middle" as const,
-          color: tokens.color.textSecondary,
+          color: tokens.color.textSecondary.replace("#", ""),
           italic: true,
+        });
+        break;
+
+      case "shape":
+        slide.addShape("rect", {
+          x: box.x, y: box.y, w: box.w, h: box.h,
+          fill: { color: tokens.color.surface.replace("#", "") },
+          line: { color: tokens.color.border.replace("#", ""), width: 1 },
         });
         break;
 
@@ -718,7 +835,7 @@ export class DocumentEngine {
         slide.addText(String(comp.content || ""), {
           ...baseTextOpts,
           fontSize: tokens.font.sizeCaption,
-          color: tokens.color.textSecondary,
+          color: tokens.color.textSecondary.replace("#", ""),
           align: "center",
         });
         break;
@@ -727,9 +844,14 @@ export class DocumentEngine {
         slide.addText("Slide {{slideNumber}}", {
           ...baseTextOpts,
           fontSize: tokens.font.sizeCaption,
-          color: tokens.color.textSecondary,
+          color: tokens.color.textSecondary.replace("#", ""),
           align: "right",
         });
+        break;
+
+      default:
+        // Unknown component type — render content as text
+        slide.addText(String(comp.content || ""), baseTextOpts);
         break;
     }
   }

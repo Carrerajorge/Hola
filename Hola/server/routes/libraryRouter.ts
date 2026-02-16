@@ -5,6 +5,7 @@ import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { db } from "../db";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import { generateWordDocument, generateExcelDocument, generatePptDocument, parseExcelFromText, parseSlidesFromText } from "../services/documentGeneration";
+import { DocumentCompiler, type CompilerFormat } from "../agent/documents/compiler";
 import fs from "fs";
 import path from "path";
 import {
@@ -700,33 +701,58 @@ export function createLibraryRouter() {
         return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
       }
 
-      // Generate binary document from content
+      // Generate binary document via DocumentCompiler (unified pipeline)
+      const formatMap: Record<string, CompilerFormat> = { word: "docx", excel: "xlsx", ppt: "pptx" };
+      const compilerFormat = formatMap[type];
+      if (!compilerFormat) {
+        return res.status(400).json({ error: "Unsupported document type" });
+      }
+
+      const compiler = new DocumentCompiler("corporate");
       let buffer: Buffer;
       let ext: string;
       let mimeType: string;
 
-      switch (type) {
-        case "word":
-          buffer = await generateWordDocument(title, content);
-          ext = "docx";
-          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-          break;
-        case "excel": {
-          const excelData = parseExcelFromText(content);
-          buffer = await generateExcelDocument(title, excelData);
-          ext = "xlsx";
-          mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-          break;
+      try {
+        const result = await compiler.compileFromText({
+          format: compilerFormat,
+          title,
+          content,
+          theme: "corporate",
+        });
+        buffer = result.buffer;
+        ext = compilerFormat === "pptx" ? "pptx" : compilerFormat === "docx" ? "docx" : "xlsx";
+        mimeType = result.mimeType;
+
+        if (result.metrics.degraded) {
+          console.warn(`[Library] Document compiled in degraded mode: ${result.validation.issues.map(i => i.message).join(", ")}`);
         }
-        case "ppt": {
-          const slides = parseSlidesFromText(content);
-          buffer = await generatePptDocument(title, slides);
-          ext = "pptx";
-          mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-          break;
+      } catch (compilerErr) {
+        // Fallback to legacy generation if compiler fails entirely
+        console.warn(`[Library] Compiler failed, using legacy generation: ${compilerErr instanceof Error ? compilerErr.message : String(compilerErr)}`);
+        switch (type) {
+          case "word":
+            buffer = await generateWordDocument(title, content);
+            ext = "docx";
+            mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            break;
+          case "excel": {
+            const excelData = parseExcelFromText(content);
+            buffer = await generateExcelDocument(title, excelData);
+            ext = "xlsx";
+            mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            break;
+          }
+          case "ppt": {
+            const slides = parseSlidesFromText(content);
+            buffer = await generatePptDocument(title, slides);
+            ext = "pptx";
+            mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            break;
+          }
+          default:
+            return res.status(400).json({ error: "Unsupported document type" });
         }
-        default:
-          return res.status(400).json({ error: "Unsupported document type" });
       }
 
       // Save to local uploads directory
