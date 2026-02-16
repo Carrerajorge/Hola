@@ -201,7 +201,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     timeout-minutes: 40
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-e2e')
     services:
       postgres:
         image: pgvector/pgvector:pg15
@@ -217,22 +216,37 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      - name: Evaluate E2E trigger
+        id: e2e_gate
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ contains(github.event.pull_request.labels.*.name, 'run-e2e') }}" == "true" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
+        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: npm ci
 
       - name: Install Playwright browsers
+        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: npx playwright install --with-deps
 
       - name: Run E2E tests
+        if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
         run: npm run test:e2e
         env:
           CI: "true"
@@ -248,11 +262,16 @@ jobs:
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v6
-        if: always()
+        if: always() && steps.e2e_gate.outputs.should_run == 'true'
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+      - name: Skip E2E
+        if: ${{ steps.e2e_gate.outputs.should_run != 'true' }}
+        run: |
+          echo "E2E intentionally skipped. Add label 'run-e2e' on the pull request to run Playwright."
 
   # Build/push container images so deploy workflows can pull by commit tag.
   docker:
