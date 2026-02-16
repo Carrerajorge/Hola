@@ -183,6 +183,7 @@ class LLMGateway {
   private xaiClient: OpenAI | null = null;
   private openaiClient: OpenAI | null = null;
   private deepseekClient: OpenAI | null = null;
+  private cleanupIntervals: ReturnType<typeof setInterval>[] = [];
   private anthropicClient: Anthropic | null = null;
 
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
@@ -234,10 +235,56 @@ class LLMGateway {
       },
     };
 
-    // Cleanup intervals
-    setInterval(() => this.cleanupCache(), 60000);
-    setInterval(() => this.cleanupInFlightRequests(), 30000);
-    setInterval(() => this.cleanupStreamCheckpoints(), 60000);
+    // Cleanup intervals — store refs to prevent memory leaks on destroy
+    this.cleanupIntervals.push(
+      setInterval(() => this.cleanupCache(), 60000),
+      setInterval(() => this.cleanupInFlightRequests(), 30000),
+      setInterval(() => this.cleanupStreamCheckpoints(), 60000),
+    );
+  }
+
+  /**
+   * Clean up all intervals to prevent memory leaks.
+   * Call this during graceful shutdown or when replacing the gateway instance.
+   */
+  destroy(): void {
+    for (const interval of this.cleanupIntervals) {
+      clearInterval(interval);
+    }
+    this.cleanupIntervals = [];
+    this.requestCache.clear();
+    this.inFlightRequests.clear();
+    this.streamCheckpoints.clear();
+    this.rateLimitByUser.clear();
+    console.log('[LLMGateway] Destroyed: all intervals cleared and caches flushed');
+  }
+
+  /**
+   * Wrap an async iterable with an idle-timeout guard.
+   * If no chunk is yielded within `timeoutMs`, the stream is aborted with an error.
+   */
+  private async *withIdleTimeout<T>(
+    source: AsyncIterable<T>,
+    timeoutMs: number,
+    requestId: string
+  ): AsyncGenerator<T> {
+    const iterator = source[Symbol.asyncIterator]();
+    while (true) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        iterator.next(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`[LLMGateway] ${requestId} stream idle timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          );
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+      if (result.done) return;
+      yield result.value;
+    }
   }
 
 
@@ -301,11 +348,7 @@ class LLMGateway {
 
   // ===== Cache Management =====
   private generateRequestId(): string {
-    try {
-      return `req_${crypto.randomUUID()}`;
-    } catch {
-      return `req_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-    }
+    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string | null {
@@ -452,11 +495,10 @@ class LLMGateway {
     const isMultimodal = Array.isArray(mustKeep.content);
     let mustKeepText = toText(mustKeep);
     let mustKeepTokens = isMultimodal
-      ? 500 // Flat estimate for multimodal messages (images are large but most budget is for text)
+      ? 500 // Flat estimate for multimodal messages (image data is not counted as context tokens)
       : estimateTokens(mustKeepText);
 
     if (mustKeepTokens > maxTokens && !isMultimodal) {
-      // Only truncate text messages, not multimodal (would destroy image data)
       mustKeepText = truncateText(mustKeepText, maxTokens);
       mustKeep = { ...mustKeep, content: mustKeepText } as ChatCompletionMessageParam;
       mustKeepTokens = estimateTokens(mustKeepText);
@@ -525,15 +567,16 @@ class LLMGateway {
     const geminiMessages: GeminiChatMessage[] = messages
       .filter(m => m.role !== "system")
       .map(m => {
-        const role = m.role === "assistant" ? "model" as const : "user" as const;
+        const role = m.role === "assistant" ? "model" : "user";
 
-        // Handle multimodal content arrays (image_url + text parts)
+        // Handle multimodal content (array of text + image_url parts)
         if (Array.isArray(m.content)) {
-          const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+          const parts: any[] = [];
           for (const part of m.content as any[]) {
             if (part.type === "text") {
               parts.push({ text: part.text });
             } else if (part.type === "image_url" && part.image_url?.url) {
+              // Extract base64 from data URI for Gemini's inlineData format
               const url = part.image_url.url as string;
               const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
               if (dataUriMatch) {
@@ -543,15 +586,13 @@ class LLMGateway {
                     data: dataUriMatch[2],
                   },
                 });
-                console.log(`[LLMGateway] convertToGemini: added inlineData image (${dataUriMatch[1]}, ${Math.round(dataUriMatch[2].length / 1024)}KB)`);
               } else {
+                // URL-based image — Gemini supports fileUri but for simplicity add as text reference
                 parts.push({ text: `[Image: ${url}]` });
-                console.warn(`[LLMGateway] convertToGemini: image_url not a data URI, falling back to text placeholder`);
               }
             }
           }
           if (parts.length === 0) parts.push({ text: "" });
-          console.log(`[LLMGateway] convertToGemini: multimodal message role=${role}, parts=${parts.length} (${parts.filter(p => p.inlineData).length} images, ${parts.filter(p => p.text).length} text)`);
           return { role, parts };
         }
 
@@ -1014,8 +1055,19 @@ class LLMGateway {
       const role = (msg as any)?.role;
       const contentRaw = (msg as any)?.content;
 
-      // Handle multimodal content arrays with image_url parts
+      // Handle multimodal content arrays (with image_url parts)
       if (Array.isArray(contentRaw) && contentRaw.some((p: any) => p?.type === "image_url")) {
+        if (role === "system") {
+          // Extract text only from system messages
+          const text = contentRaw
+            .filter((p: any) => p?.type === "text")
+            .map((p: any) => p.text)
+            .join("\n");
+          if (text.trim()) systemParts.push(text);
+          continue;
+        }
+
+        // Build Anthropic multimodal content blocks
         const anthropicContent: any[] = [];
         for (const part of contentRaw) {
           if (part?.type === "text" && part.text?.trim()) {
@@ -1035,6 +1087,7 @@ class LLMGateway {
             }
           }
         }
+
         if (anthropicContent.length > 0 && (role === "user" || role === "assistant")) {
           out.push({ role, content: anthropicContent });
           continue;
@@ -1383,7 +1436,7 @@ class LLMGateway {
             ? this.streamAnthropic(truncatedMessages, options, requestId)
             : this.streamOpenAICompatible(provider, truncatedMessages, options, requestId);
 
-        for await (const chunk of stream) {
+        for await (const chunk of this.withIdleTimeout(stream, STREAM_IDLE_TIMEOUT_MS, requestId)) {
           accumulatedContent += chunk.content;
 
           // Some providers can return a "done" marker without any visible text (e.g. if the output
