@@ -3,15 +3,30 @@ import { Request, Response, NextFunction } from "express";
 import { createClient } from "redis";
 import crypto from "crypto";
 
-// Cliente Redis para Rate Limiter
+// Cliente Redis para Rate Limiter — with aggressive timeouts to prevent startup hangs
+const REDIS_CONNECT_TIMEOUT_MS = 3_000;
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
   password: process.env.REDIS_PASSWORD,
+  socket: {
+    connectTimeoutMs: REDIS_CONNECT_TIMEOUT_MS,
+    reconnectStrategy: (retries: number) => {
+      // Give up after 3 retries to avoid blocking startup
+      if (retries > 3) return false as unknown as number;
+      return Math.min(retries * 200, 1000);
+    },
+  },
 });
 
 redisClient.on("error", (error) => {
-  console.error("[RateLimiter] Redis client error:", error);
+  // Only log once per minute to avoid log spam
+  const now = Date.now();
+  if (now - _lastRedisErrorLog > 60_000) {
+    console.error("[RateLimiter] Redis client error:", error?.message || error);
+    _lastRedisErrorLog = now;
+  }
 });
+let _lastRedisErrorLog = 0;
 
 let rateLimiterGlobal: RateLimiterRedis | RateLimiterMemory;
 let rateLimiterAuth: RateLimiterRedis | RateLimiterMemory;
@@ -33,7 +48,14 @@ let initialized = false;
 const initLimiterPromise = (async () => {
   try {
     if (process.env.REDIS_URL) {
-      await redisClient.connect();
+      // Race the connect against a hard timeout to prevent indefinite hangs
+      const connectWithTimeout = Promise.race([
+        redisClient.connect(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Redis connect timeout")), REDIS_CONNECT_TIMEOUT_MS + 1_000)
+        ),
+      ]);
+      await connectWithTimeout;
       console.log("[RateLimiter] Redis connected");
 
       rateLimiterGlobal = new RateLimiterRedis({
@@ -78,7 +100,7 @@ const initLimiterPromise = (async () => {
   initialized = true;
 })();
 
-async function waitForRateLimiterInit(timeoutMs = 2000): Promise<boolean> {
+async function waitForRateLimiterInit(timeoutMs = 5000): Promise<boolean> {
   const start = Date.now();
   while (!initialized && Date.now() - start < timeoutMs) {
     await new Promise<void>((resolve) => setTimeout(resolve, 25));

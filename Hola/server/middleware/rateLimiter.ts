@@ -1,26 +1,61 @@
 import { RateLimiterRedis, RateLimiterMemory } from "rate-limiter-flexible";
 import { Request, Response, NextFunction } from "express";
 import { createClient } from "redis";
-import { env } from "../config/env";
+import crypto from "crypto";
 
-// Cliente Redis para Rate Limiter
+// Cliente Redis para Rate Limiter — with aggressive timeouts to prevent startup hangs
+const REDIS_CONNECT_TIMEOUT_MS = 3_000;
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
   password: process.env.REDIS_PASSWORD,
+  socket: {
+    connectTimeoutMs: REDIS_CONNECT_TIMEOUT_MS,
+    reconnectStrategy: (retries: number) => {
+      // Give up after 3 retries to avoid blocking startup
+      if (retries > 3) return false as unknown as number;
+      return Math.min(retries * 200, 1000);
+    },
+  },
 });
+
+redisClient.on("error", (error) => {
+  // Only log once per minute to avoid log spam
+  const now = Date.now();
+  if (now - _lastRedisErrorLog > 60_000) {
+    console.error("[RateLimiter] Redis client error:", error?.message || error);
+    _lastRedisErrorLog = now;
+  }
+});
+let _lastRedisErrorLog = 0;
 
 let rateLimiterGlobal: RateLimiterRedis | RateLimiterMemory;
 let rateLimiterAuth: RateLimiterRedis | RateLimiterMemory;
 let rateLimiterAi: RateLimiterRedis | RateLimiterMemory;
+const MAX_KEY_LENGTH = 256;
+const MAX_IP_LENGTH = 128;
+const MAX_USER_ID_LENGTH = 128;
+
+function sanitizeRateLimitKey(part: unknown): string {
+  const raw = String(part || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.slice(0, MAX_KEY_LENGTH);
+}
 
 // Track initialization state
 let initialized = false;
 
 // Inicialización asíncrona segura
-(async () => {
+const initLimiterPromise = (async () => {
   try {
     if (process.env.REDIS_URL) {
-      await redisClient.connect();
+      // Race the connect against a hard timeout to prevent indefinite hangs
+      const connectWithTimeout = Promise.race([
+        redisClient.connect(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Redis connect timeout")), REDIS_CONNECT_TIMEOUT_MS + 1_000)
+        ),
+      ]);
+      await connectWithTimeout;
       console.log("[RateLimiter] Redis connected");
 
       rateLimiterGlobal = new RateLimiterRedis({
@@ -65,6 +100,14 @@ let initialized = false;
   initialized = true;
 })();
 
+async function waitForRateLimiterInit(timeoutMs = 5000): Promise<boolean> {
+  const start = Date.now();
+  while (!initialized && Date.now() - start < timeoutMs) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  return initialized;
+}
+
 /**
  * Security: extract the real client IP behind reverse proxies.
  * Trusts X-Forwarded-For only when app.set('trust proxy') is enabled,
@@ -72,56 +115,92 @@ let initialized = false;
  * As a fallback, we use req.ip which Express resolves based on trust proxy setting.
  */
 function getClientKey(req: Request): string {
-  // Prefer authenticated user ID for per-user limiting
-  const userId = (req as any).user?.id;
-  if (userId && typeof userId === "string") {
-    return `user:${userId}`;
-  }
-
-  // Use req.ip which respects Express 'trust proxy' setting
-  const ip = req.ip || req.socket?.remoteAddress || "unknown";
-
-  // Security: normalize IPv6-mapped IPv4 addresses
-  if (ip.startsWith("::ffff:")) {
-    return ip.slice(7);
-  }
-
-  return ip;
-}
-
-const consumeLimiter = (limiter: RateLimiterRedis | RateLimiterMemory, req: Request, res: Response, next: NextFunction) => {
-    // Security: if rate limiter not yet initialized (startup race), allow through
-    // but log a warning
-    if (!initialized || !limiter) {
-      console.warn("[RateLimiter] Not yet initialized, allowing request through");
-      return next();
+    // Security: avoid unbounded key material via malformed user IDs
+    const userId = sanitizeRateLimitKey((req as any).user?.id);
+    if (userId) {
+      if (userId.length <= MAX_USER_ID_LENGTH) {
+        return `user:${userId}`;
+      }
     }
 
-    const key = getClientKey(req);
+  // Prefer authenticated user ID for per-user limiting
+  // Use req.ip which respects Express 'trust proxy' setting
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const normalizedIp = sanitizeRateLimitKey(
+    typeof ip === "string" && ip.length <= MAX_IP_LENGTH
+      ? ip
+      : String(ip).slice(0, MAX_IP_LENGTH)
+  );
 
-    limiter.consume(key)
-        .then(() => {
-            next();
-        })
-        .catch((rateLimiterRes) => {
-            // Security: set standard rate limit headers
-            const retryAfter = Math.round((rateLimiterRes?.msBeforeNext || 60000) / 1000);
-            res.setHeader("Retry-After", String(retryAfter));
-            res.setHeader("X-RateLimit-Limit", String(limiter.points));
-            res.setHeader("X-RateLimit-Remaining", "0");
-            res.setHeader("X-RateLimit-Reset", String(Math.ceil(Date.now() / 1000) + retryAfter));
-            res.status(429).json({
-                status: "error",
-                message: "Too Many Requests",
-                retryAfter,
-            });
-        });
+  if (!normalizedIp) {
+    return "unknown";
+  }
+
+  // Security: normalize IPv6-mapped IPv4 addresses and sanitize brackets
+  if (normalizedIp.startsWith("::ffff:")) {
+    return `ip:${normalizedIp.slice(7)}`;
+  }
+
+  if (normalizedIp.startsWith("[") && normalizedIp.includes("]")) {
+    return `ip:${normalizedIp.replace("[", "").replace("]", "")}`;
+  }
+
+  return `ip:${normalizedIp}`;
+}
+
+const consumeLimiter = async (
+  getLimiter: () => RateLimiterRedis | RateLimiterMemory | undefined,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  // Security: during startup/init issues, fail closed for a short window.
+  let limiter = getLimiter();
+  if (!initialized || !limiter) {
+    const ready = await waitForRateLimiterInit();
+    limiter = getLimiter();
+    if (!ready || !limiter) {
+      console.error("[RateLimiter] Not initialized, request blocked to preserve security guarantees.");
+      res.status(503).json({
+        status: "error",
+        message: "Rate limiter not ready. Retry in a few seconds.",
+      });
+      return;
+    }
+  }
+
+  const key = getClientKey(req);
+  if (!key || key.length > MAX_KEY_LENGTH) {
+    res.status(400).json({
+      status: "error",
+      message: "Invalid client key",
+    });
+    return;
+  }
+
+  const keyHash = key.length > 64 ? crypto.createHash("sha256").update(key).digest("hex") : key;
+
+  limiter
+    .consume(keyHash)
+    .then(() => next())
+    .catch((rateLimiterRes) => {
+      const retryAfter = Math.round((rateLimiterRes?.msBeforeNext || 60000) / 1000);
+      res.setHeader("Retry-After", String(retryAfter));
+      res.setHeader("X-RateLimit-Limit", String((limiter as any).points));
+      res.setHeader("X-RateLimit-Remaining", "0");
+      res.setHeader("X-RateLimit-Reset", String(Math.ceil(Date.now() / 1000) + retryAfter));
+      res.status(429).json({
+        status: "error",
+        message: "Too Many Requests",
+        retryAfter,
+      });
+    });
 };
-
 // Billing/Stripe: tighter limits — 20 requests per 15 min per user/IP
 let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
 
 (async () => {
+  // Wait for main init to finish, then create billing limiter with same store
   const waitForInit = () => new Promise<void>((resolve) => {
     const check = () => { if (initialized) resolve(); else setTimeout(check, 50); };
     check();
@@ -143,7 +222,18 @@ let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
   }
 })();
 
-export const globalLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterGlobal, req, res, next);
-export const authLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAuth, req, res, next);
-export const aiLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAi, req, res, next);
-export const billingLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterBilling, req, res, next);
+export const globalLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterGlobal, req, res, next);
+};
+
+export const authLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterAuth, req, res, next);
+};
+
+export const aiLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterAi, req, res, next);
+};
+
+export const billingLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterBilling, req, res, next);
+};
