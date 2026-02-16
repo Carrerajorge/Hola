@@ -5,11 +5,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      skip_ci:
-        description: 'Skip CI checks and deploy directly'
-        required: false
-        default: 'false'
-        type: boolean
       image_tag:
         description: 'Override image tag (e.g. sha-abc12345). Leave empty to build from HEAD.'
         required: false
@@ -35,14 +30,14 @@ jobs:
   # ── CI Gate ──────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true) }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     uses: ./.github/workflows/ci.yml
 
   # ── Build & Push Docker Images to GHCR ─────────────────
   build_images:
     name: Build Docker Images
     needs: [ci]
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag == '' && ((github.event.inputs.skip_ci == 'true' || github.event.inputs.skip_ci == true) || needs.ci.result == 'success')) }}
+    if: ${{ needs.ci.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') }}
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
@@ -56,12 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci, build_images]
     if: >-
-      always()
-      && github.event_name == 'workflow_dispatch'
-      && (
-        needs.build_images.result == 'success'
-        || github.event.inputs.image_tag != ''
-      )
+      github.event_name == 'workflow_dispatch'
+      && success()
     timeout-minutes: 20
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -206,7 +197,7 @@ jobs:
     name: Blue-Green Deploy (Auto)
     runs-on: ubuntu-latest
     needs: [ci, build_images]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() && needs.ci.result == 'success' && needs.build_images.result == 'success' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() }}
     timeout-minutes: 25
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
