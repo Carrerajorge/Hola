@@ -690,7 +690,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         docTool,
         forceWebSearch,
         webSearchAuto,
-        latencyMode: rawLatencyMode
+        latencyMode: rawLatencyMode,
+        lastImageBase64,
+        lastImageId
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
@@ -1422,6 +1424,77 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      // ── IMAGE VISION SUPPORT ──────────────────────────────────────
+      // Collect image data to inject as multimodal content into the last user message.
+      // Sources: (1) lastImageBase64 from image-edit flow, (2) image attachments uploaded by user.
+      const imagePartsForVision: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+
+      // Source 1: Image edit context (lastImageBase64 from frontend)
+      if (lastImageBase64 && typeof lastImageBase64 === "string") {
+        const dataUrl = lastImageBase64.startsWith("data:")
+          ? lastImageBase64
+          : `data:image/png;base64,${lastImageBase64}`;
+        imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
+        console.log(`[Stream] 🖼️ Vision: injecting lastImageBase64 (${Math.round(lastImageBase64.length / 1024)}KB)`);
+      }
+
+      // Source 2: Image attachments (uploaded files with image/* mimeType)
+      if (resolvedAttachments.length > 0) {
+        for (const att of resolvedAttachments) {
+          const mime = (att.mimeType || att.type || "").toLowerCase();
+          if (!mime.startsWith("image/")) continue;
+
+          // Try to read the image file and convert to base64
+          try {
+            const fs = await import("fs/promises");
+            const path = await import("path");
+            let filePath = att.storagePath || "";
+
+            // Resolve local storage path
+            if (filePath.startsWith("/objects/uploads/")) {
+              filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
+            } else if (!path.default.isAbsolute(filePath)) {
+              filePath = path.default.join(process.cwd(), "uploads", filePath);
+            }
+
+            const imageBuffer = await fs.readFile(filePath);
+            const base64 = imageBuffer.toString("base64");
+            const dataUrl = `data:${mime};base64,${base64}`;
+            imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
+            console.log(`[Stream] 🖼️ Vision: loaded image attachment "${att.name}" (${Math.round(base64.length / 1024)}KB)`);
+          } catch (imgErr: any) {
+            console.warn(`[Stream] 🖼️ Vision: failed to load image "${att.name}":`, imgErr?.message);
+          }
+        }
+      }
+
+      // If we have images, convert the last user message to multimodal format
+      if (imagePartsForVision.length > 0) {
+        // Find the last user message and make it multimodal
+        for (let i = formattedMessages.length - 1; i >= 0; i--) {
+          if (formattedMessages[i].role === "user") {
+            const textContent = typeof formattedMessages[i].content === "string"
+              ? formattedMessages[i].content
+              : JSON.stringify(formattedMessages[i].content);
+            formattedMessages[i] = {
+              role: "user",
+              content: [
+                ...imagePartsForVision,
+                { type: "text", text: textContent },
+              ] as any,
+            };
+            console.log(`[Stream] 🖼️ Vision: converted last user message to multimodal (${imagePartsForVision.length} images)`);
+            break;
+          }
+        }
+
+        // Force deep lane for vision requests (images need more tokens)
+        if (latencyMode === 'fast') {
+          latencyMode = 'deep' as LatencyMode;
+          console.log(`[Stream] 🖼️ Vision: upgraded latency mode to 'deep' for image analysis`);
+        }
+      }
 
       // GUARD: Block image generation when attachments are present
       if (hasAttachments && attachmentsCount > 0) {

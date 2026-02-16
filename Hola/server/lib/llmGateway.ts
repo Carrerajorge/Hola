@@ -445,10 +445,13 @@ class LLMGateway {
     })();
 
     let mustKeep: ChatCompletionMessageParam = otherMessages[mustKeepIndex];
+    const isMultimodal = Array.isArray(mustKeep.content);
     let mustKeepText = toText(mustKeep);
-    let mustKeepTokens = estimateTokens(mustKeepText);
+    let mustKeepTokens = isMultimodal
+      ? 500 // Flat estimate for multimodal messages (image data is not counted as context tokens)
+      : estimateTokens(mustKeepText);
 
-    if (mustKeepTokens > maxTokens) {
+    if (mustKeepTokens > maxTokens && !isMultimodal) {
       mustKeepText = truncateText(mustKeepText, maxTokens);
       mustKeep = { ...mustKeep, content: mustKeepText } as ChatCompletionMessageParam;
       mustKeepTokens = estimateTokens(mustKeepText);
@@ -516,10 +519,41 @@ class LLMGateway {
 
     const geminiMessages: GeminiChatMessage[] = messages
       .filter(m => m.role !== "system")
-      .map(m => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
-      }));
+      .map(m => {
+        const role = m.role === "assistant" ? "model" : "user";
+
+        // Handle multimodal content (array of text + image_url parts)
+        if (Array.isArray(m.content)) {
+          const parts: any[] = [];
+          for (const part of m.content as any[]) {
+            if (part.type === "text") {
+              parts.push({ text: part.text });
+            } else if (part.type === "image_url" && part.image_url?.url) {
+              // Extract base64 from data URI for Gemini's inlineData format
+              const url = part.image_url.url as string;
+              const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+              if (dataUriMatch) {
+                parts.push({
+                  inlineData: {
+                    mimeType: dataUriMatch[1],
+                    data: dataUriMatch[2],
+                  },
+                });
+              } else {
+                // URL-based image — Gemini supports fileUri but for simplicity add as text reference
+                parts.push({ text: `[Image: ${url}]` });
+              }
+            }
+          }
+          if (parts.length === 0) parts.push({ text: "" });
+          return { role, parts };
+        }
+
+        return {
+          role,
+          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        };
+      });
 
     return { messages: geminiMessages, systemInstruction };
   }
@@ -966,13 +1000,52 @@ class LLMGateway {
     return this.anthropicClient;
   }
 
-  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }> } {
+  private convertToAnthropicMessages(messages: ChatCompletionMessageParam[]): { system?: string; messages: Array<{ role: "user" | "assistant"; content: any }> } {
     const systemParts: string[] = [];
-    const out: Array<{ role: "user" | "assistant"; content: string }> = [];
+    const out: Array<{ role: "user" | "assistant"; content: any }> = [];
 
     for (const msg of messages) {
       const role = (msg as any)?.role;
       const contentRaw = (msg as any)?.content;
+
+      // Handle multimodal content arrays (with image_url parts)
+      if (Array.isArray(contentRaw) && contentRaw.some((p: any) => p?.type === "image_url")) {
+        if (role === "system") {
+          // Extract text only from system messages
+          const text = contentRaw
+            .filter((p: any) => p?.type === "text")
+            .map((p: any) => p.text)
+            .join("\n");
+          if (text.trim()) systemParts.push(text);
+          continue;
+        }
+
+        // Build Anthropic multimodal content blocks
+        const anthropicContent: any[] = [];
+        for (const part of contentRaw) {
+          if (part?.type === "text" && part.text?.trim()) {
+            anthropicContent.push({ type: "text", text: part.text });
+          } else if (part?.type === "image_url" && part.image_url?.url) {
+            const url = part.image_url.url as string;
+            const dataUriMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+            if (dataUriMatch) {
+              anthropicContent.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: dataUriMatch[1],
+                  data: dataUriMatch[2],
+                },
+              });
+            }
+          }
+        }
+
+        if (anthropicContent.length > 0 && (role === "user" || role === "assistant")) {
+          out.push({ role, content: anthropicContent });
+          continue;
+        }
+      }
 
       const content = typeof contentRaw === "string"
         ? contentRaw

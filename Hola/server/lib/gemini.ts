@@ -36,7 +36,7 @@ export type GeminiModelType = typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS];
 
 export interface GeminiChatMessage {
   role: "user" | "model";
-  parts: { text: string }[];
+  parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
 }
 
 export interface GeminiChatOptions {
