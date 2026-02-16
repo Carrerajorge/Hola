@@ -1705,8 +1705,10 @@ export function ChatInterface({
           ? { ...m, deliveryStatus: "sent", deliveryError: undefined }
           : m
       ));
-      setAiState("idle");
-      setAiProcessSteps([]);
+      if (aiStateRef.current === "thinking") {
+        setAiState("idle");
+        setAiProcessSteps([]);
+      }
     } catch (analysisError: any) {
       if (analysisError?.name === "AbortError") {
         return;
@@ -1722,8 +1724,10 @@ export function ChatInterface({
           content: `No se pudo analizar el documento. ${errorMessage}`,
         };
       }));
-      setAiState("idle");
-      setAiProcessSteps([]);
+      if (aiStateRef.current === "thinking") {
+        setAiState("idle");
+        setAiProcessSteps([]);
+      }
       console.error(`[Document Analysis] (${userFriendlySource}) failed for userMessage ${opts.userMessageId}:`, analysisError);
       throw analysisError;
     } finally {
