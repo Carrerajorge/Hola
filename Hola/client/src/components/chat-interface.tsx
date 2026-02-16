@@ -1125,11 +1125,14 @@ export function ChatInterface({
     scrollToBottom();
   }, [aiState, streamingContent, userHasScrolledUp, scrollToBottom]);
 
-  const prevMessageCountRef = useRef(displayMessages.length);
+  const prevMessageCountRef = useRef(0);
   useEffect(() => {
     const prevCount = prevMessageCountRef.current;
     const currentCount = displayMessages.length;
     prevMessageCountRef.current = currentCount;
+
+    // Skip the very first render (mount) to avoid triggering scroll cascades
+    if (prevCount === 0) return;
 
     if (currentCount > prevCount) {
       setUserHasScrolledUp(false);

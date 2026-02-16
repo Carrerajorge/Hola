@@ -250,19 +250,22 @@ export default function Home() {
 
     if (activeChat?.id === chatIdFromUrl) return;
 
-
-
     // Exit new chat mode and clear project selection
 
     setIsNewChatMode(false);
 
-    setNewChatStableKey(null);
+    // Only clear newChatStableKey if this navigation is NOT from our own
+    // pending chat creation (handleSendNewChatMessage sets location after
+    // creating the chat — clearing the key here would cause a remount
+    // that kills the in-flight streaming request).
+    const isPendingChatNavigation = pendingChatIdRef.current != null;
+    if (!isPendingChatNavigation) {
+      setNewChatStableKey(null);
+    }
 
     pendingChatIdRef.current = null;
 
     setSelectedProjectId(null);
-
-
 
     setActiveChatId(chatIdFromUrl);
 
