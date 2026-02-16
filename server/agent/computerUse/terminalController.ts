@@ -181,6 +181,8 @@ const MAX_ENV_KEY_LENGTH = 128;
 const MAX_ENV_VALUE_LENGTH = 4096;
 const MAX_FILE_OPERATION_BYTES = 5 * 1024 * 1024; // 5MB safety limit for file content/read operations
 const MAX_PATH_LENGTH = 2_048;
+const MAX_PACKAGES_PER_INSTALL = 64;
+const MAX_PACKAGE_NAME_LENGTH = 256;
 const MAX_SCRIPT_ARGS = 64;
 const MAX_SCRIPT_ARG_LENGTH = 2_048;
 const FORBIDDEN_SESSION_ENV_KEYS = new Set([
@@ -300,6 +302,45 @@ function validateScriptArgs(args?: unknown): string[] {
       throw new Error(`Script argument too long (max ${MAX_SCRIPT_ARG_LENGTH} chars)`);
     }
     return arg;
+  });
+}
+
+function validatePackageList(
+  manager: "npm" | "pip" | "apt",
+  packages: unknown
+): string[] {
+  if (!Array.isArray(packages)) {
+    throw new Error("packages must be an array");
+  }
+  if (packages.length === 0) {
+    throw new Error("packages array cannot be empty");
+  }
+  if (packages.length > MAX_PACKAGES_PER_INSTALL) {
+    throw new Error(`Too many packages (max ${MAX_PACKAGES_PER_INSTALL})`);
+  }
+
+  return packages.map((pkg, index) => {
+    if (typeof pkg !== "string") {
+      throw new Error(`Package at index ${index} must be a string`);
+    }
+    const normalizedPackage = pkg.trim();
+    if (!normalizedPackage) {
+      throw new Error(`Package at index ${index} is required`);
+    }
+    if (normalizedPackage.length > MAX_PACKAGE_NAME_LENGTH) {
+      throw new Error(`Package name too long (max ${MAX_PACKAGE_NAME_LENGTH} chars)`);
+    }
+    if (normalizedPackage.startsWith("-")) {
+      throw new Error(`Package at index ${index} cannot be an option`);
+    }
+    if (/\s/.test(normalizedPackage) || /[`$&|;<>]/.test(normalizedPackage) || normalizedPackage.includes("\u0000")) {
+      throw new Error(`Invalid characters in package at index ${index}`);
+    }
+    if (normalizedPackage.includes("(") || normalizedPackage.includes(")")) {
+      throw new Error(`Invalid characters in package at index ${index}`);
+    }
+
+    return normalizedPackage;
   });
 }
 
@@ -1072,14 +1113,17 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async installPackage(sessionId: string, manager: "npm" | "pip" | "apt", packages: string[]): Promise<CommandResult> {
-    const commands: Record<string, string> = {
-      npm: `npm install ${packages.join(" ")}`,
-      pip: `pip install ${packages.join(" ")}`,
-      apt: `apt-get install -y ${packages.join(" ")}`,
+    const safePackages = validatePackageList(manager, packages);
+    const commands: Record<string, { command: string; args: string[] }> = {
+      npm: { command: "npm", args: ["install"] },
+      pip: { command: "pip", args: ["install"] },
+      apt: { command: "apt-get", args: ["install", "-y"] },
     };
+    const command = commands[manager];
 
     return this.executeCommand(sessionId, {
-      command: commands[manager] || `${manager} install ${packages.join(" ")}`,
+      command: command.command,
+      args: [...command.args, ...safePackages],
       timeout: 120000,
     });
   }

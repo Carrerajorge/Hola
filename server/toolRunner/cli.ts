@@ -39,42 +39,18 @@ function writeLine(stream: NodeJS.WriteStream, payload: unknown): void {
 function toErrorCodeFromIssues(issues: Array<{ code?: string; severity?: string }>): ToolRunnerErrorCode {
   const codes = new Set(issues.map((issue) => issue.code || ""));
 
-  if (codes.has("TOOL_VERSION_MISMATCH")) {
+  if (Array.from(codes).some((code) => code.includes("VERSION"))) {
     return TOOL_RUNNER_ERROR_CODES.VERSION_MISMATCH;
   }
-
-  if (Array.from(codes).some((code) => code.startsWith("PREFLIGHT_"))) {
+  if (Array.from(codes).some((code) => code.includes("PREFLIGHT"))) {
     return TOOL_RUNNER_ERROR_CODES.PRECHECK_FAILED;
   }
-
   if (Array.from(codes).some((code) => code.includes("MSO_"))) {
     return TOOL_RUNNER_ERROR_CODES.OPENXML_INVALID;
   }
-
   if (Array.from(codes).some((code) => code.includes("TOOL_UNKNOWN"))) {
     return TOOL_RUNNER_ERROR_CODES.TOOL_NOT_FOUND;
   }
-
-  if (Array.from(codes).some((code) => code.includes("TOOL_TIMEOUT"))) {
-    return TOOL_RUNNER_ERROR_CODES.TOOL_TIMEOUT;
-  }
-
-  if (Array.from(codes).some((code) => code.includes("OUTPUT_"))) {
-    return TOOL_RUNNER_ERROR_CODES.OUTPUT_MISSING;
-  }
-
-  if (Array.from(codes).some((code) => code.includes("SANDBOX"))) {
-    return TOOL_RUNNER_ERROR_CODES.SANDBOX_FAILED;
-  }
-
-  if (Array.from(codes).some((code) => code.includes("INVALID_"))) {
-    return TOOL_RUNNER_ERROR_CODES.INVALID_INPUT;
-  }
-
-  if (Array.from(codes).some((code) => code.includes("RUNTIME"))) {
-    return TOOL_RUNNER_ERROR_CODES.TOOL_EXECUTION_FAILED;
-  }
-
   return TOOL_RUNNER_ERROR_CODES.TOOL_EXECUTION_FAILED;
 }
 
@@ -122,8 +98,6 @@ async function run(): Promise<void> {
   const commandToken = args[0]?.startsWith("--") ? undefined : args[0];
   const command = commandToken && isKnownTool(commandToken) ? (commandToken as ToolCommandName) : undefined;
 
-  const hasUnknownCommand = Boolean(args[0] && !args[0].startsWith("--") && !isKnownTool(args[0]));
-
   if (hasFlag(args, "--version")) {
     writeLine(process.stdout, {
       protocolVersion: TOOL_RUNNER_PROTOCOL_VERSION,
@@ -133,16 +107,6 @@ async function run(): Promise<void> {
   }
 
   if (hasFlag(args, "--capabilities")) {
-    if (hasUnknownCommand) {
-      const code = TOOL_RUNNER_ERROR_CODES.TOOL_NOT_FOUND;
-      writeLine(process.stderr, {
-        kind: "error",
-        code,
-        message: buildToolRunnerErrorMessage({ code, locale: "en", details: `Unknown command: ${args[0]}` }),
-      });
-      process.exit(getExitCodeForError(code));
-    }
-
     if (command) {
       writeLine(process.stdout, getToolDefinition(command));
       return;
@@ -156,16 +120,6 @@ async function run(): Promise<void> {
   }
 
   if (hasFlag(args, "--healthcheck")) {
-    if (hasUnknownCommand) {
-      const code = TOOL_RUNNER_ERROR_CODES.TOOL_NOT_FOUND;
-      writeLine(process.stderr, {
-        kind: "error",
-        code,
-        message: buildToolRunnerErrorMessage({ code, locale: "en", details: `Unknown command: ${args[0]}` }),
-      });
-      process.exit(getExitCodeForError(code));
-    }
-
     writeLine(process.stdout, getHealthSnapshot(command));
     return;
   }
