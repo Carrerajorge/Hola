@@ -431,7 +431,7 @@ export function registerAuthRoutes(app: Express): void {
           )
           VALUES (
             ${newUserId}, ${newUserId}, ${email}, ${username}, ${hashedPassword}, ${username}, '',
-            'team_admin', 'free', 'active', 'email', 'true', NOW(), NOW()
+            'free', 'free', 'active', 'email', 'true', NOW(), NOW()
           )
           ON CONFLICT (email) DO NOTHING
         `);
