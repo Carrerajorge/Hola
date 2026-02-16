@@ -223,6 +223,30 @@ export const DEFAULT_INTEGRATION_PROVIDERS: Array<{
     category: "communication",
     isActive: "true",
   },
+  {
+    id: "messenger",
+    name: "Facebook Messenger",
+    description: "Messenger via Meta Page API (webhooks + envío de mensajes)",
+    iconUrl: "https://upload.wikimedia.org/wikipedia/commons/b/be/Facebook_Messenger_logo_2020.svg",
+    authType: "custom",
+    authConfig: {
+      connectionType: "page_token",
+    },
+    category: "communication",
+    isActive: "true",
+  },
+  {
+    id: "wechat",
+    name: "WeChat Official Account",
+    description: "Cuenta oficial de WeChat (customer service API)",
+    iconUrl: "https://upload.wikimedia.org/wikipedia/commons/e/e0/WeChat.svg",
+    authType: "custom",
+    authConfig: {
+      connectionType: "app_credentials",
+    },
+    category: "communication",
+    isActive: "true",
+  },
 ];
 
 export const DEFAULT_INTEGRATION_TOOLS: Array<{
@@ -526,6 +550,26 @@ export const DEFAULT_INTEGRATION_TOOLS: Array<{
     providerId: "telegram",
     name: "Enviar mensaje",
     description: "Envía un mensaje por Telegram",
+    requiredScopes: [],
+    dataAccessLevel: "write",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "messenger:send_message",
+    providerId: "messenger",
+    name: "Enviar mensaje por Messenger",
+    description: "Envía un mensaje de texto a un usuario de Messenger",
+    requiredScopes: ["pages_messaging"],
+    dataAccessLevel: "write",
+    confirmationRequired: "false",
+    isActive: "true",
+  },
+  {
+    id: "wechat:send_message",
+    providerId: "wechat",
+    name: "Enviar mensaje por WeChat",
+    description: "Envía un mensaje de texto a un usuario de WeChat",
     requiredScopes: [],
     dataAccessLevel: "write",
     confirmationRequired: "false",

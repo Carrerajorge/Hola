@@ -87,6 +87,18 @@ const envSchema = z.object({
   WHATSAPP_CLOUD_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_CLOUD_DEFAULT_USER_ID: z.string().optional(),
 
+  // Messenger (Meta)
+  MESSENGER_PAGE_ACCESS_TOKEN: z.string().optional(),
+  MESSENGER_APP_SECRET: z.string().optional(),
+  MESSENGER_VERIFY_TOKEN: z.string().optional(),
+  MESSENGER_DEFAULT_USER_ID: z.string().optional(),
+
+  // WeChat Official Account
+  WECHAT_APP_ID: z.string().optional(),
+  WECHAT_APP_SECRET: z.string().optional(),
+  WECHAT_TOKEN: z.string().optional(),
+  WECHAT_DEFAULT_USER_ID: z.string().optional(),
+
   // Channel ingest execution mode:
   // - auto: queue in production when Redis is configured, otherwise in-process
   // - queue: always enqueue to BullMQ (requires Redis + worker)
@@ -174,6 +186,15 @@ function validateEnv() {
   }
   if (data.WHATSAPP_VERIFY_TOKEN && !data.WHATSAPP_APP_SECRET) {
     console.warn("⚠️  WARNING: WHATSAPP_APP_SECRET is not set. WhatsApp Cloud webhook signatures will not be verified.");
+  }
+  if (data.MESSENGER_PAGE_ACCESS_TOKEN && !data.MESSENGER_VERIFY_TOKEN) {
+    console.warn("⚠️  WARNING: MESSENGER_VERIFY_TOKEN is not set. Messenger webhook verification will reject all requests.");
+  }
+  if (data.MESSENGER_PAGE_ACCESS_TOKEN && !data.MESSENGER_APP_SECRET) {
+    console.warn("⚠️  WARNING: MESSENGER_APP_SECRET is not set. Messenger webhook signatures will not be verified.");
+  }
+  if (data.WECHAT_APP_ID && !data.WECHAT_TOKEN) {
+    console.warn("⚠️  WARNING: WECHAT_TOKEN is not set. WeChat webhook requests won't be authenticated.");
   }
 
   return data;

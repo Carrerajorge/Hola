@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,33 @@ const WhatsAppConnectDialogInner = lazy(() =>
     default: m.WhatsAppConnectDialog,
   }))
 );
+
+/* ─── Channel status hook ─────────────────────────── */
+
+type IntegrationStatus = "active" | "inactive" | "unknown";
+
+function useChannelStatus(channelId: "telegram" | "messenger" | "wechat", enabled: boolean) {
+  const [status, setStatus] = useState<IntegrationStatus>("unknown");
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/integrations/${channelId}/status`);
+      if (!res.ok) { setStatus("unknown"); return; }
+      const data = await res.json();
+      const accounts: Array<{ status?: string }> = data?.accounts || [];
+      const hasActive = accounts.some((a) => a.status === "active");
+      setStatus(hasActive ? "active" : accounts.length > 0 ? "inactive" : "unknown");
+    } catch {
+      setStatus("unknown");
+    }
+  }, [channelId]);
+
+  useEffect(() => {
+    if (enabled) refresh();
+  }, [enabled, refresh]);
+
+  return { status, refresh };
+}
 
 /* ─── Channel definitions ─────────────────────────── */
 
@@ -153,7 +180,7 @@ function ChannelLogo({ id, className }: { id: ChannelId; className?: string }) {
 
 /* ─── Telegram Config Panel ───────────────────────── */
 
-function TelegramConfigPanel({ onBack }: { onBack: () => void }) {
+function TelegramConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?: () => void }) {
   const [botToken, setBotToken] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -174,6 +201,7 @@ function TelegramConfigPanel({ onBack }: { onBack: () => void }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatus("saved");
+      onSaved?.();
     } catch (e: any) {
       setError(e?.message || "Error al guardar");
       setStatus("error");
@@ -251,7 +279,7 @@ function TelegramConfigPanel({ onBack }: { onBack: () => void }) {
 
 /* ─── Messenger Config Panel ──────────────────────── */
 
-function MessengerConfigPanel({ onBack }: { onBack: () => void }) {
+function MessengerConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?: () => void }) {
   const [pageId, setPageId] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -281,6 +309,7 @@ function MessengerConfigPanel({ onBack }: { onBack: () => void }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatus("saved");
+      onSaved?.();
     } catch (e: any) {
       setError(e?.message || "Error al guardar");
       setStatus("error");
@@ -358,7 +387,7 @@ function MessengerConfigPanel({ onBack }: { onBack: () => void }) {
 
 /* ─── WeChat Config Panel ─────────────────────────── */
 
-function WeChatConfigPanel({ onBack }: { onBack: () => void }) {
+function WeChatConfigPanel({ onBack, onSaved }: { onBack: () => void; onSaved?: () => void }) {
   const [appId, setAppId] = useState("");
   const [appSecret, setAppSecret] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -379,6 +408,7 @@ function WeChatConfigPanel({ onBack }: { onBack: () => void }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setStatus("saved");
+      onSaved?.();
     } catch (e: any) {
       setError(e?.message || "Error al guardar");
       setStatus("error");
@@ -463,6 +493,9 @@ export function ChannelsHubDialog({
   const [activeChannel, setActiveChannel] = useState<ChannelId | null>(null);
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const { status: waStatus } = useWhatsAppWebStatus(open);
+  const tgStatus = useChannelStatus("telegram", open);
+  const msgStatus = useChannelStatus("messenger", open);
+  const wcStatus = useChannelStatus("wechat", open);
 
   // Reset when dialog closes
   const handleOpenChange = (isOpen: boolean) => {
@@ -481,6 +514,13 @@ export function ChannelsHubDialog({
     }
   };
 
+  const getChannelIntegrationStatus = (channelId: ChannelId): IntegrationStatus => {
+    if (channelId === "telegram") return tgStatus.status;
+    if (channelId === "messenger") return msgStatus.status;
+    if (channelId === "wechat") return wcStatus.status;
+    return "unknown";
+  };
+
   const getStatusDot = (channelId: ChannelId) => {
     if (channelId === "whatsapp") {
       return (
@@ -494,8 +534,17 @@ export function ChannelsHubDialog({
         />
       );
     }
-    // Other channels: gray (not configured)
-    return <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-gray-300 dark:bg-gray-600" />;
+    const s = getChannelIntegrationStatus(channelId);
+    return (
+      <span
+        className={cn(
+          "h-2.5 w-2.5 rounded-full shrink-0",
+          s === "active" && "bg-green-500",
+          s === "inactive" && "bg-amber-500",
+          s === "unknown" && "bg-gray-300 dark:bg-gray-600"
+        )}
+      />
+    );
   };
 
   // WhatsApp opens its own dialog (reuses existing component)
@@ -522,7 +571,7 @@ export function ChannelsHubDialog({
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-md">
-          <TelegramConfigPanel onBack={() => setActiveChannel(null)} />
+          <TelegramConfigPanel onBack={() => setActiveChannel(null)} onSaved={tgStatus.refresh} />
         </DialogContent>
       </Dialog>
     );
@@ -532,7 +581,7 @@ export function ChannelsHubDialog({
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-md">
-          <MessengerConfigPanel onBack={() => setActiveChannel(null)} />
+          <MessengerConfigPanel onBack={() => setActiveChannel(null)} onSaved={msgStatus.refresh} />
         </DialogContent>
       </Dialog>
     );
@@ -542,7 +591,7 @@ export function ChannelsHubDialog({
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-md">
-          <WeChatConfigPanel onBack={() => setActiveChannel(null)} />
+          <WeChatConfigPanel onBack={() => setActiveChannel(null)} onSaved={wcStatus.refresh} />
         </DialogContent>
       </Dialog>
     );
@@ -598,6 +647,8 @@ export function ChannelsHubDialog({
               {/* Connect hint */}
               <div className="mt-3 text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">
                 {ch.id === "whatsapp" && waStatus.state === "connected"
+                  ? "Conectado"
+                  : ch.id !== "whatsapp" && getChannelIntegrationStatus(ch.id) === "active"
                   ? "Conectado"
                   : "Configurar →"}
               </div>

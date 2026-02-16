@@ -157,8 +157,41 @@ export async function findWhatsAppCloudAccountByPhoneNumberId(
     .where(
       and(
         eq(integrationAccounts.providerId, "whatsapp_cloud"),
-        // JSONB metadata: { phoneNumberId: "..." }
         sql`${integrationAccounts.metadata} ->> 'phoneNumberId' = ${phoneNumberId}`,
+        eq(integrationAccounts.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function findMessengerAccountByPageId(
+  pageId: string,
+): Promise<IntegrationAccount | null> {
+  const [row] = await db
+    .select()
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.providerId, "messenger"),
+        sql`${integrationAccounts.metadata} ->> 'pageId' = ${pageId}`,
+        eq(integrationAccounts.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function findWeChatAccountByAppId(
+  appId: string,
+): Promise<IntegrationAccount | null> {
+  const [row] = await db
+    .select()
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.providerId, "wechat"),
+        sql`${integrationAccounts.metadata} ->> 'appId' = ${appId}`,
         eq(integrationAccounts.status, "active"),
       ),
     )

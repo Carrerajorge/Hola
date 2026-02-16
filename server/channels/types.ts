@@ -1,4 +1,4 @@
-export type ExternalChannel = "telegram" | "whatsapp_cloud";
+export type ExternalChannel = "telegram" | "whatsapp_cloud" | "messenger" | "wechat";
 
 export type ChannelIngestJob =
   | {
@@ -8,6 +8,16 @@ export type ChannelIngestJob =
     }
   | {
       channel: "whatsapp_cloud";
+      payload: unknown;
+      receivedAt?: string;
+    }
+  | {
+      channel: "messenger";
+      payload: unknown;
+      receivedAt?: string;
+    }
+  | {
+      channel: "wechat";
       payload: unknown;
       receivedAt?: string;
     };

@@ -68,6 +68,8 @@ import feedbackRouter from "./routes/feedbackRouter";
 import { createChannelWebhooksRouter } from "./routes/channelWebhooksRouter";
 import { createTelegramIntegrationRouter } from "./routes/telegramIntegrationRouter";
 import { createWhatsAppCloudIntegrationRouter } from "./routes/whatsappCloudIntegrationRouter";
+import { createMessengerIntegrationRouter } from "./routes/messengerIntegrationRouter";
+import { createWeChatIntegrationRouter } from "./routes/wechatIntegrationRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createSettingsRouter } from "./routes/settingsRouter";
 import { superintelligenceRouter } from "./routes/superintelligence";
@@ -567,6 +569,8 @@ export async function registerRoutes(
   app.use('/api/integrations/whatsapp/web', createWhatsAppWebRouter());
   app.use("/api/integrations/whatsapp/cloud", createWhatsAppCloudIntegrationRouter());
   app.use("/api/integrations/telegram", createTelegramIntegrationRouter());
+  app.use("/api/integrations/messenger", createMessengerIntegrationRouter());
+  app.use("/api/integrations/wechat", createWeChatIntegrationRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);

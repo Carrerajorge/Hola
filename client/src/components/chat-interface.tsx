@@ -5165,7 +5165,7 @@ IMPORTANTE:
             abortControllerRef.current = null;
             return;
           }
-          {
+          if (effectiveRunId) {
             // SSE streaming mode - real-time streaming from server
             setAiState("responding");
 

@@ -72,7 +72,13 @@ export async function telegramSendDocument(
 export async function telegramSetWebhook(input: {
   webhookUrl: string;
   secretToken?: string;
+  botToken?: string;
 }): Promise<void> {
+  const token = input.botToken || env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error("No Telegram bot token available");
+  }
+
   const payload: Record<string, unknown> = {
     url: input.webhookUrl,
   };
@@ -81,6 +87,17 @@ export async function telegramSetWebhook(input: {
     payload.secret_token = input.secretToken;
   }
 
-  await telegramCall("setWebhook", payload);
+  const url = `${TELEGRAM_API_BASE}/bot${token}/setWebhook`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const json = (await resp.json().catch(() => null)) as any;
+  if (!resp.ok || !json?.ok) {
+    const desc = json?.description ? String(json.description) : `HTTP ${resp.status}`;
+    throw new Error(`Telegram API error (setWebhook): ${desc}`);
+  }
 }
 
