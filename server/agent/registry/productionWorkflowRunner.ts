@@ -1457,7 +1457,7 @@ IMG: [descripción breve de imagen relevante]
         trace: {
           source: "productionWorkflowRunner",
         },
-      ]);
+      });
     }
 
     // QA Gate: Validate that the PPTX has content
