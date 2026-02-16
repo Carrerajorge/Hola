@@ -104,9 +104,11 @@ jobs:
             -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             docker-compose.infra.yml \
             docker-compose.slot.yml \
+            nginx.conf \
             scripts/deploy-bluegreen.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
             ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
             -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
@@ -115,6 +117,7 @@ jobs:
              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy
@@ -260,9 +263,11 @@ jobs:
             -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             docker-compose.infra.yml \
             docker-compose.slot.yml \
+            nginx.conf \
             scripts/deploy-bluegreen.sh \
             scripts/rollback-bluegreen.sh \
             scripts/health-dashboard.sh \
+            scripts/vps-bootstrap-bluegreen.sh \
             ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
             -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
@@ -271,6 +276,7 @@ jobs:
              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
+             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy

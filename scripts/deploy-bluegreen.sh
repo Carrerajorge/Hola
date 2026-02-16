@@ -480,9 +480,28 @@ echo ""
 
 # ── Step 9: Swap Nginx upstream ────────────────────────────
 log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
+
+# Auto-bootstrap upstream configs if missing (first blue-green deploy)
+ensure_upstream_conf() {
+  local slot="$1" port="$2" path="${NGINX_CONF_DIR}/iliagpt-upstream-${1}.conf"
+  if [ ! -f "${path}" ]; then
+    logw "Auto-creating missing ${path}"
+    cat > "${path}" << UPEOF
+upstream iliagpt {
+    server 127.0.0.1:${port};
+    keepalive 32;
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
+UPEOF
+    logok "Created ${path}"
+  fi
+}
+ensure_upstream_conf "blue" "5000"
+ensure_upstream_conf "green" "5001"
+
 if [ ! -f "${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf" ]; then
-  loge "Missing ${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf"
-  log "  Run scripts/vps-bootstrap-bluegreen.sh first."
+  loge "Missing ${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf (auto-create failed)"
   slot "${NEW_SLOT}" down --remove-orphans || true
   NEW_SLOT_STARTED=false
   exit 1
