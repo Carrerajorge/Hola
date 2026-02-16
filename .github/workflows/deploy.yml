@@ -57,6 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci, build_images]
     if: >-
+      success() &&
       needs.ci.result == 'success' &&
       needs.build_images.result == 'success' &&
       (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
@@ -99,6 +100,10 @@ jobs:
             echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
           echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy gate assertion
+        run: |
+          echo "Deploy gate passed: event=${{ github.event_name }}, ci=${{ needs.ci.result }}, build_images=${{ needs.build_images.result }}"
 
       - name: Wait for Docker images in GHCR
         if: ${{ github.event_name == 'push' }}

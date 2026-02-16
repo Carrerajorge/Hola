@@ -30,13 +30,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        if: always()
 
       - name: Initialize CodeQL
+        id: init
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           config-file: ./.github/codeql/codeql-config.yml
+        if: always()
 
       - name: Analyze
+        id: analyze
         uses: github/codeql-action/analyze@v4
+        if: always()
+
+      - name: Summarize CodeQL outcome
+        if: always()
+        run: |
+          if [[ "${{ steps.init.outcome }}" != "success" ]]; then
+            INIT_CAUSE="Initialization failed (tool setup, permissions, config-file parse, or checkout issue)."
+          else
+            INIT_CAUSE="CodeQL initialization completed."
+          fi
+
+          if [[ "${{ steps.analyze.outcome }}" != "success" ]]; then
+            ANALYZE_CAUSE="Analyze failed for language \`${{ matrix.language }}\`; check scan logs and SARIF upload."
+          else
+            ANALYZE_CAUSE="Static analysis succeeded for language \`${{ matrix.language }}\`."
+          fi
+
+          echo "## CodeQL Outcome" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Phase | Outcome | Cause |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|---------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Initialize | \`${{ steps.init.outcome }}\` | ${INIT_CAUSE} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Analyze | \`${{ steps.analyze.outcome }}\` | ${ANALYZE_CAUSE} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Final Job | \`${{ job.status }}\` | ${INIT_CAUSE%'.'}; ${ANALYZE_CAUSE} |" >> "$GITHUB_STEP_SUMMARY"
