@@ -1345,7 +1345,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           // Convert resolved attachments to BatchAttachment format
           // storagePaths were already resolved earlier
           const batchAttachments: BatchAttachment[] = resolvedAttachments
-            .filter((att: any) => att.storagePath || att.content)
+            .filter((att: any) => {
+              if (!(att.storagePath || att.content)) return false;
+              // Exclude image attachments — they are handled by the Vision pipeline below
+              const mime = (att.mimeType || att.type || "").toLowerCase();
+              if (mime.startsWith("image/")) return false;
+              return true;
+            })
             .map((att: any) => ({
               name: att.name || 'document',
               mimeType: att.mimeType || att.type || 'application/octet-stream',
@@ -1353,55 +1359,62 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               content: att.content
             }));
 
-          batchResult = await batchProcessor.processBatch(batchAttachments);
+          // Skip batch processing if all attachments were images (handled by Vision pipeline)
+          if (batchAttachments.length === 0) {
+            console.log(`[Stream] 🖼️ All attachments are images — skipping DocumentBatchProcessor`);
+          } else {
+            batchResult = await batchProcessor.processBatch(batchAttachments);
+          }
 
-          // Log observability metrics per file
-          console.log(`[Stream] Batch processing complete:`, {
-            attachmentsCount: batchResult.attachmentsCount,
-            processedFiles: batchResult.processedFiles,
-            failedFiles: batchResult.failedFiles.length,
-            totalChunks: batchResult.chunks.length,
-            totalTokens: batchResult.totalTokens
-          });
-
-          // Log per-file stats
-          for (const stat of batchResult.stats) {
-            console.log(`[Stream] File stats: ${stat.filename}`, {
-              bytesRead: stat.bytesRead,
-              pagesProcessed: stat.pagesProcessed,
-              tokensExtracted: stat.tokensExtracted,
-              parseTimeMs: stat.parseTimeMs,
-              chunkCount: stat.chunkCount,
-              status: stat.status
+          if (batchResult) {
+            // Log observability metrics per file
+            console.log(`[Stream] Batch processing complete:`, {
+              attachmentsCount: batchResult.attachmentsCount,
+              processedFiles: batchResult.processedFiles,
+              failedFiles: batchResult.failedFiles.length,
+              totalChunks: batchResult.chunks.length,
+              totalTokens: batchResult.totalTokens
             });
-          }
 
-          // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
-          if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
-            const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
-            const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
-            console.error(`[Stream] ${errorMsg}`);
+            // Log per-file stats
+            for (const stat of batchResult.stats) {
+              console.log(`[Stream] File stats: ${stat.filename}`, {
+                bytesRead: stat.bytesRead,
+                pagesProcessed: stat.pagesProcessed,
+                tokensExtracted: stat.tokensExtracted,
+                parseTimeMs: stat.parseTimeMs,
+                chunkCount: stat.chunkCount,
+                status: stat.status
+              });
+            }
 
-            res.write(`event: error\ndata: ${JSON.stringify({
-              type: 'coverage_failure',
-              message: 'No se pudieron procesar todos los archivos solicitados',
-              details: {
-                requested: batchResult.attachmentsCount,
-                processed: batchResult.processedFiles,
-                failedFiles: batchResult.failedFiles
-              },
-              requestId,
-              timestamp: Date.now()
-            })}\n\n`);
+            // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
+            if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
+              const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
+              const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
+              console.error(`[Stream] ${errorMsg}`);
 
-            clearInterval(heartbeatInterval);
-            return res.end();
-          }
+              res.write(`event: error\ndata: ${JSON.stringify({
+                type: 'coverage_failure',
+                message: 'No se pudieron procesar todos los archivos solicitados',
+                details: {
+                  requested: batchResult.attachmentsCount,
+                  processed: batchResult.processedFiles,
+                  failedFiles: batchResult.failedFiles
+                },
+                requestId,
+                timestamp: Date.now()
+              })}\n\n`);
 
-          // Use unified context from batch processor
-          if (batchResult.unifiedContext) {
-            attachmentContext = batchResult.unifiedContext;
-            console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+              clearInterval(heartbeatInterval);
+              return res.end();
+            }
+
+            // Use unified context from batch processor
+            if (batchResult.unifiedContext) {
+              attachmentContext = batchResult.unifiedContext;
+              console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+            }
           }
 
         } catch (batchError: any) {
@@ -1445,26 +1458,42 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           const mime = (att.mimeType || att.type || "").toLowerCase();
           if (!mime.startsWith("image/")) continue;
 
-          // Try to read the image file and convert to base64
+          const storagePath = att.storagePath || "";
+          let imageBuffer: Buffer | null = null;
+
+          // Try GCS (object storage) first — production stores files there
           try {
-            const fs = await import("fs/promises");
-            const path = await import("path");
-            let filePath = att.storagePath || "";
+            const objStore = new ObjectStorageService();
+            imageBuffer = await objStore.getObjectEntityBuffer(storagePath);
+            console.log(`[Stream] 🖼️ Vision: loaded image from GCS "${att.name}" (${imageBuffer.length} bytes)`);
+          } catch {
+            // GCS failed — try local file fallback (dev mode)
+          }
 
-            // Resolve local storage path
-            if (filePath.startsWith("/objects/uploads/")) {
-              filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
-            } else if (!path.default.isAbsolute(filePath)) {
-              filePath = path.default.join(process.cwd(), "uploads", filePath);
+          // Local file fallback
+          if (!imageBuffer) {
+            try {
+              const fs = await import("fs/promises");
+              const path = await import("path");
+              let filePath = storagePath;
+              if (filePath.startsWith("/objects/uploads/")) {
+                filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
+              } else if (filePath.startsWith("/objects/")) {
+                filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
+              } else if (!path.default.isAbsolute(filePath)) {
+                filePath = path.default.join(process.cwd(), "uploads", filePath);
+              }
+              imageBuffer = await fs.readFile(filePath);
+              console.log(`[Stream] 🖼️ Vision: loaded image from local "${att.name}" (${imageBuffer.length} bytes)`);
+            } catch (localErr: any) {
+              console.warn(`[Stream] 🖼️ Vision: failed to load image "${att.name}":`, localErr?.message);
             }
+          }
 
-            const imageBuffer = await fs.readFile(filePath);
+          if (imageBuffer) {
             const base64 = imageBuffer.toString("base64");
             const dataUrl = `data:${mime};base64,${base64}`;
             imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
-            console.log(`[Stream] 🖼️ Vision: loaded image attachment "${att.name}" (${Math.round(base64.length / 1024)}KB)`);
-          } catch (imgErr: any) {
-            console.warn(`[Stream] 🖼️ Vision: failed to load image "${att.name}":`, imgErr?.message);
           }
         }
       }
