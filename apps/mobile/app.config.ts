@@ -16,11 +16,9 @@ const config: ExpoConfig = {
   assetBundlePatterns: ['**/*'],
   ios: {
     supportsTablet: true,
-    // TODO: set to your Apple bundle identifier
     bundleIdentifier: 'com.iliagpt.app',
   },
   android: {
-    // TODO: set to your Android applicationId
     package: 'com.iliagpt.app',
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',

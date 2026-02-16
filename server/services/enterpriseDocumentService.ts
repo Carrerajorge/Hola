@@ -1015,23 +1015,63 @@ export class EnterpriseDocumentService {
 
   private async generatePDF(request: DocumentRequest): Promise<DocumentResult> {
     try {
-      // Generate DOCX first, then convert (basic approach)
-      // In production, use a proper PDF library like PDFKit
       const docxResult = await this.wordGenerator.generate(request);
       
       if (!docxResult.success) {
         return docxResult;
       }
 
-      // For now, return DOCX with PDF metadata
-      // TODO: Implement proper PDF generation with PDFKit
+      const contentLines: string[] = [];
+      contentLines.push(`Título: ${request.title || "Documento"}`);
+      if (request.subtitle) {
+        contentLines.push(`Resumen: ${request.subtitle}`);
+      }
+      if (request.author) {
+        contentLines.push(`Autor: ${request.author}`);
+      }
+
+      const sections = request.sections?.length
+        ? request.sections
+        : [{
+            id: "summary",
+            title: "Resumen",
+            content: "Documento sin secciones específicas.",
+            level: 1,
+          } as DocumentSection];
+      const sanitizePdfLine = (value: unknown, maxLength = 1200): string =>
+        String(typeof value === "string" ? value : "")
+          .replace(/\0/g, "")
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+          .trim()
+          .substring(0, maxLength);
+
+      for (const section of sections) {
+        contentLines.push(`${section.title}`);
+        contentLines.push(sanitizePdfLine(section.content, 1200));
+
+        if (section.tables && section.tables.length > 0) {
+          const table = section.tables[0];
+          if (table.headers?.length) {
+            contentLines.push(`Tabla: ${table.headers.filter(Boolean).join(" | ")}`);
+            for (const row of table.rows || []) {
+              const rowContent = (row || []).filter(Boolean).join(" | ");
+              if (rowContent) {
+                contentLines.push(rowContent);
+              }
+            }
+          }
+        }
+      }
+
+      const fallbackPdf = this.buildBasicPdfBuffer(contentLines);
+
       return {
         success: true,
-        buffer: docxResult.buffer,
+        buffer: fallbackPdf,
         filename: `${this.sanitizeFilename(request.title)}.pdf`,
         mimeType: "application/pdf",
-        sizeBytes: docxResult.sizeBytes,
-        error: "PDF generation pending - returning DOCX. Install PDFKit for native PDF.",
+        sizeBytes: fallbackPdf.length,
+        error: "PDF generation used fallback renderer. Install PDFKit for native PDF output.",
       };
     } catch (error: any) {
       return {
@@ -1042,6 +1082,89 @@ export class EnterpriseDocumentService {
         error: error.message,
       };
     }
+  }
+
+  private buildBasicPdfBuffer(contentLines: string[]): Buffer {
+    const safeLines = contentLines.map((line) => this.escapePdfText(line)).slice(0, 80);
+    const positionedLines: string[] = [];
+    let y = 760;
+
+    for (const line of safeLines) {
+      const chunks = this.wrapPdfLine(line, 88);
+      for (const chunk of chunks) {
+        if (y < 80) {
+          break;
+        }
+        positionedLines.push(`1 0 0 1 56 ${y} Tm`);
+        positionedLines.push(`(${chunk}) Tj`);
+        y -= 14;
+      }
+      if (y < 80) {
+        break;
+      }
+    }
+
+    if (safeLines.length > 80) {
+      positionedLines.push(`1 0 0 1 56 68 Tm`);
+      positionedLines.push('(Contenido truncado por límite del PDF de respaldo.) Tj');
+    }
+
+    const stream = `BT\n/F1 12 Tf\n${positionedLines.join("\n")}\nET`;
+    const streamLength = Buffer.byteLength(stream, "utf8");
+    const streamObject = `<< /Length ${streamLength} >>\nstream\n${stream}\nendstream`;
+
+    const objectBodies = [
+      `<< /Type /Catalog /Pages 2 0 R >>`,
+      `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>`,
+      `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+      streamObject,
+    ];
+
+    let pdf = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    objectBodies.forEach((objectBody, index) => {
+      offsets.push(Buffer.byteLength(pdf, "utf8"));
+      pdf += `${index + 1} 0 obj\n${objectBody}\nendobj\n`;
+    });
+
+    const xrefOffset = Buffer.byteLength(pdf, "utf8");
+    pdf += "xref\n";
+    pdf += `0 ${objectBodies.length + 1}\n`;
+    pdf += "0000000000 65535 f \n";
+    for (const offset of offsets) {
+      pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    }
+    pdf += "trailer\n";
+    pdf += `<< /Size ${objectBodies.length + 1} /Root 1 0 R >>\n`;
+    pdf += `startxref\n${xrefOffset}\n%%EOF`;
+    return Buffer.from(pdf, "utf8");
+  }
+
+  private wrapPdfLine(line: string, maxLength: number): string[] {
+    if (!line) return [];
+    const chunks: string[] = [];
+    let remaining = line;
+
+    while (remaining.length > maxLength) {
+      chunks.push(remaining.slice(0, maxLength));
+      remaining = remaining.slice(maxLength);
+    }
+
+    if (remaining.length > 0) {
+      chunks.push(remaining);
+    }
+
+    return chunks;
+  }
+
+  private escapePdfText(value: string): string {
+    return String(value)
+      .replace(/\\/g, "\\\\")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)")
+      .replace(/\r/g, " ")
+      .replace(/\n/g, " ");
   }
 
   private sanitizeFilename(name: string): string {
