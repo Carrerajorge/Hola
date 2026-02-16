@@ -523,6 +523,99 @@ export function createAgentModeRouter() {
     }
   });
 
+  router.get("/runs/:id/metrics", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const steps = await db.select()
+        .from(agentModeSteps)
+        .where(eq(agentModeSteps.runId, id))
+        .orderBy(agentModeSteps.stepIndex);
+
+      const events = await db.select()
+        .from(agentModeEvents)
+        .where(eq(agentModeEvents.runId, id))
+        .orderBy(asc(agentModeEvents.timestamp));
+
+      const completedSteps = steps.filter(step => step.status === "succeeded" || step.status === "failed");
+      const succeededSteps = steps.filter(step => step.status === "succeeded");
+      const failedSteps = steps.filter(step => step.status === "failed");
+
+      const toolUsage = steps.reduce<Record<string, {
+        toolName: string;
+        totalRuns: number;
+        successCount: number;
+        failureCount: number;
+        avgDurationMs: number | null;
+      }>>((acc, step) => {
+        const toolName = step.toolName || "unknown";
+        if (!acc[toolName]) {
+          acc[toolName] = {
+            toolName,
+            totalRuns: 0,
+            successCount: 0,
+            failureCount: 0,
+            avgDurationMs: null,
+          };
+        }
+        acc[toolName].totalRuns += 1;
+        if (step.status === "succeeded") acc[toolName].successCount += 1;
+        if (step.status === "failed") acc[toolName].failureCount += 1;
+
+        if (step.startedAt && step.completedAt) {
+          const durationMs = step.completedAt.getTime() - step.startedAt.getTime();
+          const currentAverage = acc[toolName].avgDurationMs ?? 0;
+          const previousCount = acc[toolName].totalRuns - 1;
+          acc[toolName].avgDurationMs = ((currentAverage * previousCount) + durationMs) / acc[toolName].totalRuns;
+        }
+        return acc;
+      }, {});
+
+      const eventCounts = events.reduce<Record<string, number>>((acc, event) => {
+        acc[event.eventType] = (acc[event.eventType] || 0) + 1;
+        return acc;
+      }, {});
+
+      const lastFailedStep = failedSteps[failedSteps.length - 1];
+      const lastError = lastFailedStep?.error || run.error || null;
+
+      const runStart = run.startedAt?.getTime();
+      const runEnd = run.completedAt?.getTime();
+      const totalDurationMs = runStart ? ((runEnd || Date.now()) - runStart) : null;
+
+      res.json({
+        runId: run.id,
+        status: run.status,
+        totalDurationMs,
+        stepCount: steps.length,
+        completedSteps: completedSteps.length,
+        successRate: steps.length ? succeededSteps.length / steps.length : 0,
+        failures: failedSteps.map(step => ({
+          stepIndex: step.stepIndex,
+          toolName: step.toolName,
+          error: step.error,
+          completedAt: step.completedAt,
+        })),
+        toolUsage: Object.values(toolUsage),
+        eventCounts,
+        lastError,
+        startedAt: run.startedAt?.toISOString() || null,
+        completedAt: run.completedAt?.toISOString() || null,
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting run metrics:", error);
+      res.status(500).json({ error: "Failed to get agent run metrics" });
+    }
+  });
+
   router.get("/runs/:id/events/stream", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
