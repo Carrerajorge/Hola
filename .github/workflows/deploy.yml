@@ -53,7 +53,8 @@ jobs:
     needs: [ci, build_images]
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      needs.ci.result == 'success'
+      needs.ci.result == 'success' &&
+      needs.build_images.result == 'success'
     timeout-minutes: 20
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
