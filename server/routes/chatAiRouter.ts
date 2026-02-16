@@ -767,6 +767,19 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
 
+      // DEBUG: Log attachments received from frontend
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        console.log(`[Stream] INCOMING ATTACHMENTS (${attachments.length}):`, JSON.stringify(attachments.map((a: any) => ({
+          type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+          fileId: a.fileId, hasContent: !!a.content,
+        }))));
+      } else {
+        console.log(`[Stream] NO ATTACHMENTS in request body. Keys: ${Object.keys(req.body).join(', ')}`);
+      }
+      if (lastImageBase64) {
+        console.log(`[Stream] lastImageBase64 present: ${typeof lastImageBase64 === 'string' ? `${lastImageBase64.substring(0, 50)}... (${lastImageBase64.length} chars)` : typeof lastImageBase64}`);
+      }
+
       // DEBUG: Log all incoming request parameters for docTool verification
       // Avoid externally-controlled format strings: don't interpolate user-controlled values into
       // the first console argument (console uses util.format semantics).

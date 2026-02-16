@@ -5202,6 +5202,10 @@ IMPORTANTE:
 
             // Build attachments array for streaming endpoint
             // FIX: Normalize type to match backend schema: "document" | "image" | "file"
+            console.log("[handleSubmit] currentUploadedFiles:", currentUploadedFiles.map(f => ({
+              id: f.id, name: f.name, type: f.type, status: f.status,
+              storagePath: f.storagePath, hasContent: !!f.content,
+            })));
             const streamAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .map(f => ({
@@ -5212,11 +5216,16 @@ IMPORTANTE:
                 fileId: f.id,
                 content: f.content,
               }));
+            console.log("[handleSubmit] streamAttachments:", JSON.stringify(streamAttachments.map(a => ({
+              type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+              fileId: a.fileId, hasContent: !!a.content,
+            }))));
 
             // Robust document detection using both mimeType AND file extension
             const hasDocumentAttachments = currentUploadedFiles
               .filter(f => f.status === "ready" || f.status === "processing")
               .some(f => isDocumentFile(f.type, f.name));
+            console.log("[handleSubmit] hasDocumentAttachments:", hasDocumentAttachments);
 
             // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
             // Reuse pre-fetched result if available (avoid duplicate network call)
