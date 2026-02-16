@@ -65,7 +65,9 @@ function sanitizeSheetName(name: string): string {
 
 /** WCAG AA contrast ratio check (simplified luminance) */
 function relativeLuminance(hex: string): number {
-  const c = hex.replace("#", "");
+  const safe = safeColor(hex); // ensure valid 6-digit hex
+  const c = safe.replace("#", "");
+  if (c.length !== 6) return 0; // defensive: should never happen after safeColor
   const r = parseInt(c.substring(0, 2), 16) / 255;
   const g = parseInt(c.substring(2, 4), 16) / 255;
   const b = parseInt(c.substring(4, 6), 16) / 255;
@@ -74,8 +76,8 @@ function relativeLuminance(hex: string): number {
 }
 
 function contrastRatio(fg: string, bg: string): number {
-  const lFg = relativeLuminance(safeColor(fg));
-  const lBg = relativeLuminance(safeColor(bg));
+  const lFg = relativeLuminance(fg);
+  const lBg = relativeLuminance(bg);
   const lighter = Math.max(lFg, lBg);
   const darker = Math.min(lFg, lBg);
   return (lighter + 0.05) / (darker + 0.05);
@@ -794,17 +796,17 @@ export class DocumentEngine {
       const MAX_STYLED_COLS = 200;
       const lastRow = Math.min(sheetSpec.rows.length + 1, MAX_STYLED_ROWS);
       const lastCol = Math.min(sheetSpec.columns.length, MAX_STYLED_COLS);
-      // Hoist border color outside loop to avoid recomputing 10,000× the same value
+      // Hoist border color + object outside loop — single allocation reused across all cells
       const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
+      const borderStyle = {
+        top: { style: "thin" as const, color: { argb: safeBorderColor } },
+        left: { style: "thin" as const, color: { argb: safeBorderColor } },
+        bottom: { style: "thin" as const, color: { argb: safeBorderColor } },
+        right: { style: "thin" as const, color: { argb: safeBorderColor } },
+      };
       for (let r = 1; r <= lastRow; r++) {
         for (let c = 1; c <= lastCol; c++) {
-          const cell = sheet.getCell(r, c);
-          cell.border = {
-            top: { style: "thin", color: { argb: safeBorderColor } },
-            left: { style: "thin", color: { argb: safeBorderColor } },
-            bottom: { style: "thin", color: { argb: safeBorderColor } },
-            right: { style: "thin", color: { argb: safeBorderColor } },
-          };
+          sheet.getCell(r, c).border = borderStyle;
         }
       }
     }

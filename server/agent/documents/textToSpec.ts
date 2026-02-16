@@ -110,7 +110,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       flushParagraph();
       sections.push({
         type: "heading",
-        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        level: Math.min(headingMatch[1].length, 6) as 1 | 2 | 3 | 4 | 5 | 6,
         content: sanitizeText(headingMatch[2].trim()),
       });
       continue;
@@ -123,10 +123,10 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Bullet list items (capped)
+    // Bullet list items (capped at MAX_SECTIONS as pseudo-limit)
     if (/^\s*[-*+]\s+/.test(line)) {
       flushParagraph();
-      const MAX_LIST_ITEMS = 500;
+      const MAX_LIST_ITEMS = 500; // per-list cap
       const bullets: string[] = [sanitizeText(line.replace(/^\s*[-*+]\s+/, ""))];
       while (i + 1 < lines.length && /^\s*[-*+]\s+/.test(lines[i + 1]) && bullets.length < MAX_LIST_ITEMS) {
         i++;
@@ -139,7 +139,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
     // Numbered list items (capped)
     if (/^\s*\d+[.)]\s+/.test(line)) {
       flushParagraph();
-      const MAX_LIST_ITEMS = 500;
+      const MAX_LIST_ITEMS = 500; // per-list cap
       const items: string[] = [sanitizeText(line.replace(/^\s*\d+[.)]\s+/, ""))];
       while (i + 1 < lines.length && /^\s*\d+[.)]\s+/.test(lines[i + 1]) && items.length < MAX_LIST_ITEMS) {
         i++;
@@ -248,7 +248,8 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
 
     let cells: string[];
     if (trimmedLine.includes("|")) {
-      cells = trimmedLine.split("|").map(c => c.trim()).filter(c => c && !c.match(/^-+$/));
+      // Precompiled separator row check (avoids regex per cell)
+      cells = trimmedLine.split("|").map(c => c.trim()).filter(c => c.length > 0 && !/^-+$/.test(c));
     } else if (trimmedLine.includes(",")) {
       cells = trimmedLine.split(",").map(c => c.trim());
       if (cells.length <= 1) cells = [trimmedLine];
@@ -287,8 +288,14 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
       const rawVal = c < row.length ? row[c] : "";
       const val = rawVal === null || rawVal === undefined ? "" : rawVal;
       // Auto-detect numbers (reject Infinity, NaN, 1e999 etc.)
-      const num = Number(val);
-      obj[columns[c].key] = Number.isFinite(num) && String(val).trim() !== "" ? num : val;
+      // Auto-detect numbers: skip empty/whitespace-only, reject Infinity/NaN
+      const trimVal = String(val).trim();
+      if (trimVal !== "" && trimVal.length < 30) { // 30-char limit prevents Number("1".repeat(10000))
+        const num = Number(trimVal);
+        obj[columns[c].key] = Number.isFinite(num) ? num : val;
+      } else {
+        obj[columns[c].key] = val;
+      }
     }
     return obj;
   });

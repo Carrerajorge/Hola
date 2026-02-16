@@ -101,7 +101,13 @@ function deepCloneSpec<T>(obj: T): T {
     return structuredClone(obj);
   } catch {
     // Fallback for environments without structuredClone
-    return JSON.parse(JSON.stringify(obj));
+    try {
+      return JSON.parse(JSON.stringify(obj));
+    } catch (jsonErr) {
+      console.warn(`[DocumentCompiler] deepClone JSON fallback failed: ${jsonErr instanceof Error ? jsonErr.message : String(jsonErr)}`);
+      // Last resort: return shallow copy (better than crashing)
+      return { ...obj } as T;
+    }
   }
 }
 
@@ -255,6 +261,8 @@ export class DocumentCompiler {
             break;
           }
         }
+        // Exhaustiveness guard — all 3 cases must assign buf/fname
+        if (!buf! || !fname!) throw new Error(`Unsupported format: ${input.format}`);
         return { buf: buf!, fname: fname! };
       })();
 

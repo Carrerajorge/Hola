@@ -474,27 +474,28 @@ function convertLegacyToCompilerSpec(
   switch (format) {
     case "pptx": {
       const s = spec as PptxSpec;
+      const safeTitle = safeStr(s.title, 500);
       return {
         format: "pptx" as const,
-        title: s.title,
-        author: s.metadata?.author,
+        title: safeTitle,
+        author: safeStr(s.metadata?.author, 200),
         slides: [
           {
             type: "cover" as const,
             components: [
-              { type: "title" as const, content: s.title },
-              { type: "subtitle" as const, content: s.metadata?.author || "IliaGPT" },
+              { type: "title" as const, content: safeTitle },
+              { type: "subtitle" as const, content: safeStr(s.metadata?.author, 200) || "IliaGPT" },
             ],
           },
-          ...s.slides.map(slide => ({
+          ...s.slides.slice(0, MAX_SLIDES).map(slide => ({
             type: "content" as const,
             components: [
-              { type: "title" as const, content: slide.title },
-              ...(slide.bullets.length > 0
-                ? [{ type: "bullets" as const, content: slide.bullets }]
+              { type: "title" as const, content: safeStr(slide.title, 500) },
+              ...((slide.bullets || []).length > 0
+                ? [{ type: "bullets" as const, content: (slide.bullets || []).slice(0, MAX_BULLETS_PER_SLIDE).map(b => safeStr(b, 5000)) }]
                 : []),
             ],
-            notes: slide.notes,
+            notes: slide.notes ? safeStr(slide.notes, 100_000) : undefined,
           })),
         ],
       } satisfies PresentationSpec;
@@ -503,33 +504,40 @@ function convertLegacyToCompilerSpec(
     case "docx": {
       const s = spec as DocxSpec;
       const sections: DocumentSpec["sections"] = [];
-      for (const sec of s.sections) {
+      for (const sec of (s.sections || []).slice(0, MAX_SECTIONS)) {
         sections.push({
           type: "heading",
           level: sec.level,
-          content: sec.heading,
+          content: safeStr(sec.heading, 500),
         });
-        for (const para of sec.paragraphs) {
-          sections.push({ type: "paragraph", content: para });
+        for (const para of (sec.paragraphs || []).slice(0, MAX_PARAGRAPHS_PER_SECTION)) {
+          sections.push({ type: "paragraph", content: safeStr(para) });
         }
         if (sec.table) {
+          const headers = (sec.table.headers || []).slice(0, MAX_HEADERS_PER_SHEET);
+          const rows = (sec.table.rows || []).slice(0, MAX_ROWS_PER_SHEET);
           sections.push({
             type: "table",
-            content: [sec.table.headers, ...sec.table.rows],
+            content: [
+              headers.map(h => safeStr(h, 255)),
+              ...rows.map(row =>
+                (row || []).slice(0, headers.length).map(cell => safeStr(String(cell ?? ""), 32_767))
+              ),
+            ],
           });
         }
         if (sec.citations?.length) {
           sections.push({
             type: "bullets",
-            content: sec.citations,
+            content: sec.citations.slice(0, 200).map(c => safeStr(c, 2000)),
           });
         }
       }
       return {
         format: "docx" as const,
-        title: s.title,
-        author: s.metadata?.author,
-        subject: s.metadata?.subject,
+        title: safeStr(s.title, 500),
+        author: safeStr(s.metadata?.author, 200),
+        subject: safeStr(s.metadata?.subject, 500),
         sections,
       } satisfies DocumentSpec;
     }
@@ -538,26 +546,31 @@ function convertLegacyToCompilerSpec(
       const s = spec as XlsxSpec;
       return {
         format: "xlsx" as const,
-        title: s.title,
-        sheets: s.sheets.map(sheet => ({
-          name: sheet.name.substring(0, 31),
-          columns: sheet.headers.map((h, idx) => ({
-            key: `col_${idx}`,
-            header: h,
-            type: "string" as const,
-            width: Math.max(h.length + 5, 15),
-          })),
-          rows: sheet.data.map(row => {
-            const obj: Record<string, any> = {};
-            row.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
-            return obj;
-          }),
-          formulas: [],
-          filters: true,
-          freezeRow: 1,
-          freezeCol: 0,
-          protection: false,
-        })),
+        title: safeStr(s.title, 500),
+        sheets: s.sheets.slice(0, MAX_SHEETS).map(sheet => {
+          const headers = (sheet.headers || []).slice(0, MAX_HEADERS_PER_SHEET);
+          const data = (sheet.data || []).slice(0, MAX_ROWS_PER_SHEET);
+          return {
+            name: safeStr(sheet.name, 31) || "Sheet",
+            columns: headers.map((h, idx) => ({
+              key: `col_${idx}`,
+              header: safeStr(h, 255),
+              type: "string" as const,
+              width: Math.max(Math.min(String(h).length + 5, 60), 15),
+            })),
+            rows: data.map(row => {
+              const obj: Record<string, any> = {};
+              const cells = Array.isArray(row) ? row.slice(0, headers.length) : [];
+              cells.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
+              return obj;
+            }),
+            formulas: [],
+            filters: true,
+            freezeRow: 1,
+            freezeCol: 0,
+            protection: false,
+          };
+        }),
       } satisfies WorkbookSpec;
     }
 
