@@ -18,6 +18,7 @@ import {
     formatBulletsWithIcons,
     type ProfessionalTheme
 } from "../services/pptTemplateEngine";
+import { generatePptDocument } from "../services/documentGeneration";
 import {
     formatAPA7Reference,
     formatInTextCitation,
@@ -39,11 +40,45 @@ export interface EnhancedPresentationOptions {
     aspectRatio?: "16:9" | "4:3";
 }
 
+function sanitizePptText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\0/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim();
+}
+
 export async function renderEnhancedPresentation(
-    spec: PresentationSpec,
-    options: EnhancedPresentationOptions = {}
+  spec: PresentationSpec,
+  options: EnhancedPresentationOptions = {}
 ): Promise<{ buffer: Buffer; filename: string }> {
-    const pptx = new PptxGenJS();
+  try {
+    return await renderEnhancedPresentationCore(spec, options);
+  } catch (error: any) {
+    const safeTitle = sanitizePptText(spec?.title).substring(0, 500) || "Presentación";
+    const fallback = await generatePptDocument(safeTitle, [{
+      title: "Fallback",
+      content: [
+        "No fue posible renderizar la presentación con el motor mejorado.",
+        `Error: ${sanitizePptText(error?.message || error).substring(0, 240)}`,
+      ],
+    }], {
+      trace: {
+        source: "enhancedArtifactRenderer",
+      },
+    }]);
+
+    return {
+      buffer: fallback,
+      filename: `${sanitizeFilename(safeTitle)}.pptx`,
+    };
+  }
+}
+
+async function renderEnhancedPresentationCore(
+  spec: PresentationSpec,
+  options: EnhancedPresentationOptions = {}
+): Promise<{ buffer: Buffer; filename: string }> {
+  const pptx = new PptxGenJS();
 
     // Get theme
     const themeName = options.themeName || "corporate";

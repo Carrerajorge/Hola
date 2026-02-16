@@ -96,6 +96,14 @@ app.use(requestTracerMiddleware);
 // Defense in Depth
 app.disable("x-powered-by");
 
+// Route-specific body limits (MUST come before global parser)
+// /api/chat/stream needs a higher limit to support inline image base64 for vision
+app.use("/api/chat/stream", express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+  strict: true,
+}));
+
 // Global Body Limit: Reduced to 1MB to prevent DoS
 // For large file uploads, use specific routes with increased limits (e.g. Multer)
 app.use(

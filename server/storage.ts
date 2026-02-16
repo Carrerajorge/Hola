@@ -680,7 +680,14 @@ export class MemStorage implements IStorage {
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const [result] = await db.insert(chatMessages).values(message).returning();
-    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    queueMicrotask(() => {
+      db.update(chats)
+        .set({ updatedAt: new Date() })
+        .where(eq(chats.id, message.chatId))
+        .catch((error) => {
+          console.warn("[Chats] Failed to update chat updatedAt after message create:", error?.message || error);
+        });
+    });
     if (message.role === "user" || message.role === "assistant") {
       queueMicrotask(() => {
         knowledgeBaseService.ingestChatMessage({

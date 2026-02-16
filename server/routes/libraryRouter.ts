@@ -31,6 +31,7 @@ import {
   fileIdParamSchema,
   createLibraryItemSchema,
 } from "../schemas/librarySchemas";
+import { MAX_DOC_BODY_SIZE } from "../services/documentSecurity";
 
 export function createLibraryRouter() {
   const router = Router();
@@ -692,13 +693,24 @@ export function createLibraryRouter() {
       const userId = getOrCreateSecureUserId(req);
       const { title, content, type } = req.body;
 
-      if (!title || !content || !type) {
+      if (!title || !type) {
         return res.status(400).json({ error: "title, content, and type are required" });
       }
 
       if (!['word', 'excel', 'ppt'].includes(type)) {
         return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
       }
+
+      const safeTitle = (typeof title === "string" ? title : `${title}`)
+        .replace(/\0/g, "")
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+        .trim()
+        .substring(0, 500) || "Documento";
+
+      const safeContent = (typeof content === "string" ? content : `${content ?? ""}`)
+        .replace(/\0/g, "")
+        .trim()
+        .substring(0, MAX_DOC_BODY_SIZE) || "Contenido";
 
       // Generate binary document from content
       let buffer: Buffer;
@@ -707,20 +719,24 @@ export function createLibraryRouter() {
 
       switch (type) {
         case "word":
-          buffer = await generateWordDocument(title, content);
+          buffer = await generateWordDocument(safeTitle, safeContent);
           ext = "docx";
           mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
           break;
         case "excel": {
-          const excelData = parseExcelFromText(content);
-          buffer = await generateExcelDocument(title, excelData);
+          const excelData = parseExcelFromText(safeContent);
+          buffer = await generateExcelDocument(safeTitle, excelData);
           ext = "xlsx";
           mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
           break;
         }
         case "ppt": {
-          const slides = parseSlidesFromText(content);
-          buffer = await generatePptDocument(title, slides);
+          const slides = parseSlidesFromText(safeContent);
+          buffer = await generatePptDocument(safeTitle, slides, {
+            trace: {
+              source: "libraryRouter",
+            },
+          });
           ext = "pptx";
           mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
           break;
@@ -731,7 +747,7 @@ export function createLibraryRouter() {
 
       // Save to local uploads directory
       const fileUuid = randomUUID();
-      const filename = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${fileUuid.slice(0, 8)}.${ext}`;
+      const filename = `${safeTitle.replace(/[^a-zA-Z0-9_-]/g, "_")}_${fileUuid.slice(0, 8)}.${ext}`;
       const uploadsDir = path.join(process.cwd(), "uploads");
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
@@ -742,7 +758,7 @@ export function createLibraryRouter() {
       // Save metadata to library database
       const storagePath = `/objects/uploads/${fileUuid}`;
       const file = await libraryService.saveFileMetadata(userId, storagePath, {
-        name: `${title}.${ext}`,
+        name: `${safeTitle}.${ext}`,
         originalName: filename,
         type: "document",
         mimeType,

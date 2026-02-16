@@ -1629,10 +1629,12 @@ export function ChatInterface({
     }
 
     const msgKey = msg.clientTempId || msg.id;
+    const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
 
     // 1) Re-persist the user message (idempotent by requestId/clientRequestId) so delivery state updates.
     const persistPromise = onSendMessage({
       ...msg,
+      skipRun: true,
       deliveryStatus: "sending",
       deliveryError: undefined,
     }).catch((err) => {
@@ -1644,7 +1646,7 @@ export function ChatInterface({
     const effectiveRunId: string | undefined = persisted?.run?.id;
 
     // 2) Ensure we stream against the REAL chatId (never a synthetic fallback).
-    const stableChatId = (persisted?.run?.chatId as string | undefined) || await waitForStableChatId({ timeoutMs: 8000 });
+    const stableChatId = (persisted?.run?.chatId as string | undefined) || resolvedCurrentChatId || await waitForStableChatId({ timeoutMs: 8000 });
     if (!stableChatId) {
       toast({
         title: "Error",
@@ -3696,6 +3698,7 @@ export function ChatInterface({
         requestId: generateRequestId(),
         clientRequestId: generateClientRequestId(),
         status: "pending",
+        skipRun: true,
         deliveryStatus: "sending",
         deliveryError: undefined,
       };
@@ -4439,6 +4442,7 @@ export function ChatInterface({
       requestId: generateRequestId(),
       clientRequestId: generateClientRequestId(),
       status: 'pending',
+      skipRun: true,
       deliveryStatus: "sending",
       deliveryError: undefined,
       attachments: attachments.length > 0 ? attachments : undefined,
@@ -5282,6 +5286,10 @@ IMPORTANTE:
             // DEBUG: Log selectedDocTool value before making request
             console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
+	            // Send first image dataUrl as lastImageBase64 for direct vision fallback
+	            // (bypasses storagePath resolution — belt-and-suspenders for production reliability)
+	            const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
+
 	            const response = await fetch("/api/chat/stream", {
 	              method: "POST",
 	              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
@@ -5294,6 +5302,8 @@ IMPORTANTE:
                     clientRequestId: userMsg.clientRequestId,
                     userRequestId: userMsg.requestId,
 		                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+		                // Send image base64 directly for vision (fallback if storagePath fails)
+		                lastImageBase64: firstImageDataUrl,
 		                // Send selected doc tool for production mode activation
 		                docTool: selectedDocTool || null,
 	                latencyMode,

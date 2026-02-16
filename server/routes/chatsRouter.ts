@@ -36,7 +36,7 @@ export function createChatsRouter() {
 
   router.get("/chats", async (req, res) => {
     try {
-      const userId = getSecureUserId(req);
+      const userId = getOrCreateSecureUserId(req);
       if (!userId) {
         return res.json([]);
       }
@@ -528,18 +528,38 @@ export function createChatsRouter() {
       const userId = getSecureUserId(req);
 
       const tChat = performance.now();
-      const chat = await storage.getChat(req.params.id);
-      addTiming("chat", tChat);
+      let chat = await storage.getChat(req.params.id);
+      addTiming("chat_lookup", tChat);
+
+      if (!chat) {
+        const tCreateChat = performance.now();
+        try {
+          chat = await storage.createChat({
+            id: req.params.id,
+            title: "New Chat",
+            userId,
+          });
+        } catch (chatCreateError: any) {
+          // 23505 = duplicate key (race condition with concurrent creators)
+          if (chatCreateError?.code !== '23505') {
+            throw chatCreateError;
+          }
+          chat = await storage.getChat(req.params.id);
+        }
+        addTiming("chat_create", tCreateChat);
+      }
+
       if (!chat) {
         setServerTiming();
-        return res.status(404).json({ error: "Chat not found" });
+        return res.status(500).json({ error: "Unable to create chat" });
       }
+
       if (!chat.userId || chat.userId !== userId) {
         setServerTiming();
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage, webSources, confidence, uncertaintyReason, retrievalSteps } = req.body;
+      const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage, webSources, confidence, uncertaintyReason, retrievalSteps, skipRun } = req.body;
       if (!role || !content) {
         setServerTiming();
         return res.status(400).json({ error: "role and content are required" });
@@ -595,8 +615,10 @@ export function createChatsRouter() {
           }).filter((att: any) => att.name && att.type) // Must have at least name and type
         : null;
 
-      // Run-based idempotency for user messages
-      if (role === 'user' && clientRequestId) {
+      const shouldCreateRun = role === 'user' && !skipRun && !!clientRequestId;
+
+      // Run-based idempotency for user messages when enabled.
+      if (shouldCreateRun) {
         // Check if a run with this clientRequestId already exists
         const tRunLookup = performance.now();
         const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);

@@ -738,9 +738,28 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       return timings;
     };
 
-    let heartbeatInterval: NodeJS.Timeout | null = null;
-    let isConnectionClosed = false;
-    let claimedRun: any = null;
+let heartbeatInterval: NodeJS.Timeout | null = null;
+let isConnectionClosed = false;
+let claimedRun: any = null;
+
+const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
+const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
+
+const buildSkipRunStreamKey = (chatId: string | undefined, clientRequestId?: string, userRequestId?: string): string | null => {
+  if (!chatId || !clientRequestId) {
+    return null;
+  }
+  return `skipRunStream:${chatId}:${clientRequestId}:${userRequestId || ""}`;
+};
+
+const cleanSkipRunStreamDedup = (): void => {
+  const now = Date.now();
+  for (const [key, value] of skipRunStreamDedup.entries()) {
+    if (now - value.startedAt > SKIPRUN_STREAM_DEDUP_TTL_MS) {
+      skipRunStreamDedup.delete(key);
+    }
+  }
+};
 
     try {
       const {
@@ -845,47 +864,73 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             : await storage.getChatRunByClientRequestId(chatId, clientRequestId!);
 
         // If caller did not provide runId but did provide clientRequestId,
-        // create the user-message+run atomically here so streaming can start
-        // without waiting for /chats/:id/messages round-trip.
+        // create a lightweight run here so streaming can start.
         if (!existingRun && !runId && clientRequestId && latestUserTextForRun) {
+          const runPrepStart = performance.now();
           try {
-            // If stream starts before /api/chats finishes, make sure the chat row exists
-            // so createUserMessageAndRun won't fail with FK violations.
-            const existingChat = await storage.getChat(chatId);
-            if (!existingChat) {
-              try {
-                await storage.createChat({
-                  id: chatId,
-                  title: "New Chat",
-                  userId: effectiveUserId || undefined,
-                });
-              } catch (chatCreateError: any) {
-                if (chatCreateError?.code !== "23505") {
-                  throw chatCreateError;
-                }
-              }
+            // 1) Prefer linking the run to an already-persisted user message
+            // when /chats/:id/messages used skipRun mode.
+            let runMessageIdStart = performance.now();
+            let runMessageId = userRequestId
+              ? await storage.findMessageByRequestId(userRequestId)
+              : null;
+            recordStage("user_message_lookup_ms", runMessageIdStart);
+            if (runMessageId && runMessageId.chatId === chatId) {
+              const createRunStart = performance.now();
+              const createdRun = await storage.createChatRun({
+                chatId,
+                clientRequestId,
+                userMessageId: runMessageId.id,
+                status: "pending",
+              });
+              existingRun = createdRun;
+              recordStage("run_from_existing_message_ms", createRunStart);
             }
 
-            const created = await storage.createUserMessageAndRun(
-              chatId,
-              {
+            // 2) Fallback: create user message + run atomically (legacy first-write path).
+            if (!existingRun && latestUserTextForRun) {
+              // If stream starts before /api/chats finishes, make sure the chat row exists
+              // so createUserMessageAndRun won't fail with FK violations.
+              const existingChat = await storage.getChat(chatId);
+              if (!existingChat) {
+                try {
+                  await storage.createChat({
+                    id: chatId,
+                    title: "New Chat",
+                    userId: effectiveUserId || undefined,
+                  });
+                } catch (chatCreateError: any) {
+                  if (chatCreateError?.code !== "23505") {
+                    throw chatCreateError;
+                  }
+                }
+              }
+
+              const createdRunStart = performance.now();
+              const created = await storage.createUserMessageAndRun(
                 chatId,
-                role: "user",
-                content: latestUserTextForRun,
-                status: "done",
-                requestId: userRequestId || `${requestId}:user`,
-                userMessageId: null,
-                attachments: sanitizedRunAttachments,
-              } as any,
-              clientRequestId
-            );
-            existingRun = created.run;
+                {
+                  chatId,
+                  role: "user",
+                  content: latestUserTextForRun,
+                  status: "done",
+                  requestId: userRequestId || `${requestId}:user`,
+                  userMessageId: null,
+                  attachments: sanitizedRunAttachments,
+                } as any,
+                clientRequestId
+              );
+              existingRun = created.run;
+              recordStage("create_message_run_ms", createdRunStart);
+            }
+            recordStage("run_prep_ms", runPrepStart);
           } catch (createRunError: any) {
             // Unique violation means another concurrent request created it first.
             if (createRunError?.code !== "23505") {
               throw createRunError;
             }
             existingRun = await storage.getChatRunByClientRequestId(chatId, clientRequestId);
+            recordStage("run_prep_ms", runPrepStart);
           }
         }
 

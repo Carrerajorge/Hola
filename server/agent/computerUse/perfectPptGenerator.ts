@@ -22,6 +22,15 @@ import { randomUUID } from "crypto";
 import OpenAI from "openai";
 import path from "path";
 import fs from "fs/promises";
+import { generatePptDocument } from "../../services/documentGeneration";
+
+function sanitizePptText(value: unknown, maxLength: number): string {
+  return String(value ?? "")
+    .replace(/\0/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .trim()
+    .substring(0, maxLength);
+}
 
 // ============================================
 // Types
@@ -220,58 +229,102 @@ export class PerfectPptGenerator {
   }
 
   async generate(request: PresentationRequest): Promise<GeneratedPresentation> {
-    await fs.mkdir(this.outputDir, { recursive: true });
-
-    // Step 1: Generate content with AI
-    const slides = await this.generateContent(request);
-
-    // Step 2: Select and configure template
-    const template = TEMPLATES[request.template || "corporate"] || TEMPLATES.corporate;
-    if (request.brandColors) {
-      template.colors.primary = request.brandColors.primary.replace("#", "");
-      template.colors.secondary = request.brandColors.secondary.replace("#", "");
-      template.colors.accent = request.brandColors.accent.replace("#", "");
-    }
-
-    // Step 3: Build PPTX
-    const pptx = new PptxGenJS();
-    pptx.layout = "LAYOUT_WIDE";
-    pptx.author = "ILIAGPT";
-    pptx.company = "ILIAGPT Presentation Generator";
-    pptx.subject = request.topic;
-    pptx.title = request.topic;
-
-    // Define master slides
-    this.defineMasterSlides(pptx, template);
-
-    // Generate each slide
-    for (const slideContent of slides) {
-      this.renderSlide(pptx, slideContent, template);
-    }
-
-    // Step 4: Export
     const id = randomUUID();
     const fileName = `presentation-${id.slice(0, 8)}.pptx`;
     const filePath = path.join(this.outputDir, fileName);
 
-    const buffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
-    await fs.writeFile(filePath, buffer);
+    try {
+      await fs.mkdir(this.outputDir, { recursive: true });
 
-    return {
-      id,
-      filePath,
-      fileName,
-      buffer,
-      slideCount: slides.length,
-      outline: slides.map(s => s.title),
-      metadata: {
-        topic: request.topic,
-        template: template.id,
-        language: request.language || "en",
-        generatedAt: new Date().toISOString(),
-        fileSize: buffer.length,
-      },
-    };
+      // Step 1: Generate content with AI
+      const slides = await this.generateContent(request);
+
+      // Step 2: Select and configure template
+      const template = TEMPLATES[request.template || "corporate"] || TEMPLATES.corporate;
+      if (request.brandColors) {
+        template.colors.primary = request.brandColors.primary.replace("#", "");
+        template.colors.secondary = request.brandColors.secondary.replace("#", "");
+        template.colors.accent = request.brandColors.accent.replace("#", "");
+      }
+
+      // Step 3: Build PPTX
+      const pptx = new PptxGenJS();
+      pptx.layout = "LAYOUT_WIDE";
+      pptx.author = "ILIAGPT";
+      pptx.company = "ILIAGPT Presentation Generator";
+      pptx.subject = request.topic;
+      pptx.title = request.topic;
+
+      // Define master slides
+      this.defineMasterSlides(pptx, template);
+
+      // Generate each slide
+      for (const slideContent of slides) {
+        this.renderSlide(pptx, slideContent, template);
+      }
+
+      const buffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
+      await fs.writeFile(filePath, buffer);
+
+      return {
+        id,
+        filePath,
+        fileName,
+        buffer,
+        slideCount: slides.length,
+        outline: slides.map((s) => s.title),
+        metadata: {
+          topic: request.topic,
+          template: template.id,
+          language: request.language || "en",
+          generatedAt: new Date().toISOString(),
+          fileSize: buffer.length,
+        },
+      };
+    } catch (error: any) {
+      console.warn("[PerfectPptGenerator] Fallback presentation used:", error);
+      const title = sanitizePptText(request.topic, 500) || "Presentación";
+      const fallbackBuffer = await generatePptDocument(title, [
+        {
+          title,
+          content: [
+            "No fue posible renderizar la presentación completa.",
+            `Tema: ${sanitizePptText(request.topic, 300)}`,
+            `Objetivo: ${sanitizePptText(request.purpose, 180) || "informar"}`,
+          ],
+        },
+        {
+          title: "Resumen",
+          content: [
+            "La presentación se generó con una versión de recuperación por un error técnico.",
+            `Error: ${sanitizePptText(error?.message || error, 240)}`,
+          ],
+        },
+      ], {
+        trace: {
+          source: "perfectPptGenerator",
+        },
+      });
+
+      await fs.mkdir(this.outputDir, { recursive: true });
+      await fs.writeFile(filePath, fallbackBuffer);
+
+      return {
+        id,
+        filePath,
+        fileName,
+        buffer: fallbackBuffer,
+        slideCount: 2,
+        outline: [title, "Resumen"],
+        metadata: {
+          topic: title,
+          template: "fallback",
+          language: request.language || "en",
+          generatedAt: new Date().toISOString(),
+          fileSize: fallbackBuffer.length,
+        },
+      };
+    }
   }
 
   // ============================================

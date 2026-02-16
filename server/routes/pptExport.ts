@@ -9,6 +9,7 @@ import {
   sanitizeErrorMessage,
   docConcurrencyLimiter,
 } from "../services/documentSecurity";
+import { CORPORATE_PPT_DESIGN_SYSTEM, CORPORATE_PPT_MASTER_NAME, defineCorporateMaster } from "../services/documentGeneration";
 
 export const pptExportRouter = Router();
 
@@ -140,6 +141,7 @@ pptExportRouter.post('/export', async (req, res) => {
     try {
       const pptx = new pptxgen();
       pptx.layout = 'LAYOUT_WIDE';
+      defineCorporateMaster(pptx);
       // Security: sanitize title for metadata and strip control characters
       const safeTitle = (deck.title || 'Presentation')
         .replace(/[\x00-\x1F\x7F]/g, "")
@@ -150,10 +152,12 @@ pptExportRouter.post('/export', async (req, res) => {
       pptx.subject = "";
 
       for (const s of slides) {
-        const slide = pptx.addSlide();
+        const slide = pptx.addSlide({ masterName: CORPORATE_PPT_MASTER_NAME });
 
         if (s.background?.color) {
           slide.background = { color: normalizeHex(s.background.color) };
+        } else {
+          slide.background = { color: CORPORATE_PPT_DESIGN_SYSTEM.palette.bg };
         }
 
         const elements = [...(s.elements ?? [])]
@@ -178,9 +182,9 @@ pptExportRouter.post('/export', async (req, res) => {
               y,
               w,
               h,
-              fontFace: style?.fontFamily ?? 'Arial',
-              fontSize: Math.min(Math.max(style?.fontSize ?? 18, 1), 200),
-              color: normalizeHex(style?.color ?? '#111111'),
+              fontFace: style?.fontFamily || CORPORATE_PPT_DESIGN_SYSTEM.typography.body,
+              fontSize: Math.min(Math.max(style?.fontSize ?? CORPORATE_PPT_DESIGN_SYSTEM.sizes.body, 1), 200),
+              color: normalizeHex(style?.color ?? CORPORATE_PPT_DESIGN_SYSTEM.palette.text),
               bold: !!style?.bold,
               italic: !!style?.italic,
               underline: style?.underline ? { style: 'sng' } : undefined,

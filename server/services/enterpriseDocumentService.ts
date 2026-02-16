@@ -18,6 +18,7 @@ import {
 } from "docx";
 import ExcelJS from "exceljs";
 import type { Workbook, Worksheet, Style } from "exceljs";
+import { generatePptDocument } from "./documentGeneration";
 
 // ============================================
 // TYPES & INTERFACES
@@ -897,101 +898,118 @@ export class EnterpriseDocumentService {
   }
 
   private async generatePPTX(request: DocumentRequest): Promise<DocumentResult> {
-    try {
-      // Dynamic import to avoid bundling issues
-      const pptxgen = await import("pptxgenjs");
-      const PptxGenJS = (pptxgen as any).default || pptxgen;
-      
-      const pres = new PptxGenJS();
-      pres.author = request.author || "IliaGPT";
-      pres.title = request.title;
-      pres.subject = request.subtitle || "";
+    const sanitizePptText = (value: unknown, maxLength = 500): string =>
+      String(typeof value === "string" ? value : "")
+        .replace(/\0/g, "")
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+        .trim()
+        .substring(0, maxLength);
 
-      // Title slide
-      const titleSlide = pres.addSlide();
-      titleSlide.addText(request.title, {
-        x: 0.5,
-        y: 2,
-        w: "90%",
-        h: 1.5,
-        fontSize: 44,
-        bold: true,
-        color: "1A365D",
-        align: "center",
-      });
-      if (request.subtitle) {
-        titleSlide.addText(request.subtitle, {
-          x: 0.5,
-          y: 3.8,
-          w: "90%",
-          h: 1,
-          fontSize: 24,
-          color: "4A5568",
-          align: "center",
-        });
+    const requestTitle = sanitizePptText(request.title, 500) || "Presentación";
+    const requestSubtitle = sanitizePptText(request.subtitle, 240);
+
+    const sections = request.sections?.length
+      ? request.sections
+      : [{
+          id: "summary",
+          title: "Resumen",
+          content: "Este documento contiene el contenido solicitado.",
+          level: 1,
+        } as DocumentSection];
+
+    const slides = sections.map((section, index) => {
+      const sectionTitle = sanitizePptText(section.title, 220) || `Sección ${index + 1}`;
+      const lines: string[] = [];
+
+      if (requestSubtitle && index === 0) {
+        lines.push(`Resumen: ${requestSubtitle}`);
       }
 
-      // Content slides
-      for (const section of request.sections) {
-        const slide = pres.addSlide();
-        
-        // Section title
-        slide.addText(section.title, {
-          x: 0.5,
-          y: 0.3,
-          w: "90%",
-          h: 0.8,
-          fontSize: 32,
-          bold: true,
-          color: "1A365D",
-        });
+      const contentRaw = sanitizePptText(section.content, 1200);
+      if (contentRaw) {
+        lines.push(contentRaw);
+      }
 
-        // Content (truncate for slide)
-        const contentPreview = section.content.substring(0, 500) + (section.content.length > 500 ? "..." : "");
-        slide.addText(contentPreview, {
-          x: 0.5,
-          y: 1.3,
-          w: "90%",
-          h: 4,
-          fontSize: 18,
-          color: "2D3748",
-          valign: "top",
-        });
+      if (section.tables && section.tables.length > 0 && section.tables[0]?.headers) {
+        const table = section.tables[0];
+        const safeHeaders = table.headers
+          .slice(0, 15)
+          .map((header) => sanitizePptText(header, 60) || "-");
 
-        // Tables (if any)
-        if (section.tables && section.tables.length > 0) {
-          const table = section.tables[0];
-          const tableData = [table.headers, ...table.rows.slice(0, 5)];
-          
-          slide.addTable(tableData, {
-            x: 0.5,
-            y: 3.5,
-            w: 9,
-            colW: Array(table.headers.length).fill(9 / table.headers.length),
-            fontSize: 12,
-            border: { type: "solid", pt: 1, color: "E2E8F0" },
-          });
+        if (safeHeaders.length > 0) {
+          lines.push(`Tabla: ${safeHeaders.join(" | ")}`);
+
+          for (const row of (table.rows || []).slice(0, 4)) {
+            if (!Array.isArray(row)) continue;
+            const safeRow = row
+              .slice(0, safeHeaders.length)
+              .map((cell) => sanitizePptText(cell, 70))
+              .filter(Boolean)
+              .join(" | ");
+            if (safeRow) lines.push(safeRow);
+          }
         }
       }
 
-      const buffer = await pres.write({ outputType: "nodebuffer" });
-      const filename = `${this.sanitizeFilename(request.title)}.pptx`;
+      return {
+        title: sectionTitle,
+        content: lines.length > 0 ? lines : ["Sin contenido"],
+      };
+    });
+
+    if (slides.length === 0) {
+      slides.push({
+        title: "Resumen",
+        content: ["Sin contenido disponible."],
+      });
+    }
+
+    try {
+      const buffer = await generatePptDocument(requestTitle, slides, {
+        trace: {
+          source: "enterpriseDocumentService",
+        },
+      });
+      const filename = `${this.sanitizeFilename(requestTitle)}.pptx`;
 
       return {
         success: true,
-        buffer: Buffer.from(buffer),
+        buffer,
         filename,
         mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         sizeBytes: buffer.length,
       };
     } catch (error: any) {
-      return {
-        success: false,
-        filename: "",
-        mimeType: "",
-        sizeBytes: 0,
-        error: error.message,
-      };
+      console.warn("[enterpriseDocumentService] Fallback PPT generation triggered:", error);
+      try {
+        const buffer = await generatePptDocument("Presentación", [{
+          title: "Fallback",
+          content: [
+            "No fue posible renderizar la presentación solicitada.",
+            `Error: ${sanitizePptText(error?.message || error, 240)}`,
+          ],
+        }], {
+          trace: {
+            source: "enterpriseDocumentService",
+          },
+        }]);
+        return {
+          success: true,
+          buffer,
+          filename: `${this.sanitizeFilename(requestTitle)}.pptx`,
+          mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          sizeBytes: buffer.length,
+          error: "La presentación fue generada con plantilla de emergencia.",
+        };
+      } catch (fallbackError: any) {
+        return {
+          success: false,
+          filename: "",
+          mimeType: "",
+          sizeBytes: 0,
+          error: fallbackError.message || String(fallbackError),
+        };
+      }
     }
   }
 

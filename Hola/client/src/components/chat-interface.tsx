@@ -4837,6 +4837,8 @@ IMPORTANTE:
             // DEBUG: Log selectedDocTool value before making request
             console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
+            const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
+
             const response = await fetch("/api/chat/stream", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
@@ -4846,6 +4848,7 @@ IMPORTANTE:
                 conversationId: effectiveStreamChatId,
                 chatId: effectiveStreamChatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                lastImageBase64: firstImageDataUrl,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null,
                 latencyMode,
