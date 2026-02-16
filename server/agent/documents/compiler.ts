@@ -79,6 +79,8 @@ const LIMITS = {
   pptx: { maxSlides: 200, maxTitleLength: 500, maxBulletLength: 5000, maxTotalSize: 10 * 1024 * 1024 },
   docx: { maxSections: 500, maxContentSize: 5 * 1024 * 1024 },
   xlsx: { maxRows: 100_000, maxColumns: 500, maxCellLength: 32_767, maxSheets: 100 },
+  maxOutputBytes: 50 * 1024 * 1024, // 50MB hard cap on generated file size
+  maxAutoRepairIterations: 3, // cap suffix loop in auto-repair
 } as const;
 
 const MIME_TYPES: Record<CompilerFormat, string> = {
@@ -153,8 +155,26 @@ export class DocumentCompiler {
     const engine = input.theme ? new DocumentEngine(theme) : this.engine;
     let degraded = false;
 
-    // 1. Preflight validation
-    const validation = this.preflight(input);
+    // 1. Preflight validation (wrapped to never throw)
+    let validation: ValidationResult;
+    try {
+      validation = this.preflight(input);
+    } catch (preflightErr) {
+      console.warn(`[DocumentCompiler] Preflight threw, treating as valid: ${preflightErr instanceof Error ? preflightErr.message : String(preflightErr)}`);
+      validation = {
+        valid: true,
+        format: input.format,
+        issueCount: 1,
+        errors: 0,
+        warnings: 1,
+        issues: [{
+          severity: "warning",
+          code: "COMPILER_PREFLIGHT_ERROR",
+          message: `Preflight threw: ${preflightErr instanceof Error ? preflightErr.message : String(preflightErr)}`,
+        }],
+        metadata: {},
+      };
+    }
 
     // 2. If validation errors, attempt auto-repair
     let spec = input.spec;
@@ -207,6 +227,20 @@ export class DocumentCompiler {
         severity: "warning",
         code: "COMPILER_FALLBACK",
         message: `Render failed, used fallback: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+
+    // 4. Output size guard
+    if (buffer! && buffer!.length > LIMITS.maxOutputBytes) {
+      console.warn(`[DocumentCompiler] Output exceeds max size (${buffer!.length} > ${LIMITS.maxOutputBytes}), using fallback`);
+      const fallback = await this.generateFallback(input.format, spec, new Error("Output too large"));
+      buffer = fallback.buffer;
+      filename = fallback.filename;
+      degraded = true;
+      validation.issues.push({
+        severity: "warning",
+        code: "COMPILER_OUTPUT_TOO_LARGE",
+        message: `Output was ${(buffer!.length / 1024 / 1024).toFixed(1)}MB, exceeded ${LIMITS.maxOutputBytes / 1024 / 1024}MB limit`,
       });
     }
 
@@ -320,12 +354,12 @@ export class DocumentCompiler {
 
         case "xlsx": {
           const spec = { ...(input.spec as WorkbookSpec) };
-          // Fix duplicate sheet names
+          // Fix duplicate sheet names (capped iterations to prevent infinite loop)
           const names = new Set<string>();
           for (const sheet of spec.sheets) {
             let name = sheet.name.substring(0, 31);
             let suffix = 1;
-            while (names.has(name)) {
+            while (names.has(name) && suffix <= LIMITS.maxAutoRepairIterations * 100) {
               name = `${sheet.name.substring(0, 28)}_${suffix++}`;
             }
             sheet.name = name;

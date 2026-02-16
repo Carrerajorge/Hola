@@ -22,6 +22,12 @@ const MAX_SLIDE_TITLE_LENGTH = 500;
 const MAX_BULLET_LENGTH = 5000;
 const MAX_BULLETS_PER_SLIDE = 20;
 
+const MAX_LINES = 500_000; // hard cap on line splits to prevent memory exhaustion
+const MAX_PARAGRAPH_LENGTH = 50_000; // cap accumulated paragraph text
+const MAX_JSON_INPUT_SIZE = 2 * 1024 * 1024; // 2MB cap for JSON parsing
+const MAX_JSON_DEPTH = 10; // prevent deeply nested JSON bombs
+const MAX_MARKDOWN_SECTIONS = 500; // cap markdown section splits
+
 const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
 
 /* ================================================================== */
@@ -53,6 +59,16 @@ function truncate(text: string, max: number): string {
   return text.substring(0, max - 1) + "…";
 }
 
+/** Check JSON depth to prevent deeply nested payloads from causing stack overflow */
+function checkJsonDepth(obj: unknown, maxDepth: number, current: number = 0): boolean {
+  if (current > maxDepth) return false;
+  if (obj === null || typeof obj !== "object") return true;
+  if (Array.isArray(obj)) {
+    return obj.every(item => checkJsonDepth(item, maxDepth, current + 1));
+  }
+  return Object.values(obj).every(val => checkJsonDepth(val, maxDepth, current + 1));
+}
+
 /* ================================================================== */
 /*  MARKDOWN → DOCX SPEC                                              */
 /* ================================================================== */
@@ -63,7 +79,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
     : markdown;
 
   const sections: DocumentSpec["sections"] = [];
-  const lines = safeContent.split("\n");
+  const lines = safeContent.split("\n").slice(0, MAX_LINES);
   let currentParagraph = "";
 
   function flushParagraph() {
@@ -175,8 +191,10 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Regular text → accumulate into paragraph
-    currentParagraph += (currentParagraph ? " " : "") + line;
+    // Regular text → accumulate into paragraph (capped to prevent unbounded growth)
+    if (currentParagraph.length < MAX_PARAGRAPH_LENGTH) {
+      currentParagraph += (currentParagraph ? " " : "") + line;
+    }
   }
 
   flushParagraph();
@@ -198,7 +216,7 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
     ? csv.substring(0, MAX_CONTENT_SIZE)
     : csv;
 
-  const lines = safeText.trim().split("\n");
+  const lines = safeText.trim().split("\n").slice(0, MAX_LINES);
   const parsedRows: any[][] = [];
 
   for (const line of lines) {
@@ -279,11 +297,18 @@ export function jsonToPresentationSpec(
 ): PresentationSpec {
   const safeTitle = truncate(sanitizeText(title), MAX_SLIDE_TITLE_LENGTH);
 
-  // Try JSON parse first
+  // Try JSON parse first (with size and depth limits)
   let rawSlides: Array<{ title?: string; bullets?: string[]; content?: string[] }> = [];
   try {
     const stripped = input.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+    if (stripped.length > MAX_JSON_INPUT_SIZE) {
+      return markdownToPresentationSpec(title, input);
+    }
     const parsed = JSON.parse(stripped);
+    if (!checkJsonDepth(parsed, MAX_JSON_DEPTH)) {
+      console.warn("[textToSpec] JSON exceeds max depth, falling back to markdown");
+      return markdownToPresentationSpec(title, input);
+    }
     rawSlides = Array.isArray(parsed) ? parsed : parsed.slides || [parsed];
   } catch {
     // Fallback: parse as markdown slides
@@ -336,7 +361,7 @@ export function markdownToPresentationSpec(
   markdown: string
 ): PresentationSpec {
   const safeTitle = truncate(sanitizeText(title), MAX_SLIDE_TITLE_LENGTH);
-  const sections = markdown.split(/(?=^##?\s)/m);
+  const sections = markdown.split(/(?=^##?\s)/m).slice(0, MAX_MARKDOWN_SECTIONS);
   const slides: PresentationSpec["slides"] = [];
 
   // Title slide

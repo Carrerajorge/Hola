@@ -15,6 +15,35 @@
 import { z } from "zod";
 
 /* ================================================================== */
+/*  SECURITY HELPERS                                                   */
+/* ================================================================== */
+
+const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
+
+/** Sanitize a cell value to prevent Excel formula injection */
+function sanitizeExcelValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trimStart();
+  if (trimmed.length === 0) return value;
+  if (EXCEL_FORMULA_PREFIXES.some(p => trimmed.startsWith(p))) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+/** Validate and normalize a hex color string; returns safe fallback on invalid input */
+function safeColor(color: string | undefined | null, fallback: string = "#000000"): string {
+  if (!color || typeof color !== "string") return fallback;
+  let c = color.trim();
+  if (!c.startsWith("#") && /^[0-9a-fA-F]{6}$/.test(c)) c = "#" + c;
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+    c = "#" + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+  }
+  if (!/^#[0-9a-fA-F]{6}$/.test(c)) return fallback;
+  return c;
+}
+
+/* ================================================================== */
 /*  DESIGN TOKENS                                                     */
 /* ================================================================== */
 
@@ -563,54 +592,68 @@ export class DocumentEngine {
         width: col.width || 15,
       }));
 
-      // Style header row
+      // Style header row (safe color normalization)
       const headerRow = sheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: tokens.color.headerFg.replace("#", "FF") }, size: 11 };
+      headerRow.font = { bold: true, color: { argb: safeColor(tokens.color.headerFg, "#ffffff").replace("#", "FF") }, size: 11 };
       headerRow.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: tokens.color.headerBg.replace("#", "FF") },
+        fgColor: { argb: safeColor(tokens.color.headerBg, "#1a73e8").replace("#", "FF") },
       };
       headerRow.alignment = { vertical: "middle", horizontal: "center" };
       headerRow.height = 25;
 
-      // Add data rows
+      // Add data rows (sanitize cell values to prevent formula injection)
       for (let r = 0; r < sheetSpec.rows.length; r++) {
-        const row = sheet.addRow(sheetSpec.rows[r]);
+        const sanitizedRow: Record<string, any> = {};
+        for (const [key, val] of Object.entries(sheetSpec.rows[r])) {
+          sanitizedRow[key] = sanitizeExcelValue(val);
+        }
+        const row = sheet.addRow(sanitizedRow);
 
-        // Zebra striping
+        // Zebra striping (safe colors)
         if (r % 2 === 0) {
           row.fill = {
             type: "pattern",
             pattern: "solid",
-            fgColor: { argb: tokens.color.zebraOdd.replace("#", "FF") },
+            fgColor: { argb: safeColor(tokens.color.zebraOdd, "#f8f9fa").replace("#", "FF") },
           };
         }
 
-        // Apply column formats
+        // Apply column formats (with null-safe cell access)
         for (let c = 0; c < sheetSpec.columns.length; c++) {
           const colDef = sheetSpec.columns[c];
           const cell = row.getCell(c + 1);
+          if (!cell) continue;
 
           if (colDef.format) {
             cell.numFmt = colDef.format;
           }
 
-          // Data validation
+          // Data validation (sanitize list values)
           if (colDef.validation?.type === "list" && colDef.validation.values) {
+            const safeValues = colDef.validation.values
+              .map(v => String(v).replace(/"/g, '""').substring(0, 255))
+              .slice(0, 100);
             cell.dataValidation = {
               type: "list",
               allowBlank: true,
-              formulae: [`"${colDef.validation.values.join(",")}"`],
+              formulae: [`"${safeValues.join(",")}"`],
             };
           }
         }
       }
 
-      // Apply formulas
+      // Apply formulas (validate cell reference format, cap formula length)
+      const cellRefPattern = /^[A-Z]{1,3}\d{1,7}$/;
       for (const formula of sheetSpec.formulas) {
+        if (!cellRefPattern.test(formula.cell)) {
+          console.warn(`[DocumentEngine] Skipping invalid cell ref: ${formula.cell}`);
+          continue;
+        }
+        const safeFormula = formula.formula.substring(0, 8192); // Excel formula limit
         const cell = sheet.getCell(formula.cell);
-        cell.value = { formula: formula.formula } as any;
+        cell.value = { formula: safeFormula } as any;
       }
 
       // Auto-filter
@@ -639,13 +682,14 @@ export class DocumentEngine {
       const lastRow = sheetSpec.rows.length + 1;
       const lastCol = sheetSpec.columns.length;
       for (let r = 1; r <= lastRow; r++) {
+        const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
         for (let c = 1; c <= lastCol; c++) {
           const cell = sheet.getCell(r, c);
           cell.border = {
-            top: { style: "thin", color: { argb: tokens.color.border.replace("#", "FF") } },
-            left: { style: "thin", color: { argb: tokens.color.border.replace("#", "FF") } },
-            bottom: { style: "thin", color: { argb: tokens.color.border.replace("#", "FF") } },
-            right: { style: "thin", color: { argb: tokens.color.border.replace("#", "FF") } },
+            top: { style: "thin", color: { argb: safeBorderColor } },
+            left: { style: "thin", color: { argb: safeBorderColor } },
+            bottom: { style: "thin", color: { argb: safeBorderColor } },
+            right: { style: "thin", color: { argb: safeBorderColor } },
           };
         }
       }

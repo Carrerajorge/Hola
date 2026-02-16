@@ -504,8 +504,13 @@ export function packCitations(
   const chicago: string[] = [];
   
   for (const source of sources) {
-    const domain = new URL(source.url).hostname;
-    
+    let domain = "unknown";
+    try {
+      domain = new URL(source.url).hostname;
+    } catch {
+      // Invalid URL — use fallback domain
+    }
+
     apa.push(`${source.title}. (${new Date().getFullYear()}). Retrieved from ${source.url}`);
     mla.push(`"${source.title}." ${domain}, ${source.url}. Accessed ${now}.`);
     chicago.push(`"${source.title}." ${domain}. Accessed ${now}. ${source.url}.`);
@@ -520,19 +525,29 @@ export function packCitations(
 
 export async function getArtifact(id: string): Promise<{ path: string; name: string; type: string } | null> {
   await ensureArtifactsDir();
-  
+
+  // Sanitize ID to prevent path traversal (only allow alphanumeric + hyphens)
+  const safeId = id.replace(/[^a-zA-Z0-9-]/g, "");
+  if (safeId.length < 8) return null;
+
   const files = await fs.readdir(ARTIFACTS_DIR);
-  const match = files.find(f => f.includes(id.substring(0, 8)));
-  
+  const match = files.find(f => f.includes(safeId.substring(0, 8)));
+
   if (match) {
+    // Double-check resolved path stays within ARTIFACTS_DIR
+    const resolved = path.resolve(ARTIFACTS_DIR, match);
+    if (!resolved.startsWith(path.resolve(ARTIFACTS_DIR))) {
+      console.warn(`[ArtifactTools] Path traversal attempt blocked: ${match}`);
+      return null;
+    }
     const ext = path.extname(match).slice(1);
     return {
-      path: path.join(ARTIFACTS_DIR, match),
+      path: resolved,
       name: match,
       type: ext as "xlsx" | "docx" | "pptx",
     };
   }
-  
+
   return null;
 }
 

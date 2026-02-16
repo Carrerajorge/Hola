@@ -9,6 +9,11 @@
 
 import { z } from "zod";
 
+/* Safety limits to prevent quadratic validation costs */
+const MAX_COMPONENTS_PER_SLIDE = 100;
+const MAX_OVERLAP_CHECKS = 50; // cap bounding boxes checked for O(n²) overlap
+const MAX_DATA_TYPE_CHECKS_PER_SHEET = 10_000; // skip type checking beyond this
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
@@ -72,6 +77,16 @@ export class PresentationValidator {
           severity: "warning",
           code: "PPT_EMPTY_SLIDE",
           message: `Slide ${s + 1} has no components`,
+          location: `slide[${s}]`,
+        });
+      }
+
+      // Cap component count per slide
+      if (slide.components && slide.components.length > MAX_COMPONENTS_PER_SLIDE) {
+        issues.push({
+          severity: "warning",
+          code: "PPT_TOO_MANY_COMPONENTS",
+          message: `Slide ${s + 1} has ${slide.components.length} components (max ${MAX_COMPONENTS_PER_SLIDE})`,
           location: `slide[${s}]`,
         });
       }
@@ -141,22 +156,31 @@ export class PresentationValidator {
         }
       }
 
-      // Check overlapping components (heuristic)
-      for (let i = 0; i < boundingBoxes.length; i++) {
-        for (let j = i + 1; j < boundingBoxes.length; j++) {
-          if (this.boxesOverlap(boundingBoxes[i], boundingBoxes[j])) {
+      // Check overlapping components (heuristic, capped to avoid O(n²) on large slides)
+      const cappedBoxes = boundingBoxes.slice(0, MAX_OVERLAP_CHECKS);
+      for (let i = 0; i < cappedBoxes.length; i++) {
+        for (let j = i + 1; j < cappedBoxes.length; j++) {
+          if (this.boxesOverlap(cappedBoxes[i], cappedBoxes[j])) {
             issues.push({
               severity: "warning",
               code: "PPT_OVERLAP",
-              message: `Components ${boundingBoxes[i].idx} and ${boundingBoxes[j].idx} on slide ${s + 1} may overlap`,
+              message: `Components ${cappedBoxes[i].idx} and ${cappedBoxes[j].idx} on slide ${s + 1} may overlap`,
               location: `slide[${s}]`,
               details: {
-                comp1: boundingBoxes[i],
-                comp2: boundingBoxes[j],
+                comp1: cappedBoxes[i],
+                comp2: cappedBoxes[j],
               },
             });
           }
         }
+      }
+      if (boundingBoxes.length > MAX_OVERLAP_CHECKS) {
+        issues.push({
+          severity: "info",
+          code: "PPT_OVERLAP_CHECK_CAPPED",
+          message: `Overlap check on slide ${s + 1} capped at ${MAX_OVERLAP_CHECKS} components (${boundingBoxes.length} total)`,
+          location: `slide[${s}]`,
+        });
       }
     }
 
@@ -375,10 +399,13 @@ export class WorkbookValidator {
         colKeys.add(col.key);
       }
 
-      // Check data types
-      for (let r = 0; r < sheet.rows.length; r++) {
+      // Check data types (capped to prevent slow validation on large datasets)
+      let typeChecks = 0;
+      for (let r = 0; r < sheet.rows.length && typeChecks < MAX_DATA_TYPE_CHECKS_PER_SHEET; r++) {
         const row = sheet.rows[r];
         for (const col of sheet.columns) {
+          if (typeChecks >= MAX_DATA_TYPE_CHECKS_PER_SHEET) break;
+          typeChecks++;
           const value = row[col.key];
           if (value === undefined || value === null) continue;
 

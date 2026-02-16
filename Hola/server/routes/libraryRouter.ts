@@ -701,6 +701,16 @@ export function createLibraryRouter() {
         return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
       }
 
+      // Content size validation (prevent huge payloads from consuming memory)
+      const MAX_TITLE_LENGTH = 500;
+      const MAX_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB
+      if (typeof title !== "string" || title.length > MAX_TITLE_LENGTH) {
+        return res.status(400).json({ error: `Title must be a string of max ${MAX_TITLE_LENGTH} characters` });
+      }
+      if (typeof content !== "string" || content.length > MAX_CONTENT_SIZE) {
+        return res.status(400).json({ error: `Content must be a string of max ${MAX_CONTENT_SIZE / 1024 / 1024}MB` });
+      }
+
       // Generate binary document via DocumentCompiler (unified pipeline)
       const formatMap: Record<string, CompilerFormat> = { word: "docx", excel: "xlsx", ppt: "pptx" };
       const compilerFormat = formatMap[type];
