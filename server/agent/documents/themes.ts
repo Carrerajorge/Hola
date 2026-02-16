@@ -122,6 +122,9 @@ export const THEMES: Record<string, DesignTokens> = {
 /*  RESOLVER                                                           */
 /* ================================================================== */
 
+/** Whitelist of valid theme names — prevents prototype pollution via __proto__ / constructor */
+const ALLOWED_THEMES = new Set(Object.keys(THEMES));
+
 /**
  * Resolve a theme from a name string, partial token override, or undefined.
  *
@@ -133,7 +136,12 @@ export function resolveTheme(
 ): DesignTokens {
   if (!nameOrTokens) return THEMES.default;
   if (typeof nameOrTokens === "string") {
-    return THEMES[nameOrTokens] || THEMES.default;
+    if (!ALLOWED_THEMES.has(nameOrTokens)) {
+      console.warn(`[Theme] Unknown theme "${nameOrTokens}", using default`);
+      return THEMES.default;
+    }
+    return THEMES[nameOrTokens];
   }
+  // Partial tokens override — parse through Zod to strip unknown keys
   return DesignTokensSchema.parse(nameOrTokens);
 }

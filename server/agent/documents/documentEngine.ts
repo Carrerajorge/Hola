@@ -194,7 +194,7 @@ export const ColumnDefSchema = z.object({
   key: z.string(),
   header: z.string(),
   type: z.enum(["string", "number", "date", "currency", "percentage", "boolean", "formula"]).default("string"),
-  width: z.number().positive().optional(),
+  width: z.number().positive().max(100).optional(), // Excel col max ~100 chars
   format: z.string().optional(),
   validation: z.object({
     type: z.enum(["list", "range", "length", "custom"]).optional(),

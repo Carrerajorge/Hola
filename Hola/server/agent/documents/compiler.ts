@@ -81,7 +81,29 @@ const LIMITS = {
   xlsx: { maxRows: 100_000, maxColumns: 500, maxCellLength: 32_767, maxSheets: 100 },
   maxOutputBytes: 50 * 1024 * 1024, // 50MB hard cap on generated file size
   maxAutoRepairIterations: 3, // cap suffix loop in auto-repair
+  compileTimeoutMs: 30_000, // 30s hard timeout per compilation
 } as const;
+
+/** Race a promise against a timeout; rejects with a clear message on expiry. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      val => { clearTimeout(timer); resolve(val); },
+      err => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+/** Structured-clone safe deep copy (avoids in-place mutation of caller's spec). */
+function deepCloneSpec<T>(obj: T): T {
+  try {
+    return structuredClone(obj);
+  } catch {
+    // Fallback for environments without structuredClone
+    return JSON.parse(JSON.stringify(obj));
+  }
+}
 
 const MIME_TYPES: Record<CompilerFormat, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -191,31 +213,40 @@ export class DocumentCompiler {
       }
     }
 
-    // 3. Render
+    // 3. Render (with timeout protection)
     let buffer: Buffer;
     let filename: string;
 
     try {
-      switch (input.format) {
-        case "pptx": {
-          const pptSpec = { ...spec as PresentationSpec, theme };
-          buffer = await engine.generatePresentation(pptSpec);
-          filename = sanitizeFilename((spec as PresentationSpec).title) + ".pptx";
-          break;
+      const renderPromise = (async () => {
+        let buf: Buffer;
+        let fname: string;
+        switch (input.format) {
+          case "pptx": {
+            const pptSpec = { ...spec as PresentationSpec, theme };
+            buf = await engine.generatePresentation(pptSpec);
+            fname = sanitizeFilename((spec as PresentationSpec).title) + ".pptx";
+            break;
+          }
+          case "docx": {
+            const docSpec = { ...spec as DocumentSpec, theme };
+            buf = await engine.generateDocument(docSpec);
+            fname = sanitizeFilename((spec as DocumentSpec).title) + ".docx";
+            break;
+          }
+          case "xlsx": {
+            const xlsSpec = { ...spec as WorkbookSpec, theme };
+            buf = await engine.generateWorkbook(xlsSpec);
+            fname = sanitizeFilename((spec as WorkbookSpec).title) + ".xlsx";
+            break;
+          }
         }
-        case "docx": {
-          const docSpec = { ...spec as DocumentSpec, theme };
-          buffer = await engine.generateDocument(docSpec);
-          filename = sanitizeFilename((spec as DocumentSpec).title) + ".docx";
-          break;
-        }
-        case "xlsx": {
-          const xlsSpec = { ...spec as WorkbookSpec, theme };
-          buffer = await engine.generateWorkbook(xlsSpec);
-          filename = sanitizeFilename((spec as WorkbookSpec).title) + ".xlsx";
-          break;
-        }
-      }
+        return { buf: buf!, fname: fname! };
+      })();
+
+      const result = await withTimeout(renderPromise, LIMITS.compileTimeoutMs, `${input.format} render`);
+      buffer = result.buf;
+      filename = result.fname;
     } catch (err) {
       // Graceful degradation: produce a minimal valid file
       console.warn(`[DocumentCompiler] Render failed, using fallback: ${err instanceof Error ? err.message : String(err)}`);
@@ -312,9 +343,12 @@ export class DocumentCompiler {
     if (errors.length === 0) return null;
 
     try {
+      // Deep clone to avoid corrupting the caller's spec on partial repair failure
+      const cloned = deepCloneSpec(input.spec);
+
       switch (input.format) {
         case "pptx": {
-          const spec = { ...(input.spec as PresentationSpec) };
+          const spec = cloned as PresentationSpec;
           // Fix out-of-canvas by clamping positions
           for (const slide of spec.slides) {
             for (const comp of slide.components) {
@@ -335,7 +369,7 @@ export class DocumentCompiler {
         }
 
         case "docx": {
-          const spec = { ...(input.spec as DocumentSpec) };
+          const spec = cloned as DocumentSpec;
           // Fix table column mismatches by padding/trimming rows
           for (const section of spec.sections) {
             if (section.type === "table" && Array.isArray(section.content) && section.content.length > 1) {
@@ -353,7 +387,7 @@ export class DocumentCompiler {
         }
 
         case "xlsx": {
-          const spec = { ...(input.spec as WorkbookSpec) };
+          const spec = cloned as WorkbookSpec;
           // Fix duplicate sheet names (capped iterations to prevent infinite loop)
           const names = new Set<string>();
           for (const sheet of spec.sheets) {
@@ -368,7 +402,8 @@ export class DocumentCompiler {
           return spec;
         }
       }
-    } catch {
+    } catch (repairErr) {
+      console.warn(`[DocumentCompiler] Auto-repair failed: ${repairErr instanceof Error ? repairErr.message : String(repairErr)}`);
       return null;
     }
   }

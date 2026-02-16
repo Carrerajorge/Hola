@@ -551,9 +551,16 @@ export async function getArtifact(id: string): Promise<{ path: string; name: str
   return null;
 }
 
+/** In-memory artifact metadata cache with LRU eviction to prevent unbounded growth. */
+const ARTIFACT_STORE_MAX = 10_000;
 const artifactStore = new Map<string, ArtifactMeta>();
 
 export function storeArtifactMeta(meta: ArtifactMeta): void {
+  // Evict oldest entry when at capacity (Map preserves insertion order)
+  if (artifactStore.size >= ARTIFACT_STORE_MAX) {
+    const oldestKey = artifactStore.keys().next().value;
+    if (oldestKey) artifactStore.delete(oldestKey);
+  }
   artifactStore.set(meta.id, meta);
 }
 

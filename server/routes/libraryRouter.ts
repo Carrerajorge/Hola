@@ -765,7 +765,7 @@ export function createLibraryRouter() {
         }
       }
 
-      // Save to local uploads directory
+      // Save to local uploads directory (with cleanup on failure)
       const fileUuid = randomUUID();
       const filename = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${fileUuid.slice(0, 8)}.${ext}`;
       const uploadsDir = path.join(process.cwd(), "uploads");
@@ -773,19 +773,34 @@ export function createLibraryRouter() {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
       const filePath = path.join(uploadsDir, fileUuid);
-      await fs.promises.writeFile(filePath, buffer);
 
-      // Save metadata to library database
-      const storagePath = `/objects/uploads/${fileUuid}`;
-      const file = await libraryService.saveFileMetadata(userId, storagePath, {
-        name: `${title}.${ext}`,
-        originalName: filename,
-        type: "document",
-        mimeType,
-        extension: ext,
-        size: buffer.length,
-        tags: ["ai-generated"],
-      });
+      try {
+        await fs.promises.writeFile(filePath, buffer);
+      } catch (writeErr: any) {
+        if (writeErr?.code === "ENOSPC") {
+          return res.status(507).json({ error: "Insufficient disk space to save document" });
+        }
+        throw writeErr;
+      }
+
+      let file: any;
+      try {
+        // Save metadata to library database
+        const storagePath = `/objects/uploads/${fileUuid}`;
+        file = await libraryService.saveFileMetadata(userId, storagePath, {
+          name: `${title}.${ext}`,
+          originalName: filename,
+          type: "document",
+          mimeType,
+          extension: ext,
+          size: buffer.length,
+          tags: ["ai-generated"],
+        });
+      } catch (dbErr) {
+        // Clean up written file if DB save fails
+        try { await fs.promises.unlink(filePath); } catch { /* best-effort */ }
+        throw dbErr;
+      }
 
       console.log(`[Library] Saved document to library: ${filename} (${buffer.length} bytes) -> ${file.id}`);
 
@@ -801,6 +816,9 @@ export function createLibraryRouter() {
       });
     } catch (error: any) {
       console.error("Error saving document to library:", error);
+      if (error?.code === "ENOSPC") {
+        return res.status(507).json({ error: "Insufficient disk space" });
+      }
       res.status(500).json({ error: "Failed to save document to library" });
     }
   });

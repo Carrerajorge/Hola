@@ -422,7 +422,7 @@ export class WorkbookValidator {
 
       // Validate formulas (basic check)
       if (sheet.formulas) {
-        const cellPattern = /^[A-Z]+\d+$/;
+        const cellPattern = /^[A-Z]{1,3}\d{1,7}$/; // max col XFD, max row 1048576
         for (const formula of sheet.formulas) {
           if (!cellPattern.test(formula.cell)) {
             issues.push({

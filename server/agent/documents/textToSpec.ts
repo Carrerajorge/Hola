@@ -248,8 +248,8 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
     parsedRows.push([safeText.slice(0, 500)]);
   }
 
-  // First row = headers, rest = data
-  const headers = parsedRows[0];
+  // First row = headers, rest = data (null-safe access)
+  const headers = parsedRows[0] || ["Column"];
   const dataRows = parsedRows.slice(1);
 
   const columns = headers.map((h, idx) => ({
