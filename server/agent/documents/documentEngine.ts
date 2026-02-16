@@ -68,9 +68,13 @@ function relativeLuminance(hex: string): number {
   const safe = safeColor(hex); // ensure valid 6-digit hex
   const c = safe.replace("#", "");
   if (c.length !== 6) return 0; // defensive: should never happen after safeColor
-  const r = parseInt(c.substring(0, 2), 16) / 255;
-  const g = parseInt(c.substring(2, 4), 16) / 255;
-  const b = parseInt(c.substring(4, 6), 16) / 255;
+  const rVal = parseInt(c.substring(0, 2), 16);
+  const gVal = parseInt(c.substring(2, 4), 16);
+  const bVal = parseInt(c.substring(4, 6), 16);
+  if (isNaN(rVal) || isNaN(gVal) || isNaN(bVal)) return 0; // defensive NaN guard
+  const r = rVal / 255;
+  const g = gVal / 255;
+  const b = bVal / 255;
   const srgb = [r, g, b].map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
   return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
 }
@@ -91,7 +95,7 @@ function safeColor(color: string | undefined | null, fallback: string = "#000000
   if (!color || typeof color !== "string") return fallback;
   let c = color.trim();
   if (!c.startsWith("#") && /^[0-9a-fA-F]{6}$/.test(c)) c = "#" + c;
-  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+  if (/^#[0-9a-fA-F]{3}$/.test(c) && c.length === 4) {
     c = "#" + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
   }
   if (!/^#[0-9a-fA-F]{6}$/.test(c)) return fallback;
@@ -759,12 +763,16 @@ export class DocumentEngine {
           continue;
         }
         let colNum = 0;
-        for (const ch of match[1]) colNum = colNum * 26 + (ch.charCodeAt(0) - 64);
+        for (const ch of match[1]) {
+          const code = ch.charCodeAt(0);
+          if (code < 65 || code > 90) { colNum = MAX_EXCEL_COL + 1; break; } // only A-Z
+          colNum = colNum * 26 + (code - 64);
+        }
         if (rowNum > MAX_EXCEL_ROW || colNum > MAX_EXCEL_COL) {
           console.warn(`[DocumentEngine] Cell ref out of bounds: ${formula.cell} (row ${rowNum}, col ${colNum})`);
           continue;
         }
-        const safeFormula = formula.formula.substring(0, 8192); // Excel formula limit
+        const safeFormula = (formula.formula ?? "").substring(0, 8192); // Excel formula limit
         const cell = sheet.getCell(formula.cell);
         cell.value = { formula: safeFormula } as any;
       }
@@ -796,17 +804,23 @@ export class DocumentEngine {
       const MAX_STYLED_COLS = 200;
       const lastRow = Math.min(sheetSpec.rows.length + 1, MAX_STYLED_ROWS);
       const lastCol = Math.min(sheetSpec.columns.length, MAX_STYLED_COLS);
-      // Hoist border color + object outside loop — single allocation reused across all cells
-      const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
-      const borderStyle = {
-        top: { style: "thin" as const, color: { argb: safeBorderColor } },
-        left: { style: "thin" as const, color: { argb: safeBorderColor } },
-        bottom: { style: "thin" as const, color: { argb: safeBorderColor } },
-        right: { style: "thin" as const, color: { argb: safeBorderColor } },
-      };
-      for (let r = 1; r <= lastRow; r++) {
-        for (let c = 1; c <= lastCol; c++) {
-          sheet.getCell(r, c).border = borderStyle;
+      // Skip styling if total cell count exceeds 100k (prevents OOM on huge sheets)
+      const totalCells = lastRow * lastCol;
+      if (totalCells > 100_000) {
+        console.warn(`[DocumentEngine] Skipping border styling: ${totalCells} cells exceeds 100k limit`);
+      } else {
+        // Hoist border color + object outside loop — single allocation reused across all cells
+        const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
+        const borderStyle = {
+          top: { style: "thin" as const, color: { argb: safeBorderColor } },
+          left: { style: "thin" as const, color: { argb: safeBorderColor } },
+          bottom: { style: "thin" as const, color: { argb: safeBorderColor } },
+          right: { style: "thin" as const, color: { argb: safeBorderColor } },
+        };
+        for (let r = 1; r <= lastRow; r++) {
+          for (let c = 1; c <= lastCol; c++) {
+            sheet.getCell(r, c).border = borderStyle;
+          }
         }
       }
     }

@@ -121,7 +121,7 @@ export async function createXlsx(spec: XlsxSpec): Promise<ArtifactMeta> {
   if (spec.sheets.length > MAX_SHEETS) throw new Error(`Too many sheets: ${spec.sheets.length} (max ${MAX_SHEETS})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "workbook";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "workbook";
   const filename = `${safeTitle}_${id.substring(0, 8)}.xlsx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -204,7 +204,7 @@ export async function createDocx(spec: DocxSpec): Promise<ArtifactMeta> {
   if (spec.sections.length > MAX_SECTIONS) throw new Error(`Too many sections: ${spec.sections.length} (max ${MAX_SECTIONS})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "document";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "document";
   const filename = `${safeTitle}_${id.substring(0, 8)}.docx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -337,7 +337,7 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
   if (spec.slides.length > MAX_SLIDES) throw new Error(`Too many slides: ${spec.slides.length} (max ${MAX_SLIDES})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "presentation";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "presentation";
   const filename = `${safeTitle}_${id.substring(0, 8)}.pptx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -423,7 +423,7 @@ export async function createArtifactCompiled(
   await ensureArtifactsDir();
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "document";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "document";
   const filename = `${safeTitle}_${id.substring(0, 8)}.${format}`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -623,11 +623,12 @@ export async function getArtifact(id: string): Promise<{ path: string; name: str
   // 1. Check in-memory artifact store first (fast path, no I/O)
   const meta = artifactStore.get(safeId);
   if (meta) {
-    // Verify file still exists and path is within ARTIFACTS_DIR
+    // Verify file still exists, is within ARTIFACTS_DIR, and is not a symlink
     const resolved = path.resolve(meta.path);
     if (!resolved.startsWith(path.resolve(ARTIFACTS_DIR))) return null;
     try {
-      await fs.access(resolved);
+      const stat = await fs.lstat(resolved);
+      if (stat.isSymbolicLink()) { artifactStore.delete(safeId); return null; }
       return { path: resolved, name: meta.name, type: meta.type };
     } catch {
       // File was deleted; remove stale metadata
@@ -665,6 +666,14 @@ export async function getArtifact(id: string): Promise<{ path: string; name: str
       console.warn(`[ArtifactTools] Path traversal attempt blocked: ${match}`);
       return null;
     }
+    // Reject symlinks to prevent escape from artifacts dir
+    try {
+      const fstat = await fs.lstat(resolved);
+      if (fstat.isSymbolicLink()) {
+        console.warn(`[ArtifactTools] Symlink rejected: ${match}`);
+        return null;
+      }
+    } catch { return null; }
     const ext = path.extname(match).slice(1);
     return {
       path: resolved,

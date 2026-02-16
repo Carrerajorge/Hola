@@ -149,7 +149,8 @@ function sanitizeFilename(title: string): string {
   // UTF-8 safe truncation: use TextEncoder to count bytes, not chars
   const encoder = new TextEncoder();
   let result = cleaned;
-  while (encoder.encode(result).length > 200) {
+  let iterations = 0;
+  while (encoder.encode(result).length > 200 && iterations++ < 500) {
     // Remove last character until within 200 bytes
     result = result.slice(0, -1);
   }
@@ -427,8 +428,13 @@ export class DocumentCompiler {
           for (const sheet of spec.sheets) {
             let name = sheet.name.substring(0, 31);
             let suffix = 1;
-            while (names.has(name) && suffix <= LIMITS.maxAutoRepairIterations * 100) {
+            const maxSuffix = LIMITS.maxAutoRepairIterations * 100;
+            while (names.has(name) && suffix <= maxSuffix) {
               name = `${sheet.name.substring(0, 28)}_${suffix++}`;
+            }
+            // If still colliding after max iterations, append unique suffix
+            if (names.has(name)) {
+              name = `${sheet.name.substring(0, 22)}_${Date.now() % 100000}`;
             }
             sheet.name = name;
             names.add(name);
@@ -452,7 +458,9 @@ export class DocumentCompiler {
     error: unknown
   ): Promise<{ buffer: Buffer; filename: string }> {
     const title = (spec as any).title || "Document";
-    const errMsg = error instanceof Error ? error.message : String(error);
+    // Sanitize error message: strip file paths to prevent information disclosure
+    const rawMsg = error instanceof Error ? error.message : String(error);
+    const errMsg = rawMsg.replace(/\/[a-zA-Z0-9_./-]+/g, "[PATH]").substring(0, 500);
     const safeTitle = sanitizeFilename(title);
 
     try {
@@ -505,16 +513,21 @@ export class DocumentCompiler {
         }
 
         case "xlsx": {
-          const excelMod = await import("exceljs");
-          const ExcelJS = (excelMod as any).default || excelMod;
-          const workbook = new ExcelJS.Workbook();
-          workbook.creator = "IliaGPT";
-          const sheet = workbook.addWorksheet("Sheet1");
-          sheet.columns = [{ header: "Info", key: "info", width: 50 }];
-          sheet.addRow({ info: title });
-          sheet.addRow({ info: "Generated in fallback mode" });
-          const buf = Buffer.from(await workbook.xlsx.writeBuffer());
-          return { buffer: buf, filename: `${safeTitle}.xlsx` };
+          try {
+            const excelMod = await import("exceljs");
+            const ExcelJS = (excelMod as any).default || excelMod;
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = "IliaGPT";
+            const sheet = workbook.addWorksheet("Sheet1");
+            sheet.columns = [{ header: "Info", key: "info", width: 50 }];
+            sheet.addRow({ info: title });
+            sheet.addRow({ info: "Generated in fallback mode" });
+            const buf = Buffer.from(await workbook.xlsx.writeBuffer());
+            return { buffer: buf, filename: `${safeTitle}.xlsx` };
+          } catch (xlsxErr) {
+            console.error(`[DocumentCompiler] XLSX fallback import failed: ${xlsxErr instanceof Error ? xlsxErr.message : String(xlsxErr)}`);
+            return { buffer: Buffer.from(""), filename: `${safeTitle}.xlsx` };
+          }
         }
       }
     } catch (fallbackError) {

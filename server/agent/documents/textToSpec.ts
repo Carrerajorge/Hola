@@ -78,6 +78,32 @@ function checkJsonDepth(obj: unknown, maxDepth: number, current: number = 0): bo
   return keys.every(key => checkJsonDepth((obj as Record<string, unknown>)[key], maxDepth, current + 1));
 }
 
+/** Quote-aware CSV line splitter: handles "a,b",c correctly */
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length && cells.length < MAX_COLUMNS; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // Handle escaped quotes ("") inside quoted fields
+      if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
 /* ================================================================== */
 /*  MARKDOWN → DOCX SPEC                                              */
 /* ================================================================== */
@@ -102,7 +128,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
   }
 
   for (let i = 0; i < lines.length && sections.length < MAX_SECTIONS; i++) {
-    const line = lines[i];
+    const line = lines[i].length > MAX_PARAGRAPH_LENGTH ? lines[i].substring(0, MAX_PARAGRAPH_LENGTH) : lines[i];
 
     // Headings
     const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
@@ -251,7 +277,8 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
       // Precompiled separator row check (avoids regex per cell)
       cells = trimmedLine.split("|").map(c => c.trim()).filter(c => c.length > 0 && !/^-+$/.test(c));
     } else if (trimmedLine.includes(",")) {
-      cells = trimmedLine.split(",").map(c => c.trim());
+      // Quote-aware CSV splitting: respect quoted fields like "a,b",c
+      cells = splitCsvLine(trimmedLine);
       if (cells.length <= 1) cells = [trimmedLine];
     } else if (trimmedLine.includes("\t")) {
       cells = trimmedLine.split("\t").map(c => c.trim());
