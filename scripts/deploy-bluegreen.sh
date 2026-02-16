@@ -478,7 +478,22 @@ else
 fi
 echo ""
 
-# ── Step 9: Swap Nginx upstream ────────────────────────────
+# ── Step 9a: Install Nginx server config if present ────────
+NGINX_SITE_CONF="/etc/nginx/sites-enabled/iliagpt.conf"
+NGINX_SITE_SRC="${DEPLOY_PATH}/nginx.conf"
+if [ -f "${NGINX_SITE_SRC}" ]; then
+  if ! diff -q "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}" > /dev/null 2>&1; then
+    log "  Installing updated nginx.conf → ${NGINX_SITE_CONF}"
+    cp "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}"
+    # Also remove legacy default site if it conflicts
+    if [ -f "/etc/nginx/sites-enabled/default" ]; then
+      rm -f "/etc/nginx/sites-enabled/default"
+      logw "Removed /etc/nginx/sites-enabled/default (conflicts with iliagpt.conf)"
+    fi
+  fi
+fi
+
+# ── Step 9b: Swap Nginx upstream ────────────────────────────
 log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
 
 UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
