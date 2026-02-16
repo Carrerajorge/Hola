@@ -543,12 +543,15 @@ class LLMGateway {
                     data: dataUriMatch[2],
                   },
                 });
+                console.log(`[LLMGateway] convertToGemini: added inlineData image (${dataUriMatch[1]}, ${Math.round(dataUriMatch[2].length / 1024)}KB)`);
               } else {
                 parts.push({ text: `[Image: ${url}]` });
+                console.warn(`[LLMGateway] convertToGemini: image_url not a data URI, falling back to text placeholder`);
               }
             }
           }
           if (parts.length === 0) parts.push({ text: "" });
+          console.log(`[LLMGateway] convertToGemini: multimodal message role=${role}, parts=${parts.length} (${parts.filter(p => p.inlineData).length} images, ${parts.filter(p => p.text).length} text)`);
           return { role, parts };
         }
 

@@ -1697,6 +1697,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       // Sources: (1) lastImageBase64 from image-edit flow, (2) image attachments uploaded by user.
       const imagePartsForVision: Array<{ type: "image_url"; image_url: { url: string } }> = [];
 
+      console.log(`[Stream] Vision pipeline: resolvedAttachments=${resolvedAttachments.length}, lastImageBase64=${!!lastImageBase64}, lastImageId=${lastImageId || 'none'}`);
+      if (resolvedAttachments.length > 0) {
+        console.log(`[Stream] Vision pipeline: attachments detail:`, resolvedAttachments.map((a: any) => ({
+          name: a.name, type: a.type, mimeType: a.mimeType, storagePath: a.storagePath, fileId: a.fileId,
+          hasContent: !!a.content,
+        })));
+      }
+
       // Source 1: Image edit context (lastImageBase64 from frontend)
       if (lastImageBase64 && typeof lastImageBase64 === "string") {
         const dataUrl = lastImageBase64.startsWith("data:")
@@ -1710,6 +1718,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       if (resolvedAttachments.length > 0) {
         for (const att of resolvedAttachments) {
           const mime = (att.mimeType || att.type || "").toLowerCase();
+          console.log(`[Stream] Vision: checking att "${att.name}" mime="${mime}" isImage=${mime.startsWith("image/")}`);
           if (!mime.startsWith("image/")) continue;
 
           const storagePath = att.storagePath || "";
@@ -1720,8 +1729,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             const objStore = new ObjectStorageService();
             imageBuffer = await objStore.getObjectEntityBuffer(storagePath);
             console.log(`[Stream] Vision: loaded image from GCS "${att.name}" (${imageBuffer.length} bytes)`);
-          } catch {
-            // GCS failed — try local file fallback (dev mode)
+          } catch (gcsErr: any) {
+            console.log(`[Stream] Vision: GCS failed for "${att.name}": ${gcsErr?.message || gcsErr}`);
           }
 
           // Local file fallback
@@ -1730,12 +1739,30 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               const fs = await import("fs/promises");
               const path = await import("path");
               let filePath = storagePath;
+              const cwd = process.cwd();
+              console.log(`[Stream] Vision: local fallback for "${att.name}", storagePath="${storagePath}", cwd="${cwd}"`);
               if (filePath.startsWith("/objects/uploads/")) {
-                filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
+                filePath = path.default.join(cwd, filePath.replace("/objects/", ""));
               } else if (filePath.startsWith("/objects/")) {
-                filePath = path.default.join(process.cwd(), filePath.replace("/objects/", ""));
+                filePath = path.default.join(cwd, filePath.replace("/objects/", ""));
               } else if (!path.default.isAbsolute(filePath)) {
-                filePath = path.default.join(process.cwd(), "uploads", filePath);
+                filePath = path.default.join(cwd, "uploads", filePath);
+              }
+              console.log(`[Stream] Vision: resolved filePath="${filePath}"`);
+              // Check if file exists before reading
+              try {
+                const stat = await fs.stat(filePath);
+                console.log(`[Stream] Vision: file exists, size=${stat.size} bytes`);
+              } catch {
+                console.warn(`[Stream] Vision: file NOT found at "${filePath}"`);
+                // Try listing the uploads directory to see what's there
+                try {
+                  const uploadsDir = path.default.join(cwd, "uploads");
+                  const files = await fs.readdir(uploadsDir);
+                  console.log(`[Stream] Vision: uploads dir has ${files.length} files: ${files.slice(0, 10).join(', ')}${files.length > 10 ? '...' : ''}`);
+                } catch (dirErr: any) {
+                  console.warn(`[Stream] Vision: cannot list uploads dir: ${dirErr?.message}`);
+                }
               }
               imageBuffer = await fs.readFile(filePath);
               console.log(`[Stream] Vision: loaded image from local "${att.name}" (${imageBuffer.length} bytes)`);
@@ -1748,9 +1775,14 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             const base64 = imageBuffer.toString("base64");
             const dataUrl = `data:${mime};base64,${base64}`;
             imagePartsForVision.push({ type: "image_url", image_url: { url: dataUrl } });
+            console.log(`[Stream] Vision: added image "${att.name}" to multimodal parts (${Math.round(base64.length / 1024)}KB base64)`);
+          } else {
+            console.error(`[Stream] Vision: FAILED to load image "${att.name}" from ANY source — image will NOT be sent to LLM`);
           }
         }
       }
+
+      console.log(`[Stream] Vision: total imagePartsForVision=${imagePartsForVision.length}`);
 
       // If we have images, convert the last user message to multimodal format
       if (imagePartsForVision.length > 0) {
@@ -1766,7 +1798,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 { type: "text", text: textContent },
               ] as any,
             };
-            console.log(`[Stream] Vision: converted last user message to multimodal (${imagePartsForVision.length} images)`);
+            console.log(`[Stream] Vision: converted user message[${i}] to multimodal (${imagePartsForVision.length} images, text="${textContent.substring(0, 100)}")`);
             break;
           }
         }
@@ -1776,6 +1808,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           latencyMode = 'deep' as LatencyMode;
           console.log(`[Stream] Vision: upgraded latency mode to 'deep' for image analysis`);
         }
+      } else {
+        console.log(`[Stream] Vision: NO images found — proceeding with text-only`);
       }
 
       // GUARD: Block image generation when attachments are present
