@@ -18,3 +18,4 @@ export * from "./knowledge";
 export * from "./schedules";
 export * from "./billingCredits";
 export * from "./rag";
+export * from "./packageManager";

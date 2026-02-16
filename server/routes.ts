@@ -106,6 +106,7 @@ import { automationsRouter } from "./routes/admin/automations";
 import { academicSearchRouter } from "./routes/academicSearchRouter";
 import { createSecurityRouter } from "./routes/securityRouter";
 import { createMfaRouter } from "./routes/mfaRouter";
+import { createPackagesRouter } from "./routes/packagesRouter";
 import { computeMfaForUser, startMfaLoginChallenge } from "./services/mfaLogin";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
@@ -575,6 +576,7 @@ export async function registerRoutes(
   app.use("/api/security", createSecurityRouter());
   app.use("/api/api-keys", apiKeysRouter);
   app.use("/api/memory", memoryRouter);
+  app.use("/api/packages", createPackagesRouter());
   app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
   app.use("/api/admin/automations", automationsRouter);
   app.use("/api/academic", academicSearchRouter); // Scopus + Scholar academic search
