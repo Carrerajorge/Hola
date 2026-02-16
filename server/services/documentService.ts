@@ -602,7 +602,7 @@ async function validateArtifactSafe(
   }
 }
 
-async function generateFallbackReport(
+export async function generateFallbackReport(
   request: DocumentRenderRequest,
   documentType: ToolRunnerDocumentType,
   primaryError: unknown,

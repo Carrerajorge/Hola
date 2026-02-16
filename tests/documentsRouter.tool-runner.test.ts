@@ -298,8 +298,11 @@ describe("documents router tool-runner integration", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.headers["x-tool-runner-status"]).toBe("fallback-no-report");
-    expect(response.headers["x-tool-runner-command"]).toBeUndefined();
+    expect(response.headers["x-tool-runner-status"]).toBe("fallback");
+    expect(response.headers["x-tool-runner-command"]).toBe("docx");
+    expect(response.headers["x-tool-runner-request-hash"]).toBeTruthy();
+    expect(Number(response.headers["x-tool-runner-incident-count"])).toBeGreaterThan(0);
+    expect(response.headers["x-tool-runner-incident-codes"]).toContain("TR_0011_FALLBACK_FAILED");
     expect(toolRunnerGenerateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -315,8 +318,11 @@ describe("documents router tool-runner integration", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.headers["x-tool-runner-status"]).toBe("fallback-no-report");
-    expect(response.headers["x-tool-runner-command"]).toBeUndefined();
+    expect(response.headers["x-tool-runner-status"]).toBe("fallback");
+    expect(response.headers["x-tool-runner-command"]).toBe("xlsx");
+    expect(response.headers["x-tool-runner-request-hash"]).toBeTruthy();
+    expect(Number(response.headers["x-tool-runner-incident-count"])).toBeGreaterThan(0);
+    expect(response.headers["x-tool-runner-incident-codes"]).toContain("TR_0011_FALLBACK_FAILED");
   });
 
   it("returns fallback header when pptx tool-runner generation fails", async () => {
@@ -331,8 +337,11 @@ describe("documents router tool-runner integration", () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.headers["x-tool-runner-status"]).toBe("fallback-no-report");
-    expect(response.headers["x-tool-runner-command"]).toBeUndefined();
+    expect(response.headers["x-tool-runner-status"]).toBe("fallback");
+    expect(response.headers["x-tool-runner-command"]).toBe("pptx");
+    expect(response.headers["x-tool-runner-request-hash"]).toBeTruthy();
+    expect(Number(response.headers["x-tool-runner-incident-count"])).toBeGreaterThan(0);
+    expect(response.headers["x-tool-runner-incident-codes"]).toContain("TR_0011_FALLBACK_FAILED");
   });
 
   it("returns tool runner report from generated doc endpoint", async () => {

@@ -13,7 +13,8 @@ import {
   renderDocument,
   getGeneratedDocument,
   getTemplates,
-  getTemplateById
+  getTemplateById,
+  generateFallbackReport,
 } from "../services/documentService";
 import { renderExcelFromSpec } from "../services/excelSpecRenderer";
 import { renderWordFromSpec } from "../services/wordSpecRenderer";
@@ -46,7 +47,10 @@ import {
   getHealthSnapshot,
   isKnownTool,
   listToolDefinitions,
+  TOOL_RUNNER_COMMAND_VERSION,
+  TOOL_RUNNER_PROTOCOL_VERSION,
 } from "../toolRunner/toolRegistry";
+import { TOOL_RUNNER_ERROR_CODES, buildToolRunnerErrorMessage } from "../toolRunner/errorContract";
 import { ToolAssetRef, ToolRunnerReport } from "../toolRunner/types";
 
 // Maximum request body size for document endpoints (1MB)
@@ -123,26 +127,86 @@ function normalizeAssets(value: unknown): ToolAssetRef[] | undefined {
   return assets.length > 0 ? assets : undefined;
 }
 
+function buildToolRunnerFallbackReport(
+  command: "docx" | "xlsx" | "pptx",
+  locale: string
+): ToolRunnerReport {
+  const now = new Date().toISOString();
+  const sandbox = process.env.TOOL_RUNNER_SANDBOX === "docker" ? "docker" : "subprocess";
+  const code = TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED;
+  const message = buildToolRunnerErrorMessage({
+    code,
+    locale,
+    details: "Tool runner did not return a report payload.",
+  });
+
+  const incident = {
+    code,
+    message,
+    severity: "warning" as const,
+    details: {
+      source: "documentsRouter",
+      command,
+    },
+  };
+
+  return {
+    protocolVersion: TOOL_RUNNER_PROTOCOL_VERSION,
+    locale,
+    requestHash: `fallback-${command}-${Date.now()}`,
+    documentType: command,
+    toolVersionPin: TOOL_RUNNER_COMMAND_VERSION,
+    sandbox,
+    usedFallback: true,
+    cacheHit: false,
+    artifactPath: "in-memory://tool-runner-no-report",
+    validation: {
+      valid: false,
+      checks: {
+        relationships: false,
+        styles: false,
+        fonts: false,
+        images: false,
+        schema: false,
+      },
+      metadata: {
+        artifactPath: "in-memory://tool-runner-no-report",
+        bytes: 0,
+      },
+      issues: [incident],
+    },
+    traces: [],
+    incidents: [incident],
+    metrics: {
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      retries: 0,
+    },
+  };
+}
+
 function sendToolRunnerHeaders(
   res: Response,
   report: ToolRunnerReport | undefined,
   command: "docx" | "xlsx" | "pptx",
-  toolRunnerRequested: boolean
+  toolRunnerRequested: boolean,
+  locale: string = "es"
 ): void {
   if (!toolRunnerRequested) {
     return;
   }
 
-  if (!report) {
-    res.setHeader("X-Tool-Runner-Status", "fallback-no-report");
-    return;
-  }
+  const fallback = report ?? buildToolRunnerFallbackReport(command, locale);
+  const incidentCodes = (fallback.incidents ?? []).map((incident) => incident.code);
 
-  res.setHeader("X-Tool-Runner-Request-Hash", report.requestHash);
-  res.setHeader("X-Tool-Runner-Status", report.usedFallback ? "fallback" : "success");
-  res.setHeader("X-Tool-Runner-Cache-Hit", String(report.cacheHit));
+  res.setHeader("X-Tool-Runner-Request-Hash", fallback.requestHash);
+  res.setHeader("X-Tool-Runner-Status", fallback.usedFallback ? "fallback" : "success");
+  res.setHeader("X-Tool-Runner-Cache-Hit", String(fallback.cacheHit));
   res.setHeader("X-Tool-Runner-Command", command);
-  res.setHeader("X-Tool-Runner-Validation", report.validation.valid ? "valid" : "invalid");
+  res.setHeader("X-Tool-Runner-Validation", fallback.validation.valid ? "valid" : "invalid");
+  res.setHeader("X-Tool-Runner-Incident-Count", String(incidentCodes.length));
+  res.setHeader("X-Tool-Runner-Incident-Codes", incidentCodes.join(","));
 }
 
 export function createDocumentsRouter() {
@@ -260,14 +324,32 @@ export function createDocumentsRouter() {
                 buffer = await generateWordDocument(safeTitle, safeContent);
               }
             } catch (error) {
-              toolRunnerReport = undefined;
               logDocumentEvent({
                 timestamp: new Date().toISOString(),
                 event: "generate_fallback",
                 docType: "word",
                 details: { error: sanitizeErrorMessage(error) },
               });
-              buffer = await generateWordDocument(safeTitle, safeContent);
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "docx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                },
+                "docx",
+                error,
+                async () => generateWordDocument(safeTitle, safeContent)
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
             }
             filename = sanitizeFilename(safeTitle, ".docx");
             mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -295,15 +377,35 @@ export function createDocumentsRouter() {
                 buffer = await generateExcelDocument(safeTitle, excelData);
               }
             } catch (error) {
-              toolRunnerReport = undefined;
               logDocumentEvent({
                 timestamp: new Date().toISOString(),
                 event: "generate_fallback",
                 docType: "excel",
                 details: { error: sanitizeErrorMessage(error) },
               });
-              const excelData = parseExcelFromText(safeContent);
-              buffer = await generateExcelDocument(safeTitle, excelData);
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "xlsx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                },
+                "xlsx",
+                error,
+                async () => {
+                  const excelData = parseExcelFromText(safeContent);
+                  return generateExcelDocument(safeTitle, excelData);
+                }
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
             }
             filename = sanitizeFilename(safeTitle, ".xlsx");
             mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -348,18 +450,37 @@ export function createDocumentsRouter() {
                 });
               }
             } catch (error) {
-              toolRunnerReport = undefined;
               logDocumentEvent({
                 timestamp: new Date().toISOString(),
                 event: "generate_fallback",
                 docType: "ppt",
                 details: { error: sanitizeErrorMessage(error) },
               });
-              buffer = await generatePptDocument(normalized.title, normalized.slides, {
-                trace: {
-                  source: "documentsRouter",
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "pptx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    slides: normalized.slides,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
                 },
-              });
+                "pptx",
+                error,
+                async () =>
+                  generatePptDocument(normalized.title, normalized.slides, {
+                    trace: {
+                      source: "documentsRouter",
+                    },
+                  })
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
             }
             filename = sanitizeFilename(safeTitle, ".pptx");
             mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -394,7 +515,13 @@ export function createDocumentsRouter() {
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
-      sendToolRunnerHeaders(res, toolRunnerReport, runnerDocumentType, toolRunnerRequested);
+      sendToolRunnerHeaders(
+        res,
+        toolRunnerReport,
+        runnerDocumentType,
+        toolRunnerRequested,
+        runnerLocale
+      );
       res.send(buffer);
     } catch (error: any) {
       console.error("Document generation error:", error);
