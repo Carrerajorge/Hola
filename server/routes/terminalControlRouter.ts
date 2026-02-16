@@ -229,14 +229,19 @@ export function createTerminalControlRouter(): Router {
         return res.status(400).json({ error: "command is required" });
       }
 
+      const dangerousBypassEnabled = process.env.TERMINAL_ALLOW_DANGEROUS_CONFIRM === "true";
+      const confirmDangerousRequested = Boolean(confirmDangerous);
+      const confirmDangerousAllowed = confirmDangerousRequested && dangerousBypassEnabled;
+
       // Safety check before execution
       const safety = terminalController.isCommandSafe(command);
-      if (!safety.safe && !confirmDangerous) {
+      if (!safety.safe && !confirmDangerousAllowed) {
         return res.status(403).json({
           error: "Command blocked by safety policy",
           reason: safety.reason,
           severity: safety.severity,
-          requiresConfirmation: true
+          requiresConfirmation: dangerousBypassEnabled,
+          bypassEnabled: dangerousBypassEnabled,
         });
       }
 
@@ -252,7 +257,7 @@ export function createTerminalControlRouter(): Router {
         interactive,
         inDocker,
         dockerImage,
-        confirmDangerous
+        confirmDangerous: confirmDangerousAllowed,
       };
 
       const result = await terminalController.executeCommand(req.params.sessionId, request);

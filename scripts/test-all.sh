@@ -31,14 +31,12 @@ if ! npx playwright --version &> /dev/null; then
     npx playwright install chromium
 fi
 
-# Kill any processes using ports 5000 or 5173 (common dev ports)
+# Check potential port conflicts (non-destructive)
 echo "Checking for port conflicts..."
 for PORT in 5000 5173; do
     PID=$(lsof -ti:$PORT 2>/dev/null || true)
     if [ -n "$PID" ]; then
-        echo -e "${YELLOW}Killing process on port $PORT (PID: $PID)${NC}"
-        kill -9 $PID 2>/dev/null || true
-        sleep 1
+        echo -e "${YELLOW}Warning: port $PORT is in use (PID: $PID). E2E may fail if app cannot bind.${NC}"
     fi
 done
 
@@ -47,7 +45,7 @@ echo ""
 echo "=== Running Unit Tests (Vitest) ==="
 echo ""
 
-if npm run test:run -- server/__tests__/documentAnalysis.test.ts; then
+if npm run test:run -- --silent --passWithNoTests; then
     echo -e "${GREEN}✓ Unit tests passed${NC}"
     UNIT_RESULT=0
 else

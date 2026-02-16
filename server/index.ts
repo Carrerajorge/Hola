@@ -200,6 +200,8 @@ export function log(message: string, source = "express") {
 
   // Rate Limiting (User-based) - Applied AFTER auth to use req.user
   app.use("/api", globalLimiter);
+  // Legacy/public routes outside /api should still be rate-limited.
+  app.use(["/tools", "/agents", "/metrics", "/mcp"], globalLimiter);
   app.use("/api/auth", authLimiter);
   app.use("/api/checkout", billingLimiter);
   app.use("/api/billing", billingLimiter);

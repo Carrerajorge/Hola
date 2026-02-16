@@ -22,9 +22,28 @@ const authLoginLogger = createLogger("auth-login");
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const ALLOW_LEGACY_ENV_ADMIN_LOGIN = process.env.ALLOW_LEGACY_ENV_ADMIN_LOGIN === "true";
+const ALLOW_LEGACY_PLAINTEXT_PASSWORD_LOGIN = process.env.ALLOW_LEGACY_PLAINTEXT_PASSWORD_LOGIN === "true";
+
+if (ADMIN_EMAIL && ADMIN_PASSWORD && !ADMIN_PASSWORD_HASH && !ALLOW_LEGACY_ENV_ADMIN_LOGIN) {
+  console.warn("[Auth] ADMIN_PASSWORD is set but ADMIN_PASSWORD_HASH is missing; env-admin login is disabled.");
+}
 
 function isAdminConfigured(): boolean {
-  return !!(ADMIN_EMAIL && ADMIN_PASSWORD);
+  return !!(ADMIN_EMAIL && (ADMIN_PASSWORD_HASH || (ALLOW_LEGACY_ENV_ADMIN_LOGIN && ADMIN_PASSWORD)));
+}
+
+async function verifyEnvAdminPassword(password: string): Promise<boolean> {
+  if (ADMIN_PASSWORD_HASH) {
+    return verifyPassword(password, ADMIN_PASSWORD_HASH);
+  }
+
+  if (ALLOW_LEGACY_ENV_ADMIN_LOGIN && ADMIN_PASSWORD) {
+    return password === ADMIN_PASSWORD;
+  }
+
+  return false;
 }
 
 // Sanitize user object to remove sensitive fields
@@ -75,8 +94,12 @@ export function registerAuthRoutes(app: Express): void {
       
       const { email, password } = validation.data;
 
-      // Check if it's the admin (case-insensitive email comparison)
-      if (isAdminConfigured() && email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() && password === ADMIN_PASSWORD) {
+      // Optional env-admin emergency path (hash-based by default).
+      const isEnvAdminLogin =
+        isAdminConfigured() &&
+        email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() &&
+        (await verifyEnvAdminPassword(password));
+      if (isEnvAdminLogin) {
         const adminId = "admin-user-id";
         await authStorage.upsertUser({
           id: adminId,
@@ -204,9 +227,25 @@ export function registerAuthRoutes(app: Express): void {
       if (dbUser.password) {
         if (isHashed(dbUser.password)) {
           passwordValid = await verifyPassword(password, dbUser.password);
-        } else {
+        } else if (ALLOW_LEGACY_PLAINTEXT_PASSWORD_LOGIN) {
           passwordValid = dbUser.password === password;
           needsPasswordMigration = passwordValid;
+        } else {
+          try {
+            await auditLog(req, {
+              action: AuditActions.AUTH_LOGIN_FAILED,
+              resource: "auth",
+              details: { email: dbUser.email, reason: "legacy_plaintext_password_blocked", targetUserId: dbUser.id },
+              category: "auth",
+              severity: "warning",
+            });
+          } catch (auditError) {
+            console.error("Failed to create audit log:", auditError);
+          }
+          return res.status(403).json({
+            message: "Esta cuenta requiere restablecer contraseña antes de iniciar sesión.",
+            code: "PASSWORD_RESET_REQUIRED",
+          });
         }
       }
 
@@ -230,7 +269,7 @@ export function registerAuthRoutes(app: Express): void {
         try {
           const hashedPassword = await hashPassword(password);
           await storage.updateUser(dbUser.id, { password: hashedPassword });
-          console.log(`Password migrated to bcrypt hash for user: ${dbUser.email}`);
+          console.log(`[Auth] Legacy plaintext password migrated to hash for user: ${dbUser.email}`);
         } catch (migrationError) {
           console.error("Failed to migrate password to hash:", migrationError);
         }

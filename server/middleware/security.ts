@@ -1,12 +1,59 @@
-import helmet from "helmet";
+import helmet, { type ContentSecurityPolicyOptions } from "helmet";
 import { Express } from "express";
 
 const isProduction = process.env.NODE_ENV === "production";
 
+const cspDirectives: NonNullable<ContentSecurityPolicyOptions["directives"]> = {
+  defaultSrc: ["'self'"],
+  scriptSrc: [
+    "'self'",
+    ...(isProduction ? [] : ["'unsafe-inline'", "'unsafe-eval'"]),
+    "https://cdn.jsdelivr.net",
+    "https://accounts.google.com",
+  ],
+  styleSrc: [
+    "'self'",
+    "'unsafe-inline'",
+    "https://fonts.googleapis.com",
+    "https://cdn.jsdelivr.net",
+  ],
+  imgSrc: [
+    "'self'",
+    "data:",
+    "blob:",
+    "https://lh3.googleusercontent.com",
+    "https://*.googleusercontent.com",
+    "https://files.stripe.com",
+  ],
+  connectSrc: [
+    "'self'",
+    "https://api.x.ai",
+    "https://generativelanguage.googleapis.com",
+    "https://api.openai.com",
+    "https://api.anthropic.com",
+    "https://accounts.google.com",
+    "wss:",
+    ...(isProduction ? [] : ["ws:"]),
+  ],
+  fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+  frameSrc: ["'self'", "https://accounts.google.com"],
+  frameAncestors: ["'self'"],
+  objectSrc: ["'none'"],
+  baseUri: ["'self'"],
+  formAction: ["'self'", "https://accounts.google.com"],
+};
+
+if (isProduction) {
+  cspDirectives.upgradeInsecureRequests = [];
+}
+
 export const setupSecurity = (app: Express) => {
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: cspDirectives,
+      },
       crossOriginEmbedderPolicy: false,
       crossOriginResourcePolicy: { policy: "same-origin" },
       crossOriginOpenerPolicy: { policy: "same-origin" },

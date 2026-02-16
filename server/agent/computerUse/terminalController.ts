@@ -156,6 +156,28 @@ const SAFE_COMMAND_PREFIXES = [
   "cd", "mkdir", "touch", "cp", "mv",
 ];
 
+const SAFE_COMMAND_PREFIX_SET = new Set(SAFE_COMMAND_PREFIXES.map((command) => command.toLowerCase()));
+const ENFORCE_COMMAND_ALLOWLIST =
+  process.env.TERMINAL_ENFORCE_ALLOWLIST === "true" || process.env.NODE_ENV === "production";
+const ALLOW_DANGEROUS_CONFIRM_BYPASS = process.env.TERMINAL_ALLOW_DANGEROUS_CONFIRM === "true";
+
+function getBaseCommand(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return "";
+
+  const tokens = trimmed.split(/\s+/);
+  for (const token of tokens) {
+    if (!token) continue;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) continue; // Skip VAR=value prefixes
+
+    const normalized = token.replace(/^['"]|['"]$/g, "");
+    const basename = normalized.split("/").pop() || normalized;
+    return basename.toLowerCase();
+  }
+
+  return "";
+}
+
 // ============================================
 // Terminal Controller
 // ============================================
@@ -225,13 +247,15 @@ export class TerminalController extends EventEmitter {
 
     // Safety check
     const safetyResult = this.checkCommandSafety(request.command);
-    if (!safetyResult.safe && !request.confirmDangerous) {
+    const bypassSafety =
+      Boolean(request.confirmDangerous) && ALLOW_DANGEROUS_CONFIRM_BYPASS;
+    if (!safetyResult.safe && !bypassSafety) {
       return {
         id: commandId,
         command: request.command,
         exitCode: 1,
         stdout: "",
-        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Requires explicit confirmation.`,
+        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Dangerous bypass is disabled unless TERMINAL_ALLOW_DANGEROUS_CONFIRM=true.`,
         duration: 0,
         killed: false,
         signal: null,
@@ -296,13 +320,27 @@ export class TerminalController extends EventEmitter {
 
       const env = { ...session.env, ...request.env };
       const cwd = request.cwd || session.cwd;
+      const canDirectSpawn =
+        typeof request.command === "string" &&
+        request.command.trim().length > 0 &&
+        !/\s/.test(request.command.trim()) &&
+        Array.isArray(request.args) &&
+        request.args.every((arg) => typeof arg === "string");
 
-      const proc = spawn(shell, ["-c", fullCommand], {
-        cwd,
-        env,
-        timeout,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const proc = canDirectSpawn
+        ? spawn(request.command, request.args || [], {
+            cwd,
+            env,
+            timeout,
+            stdio: ["pipe", "pipe", "pipe"],
+            shell: false,
+          })
+        : spawn(shell, ["-c", fullCommand], {
+            cwd,
+            env,
+            timeout,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
 
       let stdout = "";
       let stderr = "";
@@ -881,11 +919,28 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private checkCommandSafety(command: string): { safe: boolean; reason?: string; severity?: string } {
+    const trimmed = command.trim();
+    if (!trimmed) {
+      return { safe: false, reason: "Empty command", severity: "medium" };
+    }
+
     for (const { pattern, reason, severity } of DANGEROUS_PATTERNS) {
-      if (pattern.test(command)) {
+      if (pattern.test(trimmed)) {
         return { safe: false, reason, severity };
       }
     }
+
+    if (ENFORCE_COMMAND_ALLOWLIST) {
+      const baseCommand = getBaseCommand(trimmed);
+      if (!baseCommand || !SAFE_COMMAND_PREFIX_SET.has(baseCommand)) {
+        return {
+          safe: false,
+          reason: `Command "${baseCommand || trimmed}" is not in the allowlist`,
+          severity: "high",
+        };
+      }
+    }
+
     return { safe: true };
   }
 

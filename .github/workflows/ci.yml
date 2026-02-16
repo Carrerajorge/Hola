@@ -14,9 +14,10 @@ concurrency:
 
 permissions:
   contents: read
+  packages: write
 
 env:
-  NODE_VERSION: "25"
+  NODE_VERSION: "20"
 
 jobs:
   typecheck:
@@ -34,7 +35,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Type check
         run: npm run type-check
@@ -131,7 +132,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Run tests
         run: npm run test:run -- --silent --passWithNoTests
@@ -161,7 +162,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -191,7 +192,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: npm audit (high+)
         run: npm audit --omit=dev --audit-level=high
@@ -253,3 +254,15 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # ── Build & Push Docker Images to GHCR ────────────────
+  docker:
+    name: Docker Images
+    needs: [build, audit]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/build-images.yml
+    with:
+      sha: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write

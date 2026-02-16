@@ -4,7 +4,7 @@
 # ============================================
 # Stage 1: Build (dependencies + compile)
 # ============================================
-FROM node:25-slim AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 
 # Build-time tooling for native modules
@@ -35,7 +35,7 @@ RUN npm prune --omit=dev
 # ============================================
 # Stage 2: Sandbox Runner
 # ============================================
-FROM node:25-slim AS sandbox-runner
+FROM node:20-slim AS sandbox-runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image so runtime can report the deployed commit SHA
@@ -63,7 +63,7 @@ CMD ["node", "dist/sandbox-runner.cjs"]
 # ============================================
 # Stage 3: Production Runner
 # ============================================
-FROM node:25-slim AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 
 # Bake APP_VERSION into the image (source of truth for /api/health version).

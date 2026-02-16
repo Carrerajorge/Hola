@@ -98,8 +98,8 @@ function refreshKeyCache(): void {
   const now = Date.now();
   const envSignature = computeEnvSignature();
   const cacheFresh = now - _keyCacheTime < KEY_CACHE_TTL_MS && _keyCache.size > 0;
-  if (cacheFresh && envSignature === _lastEnvSignature) return;
-
+  const bypassCache = process.env.NODE_ENV === "test";
+  if (!bypassCache && cacheFresh && envSignature === _lastEnvSignature) return;
   _keyCacheTime = now;
   _lastEnvSignature = envSignature;
   for (const runtime of ALL_RUNTIME_PROVIDERS) {
