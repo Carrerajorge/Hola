@@ -1,113 +1,235 @@
+/**
+ * modelIntegration.ts — Hardened Model Integration Layer
+ *
+ * Single source of truth for provider normalization, API-key checks,
+ * chat-model eligibility, and public-model filtering.
+ *
+ * Hardening:
+ *  1. Immutable lookup tables (Object.freeze)
+ *  2. Input sanitization on every public entry point
+ *  3. Defensive null/undefined guards
+ *  4. Strict type narrowing via branded union
+ *  5. Cached API-key results (invalidated every 60 s)
+ *  6. Structured logging for diagnostics
+ *  7. No throw — every function returns a safe default
+ */
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
 
-export function normalizeModelProviderToRuntime(provider: string): ChatRuntimeProvider | null {
-  const normalized = String(provider || "").toLowerCase().trim();
-  if (!normalized) return null;
+const ALL_RUNTIME_PROVIDERS: readonly ChatRuntimeProvider[] = Object.freeze([
+  "xai", "gemini", "openai", "anthropic", "deepseek",
+]) as readonly ChatRuntimeProvider[];
 
-  // Storage uses "google" for Gemini models. Some code uses "gemini".
-  if (normalized === "google" || normalized === "gemini") return "gemini";
+// ─── Immutable Lookup Maps ────────────────────────────────────────────────────
 
-  // Storage uses "xai" for Grok. Some code uses "grok".
-  if (normalized === "xai" || normalized === "grok") return "xai";
+/** Maps every known DB provider string → runtime provider. */
+const PROVIDER_ALIAS_MAP: Readonly<Record<string, ChatRuntimeProvider>> = Object.freeze({
+  google: "gemini",
+  gemini: "gemini",
+  xai: "xai",
+  grok: "xai",
+  openai: "openai",
+  anthropic: "anthropic",
+  deepseek: "deepseek",
+});
 
-  // OpenAI models
-  if (normalized === "openai") return "openai";
+/** Every env-var name that proves a provider is configured, grouped by runtime. */
+const API_KEY_ENV_VARS: Readonly<Record<ChatRuntimeProvider, readonly string[]>> = Object.freeze({
+  xai: Object.freeze(["XAI_API_KEY", "GROK_API_KEY", "ILIAGPT_API_KEY"]),
+  gemini: Object.freeze(["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
+  openai: Object.freeze(["OPENAI_API_KEY"]),
+  anthropic: Object.freeze(["ANTHROPIC_API_KEY"]),
+  deepseek: Object.freeze(["DEEPSEEK_API_KEY"]),
+});
 
-  // Anthropic (Claude) models
-  if (normalized === "anthropic") return "anthropic";
+/** Model-ID regex per runtime to detect chat-capable model IDs. */
+const CHAT_MODEL_PATTERNS: Readonly<Record<ChatRuntimeProvider, RegExp>> = Object.freeze({
+  gemini: /gemini/i,
+  xai: /grok/i,
+  openai: /^(gpt|o\d|chatgpt|codex-mini)/i,
+  anthropic: /^claude/i,
+  deepseek: /^deepseek/i,
+});
 
-  // DeepSeek models
-  if (normalized === "deepseek") return "deepseek";
+/** Model types considered chat-capable. */
+const CHAT_MODEL_TYPES: ReadonlySet<string> = Object.freeze(new Set(["TEXT", "MULTIMODAL"]));
 
-  return null;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Safely coerce any value to a trimmed lowercase string. Never throws. */
+function sanitize(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).toLowerCase().trim();
 }
 
-export function isModelProviderSupported(provider: string): boolean {
+/** Minimal structured log (noop-safe — no external deps). */
+function logWarn(event: string, data?: Record<string, unknown>): void {
+  try {
+    const entry = { ts: new Date().toISOString(), level: "warn", component: "modelIntegration", event, ...data };
+    console.warn(JSON.stringify(entry));
+  } catch { /* swallow */ }
+}
+
+// ─── API-key Cache ────────────────────────────────────────────────────────────
+
+const KEY_CACHE_TTL_MS = 60_000;
+let _keyCacheTime = 0;
+const _keyCache = new Map<ChatRuntimeProvider, boolean>();
+
+function refreshKeyCache(): void {
+  const now = Date.now();
+  if (now - _keyCacheTime < KEY_CACHE_TTL_MS && _keyCache.size > 0) return;
+  _keyCacheTime = now;
+  for (const runtime of ALL_RUNTIME_PROVIDERS) {
+    const envVars = API_KEY_ENV_VARS[runtime];
+    const hasKey = envVars.some(v => {
+      const val = process.env[v];
+      return typeof val === "string" && val.trim().length > 0;
+    });
+    _keyCache.set(runtime, hasKey);
+  }
+}
+
+/** Force-refresh the API-key cache (useful after hot-loading .env). */
+export function invalidateKeyCache(): void {
+  _keyCacheTime = 0;
+  _keyCache.clear();
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Normalize a DB provider string (e.g. "google", "grok") to its runtime enum.
+ * Returns `null` for unknown providers. Never throws.
+ */
+export function normalizeModelProviderToRuntime(provider: unknown): ChatRuntimeProvider | null {
+  const key = sanitize(provider);
+  if (!key) return null;
+  return PROVIDER_ALIAS_MAP[key] ?? null;
+}
+
+/**
+ * Whether the given DB provider string maps to a known runtime.
+ */
+export function isModelProviderSupported(provider: unknown): boolean {
   return normalizeModelProviderToRuntime(provider) !== null;
 }
 
+/**
+ * Whether the runtime provider has at least one non-empty API key in process.env.
+ * Results are cached for 60 s.
+ */
 export function hasApiKeyForRuntimeProvider(runtime: ChatRuntimeProvider): boolean {
-  if (runtime === "xai") {
-    // Legacy: some deployments still use GROK_API_KEY.
-    // Legacy: ILIAGPT_API_KEY is also accepted by llmGateway deployments.
-    return !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY);
-  }
-  if (runtime === "gemini") {
-    // Legacy/alternate: GOOGLE_API_KEY.
-    return !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
-  }
-  if (runtime === "openai") {
-    return !!process.env.OPENAI_API_KEY;
-  }
-  if (runtime === "anthropic") {
-    return !!process.env.ANTHROPIC_API_KEY;
-  }
-  if (runtime === "deepseek") {
-    return !!process.env.DEEPSEEK_API_KEY;
-  }
-  return false;
+  if (!ALL_RUNTIME_PROVIDERS.includes(runtime)) return false;
+  refreshKeyCache();
+  return _keyCache.get(runtime) ?? false;
 }
 
-export function isChatModelType(modelType?: string | null): boolean {
-  // Keep permissive defaults: legacy rows may have null modelType.
-  const t = String(modelType || "TEXT").toUpperCase();
-  return t === "TEXT" || t === "MULTIMODAL";
+/**
+ * Whether the model type string represents a chat-capable type.
+ * Permissive default: null / undefined → treated as "TEXT".
+ */
+export function isChatModelType(modelType: unknown): boolean {
+  const t = sanitize(modelType) || "text";
+  return CHAT_MODEL_TYPES.has(t.toUpperCase());
 }
 
-export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId?: string | null): boolean {
-  const id = String(modelId || "").toLowerCase().trim();
+/**
+ * Whether a model ID is compatible with the given runtime for chat use.
+ */
+export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId: unknown): boolean {
+  const id = sanitize(modelId);
   if (!id) return false;
-  if (runtime === "gemini") return id.includes("gemini");
-  if (runtime === "xai") return id.includes("grok");
-  if (runtime === "openai") {
-    // All OpenAI chat models: GPT, O-series, ChatGPT, Codex (text)
-    return /^(gpt|o\d|chatgpt|codex-mini)/.test(id);
-  }
-  if (runtime === "anthropic") {
-    return /^claude/.test(id);
-  }
-  if (runtime === "deepseek") {
-    return /^deepseek/.test(id);
-  }
-  return false;
+  const pattern = CHAT_MODEL_PATTERNS[runtime];
+  if (!pattern) return false;
+  return pattern.test(id);
 }
 
-export function isModelChatCapable(model: { provider: string; modelId?: string | null; modelType?: string | null }): boolean {
+/**
+ * Composite check: provider + modelType + modelId all qualify for chat.
+ */
+export function isModelChatCapable(model: {
+  provider: unknown;
+  modelId?: unknown;
+  modelType?: unknown;
+}): boolean {
+  if (!model || typeof model !== "object") return false;
   const runtime = normalizeModelProviderToRuntime(model.provider);
   if (!runtime) return false;
   if (!isChatModelType(model.modelType)) return false;
   return isChatModelIdCompatible(runtime, model.modelId);
 }
 
-export function isModelProviderIntegrated(provider: string): boolean {
+/**
+ * Whether the DB provider has a working API key configured.
+ */
+export function isModelProviderIntegrated(provider: unknown): boolean {
   const runtime = normalizeModelProviderToRuntime(provider);
   if (!runtime) return false;
   return hasApiKeyForRuntimeProvider(runtime);
 }
 
-// Provider ids as stored in ai_models.provider (plus known aliases).
+/**
+ * Return all DB provider strings that map to supported runtimes (incl. aliases).
+ */
 export function getSupportedModelProviderIds(): string[] {
-  // Provider ids as stored in `ai_models.provider` plus known legacy aliases.
-  return ["xai", "google", "openai", "grok", "gemini", "anthropic", "deepseek"];
+  return Object.keys(PROVIDER_ALIAS_MAP);
 }
 
+/**
+ * Return only the DB provider strings whose runtime currently has an API key.
+ */
 export function getIntegratedModelProviderIds(): string[] {
+  refreshKeyCache();
   const out = new Set<string>();
-  for (const provider of getSupportedModelProviderIds()) {
-    if (isModelProviderIntegrated(provider)) out.add(provider);
+  for (const [alias, runtime] of Object.entries(PROVIDER_ALIAS_MAP)) {
+    if (_keyCache.get(runtime)) out.add(alias);
   }
   return Array.from(out);
 }
 
+/**
+ * Full eligibility gate for the `/api/models/available` public endpoint.
+ * A model is eligible iff:
+ *  - isEnabled === "true"
+ *  - status === "active"
+ *  - provider has a configured API key
+ *  - model ID + type match the chat pattern
+ */
 export function isModelEligibleForPublic(model: {
-  provider: string;
-  modelId?: string | null;
-  modelType?: string | null;
-  status?: string | null;
-  isEnabled?: string | null;
+  provider: unknown;
+  modelId?: unknown;
+  modelType?: unknown;
+  status?: unknown;
+  isEnabled?: unknown;
 }): boolean {
-  if (model.isEnabled !== "true") return false;
-  if (model.status !== "active") return false;
+  if (!model || typeof model !== "object") return false;
+  if (sanitize(model.isEnabled) !== "true") return false;
+  if (sanitize(model.status) !== "active") return false;
   if (!isModelProviderIntegrated(model.provider)) return false;
   return isModelChatCapable(model);
+}
+
+/**
+ * Return all runtime providers (useful for iteration without importing the union).
+ */
+export function getAllRuntimeProviders(): readonly ChatRuntimeProvider[] {
+  return ALL_RUNTIME_PROVIDERS;
+}
+
+/**
+ * Diagnostic snapshot — safe for logging, never leaks secrets.
+ */
+export function getIntegrationSnapshot(): {
+  runtimes: Record<ChatRuntimeProvider, { hasKey: boolean; envVars: readonly string[] }>;
+  aliases: Readonly<Record<string, ChatRuntimeProvider>>;
+} {
+  refreshKeyCache();
+  const runtimes = {} as Record<ChatRuntimeProvider, { hasKey: boolean; envVars: readonly string[] }>;
+  for (const r of ALL_RUNTIME_PROVIDERS) {
+    runtimes[r] = { hasKey: _keyCache.get(r) ?? false, envVars: API_KEY_ENV_VARS[r] };
+  }
+  return { runtimes, aliases: PROVIDER_ALIAS_MAP };
 }

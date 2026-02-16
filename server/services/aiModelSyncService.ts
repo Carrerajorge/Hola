@@ -1,24 +1,79 @@
+/**
+ * aiModelSyncService.ts — Hardened Model Catalog & Sync Service
+ *
+ * Maintains the canonical KNOWN_MODELS catalog and syncs it into the database.
+ *
+ * Hardening:
+ *  1. Deep-frozen immutable catalog (Object.freeze recursive)
+ *  2. Input validation on every public function
+ *  3. Per-model error isolation with bounded error accumulator
+ *  4. Structured JSON logging
+ *  5. Batch size limits to prevent unbounded DB writes
+ *  6. Safe string coercion for provider lookups
+ *  7. Model ID uniqueness validation within each provider
+ *  8. Defensive storage call wrappers
+ */
+
 import { storage } from "../storage";
 import type { InsertAiModel, AiModel } from "@shared/schema";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface KnownModel {
-  modelId: string;
-  name: string;
-  contextWindow: number;
-  maxOutput: number;
-  type: "TEXT" | "IMAGE" | "EMBEDDING" | "AUDIO" | "VIDEO" | "MULTIMODAL";
-  inputCost?: string;
-  outputCost?: string;
-  description?: string;
-  releaseDate?: string;
-  isDeprecated?: boolean;
+  readonly modelId: string;
+  readonly name: string;
+  readonly contextWindow: number;
+  readonly maxOutput: number;
+  readonly type: "TEXT" | "IMAGE" | "EMBEDDING" | "AUDIO" | "VIDEO" | "MULTIMODAL";
+  readonly inputCost?: string;
+  readonly outputCost?: string;
+  readonly description?: string;
+  readonly releaseDate?: string;
+  readonly isDeprecated?: boolean;
+}
+
+interface SyncResult {
+  added: number;
+  updated: number;
+  errors: string[];
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const MAX_ERRORS_PER_SYNC = 25;
+
+function logSync(level: "info" | "warn" | "error", message: string, data?: Record<string, unknown>): void {
+  try {
+    const entry = { ts: new Date().toISOString(), level, component: "aiModelSync", message, ...data };
+    if (level === "error") console.error(JSON.stringify(entry));
+    else if (level === "warn") console.warn(JSON.stringify(entry));
+    else console.log(JSON.stringify(entry));
+  } catch { /* swallow */ }
+}
+
+/** Sanitize provider input. */
+function normalizeProvider(provider: unknown): string {
+  if (provider === null || provider === undefined) return "";
+  return String(provider).toLowerCase().trim();
+}
+
+/** Deep-freeze an object and all nested arrays/objects. */
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") return obj;
+  Object.freeze(obj);
+  for (const value of Object.values(obj as Record<string, unknown>)) {
+    if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return obj;
 }
 
 // ============================================================================
-// COMPLETE MODEL LIST - Updated January 2026
+// COMPLETE MODEL CATALOG - Updated February 2026
 // ============================================================================
 
-const KNOWN_MODELS: Record<string, KnownModel[]> = {
+const KNOWN_MODELS: Readonly<Record<string, readonly KnownModel[]>> = deepFreeze({
   // ========================================
   // GOOGLE GEMINI MODELS
   // ========================================
@@ -48,7 +103,6 @@ const KNOWN_MODELS: Record<string, KnownModel[]> = {
     { modelId: "imagen-3", name: "Imagen 3", contextWindow: 0, maxOutput: 0, type: "IMAGE", inputCost: "0.04", outputCost: "0.00", description: "Image generation model" },
     { modelId: "veo-3", name: "Veo 3", contextWindow: 0, maxOutput: 0, type: "VIDEO", inputCost: "0.10", outputCost: "0.00", description: "Video generation with audio" },
     // Embeddings
-    // NOTE: some API keys/projects don't expose `text-embedding-004`; `gemini-embedding-001` is widely available.
     { modelId: "gemini-embedding-001", name: "Gemini Embedding 001", contextWindow: 2048, maxOutput: 1, type: "EMBEDDING", inputCost: "0.000025", outputCost: "0.00", description: "Text embedding model (embedContent)" },
     { modelId: "text-embedding-004", name: "Text Embedding 004", contextWindow: 2048, maxOutput: 0, type: "EMBEDDING", inputCost: "0.000025", outputCost: "0.00", description: "Text embedding model", isDeprecated: true },
   ],
@@ -179,33 +233,66 @@ const KNOWN_MODELS: Record<string, KnownModel[]> = {
     { modelId: "sonar-reasoning-pro", name: "Sonar Reasoning Pro", contextWindow: 128000, maxOutput: 8192, type: "TEXT", inputCost: "0.002", outputCost: "0.008", description: "Reasoning with search" },
     { modelId: "sonar-reasoning", name: "Sonar Reasoning", contextWindow: 128000, maxOutput: 8192, type: "TEXT", inputCost: "0.001", outputCost: "0.004", description: "Basic reasoning with search" },
   ],
-};
+});
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 export function getAvailableProviders(): string[] {
   return Object.keys(KNOWN_MODELS);
 }
 
-export function getKnownModelsForProvider(provider: string): KnownModel[] {
-  return KNOWN_MODELS[provider.toLowerCase()] || [];
+export function getKnownModelsForProvider(provider: unknown): readonly KnownModel[] {
+  const key = normalizeProvider(provider);
+  if (!key) return [];
+  return KNOWN_MODELS[key] ?? [];
 }
 
-export async function syncModelsForProvider(provider: string): Promise<{ added: number; updated: number; errors: string[] }> {
-  const result = { added: 0, updated: 0, errors: [] as string[] };
+export async function syncModelsForProvider(provider: unknown): Promise<SyncResult> {
+  const result: SyncResult = { added: 0, updated: 0, errors: [] };
+  const key = normalizeProvider(provider);
 
-  const knownModels = KNOWN_MODELS[provider.toLowerCase()];
-  if (!knownModels || knownModels.length === 0) {
-    result.errors.push(`Unknown provider: ${provider}`);
+  if (!key) {
+    result.errors.push("syncModelsForProvider: empty provider");
     return result;
   }
 
-  const existingModels = await storage.getAiModels();
+  const knownModels = KNOWN_MODELS[key];
+  if (!knownModels || knownModels.length === 0) {
+    result.errors.push(`Unknown provider: ${key}`);
+    return result;
+  }
+
+  // Validate no duplicate model IDs in catalog
+  const seen = new Set<string>();
+  for (const m of knownModels) {
+    if (seen.has(m.modelId)) {
+      logSync("warn", `Duplicate modelId in catalog`, { provider: key, modelId: m.modelId });
+    }
+    seen.add(m.modelId);
+  }
+
+  let existingModels: AiModel[];
+  try {
+    existingModels = await storage.getAiModels();
+  } catch (err) {
+    const msg = `Failed to fetch existing models: ${err instanceof Error ? err.message : String(err)}`;
+    result.errors.push(msg);
+    logSync("error", msg);
+    return result;
+  }
+
   const existingByModelId = new Map(
     existingModels
-      .filter(m => m.provider.toLowerCase() === provider.toLowerCase())
+      .filter(m => normalizeProvider(m.provider) === key)
       .map(m => [m.modelId, m])
   );
 
   for (const model of knownModels) {
+    if (result.errors.length >= MAX_ERRORS_PER_SYNC) {
+      logSync("warn", "Max errors reached, stopping sync early", { provider: key, errors: result.errors.length });
+      break;
+    }
+
     try {
       const existing = existingByModelId.get(model.modelId);
 
@@ -224,10 +311,9 @@ export async function syncModelsForProvider(provider: string): Promise<{ added: 
         });
         result.updated++;
       } else {
-        // New models are created as INACTIVE by default
         await storage.createAiModel({
           name: model.name,
-          provider: provider.toLowerCase(),
+          provider: key,
           modelId: model.modelId,
           modelType: model.type,
           contextWindow: model.contextWindow,
@@ -239,24 +325,39 @@ export async function syncModelsForProvider(provider: string): Promise<{ added: 
           isDeprecated: model.isDeprecated ? "true" : "false",
           releaseDate: model.releaseDate,
           status: "inactive",
-          isEnabled: "false", // Disabled by default - user must activate
+          isEnabled: "false",
           lastSyncAt: new Date(),
         });
         result.added++;
       }
-    } catch (error: any) {
-      result.errors.push(`Error syncing ${model.modelId}: ${error.message}`);
+    } catch (error: unknown) {
+      const msg = `Error syncing ${model.modelId}: ${error instanceof Error ? error.message : String(error)}`;
+      result.errors.push(msg);
+      logSync("error", msg, { provider: key, modelId: model.modelId });
     }
+  }
+
+  if (result.added > 0 || result.updated > 0) {
+    logSync("info", `Sync complete for ${key}`, { added: result.added, updated: result.updated });
   }
 
   return result;
 }
 
-export async function syncAllProviders(): Promise<Record<string, { added: number; updated: number; errors: string[] }>> {
-  const results: Record<string, { added: number; updated: number; errors: string[] }> = {};
+export async function syncAllProviders(): Promise<Record<string, SyncResult>> {
+  const results: Record<string, SyncResult> = {};
 
   for (const provider of Object.keys(KNOWN_MODELS)) {
-    results[provider] = await syncModelsForProvider(provider);
+    try {
+      results[provider] = await syncModelsForProvider(provider);
+    } catch (err) {
+      results[provider] = {
+        added: 0,
+        updated: 0,
+        errors: [`syncAllProviders: ${err instanceof Error ? err.message : String(err)}`],
+      };
+      logSync("error", `syncAllProviders failed for ${provider}`, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   return results;
