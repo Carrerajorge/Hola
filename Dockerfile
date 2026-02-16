@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 # Ensure mathjax sync script exists before npm ci postinstall hook
 COPY scripts/sync-mathjax-assets.cjs scripts/sync-mathjax-assets.cjs
-RUN npm ci \
+RUN npm ci --ignore-scripts \
+  && node scripts/sync-mathjax-assets.cjs || true \
   && npm cache clean --force
 
 # Build client and server assets
