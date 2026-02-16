@@ -48,6 +48,17 @@ cd /opt/iliagpt
 git pull origin main
 ```
 
+### 2.3 Si el repo es privado (token HTTPS)
+
+Si el VPS no tiene llave SSH configurada, puedes usar un token de GitHub con permisos de lectura.
+
+```bash
+export VPS_GITHUB_TOKEN="ghp_xxx"
+export REPO_HTTPS_URL="https://github.com/Carrerajorge/Hola.git"
+```
+
+Luego ejecuta el script de despliegue desde tu máquina local (ver paso 5).
+
 ## Paso 3: Configuración de Variables de Entorno
 
 Asegúrate de crear el archivo `.env.production` en el servidor con los secretos reales.
@@ -63,9 +74,27 @@ nano .env.production
 **Variables Críticas:**
 
 - `DATABASE_URL`: Tu conexión a PostgreSQL.
-- `REDIS_URL`: Tu conexión a Redis (o usa el servicio dockerizado).
-- `SESSION_SECRET`: Una cadena larga y aleatoria.
-- `OPENAI_API_KEY`, etc.: Tus llaves de API.
+- `JWT_ACCESS_SECRET`: mínimo 32 caracteres.
+- `JWT_REFRESH_SECRET`: mínimo 32 caracteres.
+- `SESSION_SECRET`: mínimo 32 caracteres.
+- Al menos una clave LLM: `XAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY` u `OPENAI_API_KEY`.
+- `REDIS_URL`: opcional (o usa el servicio dockerizado).
+
+Para generar secretos seguros:
+
+```bash
+openssl rand -hex 32
+```
+
+### 3.1 Reparar variables faltantes (script rápido)
+
+Si el servidor muestra errores como `DATABASE_URL: Required` o `SESSION_SECRET: Required`, ejecuta:
+
+```bash
+./fix_vps_env.sh
+```
+
+El script agrega `SESSION_SECRET`, `JWT_ACCESS_SECRET` y `JWT_REFRESH_SECRET` si faltan, pero **aún debes configurar al menos una LLM API key manualmente**.
 
 ## Paso 4: Levantar los Servicios
 
@@ -82,7 +111,38 @@ docker compose -f docker-compose.prod.yml up --build -d
 - **Reiniciar solo la app**: `docker compose -f docker-compose.prod.yml restart app`
 - **Parar todo**: `docker compose -f docker-compose.prod.yml down`
 
+### Solución a fallos de `npm ci`
+
+Si `npm ci` falla por desincronización entre `package.json` y `package-lock.json`, actualiza el lock en tu PC y súbelo a GitHub:
+
+```bash
+cd /ruta/al/repo/Hola
+npm install
+git add package-lock.json
+git commit -m "Sync package-lock"
+git push origin main
+```
+
+Luego en el VPS vuelve a ejecutar el despliegue.
+
 ## Verificar el Despliegue
 
 La aplicación debería estar corriendo en el puerto configurado (ej. 80, 443 o 5000).
 Visita `http://tu-vps-ip` o tu dominio configurado.
+
+## Paso 5: Desplegar con script (opcional)
+
+Desde tu máquina local, puedes usar `deploy_vps.sh`. **Ojo:** el script vive en la raíz del repositorio, así que primero ve a esa carpeta y ejecútalo desde ahí. Acepta variables para no depender de SSH keys:
+
+```bash
+cd /ruta/al/repo/Hola
+
+export VPS_HOST="69.62.98.126"
+export VPS_DIR="/var/www/michat"
+export VPS_GITHUB_TOKEN="ghp_xxx"
+export REPO_HTTPS_URL="https://github.com/Carrerajorge/Hola.git"
+
+./deploy_vps.sh
+```
+
+Si lo ejecutas directamente en el VPS, asegúrate de estar dentro del repositorio clonado o usa la ruta completa al script (por ejemplo: `/var/www/michat/deploy_vps.sh`).
