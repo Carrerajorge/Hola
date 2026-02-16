@@ -13,11 +13,18 @@ import { listToolDefinitions } from "../server/toolRunner/toolRegistry";
 import { ToolRunnerReport } from "../server/toolRunner/types";
 import { documentCliToolRunner } from "../server/toolRunner/orchestrator";
 
-vi.mock("../server/toolRunner/orchestrator", () => ({
-  documentCliToolRunner: {
-    generate: vi.fn(),
-  },
-}));
+vi.mock("../server/toolRunner/orchestrator", async () => {
+  const actual = await vi.importActual<typeof import("../server/toolRunner/orchestrator")>(
+    "../server/toolRunner/orchestrator"
+  );
+  return {
+    ...actual,
+    documentCliToolRunner: {
+      ...actual.documentCliToolRunner,
+      generate: vi.fn(),
+    },
+  };
+});
 
 const toolRunnerGenerateMock = vi.mocked(documentCliToolRunner.generate);
 
@@ -357,7 +364,7 @@ describe("documents router tool-runner integration", () => {
     expect(response.body.toolRunnerReport.documentType).toBe("docx");
   });
 
-  it("returns 404 for missing or expired report data", async () => {
+  it("returns fallback report when tool-runner fails and render falls back", async () => {
     const prev = process.env.DISABLE_TOOL_RUNNER;
     process.env.DISABLE_TOOL_RUNNER = "true";
     toolRunnerGenerateMock.mockRejectedValue(new Error("tool unavailable"));
@@ -374,8 +381,10 @@ describe("documents router tool-runner integration", () => {
       createdDocumentIds.push(document.id);
 
       const response = await appClient.get(`/api/documents/reports/${document.id}`);
-      expect(response.status).toBe(404);
-      expect(response.body.error).toBe("Generation report unavailable for this document");
+      expect(response.status).toBe(200);
+      expect(response.body.toolRunnerReport.documentType).toBe("docx");
+      expect(response.body.toolRunnerReport.usedFallback).toBe(true);
+      expect(Array.isArray(response.body.toolRunnerReport.incidents)).toBe(true);
     } finally {
       process.env.DISABLE_TOOL_RUNNER = prev;
     }
