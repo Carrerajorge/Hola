@@ -30,7 +30,7 @@ services:
 
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
 
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@redis:6379
 
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
@@ -95,7 +95,7 @@ services:
 
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
 
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@redis:6379
 
       OCR_SERVICE_URL: http://ocr:8000
 
