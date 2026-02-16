@@ -185,6 +185,10 @@ const MAX_PACKAGES_PER_INSTALL = 64;
 const MAX_PACKAGE_NAME_LENGTH = 256;
 const MAX_SCRIPT_ARGS = 64;
 const MAX_SCRIPT_ARG_LENGTH = 2_048;
+const MAX_COMMAND_ARGS = 64;
+const MAX_COMMAND_ARG_LENGTH = 2_048;
+const MAX_COMMAND_LENGTH = 8_192;
+const FORBIDDEN_COMMAND_META_CHARS = /[;&|`$()<>]/;
 const FORBIDDEN_SESSION_ENV_KEYS = new Set([
   "NODE_OPTIONS",
   "LD_PRELOAD",
@@ -280,6 +284,50 @@ function validateTextPayload(value: unknown, maxBytes: number, label: string): s
     throw new Error(`${label} exceeds maximum size of ${maxBytes} bytes`);
   }
   return text;
+}
+
+function validateCommandString(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("command is required and must be a string");
+  }
+  const command = value.trim();
+  if (command.length > MAX_COMMAND_LENGTH) {
+    throw new Error(`command exceeds maximum length of ${MAX_COMMAND_LENGTH}`);
+  }
+  if (command.includes("\u0000") || command.includes("\r") || command.includes("\n")) {
+    throw new Error("command contains invalid characters");
+  }
+  if (FORBIDDEN_COMMAND_META_CHARS.test(command)) {
+    throw new Error("command contains forbidden shell metacharacters");
+  }
+  return command;
+}
+
+function validateCommandArgs(args?: unknown): string[] {
+  if (!args) return [];
+  if (!Array.isArray(args)) {
+    throw new Error("args must be an array");
+  }
+  if (args.length > MAX_COMMAND_ARGS) {
+    throw new Error(`Too many command arguments (max ${MAX_COMMAND_ARGS})`);
+  }
+
+  return args.map((arg) => {
+    if (typeof arg !== "string") {
+      throw new Error("Each command argument must be a string");
+    }
+    if (arg.includes("\u0000") || arg.includes("\r") || arg.includes("\n")) {
+      throw new Error("Command arguments contain invalid characters");
+    }
+    if (arg.length > MAX_COMMAND_ARG_LENGTH) {
+      throw new Error(`Command argument too long (max ${MAX_COMMAND_ARG_LENGTH} chars)`);
+    }
+    return arg;
+  });
+}
+
+function buildCommandLine(command: string, args: string[]): string {
+  return args.length > 0 ? `${command} ${args.join(" ")}` : command;
 }
 
 function validateScriptArgs(args?: unknown): string[] {
@@ -471,18 +519,20 @@ export class TerminalController extends EventEmitter {
 
   async executeCommand(sessionId: string, request: CommandRequest): Promise<CommandResult> {
     const session = this.getSessionOrFail(sessionId);
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
 
     const commandId = randomUUID();
     const startTime = Date.now();
 
     // Safety check
-    const safetyResult = this.checkCommandSafety(request.command);
+    const safetyResult = this.checkCommandSafety(command);
     const bypassSafety =
       Boolean(request.confirmDangerous) && ALLOW_DANGEROUS_CONFIRM_BYPASS;
     if (!safetyResult.safe && !bypassSafety) {
       return {
         id: commandId,
-        command: request.command,
+        command,
         exitCode: 1,
         stdout: "",
         stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Dangerous bypass is disabled unless TERMINAL_ALLOW_DANGEROUS_CONFIRM=true.`,
@@ -493,18 +543,22 @@ export class TerminalController extends EventEmitter {
       };
     }
 
+    const normalizedRequest: CommandRequest = {
+      ...request,
+      command,
+      args,
+    };
+
     if (request.inDocker) {
-        return this.executeDockerCommand(sessionId, commandId, request, startTime);
+        return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     if (request.interactive) {
-        return this.executePtyCommand(sessionId, commandId, request, startTime);
+        return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     // Standard execution
-    const fullCommand = request.args
-      ? `${request.command} ${request.args.join(" ")}`
-      : request.command;
+    const fullCommand = buildCommandLine(command, args);
 
     // Handle cd command specially
     if (fullCommand.trim().startsWith("cd ")) {
@@ -551,14 +605,11 @@ export class TerminalController extends EventEmitter {
       const env = resolveCommandEnvironment(session.env, request.env);
       const cwd = request.cwd || session.cwd;
       const canDirectSpawn =
-        typeof request.command === "string" &&
-        request.command.trim().length > 0 &&
-        !/\s/.test(request.command.trim()) &&
-        Array.isArray(request.args) &&
-        request.args.every((arg) => typeof arg === "string");
+        command.length > 0 &&
+        !/\s/.test(command);
 
       const proc = canDirectSpawn
-        ? spawn(request.command, request.args || [], {
+        ? spawn(command, args, {
             cwd,
             env,
             timeout,
@@ -657,6 +708,8 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executePtyCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
     const session = this.getSessionOrFail(sessionId);
 
     return new Promise((resolve) => {
@@ -682,7 +735,7 @@ export class TerminalController extends EventEmitter {
         });
 
         // Send command
-        const fullCommand = request.args ? `${request.command} ${request.args.join(" ")}` : request.command;
+        const fullCommand = buildCommandLine(command, args);
         ptyProc.write(`${fullCommand}\r`);
         
         // If not a long-running interactive session, we might want to exit after command
@@ -722,10 +775,13 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executeDockerCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
     const session = this.getSessionOrFail(sessionId);
 
     const image = request.dockerImage || "node:22-alpine";
-    const cmd = request.args ? [request.command, ...request.args] : [request.command]; // CMD format for Docker
+    const fullCommand = buildCommandLine(command, args);
+    const cmd = args.length ? [command, ...args] : [command]; // CMD format for Docker
 
     // Prepare Env
     const env = resolveCommandEnvironment(session.env, request.env);
@@ -800,7 +856,7 @@ export class TerminalController extends EventEmitter {
 
         const cmdResult: CommandResult = {
             id: commandId,
-            command: request.command + (request.args ? " " + request.args.join(" ") : ""),
+            command: fullCommand,
             exitCode,
             stdout,
             stderr,
@@ -824,7 +880,7 @@ export class TerminalController extends EventEmitter {
         
         return {
             id: commandId,
-            command: request.command,
+            command: fullCommand,
             exitCode: isTimeout ? null : 1,
             stdout,
             stderr: error.message,
