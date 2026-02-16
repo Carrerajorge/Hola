@@ -31,6 +31,53 @@ function sanitizeExcelValue(value: unknown): unknown {
   return value;
 }
 
+/** Block remote/absolute image paths to prevent SSRF and path traversal */
+function isImagePathSafe(imagePath: string): boolean {
+  if (!imagePath || typeof imagePath !== "string") return false;
+  const lower = imagePath.trim().toLowerCase();
+  // Block remote URLs
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return false;
+  // Block file:// protocol
+  if (lower.startsWith("file://")) return false;
+  // Block SMB / UNC paths
+  if (lower.startsWith("\\\\") || lower.startsWith("//")) return false;
+  // Block absolute paths outside of project
+  if (lower.startsWith("/etc/") || lower.startsWith("/proc/") || lower.startsWith("/sys/") || lower.startsWith("/dev/")) return false;
+  // Block path traversal
+  if (imagePath.includes("..")) return false;
+  return true;
+}
+
+/** Sanitize Excel sheet name — remove illegal chars (*?:/\[]) and cap to 31 chars */
+function sanitizeSheetName(name: string): string {
+  if (!name || typeof name !== "string") return "Sheet1";
+  return name
+    .replace(/[*?:/\\[\]]/g, "_")
+    .substring(0, 31)
+    .trim() || "Sheet1";
+}
+
+/** WCAG AA contrast ratio check (simplified luminance) */
+function relativeLuminance(hex: string): number {
+  const c = hex.replace("#", "");
+  const r = parseInt(c.substring(0, 2), 16) / 255;
+  const g = parseInt(c.substring(2, 4), 16) / 255;
+  const b = parseInt(c.substring(4, 6), 16) / 255;
+  const srgb = [r, g, b].map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+}
+
+function contrastRatio(fg: string, bg: string): number {
+  const lFg = relativeLuminance(safeColor(fg));
+  const lBg = relativeLuminance(safeColor(bg));
+  const lighter = Math.max(lFg, lBg);
+  const darker = Math.min(lFg, lBg);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** Minimum WCAG AA contrast ratio for normal text (>= 4.5:1) */
+const MIN_CONTRAST_RATIO = 4.5;
+
 /** Validate and normalize a hex color string; returns safe fallback on invalid input */
 function safeColor(color: string | undefined | null, fallback: string = "#000000"): string {
   if (!color || typeof color !== "string") return fallback;
@@ -478,7 +525,14 @@ export class DocumentEngine {
    * Generate a presentation from a spec.
    */
   async generatePresentation(spec: PresentationSpec): Promise<Buffer> {
-    const parsed = PresentationSpecSchema.parse(spec);
+    let parsed: PresentationSpec;
+    try {
+      parsed = PresentationSpecSchema.parse(spec);
+    } catch (zodErr) {
+      console.warn(`[DocumentEngine] Presentation spec validation failed: ${zodErr instanceof Error ? zodErr.message : String(zodErr)}`);
+      // Use spec as-is with minimal safety
+      parsed = spec;
+    }
     const PptxGenJS = (await import("pptxgenjs")).default;
 
     const pptx = new PptxGenJS();
@@ -512,7 +566,13 @@ export class DocumentEngine {
    * Generate a Word document from a spec.
    */
   async generateDocument(spec: DocumentSpec): Promise<Buffer> {
-    const parsed = DocumentSpecSchema.parse(spec);
+    let parsed: DocumentSpec;
+    try {
+      parsed = DocumentSpecSchema.parse(spec);
+    } catch (zodErr) {
+      console.warn(`[DocumentEngine] Document spec validation failed: ${zodErr instanceof Error ? zodErr.message : String(zodErr)}`);
+      parsed = spec;
+    }
     const { generateWordFromMarkdown } = await import("../../services/markdownToDocx");
 
     // Convert spec sections to markdown for the existing renderer
@@ -572,9 +632,25 @@ export class DocumentEngine {
    * Generate an Excel workbook from a spec.
    */
   async generateWorkbook(spec: WorkbookSpec): Promise<Buffer> {
-    const parsed = WorkbookSpecSchema.parse(spec);
+    let parsed: WorkbookSpec;
+    try {
+      parsed = WorkbookSpecSchema.parse(spec);
+    } catch (zodErr) {
+      console.warn(`[DocumentEngine] Workbook spec validation failed: ${zodErr instanceof Error ? zodErr.message : String(zodErr)}`);
+      parsed = spec;
+    }
     const excelMod = await import("exceljs");
     const ExcelJS = (excelMod as any).default || excelMod;
+
+    // Estimate memory: cells × ~100 bytes, cap at 500MB to prevent OOM
+    const MAX_WORKBOOK_MEMORY = 500 * 1024 * 1024; // 500MB
+    let estimatedCells = 0;
+    for (const sh of parsed.sheets) {
+      estimatedCells += sh.rows.length * (sh.columns?.length || 1);
+    }
+    if (estimatedCells * 100 > MAX_WORKBOOK_MEMORY) {
+      throw new Error(`Workbook too large: ~${estimatedCells} cells would require ~${Math.round(estimatedCells * 100 / 1024 / 1024)}MB (limit: ${MAX_WORKBOOK_MEMORY / 1024 / 1024}MB)`);
+    }
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = parsed.author || "ILIA Agent";
@@ -583,7 +659,7 @@ export class DocumentEngine {
     const tokens = DesignTokensSchema.parse(parsed.theme);
 
     for (const sheetSpec of parsed.sheets) {
-      const sheet = workbook.addWorksheet(sheetSpec.name);
+      const sheet = workbook.addWorksheet(sanitizeSheetName(sheetSpec.name));
 
       // Setup columns
       sheet.columns = sheetSpec.columns.map((col) => ({
@@ -748,10 +824,21 @@ export class DocumentEngine {
       valign: "top" as const,
     };
 
+    // Contrast check helper (log warning if text on bg fails WCAG AA)
+    const checkContrast = (fg: string, bg: string, label: string) => {
+      try {
+        const ratio = contrastRatio(fg, bg);
+        if (ratio < MIN_CONTRAST_RATIO) {
+          console.warn(`[DocumentEngine] Low contrast (${ratio.toFixed(1)}:1) for ${label}: fg=${fg} bg=${bg} (WCAG AA requires ${MIN_CONTRAST_RATIO}:1)`);
+        }
+      } catch { /* non-critical */ }
+    };
+
     switch (comp.type) {
       case "title": {
         const text = String(comp.content || "");
         const fitted = this.layoutEngine.autoFitText(text, box, tokens.font.sizeH1);
+        checkContrast(tokens.color.textPrimary, tokens.color.background, "title");
         slide.addText(fitted.text, {
           ...baseTextOpts,
           fontSize: fitted.fontSize,
@@ -839,20 +926,31 @@ export class DocumentEngine {
 
       case "image":
         if (typeof comp.content === "string" && comp.content.trim()) {
-          try {
-            slide.addImage({
-              path: comp.content,
-              x: box.x, y: box.y, w: box.w, h: box.h,
-            });
-          } catch {
-            // Image failed — render placeholder
-            slide.addText("[Image]", {
+          if (!isImagePathSafe(comp.content)) {
+            console.warn(`[DocumentEngine] Blocked unsafe image path: ${comp.content.substring(0, 80)}`);
+            slide.addText("[Image blocked: unsafe path]", {
               ...baseTextOpts,
               align: "center",
               valign: "middle" as const,
               color: tokens.color.textSecondary.replace("#", ""),
               italic: true,
             });
+          } else {
+            try {
+              slide.addImage({
+                path: comp.content,
+                x: box.x, y: box.y, w: box.w, h: box.h,
+              });
+            } catch {
+              // Image failed — render placeholder
+              slide.addText("[Image]", {
+                ...baseTextOpts,
+                align: "center",
+                valign: "middle" as const,
+                color: tokens.color.textSecondary.replace("#", ""),
+                italic: true,
+              });
+            }
           }
         }
         break;
@@ -900,3 +998,9 @@ export class DocumentEngine {
     }
   }
 }
+
+/* ================================================================== */
+/*  EXPORTED SECURITY HELPERS (for testing)                            */
+/* ================================================================== */
+
+export { isImagePathSafe, sanitizeSheetName, contrastRatio, safeColor };

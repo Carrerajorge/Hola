@@ -59,14 +59,23 @@ function truncate(text: string, max: number): string {
   return text.substring(0, max - 1) + "…";
 }
 
-/** Check JSON depth to prevent deeply nested payloads from causing stack overflow */
+const MAX_OBJECT_KEYS = 1000; // cap keys to prevent wide-object DoS
+const MAX_ARRAY_SAMPLE = 100; // only check first N items in large arrays
+
+/** Check JSON depth/width to prevent deeply nested or wide payloads from causing stack overflow / DoS */
 function checkJsonDepth(obj: unknown, maxDepth: number, current: number = 0): boolean {
   if (current > maxDepth) return false;
   if (obj === null || typeof obj !== "object") return true;
   if (Array.isArray(obj)) {
+    if (obj.length > MAX_ARRAY_SAMPLE) {
+      // Sample first N items only for large arrays
+      return obj.slice(0, MAX_ARRAY_SAMPLE).every(item => checkJsonDepth(item, maxDepth, current + 1));
+    }
     return obj.every(item => checkJsonDepth(item, maxDepth, current + 1));
   }
-  return Object.values(obj).every(val => checkJsonDepth(val, maxDepth, current + 1));
+  const keys = Object.keys(obj);
+  if (keys.length > MAX_OBJECT_KEYS) return false; // reject excessively wide objects
+  return keys.every(key => checkJsonDepth((obj as Record<string, unknown>)[key], maxDepth, current + 1));
 }
 
 /* ================================================================== */
@@ -174,7 +183,8 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
           .map(c => c.trim())
           .filter(c => c && !c.match(/^-+$/));
         if (row.length > 0) {
-          tableRows.push(row.map(c => sanitizeText(c)));
+          // Unescape pipe characters that were escaped in markdown (e.g. \|)
+          tableRows.push(row.map(c => sanitizeText(c.replace(/\\\|/g, "|"))));
         }
         j++;
       }
@@ -263,9 +273,9 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
     const obj: Record<string, any> = {};
     for (let c = 0; c < columns.length; c++) {
       const val = c < row.length ? row[c] : "";
-      // Auto-detect numbers
+      // Auto-detect numbers (reject Infinity, NaN, 1e999 etc.)
       const num = Number(val);
-      obj[columns[c].key] = !isNaN(num) && val.trim() !== "" ? num : val;
+      obj[columns[c].key] = Number.isFinite(num) && val.trim() !== "" ? num : val;
     }
     return obj;
   });

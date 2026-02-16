@@ -184,8 +184,14 @@ export class PresentationValidator {
       }
     }
 
-    // Check total slide count
-    if (spec.slides.length > 50) {
+    // Hard limit on slide count (consistent with LIMITS.pptx.maxSlides = 200)
+    if (spec.slides.length > 200) {
+      issues.push({
+        severity: "error",
+        code: "PPT_EXCEEDS_MAX_SLIDES",
+        message: `Presentation has ${spec.slides.length} slides (hard limit: 200)`,
+      });
+    } else if (spec.slides.length > 50) {
       issues.push({
         severity: "warning",
         code: "PPT_TOO_MANY_SLIDES",

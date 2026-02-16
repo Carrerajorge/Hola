@@ -82,8 +82,14 @@ export interface CitationsPack {
 
 const ARTIFACTS_DIR = path.join(process.cwd(), "uploads", "artifacts");
 
+/** Singleton promise to prevent race conditions from concurrent mkdir calls */
+let _ensureDirPromise: Promise<void> | null = null;
+
 async function ensureArtifactsDir(): Promise<void> {
-  await fs.mkdir(ARTIFACTS_DIR, { recursive: true });
+  if (!_ensureDirPromise) {
+    _ensureDirPromise = fs.mkdir(ARTIFACTS_DIR, { recursive: true }).then(() => {});
+  }
+  return _ensureDirPromise;
 }
 
 export async function createXlsx(spec: XlsxSpec): Promise<ArtifactMeta> {

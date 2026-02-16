@@ -133,11 +133,22 @@ function normalizeColor(color: string): string {
 }
 
 function sanitizeFilename(title: string): string {
-  return title
-    .replace(/[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ _-]/g, "_")
+  const cleaned = title
+    .replace(/[^a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF _-]/g, "_") // allow Latin extended + accented chars
     .replace(/_+/g, "_")
-    .substring(0, 100)
-    .trim() || "document";
+    .trim();
+
+  if (!cleaned) return "document";
+
+  // UTF-8 safe truncation: use TextEncoder to count bytes, not chars
+  const encoder = new TextEncoder();
+  let result = cleaned;
+  while (encoder.encode(result).length > 200) {
+    // Remove last character until within 200 bytes
+    result = result.slice(0, -1);
+  }
+  // Ensure we don't end mid-character and trim trailing underscores
+  return result.replace(/_+$/, "").trim() || "document";
 }
 
 /* ================================================================== */
