@@ -253,3 +253,15 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # Build/push container images so deploy workflows can pull by commit tag.
+  docker:
+    name: Docker Images
+    needs: [build, audit]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/build-images.yml
+    with:
+      sha: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write
