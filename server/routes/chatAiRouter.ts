@@ -47,6 +47,7 @@ import { conversationStateService } from "../services/conversationStateService";
 import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
+const isDebugLogEnabled = process.env.DEBUG === "true";
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
@@ -786,23 +787,25 @@ const cleanSkipRunStreamDedup = (): void => {
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
 
-      // DEBUG: Log attachments received from frontend
-      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
-        console.log(`[Stream] INCOMING ATTACHMENTS (${attachments.length}):`, JSON.stringify(attachments.map((a: any) => ({
-          type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
-          fileId: a.fileId, hasContent: !!a.content,
-        }))));
-      } else {
-        console.log(`[Stream] NO ATTACHMENTS in request body. Keys: ${Object.keys(req.body).join(', ')}`);
-      }
-      if (lastImageBase64) {
-        console.log(`[Stream] lastImageBase64 present: ${typeof lastImageBase64 === 'string' ? `${lastImageBase64.substring(0, 50)}... (${lastImageBase64.length} chars)` : typeof lastImageBase64}`);
-      }
+      if (isDebugLogEnabled) {
+        // DEBUG: Log attachments received from frontend
+        if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+          console.log(`[Stream] INCOMING ATTACHMENTS (${attachments.length}):`, JSON.stringify(attachments.map((a: any) => ({
+            type: a.type, name: a.name, mimeType: a.mimeType, storagePath: a.storagePath,
+            fileId: a.fileId, hasContent: !!a.content,
+          }))));
+        } else {
+          console.log(`[Stream] NO ATTACHMENTS in request body. Keys: ${Object.keys(req.body).join(', ')}`);
+        }
+        if (lastImageBase64) {
+          console.log(`[Stream] lastImageBase64 present: ${typeof lastImageBase64 === 'string' ? `${lastImageBase64.substring(0, 50)}... (${lastImageBase64.length} chars)` : typeof lastImageBase64}`);
+        }
 
-      // DEBUG: Log all incoming request parameters for docTool verification
-      // Avoid externally-controlled format strings: don't interpolate user-controlled values into
-      // the first console argument (console uses util.format semantics).
-      console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
+        // DEBUG: Log all incoming request parameters for docTool verification
+        // Avoid externally-controlled format strings: don't interpolate user-controlled values into
+        // the first console argument (console uses util.format semantics).
+        console.log("[Stream] REQUEST RECEIVED", { docTool, chatId, runId, forceWebSearch });
+      }
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });

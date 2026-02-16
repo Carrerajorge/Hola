@@ -5289,8 +5289,9 @@ IMPORTANTE:
               return;
             }
 
-            // DEBUG: Log selectedDocTool value before making request
-            console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
+            if (import.meta.env.DEV) {
+              chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
+            }
 
             const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
             const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };

@@ -4,6 +4,8 @@ import { db } from '../../db';
 import { authTokens } from '../../../shared/schema/auth';
 import { eq, and, sql } from 'drizzle-orm';
 
+type TokenProvider = 'google' | 'microsoft' | 'auth0';
+
 interface ProviderRefreshResponse {
     access_token?: string;
     refresh_token?: string;
@@ -22,7 +24,7 @@ interface ProviderRefreshConfig {
 
 interface TokenRecord {
     userId: string;
-    provider: 'google' | 'microsoft' | 'auth0';
+    provider: TokenProvider;
     accessToken: string;
     refreshToken: string;
     expiresAt: number; // Timestamp
@@ -33,15 +35,23 @@ export class TokenManager {
     private encryptionKey: Buffer;
 
     constructor() {
-        // Ensure key is 32 bytes for AES-256
-        const keyString = process.env.TOKEN_ENCRYPTION_KEY || 'default-secret-key-must-be-32-bytes-long!';
+        const keyString = process.env.TOKEN_ENCRYPTION_KEY;
+        if (!keyString) {
+            throw new Error("TOKEN_ENCRYPTION_KEY is required for OAuth token storage.");
+        }
+        if (Buffer.byteLength(keyString, 'utf8') < 32) {
+            throw new Error("TOKEN_ENCRYPTION_KEY must be at least 32 bytes long.");
+        }
+        if (keyString === 'default-secret-key-must-be-32-bytes-long!') {
+            throw new Error("TOKEN_ENCRYPTION_KEY must not use the default development placeholder.");
+        }
         this.encryptionKey = crypto.scryptSync(keyString, 'salt', 32);
     }
 
     /**
      * Store tokens securely in Postgres
      */
-    async saveTokens(userId: string, provider: 'google' | 'microsoft' | 'auth0', tokens: any) {
+    async saveTokens(userId: string, provider: TokenProvider, tokens: any) {
         try {
             const accessToken = this.encrypt(tokens.access_token);
             const refreshToken = tokens.refresh_token ? this.encrypt(tokens.refresh_token) : undefined;
@@ -77,7 +87,7 @@ export class TokenManager {
     /**
      * Get valid access token (auto-refresh if needed)
      */
-    async getAccessToken(userId: string, provider: 'google' | 'microsoft' | 'auth0'): Promise<string | null> {
+    async getAccessToken(userId: string, provider: TokenProvider): Promise<string | null> {
         try {
             const [record] = await db
                 .select()
@@ -100,7 +110,7 @@ export class TokenManager {
         }
     }
 
-    private async refreshTokens(userId: string, provider: 'google' | 'microsoft' | 'auth0', record: any): Promise<string | null> {
+    private async refreshTokens(userId: string, provider: TokenProvider, record: TokenRecord): Promise<string | null> {
         if (!record.refreshToken) {
             Logger.warn(`[TokenMgr] No refresh token available for ${userId} ${provider}`);
             return null;
@@ -146,7 +156,7 @@ export class TokenManager {
     }
 
     private async exchangeRefreshToken(
-        provider: 'google' | 'microsoft' | 'auth0',
+        provider: TokenProvider,
         refreshToken: string
     ): Promise<ProviderRefreshResponse | null> {
         const config = this.getRefreshConfig(provider);
@@ -196,7 +206,7 @@ export class TokenManager {
         return payload;
     }
 
-    private getRefreshConfig(provider: 'google' | 'microsoft' | 'auth0'): ProviderRefreshConfig | null {
+    private getRefreshConfig(provider: TokenProvider): ProviderRefreshConfig | null {
         switch (provider) {
             case 'google': {
                 const clientId = process.env.GOOGLE_CLIENT_ID;
