@@ -30,8 +30,6 @@ services:
 
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
 
-      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
-
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
       # Use isolated runner for shell_command execution (no docker socket in app)
@@ -101,7 +99,6 @@ services:
 
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
 
-      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
 
       OCR_SERVICE_URL: http://ocr:8000
 
@@ -185,7 +182,6 @@ services:
 
       SANDBOX_RUNNER_PORT: "8080"
 
-      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?SANDBOX_RUNNER_TOKEN is required}
 
       AGENT_WORKSPACE_ROOT: /workspace_root
 
@@ -194,6 +190,8 @@ services:
       SHELL_COMMAND_DOCKER_CPUS: "1"
 
       SHELL_COMMAND_DOCKER_MEMORY: 512m
+
+      SHELL_COMMAND_DOCKER_NETWORK: bridge
 
       SHELL_COMMAND_DOCKER_PIDS: "256"
 

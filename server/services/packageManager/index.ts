@@ -1,8 +1,5 @@
-import { detectOS } from "./osDetector";
-import { CapabilityReport, detectPackageManagers, resolveManager, PackageManagerId } from "./capabilityProbe";
-import { evaluatePackagePolicy } from "./policyEngine";
-import { buildPlan, PackagePlan, PackageAction } from "./planner";
-import { packageAuditStore } from "./auditStore";
+import { detectOS } from "./osDetector"; import { CapabilityReport, detectPackageManagers, resolveManager, PackageManagerId } from "./capabilityProbe"; import { evaluatePackagePolicy } from 
+"./policyEngine"; import { buildPlan, PackagePlan, PackageAction } from "./planner"; import { packageAuditStore } from "./auditStore";
 
 export interface PlanRequest {
   packageName: string;
@@ -181,20 +178,64 @@ class PackageManagerService {
     });
 
     // Execute
-    const { executeCommand } = await import("./executor");
+    let result: {
+      ok: boolean;
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      stdout: string;
+      stderr: string;
+      durationMs: number;
+    };
 
-    const result = await executeCommand(
-      {
-        bin: conf.plan.exec.bin,
-        args: conf.plan.exec.args,
-        display: conf.plan.exec.display,
-        requiresSudo: conf.plan.exec.requiresSudo,
-      },
-      {
+    const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
+
+    if (!isRoot) {
+      const { runViaSandboxRunner } = await import("./runnerClient");
+
+      // Build command to run INSIDE the hardened runner container (no sudo).
+      const exec = conf.plan.exec;
+
+      const innerCmdRaw =
+        exec.bin === "sudo"
+          ? exec.args.join(" ")
+          : [exec.bin, ...exec.args].join(" ");
+
+      // apt-get in hardened containers (cap-drop ALL) cannot switch to _apt user.
+      // Force apt sandbox user to root to avoid setgroups/seteuid failures.
+      const innerCmd =
+        innerCmdRaw.startsWith("apt-get ")
+          ? innerCmdRaw.replace(/^apt-get\s+/, "apt-get -o APT::Sandbox::User=root ")
+          : innerCmdRaw.startsWith("/usr/bin/apt-get ")
+            ? innerCmdRaw.replace(/^\/usr\/bin\/apt-get\s+/, "/usr/bin/apt-get -o APT::Sandbox::User=root ")
+            : innerCmdRaw;
+
+      const isApt = innerCmd.startsWith("apt-get ") || innerCmd.startsWith("/usr/bin/apt-get ");
+      const needsAptUpdate = isApt && conf.plan.action === "install";
+
+      const command = needsAptUpdate
+        ? `set -e; apt-get -o APT::Sandbox::User=root update; ${innerCmd}`
+        : `set -e; ${innerCmd}`;
+
+      result = await runViaSandboxRunner({
+        command,
         timeoutMs: 2 * 60 * 1000,
         maxOutputBytes: 64 * 1024,
-      }
-    );
+      });
+    } else {
+      const { executeCommand } = await import("./executor");
+      result = await executeCommand(
+        {
+          bin: conf.plan.exec.bin,
+          args: conf.plan.exec.args,
+          display: conf.plan.exec.display,
+          requiresSudo: conf.plan.exec.requiresSudo,
+        },
+        {
+          timeoutMs: 2 * 60 * 1000,
+          maxOutputBytes: 64 * 1024,
+        }
+      );
+    }
 
     // Consume confirmation to avoid replay.
     confirmations.delete(input.confirmationId);
@@ -208,5 +249,4 @@ class PackageManagerService {
     };
   }
 }
-
 export const packageManagerService = new PackageManagerService();

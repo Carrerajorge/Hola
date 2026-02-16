@@ -1,5 +1,4 @@
-# ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds
-# Multi-stage build for production
+# ILIAGPT Dockerfile - Optimized for lower disk usage in GitHub/VPS builds Multi-stage build for production
 
 # ============================================
 # Stage 1: Build (dependencies + compile)
@@ -44,9 +43,9 @@ ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 
 # docker CLI (runner executes docker-run jobs via /var/run/docker.sock)
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io bash \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates curl && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+ARG DOCKER_CLI_VERSION=29.2.1
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" | tar -xz -C /tmp && mv /tmp/docker/docker /usr/local/bin/docker && chmod +x /usr/local/bin/docker && docker --version
 
 ENV NODE_ENV=production
 ENV SANDBOX_RUNNER_PORT=8080
