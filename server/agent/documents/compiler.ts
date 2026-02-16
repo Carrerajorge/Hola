@@ -209,6 +209,9 @@ export class DocumentCompiler {
       };
     }
 
+    // Ensure validation.issues is always an array
+    if (!Array.isArray(validation.issues)) validation.issues = [];
+
     // 2. If validation errors, attempt auto-repair
     let spec = input.spec;
     if (!validation.valid) {
@@ -310,17 +313,26 @@ export class DocumentCompiler {
   /* ---------------------------------------------------------------- */
 
   async compileFromText(input: CompilerTextInput): Promise<CompilerOutput> {
+    // Cap raw content size before processing to prevent DoS
+    const MAX_RAW_CONTENT = 10 * 1024 * 1024; // 10MB
+    const content = input.content.length > MAX_RAW_CONTENT
+      ? input.content.substring(0, MAX_RAW_CONTENT)
+      : input.content;
+    const title = input.title.length > 500
+      ? input.title.substring(0, 500)
+      : input.title;
+
     let spec: CompilerInputSpec;
 
     switch (input.format) {
       case "docx":
-        spec = markdownToDocSpec(input.title, input.content);
+        spec = markdownToDocSpec(title, content);
         break;
       case "xlsx":
-        spec = csvToWorkbookSpec(input.title, input.content);
+        spec = csvToWorkbookSpec(title, content);
         break;
       case "pptx":
-        spec = jsonToPresentationSpec(input.title, input.content);
+        spec = jsonToPresentationSpec(title, content);
         break;
     }
 
@@ -360,10 +372,13 @@ export class DocumentCompiler {
       switch (input.format) {
         case "pptx": {
           const spec = cloned as PresentationSpec;
+          if (!Array.isArray(spec.slides)) return null;
           // Fix out-of-canvas by clamping positions
           for (const slide of spec.slides) {
+            if (!slide || !Array.isArray(slide.components)) continue;
             for (const comp of slide.components) {
-              if (comp.position) {
+              if (!comp || typeof comp !== "object") continue;
+              if (comp.position && typeof comp.position === "object") {
                 const p = comp.position;
                 if (p.x !== undefined) p.x = Math.min(p.x, this.tokens.layout.slideWidth - 0.5);
                 if (p.y !== undefined) p.y = Math.min(p.y, this.tokens.layout.slideHeight - 0.5);
@@ -496,7 +511,7 @@ export class DocumentCompiler {
       }
     } catch (fallbackError) {
       // If even the fallback fails, return a minimal buffer
-      console.error(`[DocumentCompiler] Even fallback generation failed: ${fallbackError}`);
+      console.error(`[DocumentCompiler] Even fallback generation failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
       return {
         buffer: Buffer.from("Fallback generation failed"),
         filename: `${safeTitle}.${format}`,

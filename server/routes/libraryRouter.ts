@@ -767,7 +767,9 @@ export function createLibraryRouter() {
 
       // Save to local uploads directory (with cleanup on failure)
       const fileUuid = randomUUID();
-      const filename = `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}_${fileUuid.slice(0, 8)}.${ext}`;
+      // Sanitize filename: strip unsafe chars, cap at 200 chars to prevent filesystem issues
+      const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').substring(0, 200);
+      const filename = `${safeTitle || 'document'}_${fileUuid.slice(0, 8)}.${ext}`;
       const uploadsDir = path.join(process.cwd(), "uploads");
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });

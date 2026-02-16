@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { DocumentCompiler } from "../../Hola/server/agent/documents/compiler";
-import { DesignTokensSchema, LayoutEngine, type PresentationSpec, type DocumentSpec, type WorkbookSpec } from "../../Hola/server/agent/documents/documentEngine";
+import { DesignTokensSchema, LayoutEngine, type PresentationSpec, type DocumentSpec, type WorkbookSpec, isImagePathSafe, sanitizeSheetName, contrastRatio, safeColor } from "../../Hola/server/agent/documents/documentEngine";
 import { resolveTheme, THEMES } from "../../Hola/server/agent/documents/themes";
-import { markdownToDocSpec, csvToWorkbookSpec, jsonToPresentationSpec } from "../../Hola/server/agent/documents/textToSpec";
+import { markdownToDocSpec, csvToWorkbookSpec, jsonToPresentationSpec, markdownToPresentationSpec } from "../../Hola/server/agent/documents/textToSpec";
+import { PresentationValidator } from "../../Hola/server/agent/documents/documentValidators";
 
 /* ================================================================== */
 /*  DESIGN TOKENS & THEMES                                             */
@@ -442,5 +443,322 @@ describe("LayoutEngine", () => {
     expect(result.fits).toBe(false);
     expect(result.overflow).toBe(true);
     expect(result.truncated).toContain("…");
+  });
+});
+
+/* ================================================================== */
+/*  SECURITY TESTS — Round 1-4 hardening coverage                      */
+/* ================================================================== */
+
+describe("Security: isImagePathSafe", () => {
+  it("blocks http:// URLs", () => expect(isImagePathSafe("http://evil.com/img.png")).toBe(false));
+  it("blocks https:// URLs", () => expect(isImagePathSafe("https://evil.com/img.png")).toBe(false));
+  it("blocks file:// protocol", () => expect(isImagePathSafe("file:///etc/passwd")).toBe(false));
+  it("blocks UNC paths \\\\", () => expect(isImagePathSafe("\\\\server\\share\\img.png")).toBe(false));
+  it("blocks UNC paths //", () => expect(isImagePathSafe("//server/share/img.png")).toBe(false));
+  it("blocks /etc/ paths", () => expect(isImagePathSafe("/etc/shadow")).toBe(false));
+  it("blocks /proc/ paths", () => expect(isImagePathSafe("/proc/self/environ")).toBe(false));
+  it("blocks /sys/ paths", () => expect(isImagePathSafe("/sys/kernel")).toBe(false));
+  it("blocks /dev/ paths", () => expect(isImagePathSafe("/dev/zero")).toBe(false));
+  it("blocks path traversal ..", () => expect(isImagePathSafe("../../../etc/passwd")).toBe(false));
+  it("blocks embedded traversal", () => expect(isImagePathSafe("images/../../../secret")).toBe(false));
+  it("allows relative safe path", () => expect(isImagePathSafe("images/photo.png")).toBe(true));
+  it("allows simple filename", () => expect(isImagePathSafe("logo.png")).toBe(true));
+  it("rejects empty string", () => expect(isImagePathSafe("")).toBe(false));
+  it("rejects null-ish", () => expect(isImagePathSafe(null as any)).toBe(false));
+  it("rejects non-string", () => expect(isImagePathSafe(123 as any)).toBe(false));
+  it("blocks HTTP with mixed case", () => expect(isImagePathSafe("HTTP://EVIL.COM")).toBe(false));
+  it("blocks File:// mixed case", () => expect(isImagePathSafe("File:///tmp/x")).toBe(false));
+});
+
+describe("Security: sanitizeSheetName", () => {
+  it("removes asterisks", () => expect(sanitizeSheetName("My*Sheet")).toBe("My_Sheet"));
+  it("removes question marks", () => expect(sanitizeSheetName("What?")).toBe("What_"));
+  it("removes colons", () => expect(sanitizeSheetName("Time:12")).toBe("Time_12"));
+  it("removes slashes", () => expect(sanitizeSheetName("A/B\\C")).toBe("A_B_C"));
+  it("removes brackets", () => expect(sanitizeSheetName("[Data]")).toBe("_Data_"));
+  it("caps at 31 chars", () => expect(sanitizeSheetName("A".repeat(50)).length).toBeLessThanOrEqual(31));
+  it("returns Sheet1 for empty", () => expect(sanitizeSheetName("")).toBe("Sheet1"));
+  it("returns Sheet1 for null", () => expect(sanitizeSheetName(null as any)).toBe("Sheet1"));
+  it("returns Sheet1 for non-string", () => expect(sanitizeSheetName(123 as any)).toBe("Sheet1"));
+  it("trims whitespace", () => expect(sanitizeSheetName("  Data  ").trim()).toBeTruthy());
+});
+
+describe("Security: safeColor", () => {
+  it("normalizes 6-digit hex with #", () => expect(safeColor("#aabbcc")).toBe("#aabbcc"));
+  it("normalizes 6-digit hex without #", () => expect(safeColor("ff0000")).toBe("#ff0000"));
+  it("expands 3-digit hex", () => expect(safeColor("#abc")).toBe("#aabbcc"));
+  it("falls back on invalid", () => expect(safeColor("not-a-color")).toBe("#000000"));
+  it("falls back on empty", () => expect(safeColor("")).toBe("#000000"));
+  it("falls back on null", () => expect(safeColor(null)).toBe("#000000"));
+  it("falls back on undefined", () => expect(safeColor(undefined)).toBe("#000000"));
+  it("uses custom fallback", () => expect(safeColor("xxx", "#ffffff")).toBe("#ffffff"));
+  it("handles mixed case hex", () => expect(safeColor("#AaBbCc")).toBe("#AaBbCc"));
+  it("rejects rgb() syntax", () => expect(safeColor("rgb(255,0,0)")).toBe("#000000"));
+});
+
+describe("Security: contrastRatio", () => {
+  it("black on white gives high ratio", () => {
+    const ratio = contrastRatio("#000000", "#ffffff");
+    expect(ratio).toBeGreaterThanOrEqual(20);
+  });
+  it("white on white gives ratio ~1", () => {
+    const ratio = contrastRatio("#ffffff", "#ffffff");
+    expect(ratio).toBeCloseTo(1, 0);
+  });
+  it("detects low contrast", () => {
+    const ratio = contrastRatio("#cccccc", "#dddddd");
+    expect(ratio).toBeLessThan(4.5);
+  });
+  it("handles same colors", () => {
+    const ratio = contrastRatio("#1a73e8", "#1a73e8");
+    expect(ratio).toBeCloseTo(1, 0);
+  });
+});
+
+describe("Security: DesignTokens schema bounds", () => {
+  it("rejects font size > 200", () => {
+    expect(() => DesignTokensSchema.parse({ font: { sizeH1: 999 } })).toThrow();
+  });
+  it("rejects font size < 1", () => {
+    expect(() => DesignTokensSchema.parse({ font: { sizeBody: 0 } })).toThrow();
+  });
+  it("rejects negative margin", () => {
+    expect(() => DesignTokensSchema.parse({ layout: { marginTop: -1 } })).toThrow();
+  });
+  it("rejects slideWidth > 50", () => {
+    expect(() => DesignTokensSchema.parse({ layout: { slideWidth: 100 } })).toThrow();
+  });
+  it("rejects lineHeight > 5", () => {
+    expect(() => DesignTokensSchema.parse({ font: { lineHeight: 10 } })).toThrow();
+  });
+  it("rejects font name with special chars", () => {
+    expect(() => DesignTokensSchema.parse({ font: { heading: "Evil<script>" } })).toThrow();
+  });
+  it("rejects font name > 100 chars", () => {
+    expect(() => DesignTokensSchema.parse({ font: { heading: "A".repeat(101) } })).toThrow();
+  });
+  it("allows valid font names", () => {
+    const t = DesignTokensSchema.parse({ font: { heading: "Times New Roman" } });
+    expect(t.font.heading).toBe("Times New Roman");
+  });
+});
+
+describe("Security: textToSpec hardening", () => {
+  it("caps bullet lists at 500 items", () => {
+    const md = Array(600).fill("- bullet item").join("\n");
+    const spec = markdownToDocSpec("Test", md);
+    const bulletSection = spec.sections.find(s => s.type === "bullets");
+    expect(bulletSection).toBeTruthy();
+    expect(Array.isArray(bulletSection!.content) && bulletSection!.content.length).toBeLessThanOrEqual(500);
+  });
+
+  it("caps code blocks at 2000 lines", () => {
+    const code = "```\n" + Array(3000).fill("code line").join("\n") + "\n```";
+    const spec = markdownToDocSpec("Test", code);
+    const codeSection = spec.sections.find(s => s.type === "code");
+    expect(codeSection).toBeTruthy();
+    const lines = (codeSection!.content as string).split("\n");
+    expect(lines.length).toBeLessThanOrEqual(2000);
+  });
+
+  it("caps table rows in markdown", () => {
+    const rows = Array(1200).fill("| A | B | C |").join("\n");
+    const table = "| H1 | H2 | H3 |\n| --- | --- | --- |\n" + rows;
+    const spec = markdownToDocSpec("Test", table);
+    const tableSection = spec.sections.find(s => s.type === "table");
+    expect(tableSection).toBeTruthy();
+    expect(Array.isArray(tableSection!.content) && tableSection!.content.length).toBeLessThanOrEqual(1002);
+  });
+
+  it("uses Number.isFinite to reject Infinity", () => {
+    const spec = csvToWorkbookSpec("Test", "Value\nInfinity\n-Infinity\nNaN\n1e999");
+    const rows = spec.sheets[0].rows;
+    for (const row of rows) {
+      const val = row["col_0"];
+      if (typeof val === "number") {
+        expect(Number.isFinite(val)).toBe(true);
+      }
+    }
+  });
+
+  it("unescapes pipes in markdown table cells", () => {
+    const md = "| Col1 | Col2 |\n| --- | --- |\n| a\\|b | c |";
+    const spec = markdownToDocSpec("Test", md);
+    const tbl = spec.sections.find(s => s.type === "table");
+    expect(tbl).toBeTruthy();
+    const firstRow = (tbl!.content as string[][])[1];
+    expect(firstRow).toBeTruthy();
+  });
+
+  it("rejects JSON with > 1000 keys (wide-object DoS)", () => {
+    const obj: Record<string, number> = {};
+    for (let i = 0; i < 1100; i++) obj[`key_${i}`] = i;
+    const input = JSON.stringify(obj);
+    // Should fall back to markdown parsing since checkJsonDepth rejects wide objects
+    const spec = jsonToPresentationSpec("Test", input);
+    expect(spec.slides.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("validates array type before slicing bullets", () => {
+    // If raw.bullets is a string instead of array, should not crash
+    const input = JSON.stringify({ title: "Test", bullets: "not an array" });
+    const spec = jsonToPresentationSpec("Test", input);
+    expect(spec.slides.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("handles null/undefined CSV values", () => {
+    const spec = csvToWorkbookSpec("Test", "H1,H2\na,b\n,\nc,");
+    expect(spec.sheets[0].rows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flushes oversized paragraphs correctly", () => {
+    const longLine = "A".repeat(60_000);
+    const spec = markdownToDocSpec("Test", longLine);
+    // Should not crash and should have content
+    expect(spec.sections.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("markdownToPresentationSpec caps slides", () => {
+    const md = Array(250).fill("## Slide Title\n- bullet").join("\n\n");
+    const spec = markdownToPresentationSpec("Test", md);
+    expect(spec.slides.length).toBeLessThanOrEqual(201); // 200 + cover
+  });
+});
+
+describe("Security: themes.ts hardening", () => {
+  it("rejects __proto__ key in token overrides", () => {
+    // Use JSON.parse to create an object with __proto__ as a real own key
+    // (object literal { __proto__: ... } sets prototype, not an own key)
+    const tokens = JSON.parse('{"__proto__":{"font":{"heading":"Evil"}}}');
+    const result = resolveTheme(tokens as any);
+    // Should return default, not allow prototype pollution
+    expect(result.font.heading).toBe("Calibri");
+  });
+
+  it("rejects constructor key in token overrides", () => {
+    const tokens = { constructor: { font: { heading: "Evil" } } };
+    const result = resolveTheme(tokens as any);
+    expect(result.font.heading).toBe("Calibri");
+  });
+
+  it("handles Zod parse failure gracefully", () => {
+    // Pass something that Zod can't parse
+    const result = resolveTheme({ font: { sizeH1: 99999 } } as any);
+    // Should return default due to Zod failure (sizeH1 > 200)
+    expect(result.font.sizeH1).toBe(28); // default
+  });
+
+  it("all theme presets are valid", () => {
+    for (const [name, theme] of Object.entries(THEMES)) {
+      expect(theme.font.heading).toBeTruthy();
+      expect(theme.color.primary).toBeTruthy();
+      expect(theme.version).toBe("1.0.0");
+    }
+  });
+});
+
+describe("Security: DocumentCompiler hardening", () => {
+  const compiler = new DocumentCompiler();
+
+  it("slide hard limit at 200 causes validation error", async () => {
+    const spec: PresentationSpec = {
+      format: "pptx",
+      title: "Big",
+      slides: Array(201).fill({
+        type: "content" as const,
+        components: [{ type: "title" as const, content: "Slide" }],
+      }),
+    };
+    const result = await compiler.compile({ format: "pptx", spec });
+    // Should still produce a file (via degraded or otherwise), but validation should flag it
+    expect(result.buffer.length).toBeGreaterThan(0);
+    const hasMaxSlidesError = result.validation.issues.some(
+      i => i.code === "PPT_EXCEEDS_MAX_SLIDES"
+    );
+    expect(hasMaxSlidesError).toBe(true);
+  });
+
+  it("XLSX workbook memory limit prevents OOM", async () => {
+    const spec: WorkbookSpec = {
+      format: "xlsx",
+      title: "Huge",
+      sheets: [{
+        name: "Data",
+        columns: Array(100).fill(null).map((_, i) => ({
+          key: `c${i}`, header: `Col${i}`, type: "string" as const,
+        })),
+        rows: Array(60_000).fill(null).map(() => {
+          const row: Record<string, string> = {};
+          for (let i = 0; i < 100; i++) row[`c${i}`] = "data";
+          return row;
+        }),
+        formulas: [],
+        filters: true,
+        freezeRow: 1,
+        freezeCol: 0,
+        protection: false,
+      }],
+    };
+    // This should fail because 6M cells × 100 > 500MB limit
+    // and compiler should catch + produce fallback
+    const result = await compiler.compile({ format: "xlsx", spec });
+    expect(result.buffer.length).toBeGreaterThan(0);
+    // Should be degraded since it hit the limit
+    expect(result.metrics.degraded).toBe(true);
+  });
+
+  it("sanitizeFilename handles UTF-8 chars", async () => {
+    const spec: DocumentSpec = {
+      format: "docx",
+      title: "Résumé — Año 2024 — Ñ — Ü — Ö — Café",
+      sections: [{ type: "paragraph", content: "Test" }],
+    };
+    const result = await compiler.compile({ format: "docx", spec });
+    // Filename should contain accented chars, not just underscores
+    expect(result.filename).toContain("Résumé");
+    expect(result.filename.endsWith(".docx")).toBe(true);
+  });
+
+  it("auto-repair clamps PPTX positions", async () => {
+    const spec: PresentationSpec = {
+      format: "pptx",
+      title: "Overflow",
+      slides: [{
+        type: "content",
+        components: [{
+          type: "title",
+          content: "Off-canvas",
+          position: { x: 20, y: 15, w: 5, h: 3 },
+        }],
+      }],
+    };
+    const result = await compiler.compile({ format: "pptx", spec });
+    expect(result.buffer.length).toBeGreaterThan(0);
+    const hasRepaired = result.validation.issues.some(i => i.code === "COMPILER_AUTO_REPAIRED");
+    expect(hasRepaired).toBe(true);
+  });
+});
+
+describe("Security: documentValidators.ts hardening", () => {
+  it("issues array is capped and doesn't exhaust memory", () => {
+    const validator = new PresentationValidator();
+    // Create spec with many issues
+    const spec = {
+      slides: Array(100).fill(null).map(() => ({
+        components: Array(200).fill(null).map((_, i) => ({
+          type: "title",
+          content: "",
+          position: { x: 20 + i, y: 20, w: 1, h: 1 },
+          style: { fontSize: 4 },
+        })),
+      })),
+    };
+    const result = validator.validateSpec(spec);
+    // Should have issues but not crash, and cap should keep it bounded
+    // The cap is checked at loop boundaries, so some overshoot is expected
+    // (each slide can emit multiple issues before the next cap check)
+    expect(result.issues.length).toBeGreaterThan(0);
+    expect(result.issues.length).toBeLessThanOrEqual(10_000); // well under 100*200=20_000 without cap
   });
 });

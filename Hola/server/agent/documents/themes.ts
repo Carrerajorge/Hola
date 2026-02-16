@@ -131,6 +131,9 @@ const ALLOWED_THEMES = new Set(Object.keys(THEMES));
  * @param nameOrTokens - Theme name ("corporate"), partial tokens, or undefined
  * @returns Fully resolved DesignTokens
  */
+/** Dangerous keys that indicate prototype pollution attempts */
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 export function resolveTheme(
   nameOrTokens: string | Partial<DesignTokens> | undefined
 ): DesignTokens {
@@ -142,6 +145,20 @@ export function resolveTheme(
     }
     return THEMES[nameOrTokens];
   }
+  // Check for prototype pollution attempts
+  if (typeof nameOrTokens === "object" && nameOrTokens !== null) {
+    for (const key of Object.keys(nameOrTokens)) {
+      if (DANGEROUS_KEYS.has(key)) {
+        console.warn(`[Theme] Rejecting theme with dangerous key: ${key}`);
+        return THEMES.default;
+      }
+    }
+  }
   // Partial tokens override — parse through Zod to strip unknown keys
-  return DesignTokensSchema.parse(nameOrTokens);
+  try {
+    return DesignTokensSchema.parse(nameOrTokens);
+  } catch (err) {
+    console.warn(`[Theme] Failed to parse theme tokens: ${err instanceof Error ? err.message : String(err)}, using default`);
+    return THEMES.default;
+  }
 }

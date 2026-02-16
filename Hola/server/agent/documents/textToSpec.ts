@@ -123,11 +123,12 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Bullet list items
+    // Bullet list items (capped)
     if (/^\s*[-*+]\s+/.test(line)) {
       flushParagraph();
+      const MAX_LIST_ITEMS = 500;
       const bullets: string[] = [sanitizeText(line.replace(/^\s*[-*+]\s+/, ""))];
-      while (i + 1 < lines.length && /^\s*[-*+]\s+/.test(lines[i + 1])) {
+      while (i + 1 < lines.length && /^\s*[-*+]\s+/.test(lines[i + 1]) && bullets.length < MAX_LIST_ITEMS) {
         i++;
         bullets.push(sanitizeText(lines[i].replace(/^\s*[-*+]\s+/, "")));
       }
@@ -135,11 +136,12 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Numbered list items
+    // Numbered list items (capped)
     if (/^\s*\d+[.)]\s+/.test(line)) {
       flushParagraph();
+      const MAX_LIST_ITEMS = 500;
       const items: string[] = [sanitizeText(line.replace(/^\s*\d+[.)]\s+/, ""))];
-      while (i + 1 < lines.length && /^\s*\d+[.)]\s+/.test(lines[i + 1])) {
+      while (i + 1 < lines.length && /^\s*\d+[.)]\s+/.test(lines[i + 1]) && items.length < MAX_LIST_ITEMS) {
         i++;
         items.push(sanitizeText(lines[i].replace(/^\s*\d+[.)]\s+/, "")));
       }
@@ -159,32 +161,37 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Code block
+    // Code block (capped at 2000 lines)
     if (line.startsWith("```")) {
       flushParagraph();
+      const MAX_CODE_LINES = 2000;
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
+      while (i < lines.length && !lines[i].startsWith("```") && codeLines.length < MAX_CODE_LINES) {
         codeLines.push(lines[i]);
         i++;
       }
+      // Skip remaining lines if capped
+      while (i < lines.length && !lines[i].startsWith("```")) i++;
       sections.push({ type: "code", content: codeLines.join("\n") });
       continue;
     }
 
-    // Table (pipe-delimited)
-    if (line.includes("|") && line.trim().startsWith("|")) {
+    // Table (pipe-delimited, capped rows and line length)
+    if (line.length <= 10_000 && line.includes("|") && line.trim().startsWith("|")) {
       flushParagraph();
+      const MAX_TABLE_ROWS = 1000;
+      const MAX_TABLE_COLS = 100;
       const tableRows: string[][] = [];
       let j = i;
-      while (j < lines.length && lines[j].includes("|")) {
+      while (j < lines.length && lines[j].includes("|") && tableRows.length < MAX_TABLE_ROWS) {
         const row = lines[j]
           .split("|")
           .map(c => c.trim())
           .filter(c => c && !c.match(/^-+$/));
         if (row.length > 0) {
           // Unescape pipe characters that were escaped in markdown (e.g. \|)
-          tableRows.push(row.map(c => sanitizeText(c.replace(/\\\|/g, "|"))));
+          tableRows.push(row.slice(0, MAX_TABLE_COLS).map(c => sanitizeText(c.replace(/\\\|/g, "|"))));
         }
         j++;
       }
@@ -202,8 +209,13 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
     }
 
     // Regular text → accumulate into paragraph (capped to prevent unbounded growth)
-    if (currentParagraph.length < MAX_PARAGRAPH_LENGTH) {
-      currentParagraph += (currentParagraph ? " " : "") + line;
+    const safeLine = line.length > MAX_PARAGRAPH_LENGTH ? line.substring(0, MAX_PARAGRAPH_LENGTH) : line;
+    if (currentParagraph.length + safeLine.length + 1 < MAX_PARAGRAPH_LENGTH) {
+      currentParagraph += (currentParagraph ? " " : "") + safeLine;
+    } else if (currentParagraph.length < MAX_PARAGRAPH_LENGTH) {
+      // Flush current and start new paragraph with this line
+      flushParagraph();
+      currentParagraph = safeLine;
     }
   }
 
@@ -272,10 +284,11 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
   const rows = dataRows.map(row => {
     const obj: Record<string, any> = {};
     for (let c = 0; c < columns.length; c++) {
-      const val = c < row.length ? row[c] : "";
+      const rawVal = c < row.length ? row[c] : "";
+      const val = rawVal === null || rawVal === undefined ? "" : rawVal;
       // Auto-detect numbers (reject Infinity, NaN, 1e999 etc.)
       const num = Number(val);
-      obj[columns[c].key] = Number.isFinite(num) && val.trim() !== "" ? num : val;
+      obj[columns[c].key] = Number.isFinite(num) && String(val).trim() !== "" ? num : val;
     }
     return obj;
   });
@@ -339,8 +352,12 @@ export function jsonToPresentationSpec(
   });
 
   for (const raw of rawSlides) {
-    const slideTitle = truncate(sanitizeText(raw.title || ""), MAX_SLIDE_TITLE_LENGTH);
-    const bullets = (raw.bullets || raw.content || [])
+    if (!raw || typeof raw !== "object") continue;
+    const slideTitle = truncate(sanitizeText(String(raw.title || "")), MAX_SLIDE_TITLE_LENGTH);
+    const bulletSource = Array.isArray(raw.bullets) ? raw.bullets
+                       : Array.isArray(raw.content) ? raw.content
+                       : [];
+    const bullets = bulletSource
       .slice(0, MAX_BULLETS_PER_SLIDE)
       .map(b => truncate(sanitizeText(String(b)), MAX_BULLET_LENGTH));
 

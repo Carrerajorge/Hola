@@ -18,6 +18,12 @@ import { z } from "zod";
 /*  SECURITY HELPERS                                                   */
 /* ================================================================== */
 
+/** Strip control characters from text */
+function sanitizeText(text: string): string {
+  // Single-pass: strip null bytes + all control chars (except \t \n \r)
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
 const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
 
 /** Sanitize a cell value to prevent Excel formula injection */
@@ -98,17 +104,17 @@ export const DesignTokensSchema = z.object({
   version: z.string().default("1.0.0"),
   name: z.string().default("default"),
   font: z.object({
-    heading: z.string().default("Calibri"),
-    body: z.string().default("Calibri"),
-    mono: z.string().default("Consolas"),
-    sizeH1: z.number().default(28),
-    sizeH2: z.number().default(22),
-    sizeH3: z.number().default(18),
-    sizeH4: z.number().default(16),
-    sizeBody: z.number().default(12),
-    sizeCaption: z.number().default(10),
-    sizeMin: z.number().default(8),
-    lineHeight: z.number().default(1.15),
+    heading: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Calibri"),
+    body: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Calibri"),
+    mono: z.string().max(100).regex(/^[a-zA-Z0-9\s\-_.]+$/).default("Consolas"),
+    sizeH1: z.number().min(1).max(200).default(28),
+    sizeH2: z.number().min(1).max(150).default(22),
+    sizeH3: z.number().min(1).max(120).default(18),
+    sizeH4: z.number().min(1).max(100).default(16),
+    sizeBody: z.number().min(1).max(100).default(12),
+    sizeCaption: z.number().min(1).max(72).default(10),
+    sizeMin: z.number().min(1).max(50).default(8),
+    lineHeight: z.number().min(0.5).max(5).default(1.15),
   }).default({}),
   color: z.object({
     primary: z.string().default("#1a73e8"),
@@ -141,15 +147,15 @@ export const DesignTokensSchema = z.object({
     xxl: z.number().default(48),
   }).default({}),
   layout: z.object({
-    slideWidth: z.number().default(10),      // inches
-    slideHeight: z.number().default(5.625),  // 16:9 widescreen default
-    marginTop: z.number().default(0.5),
-    marginBottom: z.number().default(0.5),
-    marginLeft: z.number().default(0.5),
-    marginRight: z.number().default(0.5),
-    gridColumns: z.number().default(12),
-    pageWidth: z.number().default(8.5),      // DOCX letter width inches
-    pageHeight: z.number().default(11),      // DOCX letter height inches
+    slideWidth: z.number().min(1).max(50).default(10),      // inches
+    slideHeight: z.number().min(1).max(50).default(5.625),  // 16:9 widescreen default
+    marginTop: z.number().min(0).max(5).default(0.5),
+    marginBottom: z.number().min(0).max(5).default(0.5),
+    marginLeft: z.number().min(0).max(5).default(0.5),
+    marginRight: z.number().min(0).max(5).default(0.5),
+    gridColumns: z.number().int().min(1).max(24).default(12),
+    pageWidth: z.number().min(1).max(50).default(8.5),      // DOCX letter width inches
+    pageHeight: z.number().min(1).max(50).default(11),      // DOCX letter height inches
   }).default({}),
   border: z.object({
     radiusSm: z.number().default(2),
@@ -205,7 +211,7 @@ export const PresentationSpecSchema = z.object({
   subject: z.string().optional(),
   theme: DesignTokensSchema.default({}),
   slides: z.array(SlideSpecSchema),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type PresentationSpec = z.infer<typeof PresentationSpecSchema>;
 
@@ -229,7 +235,7 @@ export const DocumentSpecSchema = z.object({
   sections: z.array(DocSectionSchema),
   header: z.string().optional(),
   footer: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type DocumentSpec = z.infer<typeof DocumentSpecSchema>;
 
@@ -272,7 +278,7 @@ export const WorkbookSpecSchema = z.object({
   author: z.string().optional(),
   theme: DesignTokensSchema.default({}),
   sheets: z.array(SheetSpecSchema),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.union([z.string().max(1000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type WorkbookSpec = z.infer<typeof WorkbookSpecSchema>;
 
@@ -471,12 +477,17 @@ export class LayoutEngine {
     const minFontSize = this.tokens.font.sizeMin;
     let fontSize = startFontSize;
 
-    while (fontSize > minFontSize) {
+    // Cap iterations to prevent CPU exhaustion on large font ranges
+    const MAX_FONT_ITERATIONS = 50;
+    let iterations = 0;
+    while (fontSize > minFontSize && iterations < MAX_FONT_ITERATIONS) {
       const fit = this.checkTextFit(text, box, fontSize);
       if (fit.fits) {
         return { fontSize, text, truncated: false };
       }
-      fontSize -= 1;
+      // Step down faster for large fonts to reduce iteration count
+      fontSize -= fontSize > 48 ? 4 : fontSize > 24 ? 2 : 1;
+      iterations++;
     }
 
     // At minimum font size, truncate if still doesn't fit
@@ -535,10 +546,13 @@ export class DocumentEngine {
     }
     const PptxGenJS = (await import("pptxgenjs")).default;
 
+    const MAX_NOTES_LENGTH = 100_000;
+    const MAX_TABLE_TOTAL_CHARS = 50_000;
+
     const pptx = new PptxGenJS();
-    pptx.title = parsed.title;
-    if (parsed.author) pptx.author = parsed.author;
-    if (parsed.subject) pptx.subject = parsed.subject;
+    pptx.title = sanitizeText(String(parsed.title || "").substring(0, 500));
+    if (parsed.author) pptx.author = sanitizeText(String(parsed.author).substring(0, 200));
+    if (parsed.subject) pptx.subject = sanitizeText(String(parsed.subject).substring(0, 200));
 
     const tokens = DesignTokensSchema.parse(parsed.theme);
     const layout = new LayoutEngine(tokens);
@@ -553,8 +567,8 @@ export class DocumentEngine {
         this.renderSlideComponent(slide, comp, box, tokens);
       }
 
-      if (slideSpec.notes) {
-        slide.addNotes(slideSpec.notes);
+      if (slideSpec.notes && typeof slideSpec.notes === "string") {
+        slide.addNotes(sanitizeText(slideSpec.notes.substring(0, MAX_NOTES_LENGTH)));
       }
     }
 
@@ -644,9 +658,14 @@ export class DocumentEngine {
 
     // Estimate memory: cells × ~100 bytes, cap at 500MB to prevent OOM
     const MAX_WORKBOOK_MEMORY = 500 * 1024 * 1024; // 500MB
+    const MAX_SAFE_CELLS = Math.floor(Number.MAX_SAFE_INTEGER / 100);
     let estimatedCells = 0;
     for (const sh of parsed.sheets) {
-      estimatedCells += sh.rows.length * (sh.columns?.length || 1);
+      const sheetCells = sh.rows.length * (sh.columns?.length || 1);
+      if (sheetCells > MAX_SAFE_CELLS) {
+        throw new Error(`Sheet "${sh.name}" exceeds safe cell count: ${sheetCells}`);
+      }
+      estimatedCells += sheetCells;
     }
     if (estimatedCells * 100 > MAX_WORKBOOK_MEMORY) {
       throw new Error(`Workbook too large: ~${estimatedCells} cells would require ~${Math.round(estimatedCells * 100 / 1024 / 1024)}MB (limit: ${MAX_WORKBOOK_MEMORY / 1024 / 1024}MB)`);
@@ -720,11 +739,27 @@ export class DocumentEngine {
         }
       }
 
-      // Apply formulas (validate cell reference format, cap formula length)
-      const cellRefPattern = /^[A-Z]{1,3}\d{1,7}$/;
+      // Apply formulas (validate cell reference format + row/col bounds, cap formula length)
+      const cellRefPattern = /^([A-Z]{1,3})(\d{1,7})$/;
+      const MAX_EXCEL_ROW = 1_048_576;
+      const MAX_EXCEL_COL = 16_384; // XFD
       for (const formula of sheetSpec.formulas) {
-        if (!cellRefPattern.test(formula.cell)) {
+        const match = formula.cell.match(cellRefPattern);
+        if (!match) {
           console.warn(`[DocumentEngine] Skipping invalid cell ref: ${formula.cell}`);
+          continue;
+        }
+        const rowNum = parseInt(match[2], 10);
+        // Convert column letters to number (A=1, Z=26, AA=27...)
+        // Pre-check: Excel max column is "XFD" (3 chars)
+        if (match[1].length > 3) {
+          console.warn(`[DocumentEngine] Column ref too long: ${match[1]}`);
+          continue;
+        }
+        let colNum = 0;
+        for (const ch of match[1]) colNum = colNum * 26 + (ch.charCodeAt(0) - 64);
+        if (rowNum > MAX_EXCEL_ROW || colNum > MAX_EXCEL_COL) {
+          console.warn(`[DocumentEngine] Cell ref out of bounds: ${formula.cell} (row ${rowNum}, col ${colNum})`);
           continue;
         }
         const safeFormula = formula.formula.substring(0, 8192); // Excel formula limit
@@ -754,11 +789,14 @@ export class DocumentEngine {
         sheet.protect("", { selectLockedCells: true, selectUnlockedCells: true });
       }
 
-      // Add borders to all cells
-      const lastRow = sheetSpec.rows.length + 1;
-      const lastCol = sheetSpec.columns.length;
+      // Add borders to all cells (capped to prevent memory exhaustion on huge sheets)
+      const MAX_STYLED_ROWS = 10_000;
+      const MAX_STYLED_COLS = 200;
+      const lastRow = Math.min(sheetSpec.rows.length + 1, MAX_STYLED_ROWS);
+      const lastCol = Math.min(sheetSpec.columns.length, MAX_STYLED_COLS);
+      // Hoist border color outside loop to avoid recomputing 10,000× the same value
+      const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
       for (let r = 1; r <= lastRow; r++) {
-        const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
         for (let c = 1; c <= lastCol; c++) {
           const cell = sheet.getCell(r, c);
           cell.border = {
@@ -789,11 +827,14 @@ export class DocumentEngine {
       // Graceful degradation: render as plain text fallback
       console.warn(`[DocumentEngine] Component "${comp.type}" render failed, using fallback: ${err instanceof Error ? err.message : String(err)}`);
       try {
-        const fallbackText = typeof comp.content === "string"
-          ? comp.content
-          : Array.isArray(comp.content)
-            ? comp.content.map(String).join("\n")
-            : JSON.stringify(comp.content);
+        let fallbackText: string;
+        try {
+          fallbackText = typeof comp.content === "string"
+            ? comp.content
+            : Array.isArray(comp.content)
+              ? comp.content.map(String).join("\n")
+              : JSON.stringify(comp.content);
+        } catch { fallbackText = "[content]"; }
         slide.addText(fallbackText.substring(0, 2000), {
           x: box.x, y: box.y, w: box.w, h: box.h,
           fontSize: tokens.font.sizeBody,
@@ -831,7 +872,7 @@ export class DocumentEngine {
         if (ratio < MIN_CONTRAST_RATIO) {
           console.warn(`[DocumentEngine] Low contrast (${ratio.toFixed(1)}:1) for ${label}: fg=${fg} bg=${bg} (WCAG AA requires ${MIN_CONTRAST_RATIO}:1)`);
         }
-      } catch { /* non-critical */ }
+      } catch (e) { console.warn(`[DocumentEngine] Contrast check error: ${e instanceof Error ? e.message : String(e)}`); }
     };
 
     switch (comp.type) {
@@ -893,9 +934,13 @@ export class DocumentEngine {
           const chunks = this.layoutEngine.splitTable(comp.content, maxRowsPerSlide);
           const firstChunk = chunks[0]; // Only render first chunk on this slide
 
+          let tableCharCount = 0;
           const tableRows = firstChunk.rows.map((row: any[], rowIdx: number) =>
-            (Array.isArray(row) ? row : [row]).map((cell: any) => ({
-              text: String(cell).substring(0, 500),
+            (Array.isArray(row) ? row : [row]).map((cell: any) => {
+              const cellText = String(cell).substring(0, 500);
+              tableCharCount += cellText.length;
+              return {
+              text: tableCharCount <= MAX_TABLE_TOTAL_CHARS ? cellText : "…",
               options: {
                 fontSize: Math.max(tokens.font.sizeBody - 2, tokens.font.sizeMin),
                 bold: rowIdx === 0,
@@ -908,7 +953,7 @@ export class DocumentEngine {
                   ? tokens.color.headerFg.replace("#", "")
                   : tokens.color.textPrimary.replace("#", ""),
               },
-            }))
+            }; })
           );
 
           const colCount = firstChunk.rows[0]?.length || 1;

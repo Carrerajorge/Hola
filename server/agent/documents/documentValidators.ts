@@ -13,6 +13,7 @@ import { z } from "zod";
 const MAX_COMPONENTS_PER_SLIDE = 100;
 const MAX_OVERLAP_CHECKS = 50; // cap bounding boxes checked for O(n²) overlap
 const MAX_DATA_TYPE_CHECKS_PER_SHEET = 10_000; // skip type checking beyond this
+const MAX_VALIDATION_ISSUES = 5_000; // prevent memory exhaustion from issue array
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -69,6 +70,7 @@ export class PresentationValidator {
     const issues: ValidationIssue[] = [];
 
     for (let s = 0; s < spec.slides.length; s++) {
+      if (issues.length >= MAX_VALIDATION_ISSUES) break;
       const slide = spec.slides[s];
 
       // Check empty slide
@@ -258,7 +260,7 @@ export class DocumentValidator {
 
     let lastHeadingLevel = 0;
 
-    for (let i = 0; i < spec.sections.length; i++) {
+    for (let i = 0; i < spec.sections.length && issues.length < MAX_VALIDATION_ISSUES; i++) {
       const section = spec.sections[i];
 
       // Check heading hierarchy
@@ -356,7 +358,7 @@ export class WorkbookValidator {
 
     const sheetNames = new Set<string>();
 
-    for (let s = 0; s < spec.sheets.length; s++) {
+    for (let s = 0; s < spec.sheets.length && issues.length < MAX_VALIDATION_ISSUES; s++) {
       const sheet = spec.sheets[s];
 
       // Check duplicate sheet names
