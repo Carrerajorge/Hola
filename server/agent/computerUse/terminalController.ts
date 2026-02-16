@@ -156,6 +156,259 @@ const SAFE_COMMAND_PREFIXES = [
   "cd", "mkdir", "touch", "cp", "mv",
 ];
 
+const SAFE_COMMAND_PREFIX_SET = new Set(SAFE_COMMAND_PREFIXES.map((command) => command.toLowerCase()));
+const ENFORCE_COMMAND_ALLOWLIST =
+  process.env.TERMINAL_ENFORCE_ALLOWLIST === "true" || process.env.NODE_ENV === "production";
+const ALLOW_DANGEROUS_CONFIRM_BYPASS = process.env.TERMINAL_ALLOW_DANGEROUS_CONFIRM === "true";
+const SESSION_TTL_MS = (() => {
+  const rawValue = process.env.TERMINAL_SESSION_TTL_MS;
+  if (rawValue === undefined) {
+    return 15 * 60 * 1000;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  if (Number.isNaN(parsed)) {
+    return 15 * 60 * 1000;
+  }
+  return Math.max(60_000, parsed);
+})();
+const SESSION_CLEANUP_INTERVAL_MS = Math.max(
+  5_000,
+  Math.min(60_000, Math.floor(SESSION_TTL_MS / 4))
+);
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MAX_ENV_ENTRIES = 256;
+const MAX_ENV_KEY_LENGTH = 128;
+const MAX_ENV_VALUE_LENGTH = 4096;
+const MAX_FILE_OPERATION_BYTES = 5 * 1024 * 1024; // 5MB safety limit for file content/read operations
+const MAX_PATH_LENGTH = 2_048;
+const MAX_PACKAGES_PER_INSTALL = 64;
+const MAX_PACKAGE_NAME_LENGTH = 256;
+const MAX_SCRIPT_ARGS = 64;
+const MAX_SCRIPT_ARG_LENGTH = 2_048;
+const MAX_COMMAND_ARGS = 64;
+const MAX_COMMAND_ARG_LENGTH = 2_048;
+const MAX_COMMAND_LENGTH = 8_192;
+const FORBIDDEN_COMMAND_META_CHARS = /[;&|`$()<>]/;
+const FORBIDDEN_SESSION_ENV_KEYS = new Set([
+  "NODE_OPTIONS",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "PYTHONSTARTUP",
+  "PYTHONPATH",
+  "BASH_ENV",
+  "PROMPT_COMMAND",
+  "LD_AUDIT",
+  "RUST_BACKTRACE",
+  "TERM",
+  "DISPLAY",
+  "SSH_AUTH_SOCK",
+  "SHELLOPTS",
+  "ENV",
+  "BASH_FUNC_",
+]);
+
+function sanitizeIncomingEnv(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Environment block must be an object");
+  }
+
+  const entries = Object.entries(raw);
+  if (entries.length > MAX_ENV_ENTRIES) {
+    throw new Error(`Too many environment variables (max ${MAX_ENV_ENTRIES})`);
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    if (typeof key !== "string") {
+      continue;
+    }
+
+    const trimmedKey = key.trim();
+    if (!trimmedKey || trimmedKey.length > MAX_ENV_KEY_LENGTH || !ENV_KEY_PATTERN.test(trimmedKey)) {
+      continue;
+    }
+
+    const keyUpper = trimmedKey.toUpperCase();
+    if (FORBIDDEN_SESSION_ENV_KEYS.has(keyUpper) || keyUpper.startsWith("BASH_FUNC_")) {
+      continue;
+    }
+
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    const valueText = typeof value === "string" ? value : String(value);
+    normalized[trimmedKey] = valueText.slice(0, MAX_ENV_VALUE_LENGTH);
+  }
+
+  return normalized;
+}
+
+function sanitizeProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function resolveCommandEnvironment(sessionEnv: Record<string, string>, requestEnv?: Record<string, string>): Record<string, string> {
+  const sanitized = requestEnv ? sanitizeIncomingEnv(requestEnv) : {};
+  return { ...sessionEnv, ...sanitized };
+}
+
+function isPathInsideBase(basePath: string, targetPath: string): boolean {
+  const relativePath = path.relative(basePath, targetPath);
+  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath));
+}
+
+function validateStringOrThrow(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} is required and must be a string`);
+  }
+  if (value.includes("\u0000")) {
+    throw new Error(`${label} contains invalid characters`);
+  }
+  if (value.length > MAX_PATH_LENGTH) {
+    throw new Error(`${label} is too long`);
+  }
+  return value;
+}
+
+function validateTextPayload(value: unknown, maxBytes: number, label: string): string {
+  if (value === undefined || value === null) return "";
+  const text = typeof value === "string" ? value : String(value);
+  if (Buffer.byteLength(text) > maxBytes) {
+    throw new Error(`${label} exceeds maximum size of ${maxBytes} bytes`);
+  }
+  return text;
+}
+
+function validateCommandString(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("command is required and must be a string");
+  }
+  const command = value.trim();
+  if (command.length > MAX_COMMAND_LENGTH) {
+    throw new Error(`command exceeds maximum length of ${MAX_COMMAND_LENGTH}`);
+  }
+  if (command.includes("\u0000") || command.includes("\r") || command.includes("\n")) {
+    throw new Error("command contains invalid characters");
+  }
+  if (FORBIDDEN_COMMAND_META_CHARS.test(command)) {
+    throw new Error("command contains forbidden shell metacharacters");
+  }
+  return command;
+}
+
+function validateCommandArgs(args?: unknown): string[] {
+  if (!args) return [];
+  if (!Array.isArray(args)) {
+    throw new Error("args must be an array");
+  }
+  if (args.length > MAX_COMMAND_ARGS) {
+    throw new Error(`Too many command arguments (max ${MAX_COMMAND_ARGS})`);
+  }
+
+  return args.map((arg) => {
+    if (typeof arg !== "string") {
+      throw new Error("Each command argument must be a string");
+    }
+    if (arg.includes("\u0000") || arg.includes("\r") || arg.includes("\n")) {
+      throw new Error("Command arguments contain invalid characters");
+    }
+    if (arg.length > MAX_COMMAND_ARG_LENGTH) {
+      throw new Error(`Command argument too long (max ${MAX_COMMAND_ARG_LENGTH} chars)`);
+    }
+    return arg;
+  });
+}
+
+function buildCommandLine(command: string, args: string[]): string {
+  return args.length > 0 ? `${command} ${args.join(" ")}` : command;
+}
+
+function validateScriptArgs(args?: unknown): string[] {
+  if (!args) return [];
+  if (!Array.isArray(args)) {
+    throw new Error("args must be an array");
+  }
+  if (args.length > MAX_SCRIPT_ARGS) {
+    throw new Error(`Too many script arguments (max ${MAX_SCRIPT_ARGS})`);
+  }
+
+  return args.map((arg) => {
+    if (typeof arg !== "string") {
+      throw new Error("Each script argument must be a string");
+    }
+    if (arg.includes("\u0000")) {
+      throw new Error("Script arguments cannot contain null bytes");
+    }
+    if (arg.length > MAX_SCRIPT_ARG_LENGTH) {
+      throw new Error(`Script argument too long (max ${MAX_SCRIPT_ARG_LENGTH} chars)`);
+    }
+    return arg;
+  });
+}
+
+function validatePackageList(
+  manager: "npm" | "pip" | "apt",
+  packages: unknown
+): string[] {
+  if (!Array.isArray(packages)) {
+    throw new Error("packages must be an array");
+  }
+  if (packages.length === 0) {
+    throw new Error("packages array cannot be empty");
+  }
+  if (packages.length > MAX_PACKAGES_PER_INSTALL) {
+    throw new Error(`Too many packages (max ${MAX_PACKAGES_PER_INSTALL})`);
+  }
+
+  return packages.map((pkg, index) => {
+    if (typeof pkg !== "string") {
+      throw new Error(`Package at index ${index} must be a string`);
+    }
+    const normalizedPackage = pkg.trim();
+    if (!normalizedPackage) {
+      throw new Error(`Package at index ${index} is required`);
+    }
+    if (normalizedPackage.length > MAX_PACKAGE_NAME_LENGTH) {
+      throw new Error(`Package name too long (max ${MAX_PACKAGE_NAME_LENGTH} chars)`);
+    }
+    if (normalizedPackage.startsWith("-")) {
+      throw new Error(`Package at index ${index} cannot be an option`);
+    }
+    if (/\s/.test(normalizedPackage) || /[`$&|;<>]/.test(normalizedPackage) || normalizedPackage.includes("\u0000")) {
+      throw new Error(`Invalid characters in package at index ${index}`);
+    }
+    if (normalizedPackage.includes("(") || normalizedPackage.includes(")")) {
+      throw new Error(`Invalid characters in package at index ${index}`);
+    }
+
+    return normalizedPackage;
+  });
+}
+
+function getBaseCommand(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) return "";
+
+  const tokens = trimmed.split(/\s+/);
+  for (const token of tokens) {
+    if (!token) continue;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token)) continue; // Skip VAR=value prefixes
+
+    const normalized = token.replace(/^['"]|['"]$/g, "");
+    const basename = normalized.split("/").pop() || normalized;
+    return basename.toLowerCase();
+  }
+
+  return "";
+}
+
 // ============================================
 // Terminal Controller
 // ============================================
@@ -164,21 +417,56 @@ export class TerminalController extends EventEmitter {
   private sessions: Map<string, TerminalSession> = new Map();
   private maxOutputSize = 1024 * 1024; // 1MB max output
   private defaultTimeout = 30000; // 30 seconds
+  private cleanupTimer: NodeJS.Timeout;
 
   constructor() {
     super();
+    this.cleanupTimer = setInterval(
+      () => this.cleanupExpiredSessions(),
+      SESSION_CLEANUP_INTERVAL_MS
+    );
+    if (typeof this.cleanupTimer.unref === "function") {
+      this.cleanupTimer.unref();
+    }
   }
 
   // ============================================
   // Session Management
   // ============================================
 
+  private getSessionOrFail(sessionId: string): TerminalSession {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const now = Date.now();
+    if (now - session.lastActivity > SESSION_TTL_MS) {
+      this.closeSession(sessionId);
+      throw new Error(`Session expired: ${sessionId}`);
+    }
+
+    session.lastActivity = now;
+    return session;
+  }
+
+  private cleanupExpiredSessions(): void {
+    const now = Date.now();
+    for (const [sessionId, session] of Array.from(this.sessions.entries())) {
+      if (now - session.lastActivity > SESSION_TTL_MS) {
+        this.closeSession(sessionId);
+      }
+    }
+  }
+
   createSession(cwd?: string, env?: Record<string, string>): string {
     const sessionId = randomUUID();
+    const baseEnv = sanitizeProcessEnv(process.env);
+    const requestedEnv = env ? sanitizeIncomingEnv(env) : {};
     const session: TerminalSession = {
       id: sessionId,
-      cwd: cwd || process.cwd(),
-      env: { ...process.env, ...env } as Record<string, string>,
+      cwd: path.resolve(cwd || process.cwd()),
+      env: { ...baseEnv, ...requestedEnv },
       history: [],
       activeProcesses: new Map(),
       createdAt: Date.now(),
@@ -188,6 +476,19 @@ export class TerminalController extends EventEmitter {
     this.sessions.set(sessionId, session);
     this.emit("session:created", { sessionId });
     return sessionId;
+  }
+
+  setSessionEnv(sessionId: string, variables: Record<string, string>): { updated: Record<string, string> } {
+    const session = this.getSessionOrFail(sessionId);
+
+    const sanitized = sanitizeIncomingEnv(variables);
+    Object.assign(session.env, sanitized);
+    return { updated: { ...sanitized } };
+  }
+
+  getSessionEnv(sessionId: string): Record<string, string> | undefined {
+    const session = this.getSessionOrFail(sessionId);
+    return { ...session.env };
   }
 
   closeSession(sessionId: string): void {
@@ -217,21 +518,24 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async executeCommand(sessionId: string, request: CommandRequest): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
 
     const commandId = randomUUID();
     const startTime = Date.now();
 
     // Safety check
-    const safetyResult = this.checkCommandSafety(request.command);
-    if (!safetyResult.safe && !request.confirmDangerous) {
+    const safetyResult = this.checkCommandSafety(command);
+    const bypassSafety =
+      Boolean(request.confirmDangerous) && ALLOW_DANGEROUS_CONFIRM_BYPASS;
+    if (!safetyResult.safe && !bypassSafety) {
       return {
         id: commandId,
-        command: request.command,
+        command,
         exitCode: 1,
         stdout: "",
-        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Requires explicit confirmation.`,
+        stderr: `SAFETY BLOCK: ${safetyResult.reason} (severity: ${safetyResult.severity}). Dangerous bypass is disabled unless TERMINAL_ALLOW_DANGEROUS_CONFIRM=true.`,
         duration: 0,
         killed: false,
         signal: null,
@@ -239,18 +543,22 @@ export class TerminalController extends EventEmitter {
       };
     }
 
+    const normalizedRequest: CommandRequest = {
+      ...request,
+      command,
+      args,
+    };
+
     if (request.inDocker) {
-        return this.executeDockerCommand(sessionId, commandId, request, startTime);
+        return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     if (request.interactive) {
-        return this.executePtyCommand(sessionId, commandId, request, startTime);
+        return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     // Standard execution
-    const fullCommand = request.args
-      ? `${request.command} ${request.args.join(" ")}`
-      : request.command;
+    const fullCommand = buildCommandLine(command, args);
 
     // Handle cd command specially
     if (fullCommand.trim().startsWith("cd ")) {
@@ -294,15 +602,26 @@ export class TerminalController extends EventEmitter {
       const shell = request.shell || "bash";
       const timeout = request.timeout || this.defaultTimeout;
 
-      const env = { ...session.env, ...request.env };
+      const env = resolveCommandEnvironment(session.env, request.env);
       const cwd = request.cwd || session.cwd;
+      const canDirectSpawn =
+        command.length > 0 &&
+        !/\s/.test(command);
 
-      const proc = spawn(shell, ["-c", fullCommand], {
-        cwd,
-        env,
-        timeout,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      const proc = canDirectSpawn
+        ? spawn(command, args, {
+            cwd,
+            env,
+            timeout,
+            stdio: ["pipe", "pipe", "pipe"],
+            shell: false,
+          })
+        : spawn(shell, ["-c", fullCommand], {
+            cwd,
+            env,
+            timeout,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
 
       let stdout = "";
       let stderr = "";
@@ -389,8 +708,9 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executePtyCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error("Session lost");
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
+    const session = this.getSessionOrFail(sessionId);
 
     return new Promise((resolve) => {
         const shell = request.shell || "bash";
@@ -399,7 +719,7 @@ export class TerminalController extends EventEmitter {
             cols: 80,
             rows: 30,
             cwd: session.cwd,
-            env: { ...session.env, ...request.env }
+            env: resolveCommandEnvironment(session.env, request.env),
         });
 
         let output = "";
@@ -415,7 +735,7 @@ export class TerminalController extends EventEmitter {
         });
 
         // Send command
-        const fullCommand = request.args ? `${request.command} ${request.args.join(" ")}` : request.command;
+        const fullCommand = buildCommandLine(command, args);
         ptyProc.write(`${fullCommand}\r`);
         
         // If not a long-running interactive session, we might want to exit after command
@@ -455,14 +775,17 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executeDockerCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error("Session lost");
+    const command = validateCommandString(request.command);
+    const args = validateCommandArgs(request.args);
+    const session = this.getSessionOrFail(sessionId);
 
     const image = request.dockerImage || "node:22-alpine";
-    const cmd = request.args ? [request.command, ...request.args] : [request.command]; // CMD format for Docker
+    const fullCommand = buildCommandLine(command, args);
+    const cmd = args.length ? [command, ...args] : [command]; // CMD format for Docker
 
     // Prepare Env
-    const envVars = Object.entries({ ...session.env, ...request.env }).map(([k, v]) => `${k}=${v}`);
+    const env = resolveCommandEnvironment(session.env, request.env);
+    const envVars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
 
     let stdout = "";
     let stderr = "";
@@ -533,7 +856,7 @@ export class TerminalController extends EventEmitter {
 
         const cmdResult: CommandResult = {
             id: commandId,
-            command: request.command + (request.args ? " " + request.args.join(" ") : ""),
+            command: fullCommand,
             exitCode,
             stdout,
             stderr,
@@ -557,7 +880,7 @@ export class TerminalController extends EventEmitter {
         
         return {
             id: commandId,
-            command: request.command,
+            command: fullCommand,
             exitCode: isTimeout ? null : 1,
             stdout,
             stderr: error.message,
@@ -574,26 +897,35 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async fileOperation(sessionId: string, op: FileOperation): Promise<{ success: boolean; data?: any; error?: string }> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
+    const relativePath = validateStringOrThrow(op.path, "path");
+    const resolvedPath = path.resolve(session.cwd, relativePath);
 
-    const resolvedPath = path.resolve(session.cwd, op.path);
+    if (!isPathInsideBase(session.cwd, resolvedPath)) {
+      return { success: false, error: "Path is outside session working directory" };
+    }
 
     try {
       switch (op.type) {
         case "read": {
+          const stats = await fs.stat(resolvedPath);
+          if (stats.size > MAX_FILE_OPERATION_BYTES) {
+            throw new Error(`File size exceeds ${MAX_FILE_OPERATION_BYTES} bytes`);
+          }
           const content = await fs.readFile(resolvedPath, "utf-8");
           return { success: true, data: content };
         }
 
         case "write": {
+          const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
           await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
-          await fs.writeFile(resolvedPath, op.content || "");
+          await fs.writeFile(resolvedPath, content);
           return { success: true };
         }
 
         case "append": {
-          await fs.appendFile(resolvedPath, op.content || "");
+          const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
+          await fs.appendFile(resolvedPath, content);
           return { success: true };
         }
 
@@ -604,14 +936,22 @@ export class TerminalController extends EventEmitter {
 
         case "copy": {
           if (!op.destination) return { success: false, error: "Destination required" };
-          const destPath = path.resolve(session.cwd, op.destination);
+          const destination = validateStringOrThrow(op.destination, "destination");
+          const destPath = path.resolve(session.cwd, destination);
+          if (!isPathInsideBase(session.cwd, destPath)) {
+            return { success: false, error: "Destination is outside session working directory" };
+          }
           await fs.cp(resolvedPath, destPath, { recursive: op.recursive || false });
           return { success: true };
         }
 
         case "move": {
           if (!op.destination) return { success: false, error: "Destination required" };
-          const moveDest = path.resolve(session.cwd, op.destination);
+          const destination = validateStringOrThrow(op.destination, "destination");
+          const moveDest = path.resolve(session.cwd, destination);
+          if (!isPathInsideBase(session.cwd, moveDest)) {
+            return { success: false, error: "Destination is outside session working directory" };
+          }
           await fs.rename(resolvedPath, moveDest);
           return { success: true };
         }
@@ -648,12 +988,18 @@ export class TerminalController extends EventEmitter {
         }
 
         case "search": {
+          const pattern = validateStringOrThrow(op.pattern || "*", "pattern");
           const result = await this.executeCommand(sessionId, {
-            command: `find "${resolvedPath}" -name "${op.pattern || "*"}" -type f 2>/dev/null | head -50`,
+            command: "find",
+            args: [resolvedPath, "-name", pattern, "-type", "f"],
+            timeout: 10_000,
           });
+          if (!result.success) {
+            return { success: false, error: result.stderr || result.stdout || "Search failed" };
+          }
           return {
             success: true,
-            data: result.stdout.trim().split("\n").filter(Boolean),
+            data: result.stdout.trim().split("\n").filter(Boolean).slice(0, 200),
           };
         }
 
@@ -823,14 +1169,17 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async installPackage(sessionId: string, manager: "npm" | "pip" | "apt", packages: string[]): Promise<CommandResult> {
-    const commands: Record<string, string> = {
-      npm: `npm install ${packages.join(" ")}`,
-      pip: `pip install ${packages.join(" ")}`,
-      apt: `apt-get install -y ${packages.join(" ")}`,
+    const safePackages = validatePackageList(manager, packages);
+    const commands: Record<string, { command: string; args: string[] }> = {
+      npm: { command: "npm", args: ["install"] },
+      pip: { command: "pip", args: ["install"] },
+      apt: { command: "apt-get", args: ["install", "-y"] },
     };
+    const command = commands[manager];
 
     return this.executeCommand(sessionId, {
-      command: commands[manager] || `${manager} install ${packages.join(" ")}`,
+      command: command.command,
+      args: [...command.args, ...safePackages],
       timeout: 120000,
     });
   }
@@ -843,8 +1192,7 @@ export class TerminalController extends EventEmitter {
     timeout?: number;
     args?: string[];
   }): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    this.getSessionOrFail(sessionId);
 
     const tempDir = path.join(os.tmpdir(), "iliagpt-scripts");
     await fs.mkdir(tempDir, { recursive: true });
@@ -854,21 +1202,30 @@ export class TerminalController extends EventEmitter {
       ruby: "rb", go: "go", rust: "rs", php: "php",
     };
 
-    const interpreters: Record<string, string> = {
-      python: "python3", javascript: "node", typescript: "npx ts-node",
-      bash: "bash", ruby: "ruby", php: "php", go: "go run",
+    const interpreters: Record<string, { command: string; args?: string[] }> = {
+      python: { command: "python3" },
+      javascript: { command: "node" },
+      typescript: { command: "npx", args: ["ts-node"] },
+      bash: { command: "bash" },
+      ruby: { command: "ruby" },
+      go: { command: "go", args: ["run"] },
+      rust: { command: "rust" },
+      php: { command: "php" },
     };
 
-    const ext = extensions[language] || "txt";
-    const interpreter = interpreters[language] || language;
+    const normalizedLanguage = language.toLowerCase();
+    const ext = extensions[normalizedLanguage] || "txt";
+    const interpreter = interpreters[normalizedLanguage] || { command: normalizedLanguage };
     const scriptFile = path.join(tempDir, `script-${randomUUID().slice(0, 8)}.${ext}`);
+    const scriptArgs = validateScriptArgs(options?.args);
 
     await fs.writeFile(scriptFile, code);
 
     try {
-      const args = options?.args?.join(" ") || "";
+      const args = [scriptFile, ...scriptArgs];
       return await this.executeCommand(sessionId, {
-        command: `${interpreter} "${scriptFile}" ${args}`,
+        command: interpreter.command,
+        args: interpreter.args ? [...interpreter.args, ...args] : args,
         timeout: options?.timeout || 60000,
       });
     } finally {
@@ -881,11 +1238,28 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private checkCommandSafety(command: string): { safe: boolean; reason?: string; severity?: string } {
+    const trimmed = command.trim();
+    if (!trimmed) {
+      return { safe: false, reason: "Empty command", severity: "medium" };
+    }
+
     for (const { pattern, reason, severity } of DANGEROUS_PATTERNS) {
-      if (pattern.test(command)) {
+      if (pattern.test(trimmed)) {
         return { safe: false, reason, severity };
       }
     }
+
+    if (ENFORCE_COMMAND_ALLOWLIST) {
+      const baseCommand = getBaseCommand(trimmed);
+      if (!baseCommand || !SAFE_COMMAND_PREFIX_SET.has(baseCommand)) {
+        return {
+          safe: false,
+          reason: `Command "${baseCommand || trimmed}" is not in the allowlist`,
+          severity: "high",
+        };
+      }
+    }
+
     return { safe: true };
   }
 
@@ -898,14 +1272,12 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   getHistory(sessionId: string, limit: number = 50): CommandResult[] {
-    const session = this.sessions.get(sessionId);
-    if (!session) return [];
+    const session = this.getSessionOrFail(sessionId);
     return session.history.slice(-limit);
   }
 
   async replayCommand(sessionId: string, commandId: string): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
 
     const original = session.history.find(h => h.id === commandId);
     if (!original) throw new Error(`Command not found: ${commandId}`);
@@ -914,8 +1286,8 @@ export class TerminalController extends EventEmitter {
   }
 
   getCwd(sessionId: string): string {
-    const session = this.sessions.get(sessionId);
-    return session?.cwd || process.cwd();
+    const session = this.getSessionOrFail(sessionId);
+    return session.cwd;
   }
 
   cleanup(): void {

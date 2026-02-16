@@ -10,10 +10,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
+  packages: write
 
 env:
   NODE_VERSION: "20"
@@ -54,6 +55,52 @@ jobs:
 
       - name: Compile
         run: python -m compileall main.py fastapi_sse python_agent_tools
+
+  ocr_service:
+    name: OCR Service (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Cache PaddleOCR models
+        uses: actions/cache@v4
+        with:
+          path: ~/.paddleocr
+          key: paddleocr-${{ runner.os }}-${{ hashFiles('ocr_service/pyproject.toml') }}
+
+      - name: Install system dependencies (Tesseract + fonts)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr \
+            tesseract-ocr-eng \
+            tesseract-ocr-spa \
+            fonts-dejavu-core \
+            libgomp1
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "ocr_service[dev,paddle]"
+
+      - name: Run tests (coverage >= 95%)
+        working-directory: ocr_service
+        env:
+          OCR_DEFAULT_LANG: eng
+          # Deterministic in CI: prefer Tesseract for the real-OCR accuracy suite.
+          OCR_PREFER_ENGINE: tesseract
+        run: |
+          set -euo pipefail
+          pytest
 
   test:
     name: Unit Tests
@@ -208,3 +255,14 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  # ── Build & Push Docker Images to GHCR ────────────────
+  docker:
+    name: Docker Images
+    needs: [build, audit]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/build-images.yml
+    with:
+      sha: ${{ github.sha }}
+    permissions:
+      contents: read
+      packages: write

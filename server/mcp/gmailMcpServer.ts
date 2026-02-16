@@ -11,6 +11,7 @@ import {
   gmailLabels,
 } from '../integrations/gmailApi';
 import type { GmailOAuthToken } from '@shared/schema';
+import { getUserId } from '../types/express';
 
 interface McpTool {
   name: string;
@@ -144,8 +145,16 @@ async function handleToolCall(
 export function createGmailMcpRouter(): Router {
   const router = Router();
 
+  const resolveAuthenticatedUserId = (req: Request): string | null => {
+    const userId = getUserId(req);
+    if (!userId) return null;
+    const normalized = String(userId);
+    if (normalized.startsWith("anon_")) return null;
+    return normalized;
+  };
+
   router.get('/sse', async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
+    const userId = resolveAuthenticatedUserId(req);
     
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -161,7 +170,6 @@ export function createGmailMcpRouter(): Router {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
 
     const sendEvent = (event: string, data: unknown) => {
       res.write(`event: ${event}\n`);
@@ -182,7 +190,7 @@ export function createGmailMcpRouter(): Router {
   });
 
   router.post('/tools/call', async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
+    const userId = resolveAuthenticatedUserId(req);
     
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -208,11 +216,16 @@ export function createGmailMcpRouter(): Router {
   });
 
   router.get('/tools', (req: Request, res: Response) => {
+    const userId = resolveAuthenticatedUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
     res.json({ tools: MCP_TOOLS });
   });
 
   router.post('/jsonrpc', async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
+    const userId = resolveAuthenticatedUserId(req);
     const request = req.body as McpRequest;
     
     const response: McpResponse = {

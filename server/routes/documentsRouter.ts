@@ -1,4 +1,5 @@
-import { Router } from "express";
+import { Response, Router } from "express";
+import fs from "node:fs/promises";
 import {
   generateWordDocument,
   generateExcelDocument,
@@ -12,7 +13,8 @@ import {
   renderDocument,
   getGeneratedDocument,
   getTemplates,
-  getTemplateById
+  getTemplateById,
+  generateFallbackReport,
 } from "../services/documentService";
 import { renderExcelFromSpec } from "../services/excelSpecRenderer";
 import { renderWordFromSpec } from "../services/wordSpecRenderer";
@@ -40,6 +42,16 @@ import {
   applyDocumentSecurityHeaders,
   sanitizeErrorMessage,
 } from "../services/documentSecurity";
+import { documentCliToolRunner } from "../toolRunner/orchestrator";
+import {
+  getHealthSnapshot,
+  isKnownTool,
+  listToolDefinitions,
+  TOOL_RUNNER_COMMAND_VERSION,
+  TOOL_RUNNER_PROTOCOL_VERSION,
+} from "../toolRunner/toolRegistry";
+import { TOOL_RUNNER_ERROR_CODES, buildToolRunnerErrorMessage } from "../toolRunner/errorContract";
+import { ToolAssetRef, ToolRunnerReport } from "../toolRunner/types";
 
 // Maximum request body size for document endpoints (1MB)
 const DOC_BODY_LIMIT = "1mb";
@@ -61,6 +73,142 @@ function safeErrorResponse(publicMessage: string, error: unknown): { error: stri
   return { error: publicMessage, details: sanitizeErrorMessage(error) };
 }
 
+function normalizeObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function normalizeTheme(value: unknown): { id?: string; name?: string; tokens?: Record<string, unknown> } | undefined {
+  const normalized = normalizeObject(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const normalizedTokens = normalizeObject(normalized.tokens);
+
+  return {
+    id: typeof normalized.id === "string" && normalized.id.trim().length > 0 ? normalized.id.trim() : undefined,
+    name:
+      typeof normalized.name === "string" && normalized.name.trim().length > 0
+        ? normalized.name.trim()
+        : undefined,
+    tokens:
+      normalizedTokens && Object.keys(normalizedTokens).length > 0 ? normalizedTokens : undefined,
+  };
+}
+
+function normalizeAssets(value: unknown): ToolAssetRef[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const assets: ToolAssetRef[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+
+    const entry = candidate as Partial<ToolAssetRef>;
+    if (typeof entry.name !== "string" || !entry.name.trim() || typeof entry.path !== "string" || !entry.path.trim()) {
+      continue;
+    }
+
+    assets.push({
+      name: entry.name.trim(),
+      path: entry.path.trim(),
+      mediaType: typeof entry.mediaType === "string" ? entry.mediaType : undefined,
+      sha256: typeof entry.sha256 === "string" ? entry.sha256 : undefined,
+    });
+  }
+
+  return assets.length > 0 ? assets : undefined;
+}
+
+function buildToolRunnerFallbackReport(
+  command: "docx" | "xlsx" | "pptx",
+  locale: string
+): ToolRunnerReport {
+  const now = new Date().toISOString();
+  const sandbox = process.env.TOOL_RUNNER_SANDBOX === "docker" ? "docker" : "subprocess";
+  const code = TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED;
+  const message = buildToolRunnerErrorMessage({
+    code,
+    locale,
+    details: "Tool runner did not return a report payload.",
+  });
+
+  const incident = {
+    code,
+    message,
+    severity: "warning" as const,
+    details: {
+      source: "documentsRouter",
+      command,
+    },
+  };
+
+  return {
+    protocolVersion: TOOL_RUNNER_PROTOCOL_VERSION,
+    locale,
+    requestHash: `fallback-${command}-${Date.now()}`,
+    documentType: command,
+    toolVersionPin: TOOL_RUNNER_COMMAND_VERSION,
+    sandbox,
+    usedFallback: true,
+    cacheHit: false,
+    artifactPath: "in-memory://tool-runner-no-report",
+    validation: {
+      valid: false,
+      checks: {
+        relationships: false,
+        styles: false,
+        fonts: false,
+        images: false,
+        schema: false,
+      },
+      metadata: {
+        artifactPath: "in-memory://tool-runner-no-report",
+        bytes: 0,
+      },
+      issues: [incident],
+    },
+    traces: [],
+    incidents: [incident],
+    metrics: {
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 0,
+      retries: 0,
+    },
+  };
+}
+
+function sendToolRunnerHeaders(
+  res: Response,
+  report: ToolRunnerReport | undefined,
+  command: "docx" | "xlsx" | "pptx",
+  toolRunnerRequested: boolean,
+  locale: string = "es"
+): void {
+  if (!toolRunnerRequested) {
+    return;
+  }
+
+  const fallback = report ?? buildToolRunnerFallbackReport(command, locale);
+  const incidentCodes = (fallback.incidents ?? []).map((incident) => incident.code);
+
+  res.setHeader("X-Tool-Runner-Request-Hash", fallback.requestHash);
+  res.setHeader("X-Tool-Runner-Status", fallback.usedFallback ? "fallback" : "success");
+  res.setHeader("X-Tool-Runner-Cache-Hit", String(fallback.cacheHit));
+  res.setHeader("X-Tool-Runner-Command", command);
+  res.setHeader("X-Tool-Runner-Validation", fallback.validation.valid ? "valid" : "invalid");
+  res.setHeader("X-Tool-Runner-Incident-Count", String(incidentCodes.length));
+  res.setHeader("X-Tool-Runner-Incident-Codes", incidentCodes.join(","));
+}
+
 export function createDocumentsRouter() {
   const router = Router();
 
@@ -68,6 +216,40 @@ export function createDocumentsRouter() {
   router.use((_req, res, next) => {
     applyDocumentSecurityHeaders(res);
     next();
+  });
+
+  router.get("/tool-runner/capabilities", async (req, res) => {
+    const command = typeof req.query.command === "string" ? req.query.command.toLowerCase() : undefined;
+
+    if (!command) {
+      const health = getHealthSnapshot();
+      return res.json({
+        protocolVersion: health.protocolVersion,
+        commandVersion: health.commandVersion,
+        tools: listToolDefinitions(),
+      });
+    }
+
+    if (!isKnownTool(command)) {
+      return res.status(404).json({ error: "Tool not found", tool: command });
+    }
+
+    const match = listToolDefinitions().find((tool) => tool.name === command);
+    if (!match) {
+      return res.status(404).json({ error: "Tool definition not found", tool: command });
+    }
+
+    res.json(match);
+  });
+
+  router.get("/tool-runner/healthcheck", async (req, res) => {
+    const command = typeof req.query.command === "string" ? req.query.command.toLowerCase() : undefined;
+
+    if (command && !isKnownTool(command)) {
+      return res.status(404).json({ error: "Tool not found", tool: command });
+    }
+
+    res.json(getHealthSnapshot(command));
   });
 
   // ============================================
@@ -91,6 +273,14 @@ export function createDocumentsRouter() {
 
       const safeTitle = typeof title === "string" ? title.substring(0, 500) : `${title}`.substring(0, 500);
       const safeContent = typeof content === "string" ? content.substring(0, MAX_DOC_BODY_SIZE) : `${content}`.substring(0, MAX_DOC_BODY_SIZE);
+      const runnerLocale = typeof req.body?.locale === "string" && req.body.locale.length > 0 ? req.body.locale : "es";
+      const useToolRunner = process.env.DISABLE_TOOL_RUNNER !== "true";
+      const designTokens = normalizeObject(req.body?.designTokens);
+      const theme = normalizeTheme(req.body?.theme);
+      const assets = normalizeAssets(req.body?.assets);
+      const runnerOptions = normalizeObject(req.body?.options);
+      const runnerDocumentType = type === "word" ? "docx" : type === "excel" ? "xlsx" : "pptx";
+      let toolRunnerReport: ToolRunnerReport | undefined;
 
       if (safeTitle.trim().length === 0) {
         return res.status(400).json({ error: "title cannot be empty" });
@@ -108,17 +298,115 @@ export function createDocumentsRouter() {
       let buffer: Buffer;
       let filename: string;
       let mimeType: string;
+      let toolRunnerRequested = false;
 
       try {
         switch (type) {
           case "word":
-            buffer = await generateWordDocument(safeTitle, safeContent);
+            try {
+              if (useToolRunner) {
+                toolRunnerRequested = true;
+                const result = await documentCliToolRunner.generate({
+                  documentType: "docx",
+                  title: safeTitle,
+                  data: {
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                });
+                buffer = await fs.readFile(result.artifactPath);
+                toolRunnerReport = result.report;
+              } else {
+                buffer = await generateWordDocument(safeTitle, safeContent);
+              }
+            } catch (error) {
+              logDocumentEvent({
+                timestamp: new Date().toISOString(),
+                event: "generate_fallback",
+                docType: "word",
+                details: { error: sanitizeErrorMessage(error) },
+              });
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "docx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                },
+                "docx",
+                error,
+                async () => generateWordDocument(safeTitle, safeContent)
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
+            }
             filename = sanitizeFilename(safeTitle, ".docx");
             mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
             break;
           case "excel": {
-            const excelData = parseExcelFromText(safeContent);
-            buffer = await generateExcelDocument(safeTitle, excelData);
+            try {
+              if (useToolRunner) {
+                toolRunnerRequested = true;
+                const result = await documentCliToolRunner.generate({
+                  documentType: "xlsx",
+                  title: safeTitle,
+                  data: {
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                });
+                buffer = await fs.readFile(result.artifactPath);
+                toolRunnerReport = result.report;
+              } else {
+                const excelData = parseExcelFromText(safeContent);
+                buffer = await generateExcelDocument(safeTitle, excelData);
+              }
+            } catch (error) {
+              logDocumentEvent({
+                timestamp: new Date().toISOString(),
+                event: "generate_fallback",
+                docType: "excel",
+                details: { error: sanitizeErrorMessage(error) },
+              });
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "xlsx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    content: safeContent,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                },
+                "xlsx",
+                error,
+                async () => {
+                  const excelData = parseExcelFromText(safeContent);
+                  return generateExcelDocument(safeTitle, excelData);
+                }
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
+            }
             filename = sanitizeFilename(safeTitle, ".xlsx");
             mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             break;
@@ -137,11 +425,63 @@ export function createDocumentsRouter() {
               });
             }
 
-            buffer = await generatePptDocument(normalized.title, normalized.slides, {
-              trace: {
-                source: "documentsRouter",
-              },
-            });
+            try {
+              if (useToolRunner) {
+                toolRunnerRequested = true;
+                const result = await documentCliToolRunner.generate({
+                  documentType: "pptx",
+                  title: safeTitle,
+                  data: {
+                    slides: normalized.slides,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                });
+                buffer = await fs.readFile(result.artifactPath);
+                toolRunnerReport = result.report;
+              } else {
+                buffer = await generatePptDocument(normalized.title, normalized.slides, {
+                  trace: {
+                    source: "documentsRouter",
+                  },
+                });
+              }
+            } catch (error) {
+              logDocumentEvent({
+                timestamp: new Date().toISOString(),
+                event: "generate_fallback",
+                docType: "ppt",
+                details: { error: sanitizeErrorMessage(error) },
+              });
+              const fallbackResult = await generateFallbackReport(
+                {
+                  type: "pptx",
+                  templateId: "legacy-fallback",
+                  data: {
+                    title: safeTitle,
+                    slides: normalized.slides,
+                  },
+                  locale: runnerLocale,
+                  options: runnerOptions,
+                  designTokens,
+                  theme,
+                  assets,
+                },
+                "pptx",
+                error,
+                async () =>
+                  generatePptDocument(normalized.title, normalized.slides, {
+                    trace: {
+                      source: "documentsRouter",
+                    },
+                  })
+              );
+              toolRunnerReport = fallbackResult.report;
+              buffer = fallbackResult.buffer;
+            }
             filename = sanitizeFilename(safeTitle, ".pptx");
             mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
             break;
@@ -175,6 +515,13 @@ export function createDocumentsRouter() {
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
+      sendToolRunnerHeaders(
+        res,
+        toolRunnerReport,
+        runnerDocumentType,
+        toolRunnerRequested,
+        runnerLocale
+      );
       res.send(buffer);
     } catch (error: any) {
       console.error("Document generation error:", error);
@@ -267,6 +614,23 @@ export function createDocumentsRouter() {
         mimeType: document.mimeType,
         downloadUrl,
         expiresAt: document.expiresAt.toISOString(),
+        ...(document.generationReport
+          ? {
+              toolRunnerReport: {
+                requestHash: document.generationReport.requestHash,
+                documentType: document.generationReport.documentType,
+                usedFallback: document.generationReport.usedFallback,
+                cacheHit: document.generationReport.cacheHit,
+                sandbox: document.generationReport.sandbox,
+                validation: {
+                  valid: document.generationReport.validation.valid,
+                  checks: document.generationReport.validation.checks,
+                },
+                metrics: document.generationReport.metrics,
+                incidents: document.generationReport.incidents,
+              },
+            }
+          : undefined),
       });
     } catch (error: any) {
       console.error("Document render error:", error);
@@ -277,6 +641,28 @@ export function createDocumentsRouter() {
   // ============================================
   // DOCUMENT DOWNLOAD
   // ============================================
+
+  router.get("/reports/:id", async (req, res) => {
+    try {
+      const document = getGeneratedDocument(req.params.id);
+
+      if (!document) {
+        return res.status(404).json({ error: "Document not found or expired" });
+      }
+
+      if (!document.generationReport) {
+        return res.status(404).json({ error: "Generation report unavailable for this document" });
+      }
+
+      res.json({
+        documentId: document.id,
+        toolRunnerReport: document.generationReport,
+      });
+    } catch (error: any) {
+      console.error("Tool runner report error:", error);
+      res.status(500).json({ error: "Failed to fetch generation report" });
+    }
+  });
 
   router.get("/:id", async (req, res) => {
     try {

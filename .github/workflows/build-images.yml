@@ -1,0 +1,137 @@
+name: Build & Push Docker Images
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+    outputs:
+      image_tag:
+        description: "The image tag that was pushed"
+        value: ${{ jobs.build.outputs.image_tag }}
+      app_digest:
+        description: "App image digest"
+        value: ${{ jobs.build.outputs.app_digest }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: ghcr.io/carrerajorge/iliagpt
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      app_digest: ${{ steps.build_app.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${{ inputs.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:8}"
+          echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push app image (runner stage)
+        id: build_app
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-app:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-app:latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+          # Build provenance (SLSA) — creates attestation for supply chain security
+          provenance: true
+          # SBOM generation — creates software bill of materials
+          sbom: true
+
+      - name: Build & push sandbox-runner image
+        id: build_sandbox
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: sandbox-runner
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-sandbox:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-sandbox:latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha,scope=sandbox
+          cache-to: type=gha,mode=max,scope=sandbox
+          provenance: true
+          sbom: true
+
+      - name: Build & push OCR image
+        id: build_ocr
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ocr_service/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-ocr:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_BASE }}-ocr:latest
+          cache-from: type=gha,scope=ocr
+          cache-to: type=gha,mode=max,scope=ocr
+          provenance: true
+          sbom: true
+
+      - name: Verify images exist in GHCR
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          echo "▸ Verifying pushed images..."
+          for img in app sandbox ocr; do
+            if docker manifest inspect "${{ env.IMAGE_BASE }}-${img}:${TAG}" > /dev/null 2>&1; then
+              echo "  ✓ ${{ env.IMAGE_BASE }}-${img}:${TAG}"
+            else
+              echo "  ✗ ${{ env.IMAGE_BASE }}-${img}:${TAG} NOT FOUND"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "▸ App image digest: ${{ steps.build_app.outputs.digest }}"
+          echo "▸ Sandbox digest:   ${{ steps.build_sandbox.outputs.digest }}"
+          echo "▸ OCR digest:       ${{ steps.build_ocr.outputs.digest }}"
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "## Docker Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag | Digest |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| app | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_app.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| sandbox | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_sandbox.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ocr | \`${{ steps.meta.outputs.tag }}\` | \`${{ steps.build_ocr.outputs.digest || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY

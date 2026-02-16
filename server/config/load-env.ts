@@ -33,3 +33,5 @@ envFiles.forEach((envFile) => {
     dotenv.config({ path: envPath, override: false });
   }
 });
+
+process.env.ENV_LOADED_BY_BOOTSTRAP = "true";

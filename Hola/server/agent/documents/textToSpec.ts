@@ -78,6 +78,32 @@ function checkJsonDepth(obj: unknown, maxDepth: number, current: number = 0): bo
   return keys.every(key => checkJsonDepth((obj as Record<string, unknown>)[key], maxDepth, current + 1));
 }
 
+/** Quote-aware CSV line splitter: handles "a,b",c correctly */
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length && cells.length < MAX_COLUMNS; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // Handle escaped quotes ("") inside quoted fields
+      if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
 /* ================================================================== */
 /*  MARKDOWN → DOCX SPEC                                              */
 /* ================================================================== */
@@ -102,7 +128,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
   }
 
   for (let i = 0; i < lines.length && sections.length < MAX_SECTIONS; i++) {
-    const line = lines[i];
+    const line = lines[i].length > MAX_PARAGRAPH_LENGTH ? lines[i].substring(0, MAX_PARAGRAPH_LENGTH) : lines[i];
 
     // Headings
     const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
@@ -110,7 +136,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       flushParagraph();
       sections.push({
         type: "heading",
-        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        level: Math.min(headingMatch[1].length, 6) as 1 | 2 | 3 | 4 | 5 | 6,
         content: sanitizeText(headingMatch[2].trim()),
       });
       continue;
@@ -123,10 +149,10 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
       continue;
     }
 
-    // Bullet list items (capped)
+    // Bullet list items (capped at MAX_SECTIONS as pseudo-limit)
     if (/^\s*[-*+]\s+/.test(line)) {
       flushParagraph();
-      const MAX_LIST_ITEMS = 500;
+      const MAX_LIST_ITEMS = 500; // per-list cap
       const bullets: string[] = [sanitizeText(line.replace(/^\s*[-*+]\s+/, ""))];
       while (i + 1 < lines.length && /^\s*[-*+]\s+/.test(lines[i + 1]) && bullets.length < MAX_LIST_ITEMS) {
         i++;
@@ -139,7 +165,7 @@ export function markdownToDocSpec(title: string, markdown: string): DocumentSpec
     // Numbered list items (capped)
     if (/^\s*\d+[.)]\s+/.test(line)) {
       flushParagraph();
-      const MAX_LIST_ITEMS = 500;
+      const MAX_LIST_ITEMS = 500; // per-list cap
       const items: string[] = [sanitizeText(line.replace(/^\s*\d+[.)]\s+/, ""))];
       while (i + 1 < lines.length && /^\s*\d+[.)]\s+/.test(lines[i + 1]) && items.length < MAX_LIST_ITEMS) {
         i++;
@@ -248,9 +274,11 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
 
     let cells: string[];
     if (trimmedLine.includes("|")) {
-      cells = trimmedLine.split("|").map(c => c.trim()).filter(c => c && !c.match(/^-+$/));
+      // Precompiled separator row check (avoids regex per cell)
+      cells = trimmedLine.split("|").map(c => c.trim()).filter(c => c.length > 0 && !/^-+$/.test(c));
     } else if (trimmedLine.includes(",")) {
-      cells = trimmedLine.split(",").map(c => c.trim());
+      // Quote-aware CSV splitting: respect quoted fields like "a,b",c
+      cells = splitCsvLine(trimmedLine);
       if (cells.length <= 1) cells = [trimmedLine];
     } else if (trimmedLine.includes("\t")) {
       cells = trimmedLine.split("\t").map(c => c.trim());
@@ -287,8 +315,14 @@ export function csvToWorkbookSpec(title: string, csv: string): WorkbookSpec {
       const rawVal = c < row.length ? row[c] : "";
       const val = rawVal === null || rawVal === undefined ? "" : rawVal;
       // Auto-detect numbers (reject Infinity, NaN, 1e999 etc.)
-      const num = Number(val);
-      obj[columns[c].key] = Number.isFinite(num) && String(val).trim() !== "" ? num : val;
+      // Auto-detect numbers: skip empty/whitespace-only, reject Infinity/NaN
+      const trimVal = String(val).trim();
+      if (trimVal !== "" && trimVal.length < 30) { // 30-char limit prevents Number("1".repeat(10000))
+        const num = Number(trimVal);
+        obj[columns[c].key] = Number.isFinite(num) ? num : val;
+      } else {
+        obj[columns[c].key] = val;
+      }
     }
     return obj;
   });

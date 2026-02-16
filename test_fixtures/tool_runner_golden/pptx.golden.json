@@ -1,0 +1,5 @@
+{
+  "documentType": "pptx",
+  "requiredTools": ["theme-apply", "pptxgen", "mso-validate", "render-preview"],
+  "requiredValidationChecks": ["relationships", "schema", "images"]
+}

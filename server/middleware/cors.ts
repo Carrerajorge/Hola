@@ -63,12 +63,24 @@ export const corsOptions: cors.CorsOptions = {
             return;
         }
 
-        // In development, allow all origins (useful for local testing).
+        // In development, allow localhost (any port) plus explicit allowlist entries.
         if (!isProduction) {
-            if (process.env.CORS_DEBUG === 'true') {
-                console.log(`[CORS] Dev mode - allowing origin: ${origin}`);
+            const localhostPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+            const explicitlyAllowed = Array.isArray(allowedOrigins) && allowedOrigins.includes(origin);
+            const localhostAllowed = localhostPattern.test(origin);
+
+            if (explicitlyAllowed || localhostAllowed) {
+                if (process.env.CORS_DEBUG === 'true') {
+                    console.log(`[CORS] Dev mode - allowing origin: ${origin}`);
+                }
+                callback(null, true);
+                return;
             }
-            callback(null, true);
+
+            if (process.env.CORS_DEBUG === 'true') {
+                console.warn(`[CORS] Dev mode - blocked origin: ${origin}`);
+            }
+            callback(new Error('Not allowed by CORS'));
             return;
         }
 

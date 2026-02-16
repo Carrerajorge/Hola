@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { type AuthenticatedRequest } from "./types/express";
+import { type AuthenticatedRequest, getUserId } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -101,6 +101,7 @@ import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
 import { getHealthStatus as getDbHealthStatus } from "./db";
+import { getRateLimiterStatus } from "./middleware/rateLimiter";
 import { templatesRouter } from "./routes/templatesRouter";
 import { webhooksRouter } from "./routes/webhooksRouter";
 import { twoFactorRouter } from "./routes/twoFactorRouter";
@@ -118,6 +119,7 @@ import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from ".
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
 import { getExecutionIntentGuardStatus, preExecutionIntentGuard } from "./middleware/preExecutionIntentGuard";
+import { require2FA } from "./middleware/auth";
 import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
@@ -126,7 +128,6 @@ import {
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { compression } from "./middleware/compression";
 
 import { createRunRouter } from "./routes/runRouter";
 import { errorHandler } from "./middleware/error";
@@ -448,12 +449,11 @@ export async function registerRoutes(
   const { phoneAuthRouter } = await import("./routes/phoneAuthRouter");
   app.use("/api/auth/phone", phoneAuthRouter);
 
-  // Global Compression Middleware (Gzip)
-  app.use(compression);
-
   // Global Audit Middleware (Logs mutations)
   if (process.env.NODE_ENV !== "test" || process.env.ENABLE_AUDIT_IN_TEST === "true") {
     app.use(globalAuditMiddleware);
+    // Capture additional audit signals as early as possible.
+    app.use(auditMiddleware);
   }
 
   // Session identity endpoint for consistent user ID across frontend/backend
@@ -528,26 +528,36 @@ export async function registerRoutes(
   if (!fs.existsSync(artifactsDir)) {
     fs.mkdirSync(artifactsDir, { recursive: true });
   }
-  app.use("/api/artifacts", express.static(artifactsDir, {
-    setHeaders: (res, filePath) => {
-      const ext = path.extname(filePath).toLowerCase();
-      const stats = fs.statSync(filePath);
-      if (ext === ".pptx") {
-        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-      } else if (ext === ".docx") {
-        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-      } else if (ext === ".xlsx") {
-        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      } else if (ext === ".pdf") {
-        res.setHeader("Content-Type", "application/pdf");
-      } else if (ext === ".png") {
-        res.setHeader("Content-Type", "image/png");
+  app.use(
+    "/api/artifacts",
+    (req: Request, res: Response, next) => {
+      const userId = getUserId(req);
+      if (!userId || String(userId).startsWith("anon_")) {
+        return res.status(401).json({ error: "Authentication required" });
       }
-      res.setHeader("Content-Length", stats.size);
-      res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    }
-  }));
+      return next();
+    },
+    express.static(artifactsDir, {
+      setHeaders: (res, filePath) => {
+        const ext = path.extname(filePath).toLowerCase();
+        const stats = fs.statSync(filePath);
+        if (ext === ".pptx") {
+          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        } else if (ext === ".docx") {
+          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        } else if (ext === ".xlsx") {
+          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        } else if (ext === ".pdf") {
+          res.setHeader("Content-Type", "application/pdf");
+        } else if (ext === ".png") {
+          res.setHeader("Content-Type", "image/png");
+        }
+        res.setHeader("Content-Length", stats.size);
+        res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      }
+    }),
+  );
 
   app.use("/api/ppt", pptExportRouter);
   app.use("/api", createChatsRouter());
@@ -574,7 +584,8 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/api/oauth/google/calendar", calendarOAuthRouter);
   app.use("/api/oauth/microsoft", outlookOAuthRouter);
-  app.use("/mcp/gmail", createGmailMcpRouter());
+  app.use("/api/mcp/gmail", createGmailMcpRouter());
+  app.use("/mcp/gmail", createGmailMcpRouter()); // Backward compatibility
 
   // External inbound webhooks must live outside /api to bypass CSRF middleware.
   app.use("/webhooks", createChannelWebhooksRouter());
@@ -623,6 +634,7 @@ export async function registerRoutes(
         heapTotal: mem.heapTotal,
       },
       uptime: process.uptime(),
+      rateLimiter: getRateLimiterStatus(),
     });
   });
 
@@ -635,6 +647,7 @@ export async function registerRoutes(
   app.get("/api/health/ready", (_req: Request, res: Response) => {
     const db = getDbHealthStatus();
     const mem = process.memoryUsage();
+    const rlStatus = getRateLimiterStatus();
 
     const dbReady = db.status === "HEALTHY";
     const status = dbReady ? "ready" : "degraded";
@@ -659,6 +672,11 @@ export async function registerRoutes(
           status: "ok",
           seconds: process.uptime(),
         },
+        rateLimiter: {
+          status: rlStatus.backend === "redis" ? "ok" : "degraded",
+          backend: rlStatus.backend,
+          initialized: rlStatus.initialized,
+        },
       },
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
@@ -672,7 +690,12 @@ export async function registerRoutes(
   // API Documentation
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-  app.get("/metrics", metricsHandler);
+  const metricsPublic = process.env.METRICS_PUBLIC === "true";
+  if (metricsPublic) {
+    app.get("/metrics", metricsHandler);
+  } else {
+    app.get("/metrics", requireAdminMiddleware, metricsHandler);
+  }
   app.get("/api/pare/metrics", (_req: Request, res: Response) => {
     res.json({
       prometheus: getMetricsJson(),
@@ -731,14 +754,13 @@ export async function registerRoutes(
   // SuperIntelligence System
   app.use("/api/audit", createAuditDashboardRouter());
   app.use("/api/super-intelligence", createSuperIntelligenceRouter());
-  app.use(auditMiddleware); // Capture metrics for all requests
 
   // ===== Device Control (autonomy primitives: local/remote terminal + browser) =====
   app.use("/api/device-control", createDeviceControlRouter());
 
   // ===== Browser & Terminal Control =====
   app.use("/api/browser-control", createBrowserControlRouter());
-  app.use("/api/terminal", requireAdminMiddleware, createTerminalControlRouter());
+  app.use("/api/terminal", requireAdminMiddleware, require2FA, createTerminalControlRouter());
   app.use("/api/workflows", createWorkflowRouter());
 
   // ===== OpenClaw 500 Capabilities Verification =====
@@ -777,7 +799,7 @@ export async function registerRoutes(
   // ===== Simple Tools & Agents Endpoints =====
 
   // GET /tools - Return all 100 tools
-  app.get("/tools", (_req: Request, res: Response) => {
+  app.get("/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
       const tools = ALL_TOOLS.map(tool => ({
         name: tool.name,
@@ -803,7 +825,7 @@ export async function registerRoutes(
   });
 
   // GET /agents - Return all 10 agents
-  app.get("/agents", (_req: Request, res: Response) => {
+  app.get("/agents", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
       const agents = SPECIALIZED_AGENTS.map(agent => ({
         name: agent.name,
@@ -828,7 +850,7 @@ export async function registerRoutes(
 
   // GET /api/super-agent/capabilities - Coverage mapping for Super Agente Digital 100
   // Query: ?source=combined|runtime|langgraph
-  app.get("/api/super-agent/capabilities", async (req: Request, res: Response) => {
+  app.get("/api/super-agent/capabilities", requireAdminMiddleware, async (req: Request, res: Response) => {
     try {
       const rawSource = typeof req.query.source === "string" ? req.query.source : "combined";
       const source: SuperAgentCoverageSource =
@@ -882,7 +904,7 @@ export async function registerRoutes(
   // - ?status=implemented|partial|stub|missing
   // - ?q=<prompt-like text> (returns capability profile + filtered matches)
   // - ?limit=1..1000
-  app.get("/api/super-agent/capabilities-1000", (req: Request, res: Response) => {
+  app.get("/api/super-agent/capabilities-1000", requireAdminMiddleware, (req: Request, res: Response) => {
     try {
       const category = typeof req.query.category === "string" ? req.query.category : undefined;
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
@@ -937,7 +959,7 @@ export async function registerRoutes(
   });
 
   // GET /api/tools - Enhanced tool catalog with category metadata
-  app.get("/api/tools", (_req: Request, res: Response) => {
+  app.get("/api/tools", requireAdminMiddleware, (_req: Request, res: Response) => {
     try {
       const categoryMap: Record<string, string[]> = {
         "Core": SAFE_TOOLS.map(t => t.name),

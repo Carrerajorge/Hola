@@ -52,6 +52,7 @@ export function createLocalStorageRouter() {
                 return res.status(400).json({ error: "Invalid object ID" });
             }
             const filePath = validation.filePath;
+            const tmpPath = filePath + ".tmp"; // Atomic write: write to tmp, rename
 
             const chunks: Buffer[] = [];
             let totalSize = 0;
@@ -62,7 +63,7 @@ export function createLocalStorageRouter() {
                 totalSize += chunk.length;
                 if (totalSize > MAX_UPLOAD_SIZE) {
                     aborted = true;
-                    res.status(413).json({ error: "File too large" });
+                    if (!res.headersSent) res.status(413).json({ error: "File too large" });
                     req.destroy();
                     return;
                 }
@@ -72,19 +73,26 @@ export function createLocalStorageRouter() {
                 if (aborted) return;
                 try {
                     const buffer = Buffer.concat(chunks);
-                    await fs.promises.writeFile(filePath, buffer, { mode: 0o640 });
+                    // Write to tmp first, then atomic rename (prevents partial reads)
+                    await fs.promises.writeFile(tmpPath, buffer, { mode: 0o640 });
+                    await fs.promises.rename(tmpPath, filePath);
                     console.log(`[LocalStorage] File saved: ${objectId} (${buffer.length} bytes)`);
                     // Don't leak filesystem path in response
                     res.status(200).json({ success: true, storagePath: `/objects/uploads/${objectId}` });
                 } catch (writeErr: any) {
+                    // Cleanup tmp file on any write error
+                    await fs.promises.unlink(tmpPath).catch(() => {});
                     if (writeErr?.code === "ENOSPC") {
-                        return res.status(507).json({ error: "Insufficient disk space" });
+                        if (!res.headersSent) return res.status(507).json({ error: "Insufficient disk space" });
+                        return;
                     }
                     console.error("Error writing upload:", writeErr instanceof Error ? writeErr.message : String(writeErr));
                     if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
                 }
             });
             req.on("error", (error) => {
+                // Cleanup tmp file on stream error
+                fs.promises.unlink(tmpPath).catch(() => {});
                 console.error("Upload stream error:", error instanceof Error ? error.message : String(error));
                 if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
             });
@@ -106,20 +114,39 @@ export function createLocalStorageRouter() {
             }
             const filePath = validation.filePath;
 
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ error: "File not found" });
-            }
-
             // Security headers to prevent inline execution of potentially dangerous content
             res.setHeader("X-Content-Type-Options", "nosniff");
+            res.setHeader("Content-Type", "application/octet-stream"); // Force download, no sniffing
             res.setHeader("Content-Disposition", `attachment; filename="${objectId}"`);
             res.setHeader("Cache-Control", "private, max-age=3600");
 
-            const content = await fs.promises.readFile(filePath);
-            res.send(content);
+            // Reject symlinks to prevent escape from uploads dir
+            let stat: fs.Stats;
+            try {
+                stat = await fs.promises.lstat(filePath);
+            } catch (err: any) {
+                if (err?.code === "ENOENT") return res.status(404).json({ error: "File not found" });
+                throw err;
+            }
+            if (stat.isSymbolicLink()) {
+                console.warn(`[LocalStorage] Symlink rejected: ${objectId}`);
+                return res.status(403).json({ error: "Access denied" });
+            }
+
+            // Stream the file instead of loading entirely into memory
+            const stream = fs.createReadStream(filePath);
+            stream.on("error", (streamErr: any) => {
+                if (streamErr?.code === "ENOENT") {
+                    if (!res.headersSent) res.status(404).json({ error: "File not found" });
+                } else {
+                    console.error("Error streaming file:", streamErr instanceof Error ? streamErr.message : String(streamErr));
+                    if (!res.headersSent) res.status(500).json({ error: "Failed to serve file" });
+                }
+            });
+            stream.pipe(res);
         } catch (error: any) {
             console.error("Error serving file:", error instanceof Error ? error.message : String(error));
-            res.status(500).json({ error: "Failed to serve file" });
+            if (!res.headersSent) res.status(500).json({ error: "Failed to serve file" });
         }
     });
 

@@ -3,13 +3,16 @@ import { z } from "zod";
 
 const nodeEnv = process.env.NODE_ENV || "development";
 const loadEnvLocal = process.env.LOAD_ENV_LOCAL === "true";
+const envLoadedByBootstrap = process.env.ENV_LOADED_BY_BOOTSTRAP === "true";
 
 // Load local overrides first, then defaults.
 // .env.local is intended for development only; tests should be hermetic by default.
-if (nodeEnv === "development" || loadEnvLocal) {
-  dotenv.config({ path: ".env.local" });
+if (!envLoadedByBootstrap) {
+  if (nodeEnv === "development" || loadEnvLocal) {
+    dotenv.config({ path: ".env.local" });
+  }
+  dotenv.config();
 }
-dotenv.config();
 // Backward compatible aliases for xAI keys used across different parts of the codebase.
 process.env.XAI_API_KEY = process.env.XAI_API_KEY || process.env.GROK_API_KEY || process.env.ILIAGPT_API_KEY;
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { generatePdfFromHtml, PdfOptions } from "./pdfGeneration";
 import {
   generateWordDocument,
@@ -8,6 +11,24 @@ import {
   parseExcelFromText,
   parseSlidesFromText
 } from "./documentGeneration";
+import { buildToolRunnerRequestHash, documentCliToolRunner } from "../toolRunner/orchestrator";
+import { validateOpenXmlArtifact } from "../toolRunner/openXmlValidator";
+import {
+  TOOL_RUNNER_ERROR_CODES,
+  buildToolRunnerErrorMessage,
+} from "../toolRunner/errorContract";
+import {
+  TOOL_RUNNER_COMMAND_VERSION,
+  TOOL_RUNNER_PROTOCOL_VERSION,
+} from "../toolRunner/toolRegistry";
+import {
+  ToolAssetRef,
+  ToolCommandName,
+  ToolRunnerIncident,
+  ToolRunnerReport,
+  ToolRunnerValidationResult,
+  ToolRunnerDocumentType,
+} from "../toolRunner/types";
 
 // ============================================
 // SECURITY: HTML entity escaping to prevent XSS
@@ -45,6 +66,8 @@ export const DocumentRenderRequestSchema = z.object({
   templateId: z.string().min(1, "Template ID is required"),
   type: DocumentTypeSchema,
   data: z.record(z.any()),
+  locale: z.string().max(16).optional(),
+  designTokens: z.record(z.any()).optional(),
   options: z.object({
     format: z.enum(["A4", "Letter", "Legal", "Tabloid", "A3", "A5"]).optional(),
     landscape: z.boolean().optional(),
@@ -57,6 +80,23 @@ export const DocumentRenderRequestSchema = z.object({
     printBackground: z.boolean().optional(),
     scale: z.number().min(0.1).max(2).optional(),
   }).optional(),
+  theme: z
+    .object({
+      id: z.string().optional(),
+      name: z.string().optional(),
+      tokens: z.record(z.any()).optional(),
+    })
+    .optional(),
+  assets: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        path: z.string().min(1),
+        mediaType: z.string().optional(),
+        sha256: z.string().optional(),
+      })
+    )
+    .optional(),
 });
 
 export type DocumentRenderRequest = z.infer<typeof DocumentRenderRequestSchema>;
@@ -76,6 +116,7 @@ export interface GeneratedDocument {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
+  generationReport?: ToolRunnerReport;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -438,6 +479,299 @@ async function generatePptx(template: DocumentTemplate, data: Record<string, any
   });
 }
 
+async function generateWithToolRunner(
+  request: DocumentRenderRequest,
+  documentType: "docx" | "xlsx" | "pptx"
+): Promise<{ buffer: Buffer; report: ToolRunnerReport | undefined }> {
+  const runnerRequest = {
+    documentType,
+    title: String((request.data?.title as string | undefined) || "Documento"),
+    templateId: request.templateId,
+    data: request.data,
+    locale: request.locale || "es",
+    options: request.options,
+    designTokens: request.designTokens,
+    theme: request.theme,
+    assets: request.assets as ToolAssetRef[] | undefined,
+  };
+
+  const runnerOutput = await documentCliToolRunner.generate(runnerRequest);
+  const buffer = await fs.readFile(runnerOutput.artifactPath);
+  return {
+    buffer,
+    report: runnerOutput.report,
+  };
+}
+
+function normalizeErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || "Unexpected error";
+  }
+  return typeof error === "string" ? error : "Unknown error";
+}
+
+function toToolRunnerRequest(
+  request: DocumentRenderRequest,
+  documentType: ToolRunnerDocumentType
+) {
+  return {
+    documentType,
+    title: String((request.data?.title as string | undefined) || "Documento"),
+    templateId: request.templateId,
+    data: request.data,
+    options: request.options,
+    locale: request.locale || "es",
+    designTokens: request.designTokens,
+    theme: request.theme,
+    assets: request.assets as ToolAssetRef[] | undefined,
+  };
+}
+
+function resolveToolRunnerCommand(documentType: ToolRunnerDocumentType): ToolCommandName {
+  if (documentType === "docx") return "docgen";
+  if (documentType === "xlsx") return "xlsxgen";
+  return "pptxgen";
+}
+
+function resolveToolRunnerSandbox():
+  | "subprocess"
+  | "docker" {
+  return process.env.TOOL_RUNNER_SANDBOX === "docker" ? "docker" : "subprocess";
+}
+
+function normalizeToolRunnerArtifactsPath(basePath: string, requestHash: string, documentType: ToolRunnerDocumentType): string {
+  return path.join(basePath, `${requestHash}.${documentType}`);
+}
+
+async function buildMinimalFallbackArtifact(documentType: ToolRunnerDocumentType, title: string): Promise<Buffer> {
+  if (documentType === "docx") {
+    return generateWordDocument(
+      title,
+      "Se aplicó recuperación automática para garantizar un artefacto de Word válido."
+    );
+  }
+
+  if (documentType === "xlsx") {
+    return generateExcelDocument(title, [
+      ["Campo", "Valor"],
+      ["Estado", "Fallback"],
+      ["Documento", title],
+    ]);
+  }
+
+  return generatePptDocument(title, [
+    {
+      title: "Recuperación automática",
+      content: ["La presentación se generó con una ruta de recuperación válida."],
+    },
+  ], {
+    trace: {
+      source: "documentService-fallback",
+    },
+  });
+}
+
+async function validateArtifactSafe(
+  artifactPath: string,
+  documentType: ToolRunnerDocumentType
+): Promise<ToolRunnerValidationResult> {
+  try {
+    return await validateOpenXmlArtifact(artifactPath, documentType);
+  } catch (error) {
+    return {
+      valid: false,
+      checks: {
+        relationships: false,
+        styles: false,
+        fonts: false,
+        images: false,
+        schema: false,
+      },
+      metadata: {
+        artifactPath,
+        bytes: 0,
+      },
+      issues: [
+        {
+          code: TOOL_RUNNER_ERROR_CODES.INTERNAL,
+          message: normalizeErrorMessage(error),
+          severity: "error",
+        },
+      ],
+    };
+  }
+}
+
+export async function generateFallbackReport(
+  request: DocumentRenderRequest,
+  documentType: ToolRunnerDocumentType,
+  primaryError: unknown,
+  fallbackGenerator: () => Promise<Buffer>
+): Promise<{ buffer: Buffer; report: ToolRunnerReport }> {
+  const startedAt = Date.now();
+  const runnerLocale = request.locale || "es";
+  const runnerRequest = toToolRunnerRequest(request, documentType);
+  const requestHash = buildToolRunnerRequestHash(runnerRequest);
+  const title = runnerRequest.title;
+  const fallbackCommand = resolveToolRunnerCommand(documentType);
+  const defaultValidation: ToolRunnerValidationResult = {
+    valid: false,
+    checks: {
+      relationships: false,
+      styles: false,
+      fonts: false,
+      images: false,
+      schema: false,
+    },
+    metadata: {
+      artifactPath: "n/a",
+      bytes: 0,
+    },
+    issues: [],
+  };
+  const fallbackIncidents: ToolRunnerIncident[] = [
+    {
+      code: TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED,
+      severity: "warning",
+      message: buildToolRunnerErrorMessage({
+        code: TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED,
+        locale: runnerLocale,
+        details: `tool-runner.${documentType} failed: ${normalizeErrorMessage(primaryError)}`,
+      }),
+      details: { stage: "tool-runner", tool: resolveToolRunnerCommand(documentType) },
+    },
+  ];
+
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "iliacodex-tool-fallback-"));
+  let artifactPath = normalizeToolRunnerArtifactsPath(workspace, requestHash, documentType);
+  let buffer: Buffer;
+  let validation = defaultValidation;
+
+  const now = new Date().toISOString();
+  const reportPath = path.join(workspace, `${requestHash}.report.json`);
+
+  try {
+    try {
+      buffer = await fallbackGenerator();
+    } catch (error) {
+      fallbackIncidents.push({
+        code: TOOL_RUNNER_ERROR_CODES.TOOL_EXECUTION_FAILED,
+        severity: "error",
+        message: buildToolRunnerErrorMessage({
+          code: TOOL_RUNNER_ERROR_CODES.TOOL_EXECUTION_FAILED,
+          locale: runnerLocale,
+          details: `Legacy fallback generation failed: ${normalizeErrorMessage(error)}`,
+        }),
+        details: { stage: "legacy-generator", toolRunner: "documentService" },
+      });
+      buffer = await buildMinimalFallbackArtifact(documentType, title);
+    }
+
+    await fs.writeFile(artifactPath, buffer);
+    validation = await validateArtifactSafe(artifactPath, documentType);
+
+    if (!validation.valid) {
+      fallbackIncidents.push({
+        code: TOOL_RUNNER_ERROR_CODES.OPENXML_INVALID,
+        severity: "warning",
+        message: buildToolRunnerErrorMessage({
+          code: TOOL_RUNNER_ERROR_CODES.OPENXML_INVALID,
+          locale: runnerLocale,
+          details: "Initial legacy fallback artifact did not pass OpenXML validation.",
+        }),
+        details: { stage: "legacy-fallback", artifactPath },
+      });
+
+      const recoveredPath = normalizeToolRunnerArtifactsPath(workspace, `${requestHash}.recovered`, documentType);
+      const recoveredBuffer = await buildMinimalFallbackArtifact(documentType, title);
+      await fs.writeFile(recoveredPath, recoveredBuffer);
+      validation = await validateArtifactSafe(recoveredPath, documentType);
+      artifactPath = recoveredPath;
+      buffer = recoveredBuffer;
+
+      if (!validation.valid) {
+        fallbackIncidents.push({
+          code: TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED,
+          severity: "error",
+          message: buildToolRunnerErrorMessage({
+            code: TOOL_RUNNER_ERROR_CODES.FALLBACK_FAILED,
+            locale: runnerLocale,
+            details: "OpenXML validation failed for legacy fallback and simplified fallback path.",
+          }),
+          details: { stage: "legacy-recovery", artifactPath },
+        });
+      }
+    }
+  } catch (error) {
+    fallbackIncidents.push({
+      code: TOOL_RUNNER_ERROR_CODES.INTERNAL,
+      severity: "error",
+      message: buildToolRunnerErrorMessage({
+        code: TOOL_RUNNER_ERROR_CODES.INTERNAL,
+        locale: runnerLocale,
+        details: normalizeErrorMessage(error),
+      }),
+      details: { stage: "fallback-execution", documentType },
+    });
+
+    buffer = await buildMinimalFallbackArtifact(documentType, title);
+    artifactPath = normalizeToolRunnerArtifactsPath(workspace, `${requestHash}.fallback`, documentType);
+    await fs.writeFile(artifactPath, buffer).catch(() => {});
+    validation = await validateArtifactSafe(artifactPath, documentType);
+  }
+
+  const report: ToolRunnerReport = {
+    protocolVersion: TOOL_RUNNER_PROTOCOL_VERSION,
+    locale: runnerLocale,
+    requestHash,
+    documentType,
+    toolVersionPin: TOOL_RUNNER_COMMAND_VERSION,
+    sandbox: resolveToolRunnerSandbox(),
+    usedFallback: true,
+    cacheHit: false,
+    artifactPath,
+    validation,
+    traces: [
+      {
+        tool: fallbackCommand,
+        version: TOOL_RUNNER_COMMAND_VERSION,
+        attempt: 1,
+        startedAt: now,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAt,
+        exitCode: 0,
+        timedOut: false,
+        stdout: [
+          {
+            kind: "log",
+            level: "warn",
+            tool: fallbackCommand,
+            event: "fallback.generator",
+            ts: new Date().toISOString(),
+            data: {
+              source: "documentService",
+              documentType,
+            },
+          },
+        ],
+        stderr: [],
+      },
+    ],
+    incidents: fallbackIncidents,
+    metrics: {
+      startedAt: now,
+      finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      retries: 0,
+    },
+  };
+
+  await fs.writeFile(reportPath, JSON.stringify(report, null, 2), "utf8").catch(() => {});
+  await fs.rm(workspace, { recursive: true, force: true }).catch(() => {});
+
+  return { buffer, report };
+}
+
 export async function renderDocument(request: DocumentRenderRequest): Promise<GeneratedDocument> {
   const template = getTemplateById(request.templateId);
   if (!template) {
@@ -455,19 +789,41 @@ export async function renderDocument(request: DocumentRenderRequest): Promise<Ge
   }
   
   let buffer: Buffer;
+  let generationReport: ToolRunnerReport | undefined;
   
   switch (request.type) {
     case "pdf":
       buffer = await generatePdf(template, request.data, request.options);
       break;
     case "docx":
-      buffer = await generateDocx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "docx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for docx, falling back to legacy generator.", error);
+        ({ buffer, report: generationReport } = await generateFallbackReport(request, "docx", error, () =>
+          generateDocx(template, request.data)
+        ));
+      }
       break;
     case "xlsx":
-      buffer = await generateXlsx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "xlsx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for xlsx, falling back to legacy generator.", error);
+        ({ buffer, report: generationReport } = await generateFallbackReport(request, "xlsx", error, () =>
+          generateXlsx(template, request.data)
+        ));
+      }
       break;
     case "pptx":
-      buffer = await generatePptx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "pptx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for pptx, falling back to legacy generator.", error);
+        ({ buffer, report: generationReport } = await generateFallbackReport(request, "pptx", error, () =>
+          generatePptx(template, request.data)
+        ));
+      }
       break;
     default:
       throw new Error(`Unsupported document type: ${request.type}`);
@@ -481,6 +837,7 @@ export async function renderDocument(request: DocumentRenderRequest): Promise<Ge
     id: docId,
     fileName,
     mimeType: getMimeType(request.type),
+    generationReport,
     buffer,
     createdAt: new Date(),
     expiresAt: new Date(Date.now() + DOCUMENT_EXPIRY_MS),

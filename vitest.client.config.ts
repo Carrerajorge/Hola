@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    testTimeout: 15000,
     setupFiles: ['./client/src/test/setup.ts'],
     include: ['client/src/**/*.test.{ts,tsx}', 'client/src/**/__tests__/*.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
@@ -15,6 +16,12 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['client/src/**/*.{ts,tsx}'],
       exclude: ['client/src/**/*.test.{ts,tsx}', 'client/src/test/**'],
+      thresholds: {
+        lines: 40,
+        functions: 40,
+        branches: 30,
+        statements: 40,
+      },
     },
     alias: {
       '@': path.resolve(__dirname, './client/src'),

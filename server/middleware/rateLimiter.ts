@@ -2,6 +2,7 @@ import { RateLimiterRedis, RateLimiterMemory } from "rate-limiter-flexible";
 import { Request, Response, NextFunction } from "express";
 import { createClient } from "redis";
 import crypto from "crypto";
+import { getSecureUserId } from "../lib/anonUserHelper";
 
 // Cliente Redis para Rate Limiter — with aggressive timeouts to prevent startup hangs
 const REDIS_CONNECT_TIMEOUT_MS = 3_000;
@@ -35,6 +36,29 @@ const MAX_KEY_LENGTH = 256;
 const MAX_IP_LENGTH = 128;
 const MAX_USER_ID_LENGTH = 128;
 
+// Health endpoints must NEVER be blocked by rate limiting
+const RATE_LIMIT_EXEMPT_PREFIXES: ReadonlyArray<string> = [
+  "/api/health",
+  "/health",
+];
+
+function isExemptPath(req: Request): boolean {
+  const url = req.originalUrl || req.url;
+  return RATE_LIMIT_EXEMPT_PREFIXES.some(
+    (prefix) => url === prefix || url.startsWith(prefix + "/") || url.startsWith(prefix + "?")
+  );
+}
+
+// Observability: track which backend is active
+let rateLimiterBackend: "redis" | "memory" | "initializing" = "initializing";
+
+export function getRateLimiterStatus(): {
+  initialized: boolean;
+  backend: "redis" | "memory" | "initializing";
+} {
+  return { initialized, backend: rateLimiterBackend };
+}
+
 function sanitizeRateLimitKey(part: unknown): string {
   const raw = String(part || "").trim().toLowerCase();
   if (!raw) return "";
@@ -63,6 +87,7 @@ const initLimiterPromise = (async () => {
         keyPrefix: "middleware_global",
         points: 200, // 200 requests
         duration: 60, // per 60 seconds per IP
+        insuranceLimiter: new RateLimiterMemory({ points: 200, duration: 60 }),
       });
 
       rateLimiterAuth = new RateLimiterRedis({
@@ -70,6 +95,7 @@ const initLimiterPromise = (async () => {
         keyPrefix: "middleware_auth",
         points: 10, // 10 attempts
         duration: 60 * 15, // per 15 minutes (brute force protection)
+        insuranceLimiter: new RateLimiterMemory({ points: 10, duration: 60 * 15 }),
       });
 
       rateLimiterAi = new RateLimiterRedis({
@@ -77,13 +103,17 @@ const initLimiterPromise = (async () => {
         keyPrefix: "middleware_ai",
         points: 60, // 60 AI requests
         duration: 60, // per minute
+        insuranceLimiter: new RateLimiterMemory({ points: 60, duration: 60 }),
       });
+
+      rateLimiterBackend = "redis";
     } else {
-        throw new Error("No Redis URL");
+      throw new Error("No Redis URL");
     }
   } catch (err) {
-    console.warn("[RateLimiter] Redis connection failed, falling back to Memory:", err);
-    // Fallback to memory if Redis fails or is unavailable
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn(`[RateLimiter] Redis connection failed, falling back to in-memory rate limiting: ${reason}`);
+    // Fallback to memory — better to have per-process rate limits than no site at all
     rateLimiterGlobal = new RateLimiterMemory({
       points: 200,
       duration: 60,
@@ -96,6 +126,7 @@ const initLimiterPromise = (async () => {
       points: 60,
       duration: 60,
     });
+    rateLimiterBackend = "memory";
   }
   initialized = true;
 })();
@@ -115,8 +146,8 @@ async function waitForRateLimiterInit(timeoutMs = 5000): Promise<boolean> {
  * As a fallback, we use req.ip which Express resolves based on trust proxy setting.
  */
 function getClientKey(req: Request): string {
-    // Security: avoid unbounded key material via malformed user IDs
-    const userId = sanitizeRateLimitKey((req as any).user?.id);
+    // Prefer stable user/session identity when available.
+    const userId = sanitizeRateLimitKey(getSecureUserId(req));
     if (userId) {
       if (userId.length <= MAX_USER_ID_LENGTH) {
         return `user:${userId}`;
@@ -196,6 +227,7 @@ const consumeLimiter = async (
       });
     });
 };
+
 // Billing/Stripe: tighter limits — 20 requests per 15 min per user/IP
 let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
 
@@ -213,6 +245,7 @@ let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
       keyPrefix: "middleware_billing",
       points: 20,
       duration: 60 * 15,
+      insuranceLimiter: new RateLimiterMemory({ points: 20, duration: 60 * 15 }),
     });
   } else {
     rateLimiterBilling = new RateLimiterMemory({
@@ -223,17 +256,21 @@ let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
 })();
 
 export const globalLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  if (isExemptPath(req)) return next();
   await consumeLimiter(() => rateLimiterGlobal, req, res, next);
 };
 
 export const authLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  if (isExemptPath(req)) return next();
   await consumeLimiter(() => rateLimiterAuth, req, res, next);
 };
 
 export const aiLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  if (isExemptPath(req)) return next();
   await consumeLimiter(() => rateLimiterAi, req, res, next);
 };
 
 export const billingLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  if (isExemptPath(req)) return next();
   await consumeLimiter(() => rateLimiterBilling, req, res, next);
 };

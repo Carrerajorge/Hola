@@ -121,7 +121,7 @@ export async function createXlsx(spec: XlsxSpec): Promise<ArtifactMeta> {
   if (spec.sheets.length > MAX_SHEETS) throw new Error(`Too many sheets: ${spec.sheets.length} (max ${MAX_SHEETS})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "workbook";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "workbook";
   const filename = `${safeTitle}_${id.substring(0, 8)}.xlsx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -204,7 +204,7 @@ export async function createDocx(spec: DocxSpec): Promise<ArtifactMeta> {
   if (spec.sections.length > MAX_SECTIONS) throw new Error(`Too many sections: ${spec.sections.length} (max ${MAX_SECTIONS})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "document";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "document";
   const filename = `${safeTitle}_${id.substring(0, 8)}.docx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -337,7 +337,7 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
   if (spec.slides.length > MAX_SLIDES) throw new Error(`Too many slides: ${spec.slides.length} (max ${MAX_SLIDES})`);
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "presentation";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "presentation";
   const filename = `${safeTitle}_${id.substring(0, 8)}.pptx`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -423,7 +423,7 @@ export async function createArtifactCompiled(
   await ensureArtifactsDir();
 
   const id = randomUUID();
-  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_") || "document";
+  const safeTitle = safeStr(spec.title, 200).replace(/[^a-zA-Z0-9]/g, "_").substring(0, 80) || "document";
   const filename = `${safeTitle}_${id.substring(0, 8)}.${format}`;
   const filepath = path.join(ARTIFACTS_DIR, filename);
 
@@ -474,27 +474,28 @@ function convertLegacyToCompilerSpec(
   switch (format) {
     case "pptx": {
       const s = spec as PptxSpec;
+      const safeTitle = safeStr(s.title, 500);
       return {
         format: "pptx" as const,
-        title: s.title,
-        author: s.metadata?.author,
+        title: safeTitle,
+        author: safeStr(s.metadata?.author, 200),
         slides: [
           {
             type: "cover" as const,
             components: [
-              { type: "title" as const, content: s.title },
-              { type: "subtitle" as const, content: s.metadata?.author || "IliaGPT" },
+              { type: "title" as const, content: safeTitle },
+              { type: "subtitle" as const, content: safeStr(s.metadata?.author, 200) || "IliaGPT" },
             ],
           },
-          ...s.slides.map(slide => ({
+          ...s.slides.slice(0, MAX_SLIDES).map(slide => ({
             type: "content" as const,
             components: [
-              { type: "title" as const, content: slide.title },
-              ...(slide.bullets.length > 0
-                ? [{ type: "bullets" as const, content: slide.bullets }]
+              { type: "title" as const, content: safeStr(slide.title, 500) },
+              ...((slide.bullets || []).length > 0
+                ? [{ type: "bullets" as const, content: (slide.bullets || []).slice(0, MAX_BULLETS_PER_SLIDE).map(b => safeStr(b, 5000)) }]
                 : []),
             ],
-            notes: slide.notes,
+            notes: slide.notes ? safeStr(slide.notes, 100_000) : undefined,
           })),
         ],
       } satisfies PresentationSpec;
@@ -503,33 +504,40 @@ function convertLegacyToCompilerSpec(
     case "docx": {
       const s = spec as DocxSpec;
       const sections: DocumentSpec["sections"] = [];
-      for (const sec of s.sections) {
+      for (const sec of (s.sections || []).slice(0, MAX_SECTIONS)) {
         sections.push({
           type: "heading",
           level: sec.level,
-          content: sec.heading,
+          content: safeStr(sec.heading, 500),
         });
-        for (const para of sec.paragraphs) {
-          sections.push({ type: "paragraph", content: para });
+        for (const para of (sec.paragraphs || []).slice(0, MAX_PARAGRAPHS_PER_SECTION)) {
+          sections.push({ type: "paragraph", content: safeStr(para) });
         }
         if (sec.table) {
+          const headers = (sec.table.headers || []).slice(0, MAX_HEADERS_PER_SHEET);
+          const rows = (sec.table.rows || []).slice(0, MAX_ROWS_PER_SHEET);
           sections.push({
             type: "table",
-            content: [sec.table.headers, ...sec.table.rows],
+            content: [
+              headers.map(h => safeStr(h, 255)),
+              ...rows.map(row =>
+                (row || []).slice(0, headers.length).map(cell => safeStr(String(cell ?? ""), 32_767))
+              ),
+            ],
           });
         }
         if (sec.citations?.length) {
           sections.push({
             type: "bullets",
-            content: sec.citations,
+            content: sec.citations.slice(0, 200).map(c => safeStr(c, 2000)),
           });
         }
       }
       return {
         format: "docx" as const,
-        title: s.title,
-        author: s.metadata?.author,
-        subject: s.metadata?.subject,
+        title: safeStr(s.title, 500),
+        author: safeStr(s.metadata?.author, 200),
+        subject: safeStr(s.metadata?.subject, 500),
         sections,
       } satisfies DocumentSpec;
     }
@@ -538,26 +546,31 @@ function convertLegacyToCompilerSpec(
       const s = spec as XlsxSpec;
       return {
         format: "xlsx" as const,
-        title: s.title,
-        sheets: s.sheets.map(sheet => ({
-          name: sheet.name.substring(0, 31),
-          columns: sheet.headers.map((h, idx) => ({
-            key: `col_${idx}`,
-            header: h,
-            type: "string" as const,
-            width: Math.max(h.length + 5, 15),
-          })),
-          rows: sheet.data.map(row => {
-            const obj: Record<string, any> = {};
-            row.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
-            return obj;
-          }),
-          formulas: [],
-          filters: true,
-          freezeRow: 1,
-          freezeCol: 0,
-          protection: false,
-        })),
+        title: safeStr(s.title, 500),
+        sheets: s.sheets.slice(0, MAX_SHEETS).map(sheet => {
+          const headers = (sheet.headers || []).slice(0, MAX_HEADERS_PER_SHEET);
+          const data = (sheet.data || []).slice(0, MAX_ROWS_PER_SHEET);
+          return {
+            name: safeStr(sheet.name, 31) || "Sheet",
+            columns: headers.map((h, idx) => ({
+              key: `col_${idx}`,
+              header: safeStr(h, 255),
+              type: "string" as const,
+              width: Math.max(Math.min(String(h).length + 5, 60), 15),
+            })),
+            rows: data.map(row => {
+              const obj: Record<string, any> = {};
+              const cells = Array.isArray(row) ? row.slice(0, headers.length) : [];
+              cells.forEach((cell, idx) => { obj[`col_${idx}`] = cell; });
+              return obj;
+            }),
+            formulas: [],
+            filters: true,
+            freezeRow: 1,
+            freezeCol: 0,
+            protection: false,
+          };
+        }),
       } satisfies WorkbookSpec;
     }
 
@@ -610,11 +623,12 @@ export async function getArtifact(id: string): Promise<{ path: string; name: str
   // 1. Check in-memory artifact store first (fast path, no I/O)
   const meta = artifactStore.get(safeId);
   if (meta) {
-    // Verify file still exists and path is within ARTIFACTS_DIR
+    // Verify file still exists, is within ARTIFACTS_DIR, and is not a symlink
     const resolved = path.resolve(meta.path);
     if (!resolved.startsWith(path.resolve(ARTIFACTS_DIR))) return null;
     try {
-      await fs.access(resolved);
+      const stat = await fs.lstat(resolved);
+      if (stat.isSymbolicLink()) { artifactStore.delete(safeId); return null; }
       return { path: resolved, name: meta.name, type: meta.type };
     } catch {
       // File was deleted; remove stale metadata
@@ -652,6 +666,14 @@ export async function getArtifact(id: string): Promise<{ path: string; name: str
       console.warn(`[ArtifactTools] Path traversal attempt blocked: ${match}`);
       return null;
     }
+    // Reject symlinks to prevent escape from artifacts dir
+    try {
+      const fstat = await fs.lstat(resolved);
+      if (fstat.isSymbolicLink()) {
+        console.warn(`[ArtifactTools] Symlink rejected: ${match}`);
+        return null;
+      }
+    } catch { return null; }
     const ext = path.extname(match).slice(1);
     return {
       path: resolved,

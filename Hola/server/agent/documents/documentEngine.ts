@@ -20,8 +20,9 @@ import { z } from "zod";
 
 /** Strip control characters from text */
 function sanitizeText(text: string): string {
-  // Single-pass: strip null bytes + all control chars (except \t \n \r)
-  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Single-pass: strip null bytes, control chars (except \t \n \r),
+  // bidi overrides (U+202A-U+202E, U+2066-U+2069), zero-width chars, and BOM
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
 }
 
 const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
@@ -40,13 +41,14 @@ function sanitizeExcelValue(value: unknown): unknown {
 /** Block remote/absolute image paths to prevent SSRF and path traversal */
 function isImagePathSafe(imagePath: string): boolean {
   if (!imagePath || typeof imagePath !== "string") return false;
+  if (imagePath.length > 4096) return false; // reject absurdly long paths
   const lower = imagePath.trim().toLowerCase();
   // Block remote URLs
   if (lower.startsWith("http://") || lower.startsWith("https://")) return false;
   // Block file:// protocol
   if (lower.startsWith("file://")) return false;
-  // Block SMB / UNC paths
-  if (lower.startsWith("\\\\") || lower.startsWith("//")) return false;
+  // Block SMB / UNC / extended-length paths
+  if (lower.startsWith("\\\\") || lower.startsWith("//") || lower.startsWith("\\\\?\\")) return false;
   // Block absolute paths outside of project
   if (lower.startsWith("/etc/") || lower.startsWith("/proc/") || lower.startsWith("/sys/") || lower.startsWith("/dev/")) return false;
   // Block path traversal
@@ -65,17 +67,23 @@ function sanitizeSheetName(name: string): string {
 
 /** WCAG AA contrast ratio check (simplified luminance) */
 function relativeLuminance(hex: string): number {
-  const c = hex.replace("#", "");
-  const r = parseInt(c.substring(0, 2), 16) / 255;
-  const g = parseInt(c.substring(2, 4), 16) / 255;
-  const b = parseInt(c.substring(4, 6), 16) / 255;
+  const safe = safeColor(hex); // ensure valid 6-digit hex
+  const c = safe.replace("#", "");
+  if (c.length !== 6) return 0; // defensive: should never happen after safeColor
+  const rVal = parseInt(c.substring(0, 2), 16);
+  const gVal = parseInt(c.substring(2, 4), 16);
+  const bVal = parseInt(c.substring(4, 6), 16);
+  if (isNaN(rVal) || isNaN(gVal) || isNaN(bVal)) return 0; // defensive NaN guard
+  const r = rVal / 255;
+  const g = gVal / 255;
+  const b = bVal / 255;
   const srgb = [r, g, b].map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
   return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
 }
 
 function contrastRatio(fg: string, bg: string): number {
-  const lFg = relativeLuminance(safeColor(fg));
-  const lBg = relativeLuminance(safeColor(bg));
+  const lFg = relativeLuminance(fg);
+  const lBg = relativeLuminance(bg);
   const lighter = Math.max(lFg, lBg);
   const darker = Math.min(lFg, lBg);
   return (lighter + 0.05) / (darker + 0.05);
@@ -89,7 +97,7 @@ function safeColor(color: string | undefined | null, fallback: string = "#000000
   if (!color || typeof color !== "string") return fallback;
   let c = color.trim();
   if (!c.startsWith("#") && /^[0-9a-fA-F]{6}$/.test(c)) c = "#" + c;
-  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+  if (/^#[0-9a-fA-F]{3}$/.test(c) && c.length === 4) {
     c = "#" + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
   }
   if (!/^#[0-9a-fA-F]{6}$/.test(c)) return fallback;
@@ -390,6 +398,7 @@ export class LayoutEngine {
     truncated: string;
     overflow: boolean;
   } {
+    if (box.h <= 0 || box.w <= 0 || fontSize <= 0) return { fits: false, truncated: text.substring(0, 100), overflow: true };
     const charsPerInch = 72 / fontSize * 1.5; // rough estimate
     const maxCharsPerLine = box.w * charsPerInch;
     const maxLines = Math.floor(box.h / (fontSize / 72 * 1.5));
@@ -454,7 +463,8 @@ export class LayoutEngine {
     const dataRows = rows.slice(1);
     const chunks: { rows: any[][]; includesHeader: boolean }[] = [];
 
-    for (let i = 0; i < dataRows.length; i += maxRowsPerPage) {
+    const MAX_CHUNKS = 200; // cap to prevent memory exhaustion on huge tables
+    for (let i = 0; i < dataRows.length && chunks.length < MAX_CHUNKS; i += maxRowsPerPage) {
       const chunk = dataRows.slice(i, i + maxRowsPerPage);
       chunks.push({
         rows: [header, ...chunk],
@@ -508,11 +518,12 @@ export class LayoutEngine {
     box: LayoutBox,
     fontSize: number,
   ): string[][] {
-    const lineHeight = fontSize / 72 * 1.5; // inches per line
+    const lineHeight = Math.max(0.01, fontSize / 72 * 1.5); // inches per line, min 0.01
     const maxItems = Math.max(1, Math.floor(box.h / lineHeight));
     const groups: string[][] = [];
+    const MAX_GROUPS = 200; // cap to prevent memory exhaustion
 
-    for (let i = 0; i < items.length; i += maxItems) {
+    for (let i = 0; i < items.length && groups.length < MAX_GROUPS; i += maxItems) {
       groups.push(items.slice(i, i + maxItems));
     }
 
@@ -590,9 +601,14 @@ export class DocumentEngine {
     const { generateWordFromMarkdown } = await import("../../services/markdownToDocx");
 
     // Convert spec sections to markdown for the existing renderer
+    const MAX_MARKDOWN_SIZE = 2 * 1024 * 1024; // 2MB cap on generated markdown
     let markdown = `# ${parsed.title}\n\n`;
 
     for (const section of parsed.sections) {
+      if (markdown.length > MAX_MARKDOWN_SIZE) {
+        markdown += "\n[Document truncated due to size limits]\n";
+        break;
+      }
       switch (section.type) {
         case "heading": {
           const level = section.level || 1;
@@ -728,13 +744,16 @@ export class DocumentEngine {
           // Data validation (sanitize list values)
           if (colDef.validation?.type === "list" && colDef.validation.values) {
             const safeValues = colDef.validation.values
-              .map(v => String(v).replace(/"/g, '""').substring(0, 255))
+              .map(v => String(v).replace(/"/g, "").replace(/,/g, "").substring(0, 255))
+              .filter(v => v.length > 0)
               .slice(0, 100);
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`"${safeValues.join(",")}"`],
-            };
+            if (safeValues.length > 0) {
+              cell.dataValidation = {
+                type: "list",
+                allowBlank: true,
+                formulae: [`"${safeValues.join(",")}"`],
+              };
+            }
           }
         }
       }
@@ -757,12 +776,16 @@ export class DocumentEngine {
           continue;
         }
         let colNum = 0;
-        for (const ch of match[1]) colNum = colNum * 26 + (ch.charCodeAt(0) - 64);
+        for (const ch of match[1]) {
+          const code = ch.charCodeAt(0);
+          if (code < 65 || code > 90) { colNum = MAX_EXCEL_COL + 1; break; } // only A-Z
+          colNum = colNum * 26 + (code - 64);
+        }
         if (rowNum > MAX_EXCEL_ROW || colNum > MAX_EXCEL_COL) {
           console.warn(`[DocumentEngine] Cell ref out of bounds: ${formula.cell} (row ${rowNum}, col ${colNum})`);
           continue;
         }
-        const safeFormula = formula.formula.substring(0, 8192); // Excel formula limit
+        const safeFormula = (formula.formula ?? "").substring(0, 8192); // Excel formula limit
         const cell = sheet.getCell(formula.cell);
         cell.value = { formula: safeFormula } as any;
       }
@@ -794,17 +817,23 @@ export class DocumentEngine {
       const MAX_STYLED_COLS = 200;
       const lastRow = Math.min(sheetSpec.rows.length + 1, MAX_STYLED_ROWS);
       const lastCol = Math.min(sheetSpec.columns.length, MAX_STYLED_COLS);
-      // Hoist border color outside loop to avoid recomputing 10,000× the same value
-      const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
-      for (let r = 1; r <= lastRow; r++) {
-        for (let c = 1; c <= lastCol; c++) {
-          const cell = sheet.getCell(r, c);
-          cell.border = {
-            top: { style: "thin", color: { argb: safeBorderColor } },
-            left: { style: "thin", color: { argb: safeBorderColor } },
-            bottom: { style: "thin", color: { argb: safeBorderColor } },
-            right: { style: "thin", color: { argb: safeBorderColor } },
-          };
+      // Skip styling if total cell count exceeds 100k (prevents OOM on huge sheets)
+      const totalCells = lastRow * lastCol;
+      if (totalCells > 100_000) {
+        console.warn(`[DocumentEngine] Skipping border styling: ${totalCells} cells exceeds 100k limit`);
+      } else {
+        // Hoist border color + object outside loop — single allocation reused across all cells
+        const safeBorderColor = safeColor(tokens.color.border, "#dadce0").replace("#", "FF");
+        const borderStyle = {
+          top: { style: "thin" as const, color: { argb: safeBorderColor } },
+          left: { style: "thin" as const, color: { argb: safeBorderColor } },
+          bottom: { style: "thin" as const, color: { argb: safeBorderColor } },
+          right: { style: "thin" as const, color: { argb: safeBorderColor } },
+        };
+        for (let r = 1; r <= lastRow; r++) {
+          for (let c = 1; c <= lastCol; c++) {
+            sheet.getCell(r, c).border = borderStyle;
+          }
         }
       }
     }

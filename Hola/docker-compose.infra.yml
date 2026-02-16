@@ -1,0 +1,235 @@
+# ═══════════════════════════════════════════════════════════
+#  Shared Infrastructure (hardened v2) — always running,
+#  independent of blue/green application slots.
+#
+#  Usage: docker compose -p hola-infra -f docker-compose.infra.yml up -d
+# ═══════════════════════════════════════════════════════════
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: hola-postgres
+    hostname: hola-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: iliagpt
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
+    command:
+      - "postgres"
+      # ── Memory tuning (for 2GB container) ──
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      # ── Connection limits ──
+      - "-c"
+      - "max_connections=200"
+      # ── WAL / durability ──
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_size=1GB"
+      - "-c"
+      - "min_wal_size=80MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_compression=on"
+      # ── Logging (slow queries, checkpoints, locks) ──
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_checkpoints=on"
+      - "-c"
+      - "log_lock_waits=on"
+      - "-c"
+      - "log_temp_files=0"
+      - "-c"
+      - "log_autovacuum_min_duration=250"
+      # ── Autovacuum tuning ──
+      - "-c"
+      - "autovacuum_vacuum_scale_factor=0.05"
+      - "-c"
+      - "autovacuum_analyze_scale_factor=0.025"
+      # ── Security ──
+      - "-c"
+      - "password_encryption=scram-sha-256"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:size=128m
+    networks:
+      - hola-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iliagpt && psql -U postgres -d iliagpt -c 'SELECT 1' > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    # ── Resource limits ──────────────────────────────
+    mem_limit: 2g
+    mem_reservation: 512m
+    cpus: 2.0
+    # OOM: keep DB alive as long as possible (lowest score = last to be killed)
+    oom_score_adj: -500
+    shm_size: 256m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "{{.Name}}"
+    restart: unless-stopped
+    labels:
+      com.iliagpt.component: "postgres"
+      com.iliagpt.tier: "infrastructure"
+
+  redis:
+    image: redis:alpine
+    container_name: hola-redis
+    hostname: hola-redis
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${REDIS_PASSWORD:-redis_secure_password_change_me}"
+      # ── Memory policy ──
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      # ── RDB persistence (snapshot) ──
+      - "--save"
+      - "900 1"
+      - "--save"
+      - "300 10"
+      - "--save"
+      - "60 10000"
+      # ── AOF persistence (append-only file for crash recovery) ──
+      - "--appendonly"
+      - "yes"
+      - "--appendfsync"
+      - "everysec"
+      - "--auto-aof-rewrite-percentage"
+      - "100"
+      - "--auto-aof-rewrite-min-size"
+      - "64mb"
+      # ── Connection tuning ──
+      - "--tcp-keepalive"
+      - "60"
+      - "--timeout"
+      - "300"
+      - "--tcp-backlog"
+      - "511"
+      # ── Security ──
+      - "--rename-command"
+      - "FLUSHALL"
+      - "FLUSHALL_CONFIRMED"
+      - "--rename-command"
+      - "FLUSHDB"
+      - "FLUSHDB_CONFIRMED"
+    volumes:
+      - redis_data:/data
+    tmpfs:
+      - /tmp:size=32m
+    networks:
+      - hola-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_password_change_me}", "ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    # ── Resource limits ──────────────────────────────
+    mem_limit: 512m
+    mem_reservation: 64m
+    cpus: 0.5
+    # OOM: keep Redis alive (caching layer, session store)
+    oom_score_adj: -400
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 32768
+    logging:
+      driver: json-file
+      options:
+        max-size: "15m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    restart: unless-stopped
+    labels:
+      com.iliagpt.component: "redis"
+      com.iliagpt.tier: "infrastructure"
+
+  ocr:
+    image: ghcr.io/carrerajorge/iliagpt-ocr:${IMAGE_TAG:-latest}
+    container_name: hola-ocr
+    hostname: hola-ocr
+    env_file:
+      - .env.production
+    environment:
+      OCR_HOST: 0.0.0.0
+      OCR_PORT: "8000"
+      OCR_PREFER_ENGINE: ${OCR_PREFER_ENGINE:-auto}
+      OCR_DEFAULT_LANG: ${OCR_DEFAULT_LANG:-eng}
+      OCR_DPI: ${OCR_DPI:-300}
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-10}
+      OCR_MAX_FILE_SIZE_MB: ${OCR_MAX_FILE_SIZE_MB:-15}
+      OCR_MAX_CONCURRENT_REQUESTS: ${OCR_MAX_CONCURRENT_REQUESTS:-4}
+      OCR_API_KEY: ${OCR_API_KEY:-}
+      OCR_LOG_LEVEL: ${OCR_LOG_LEVEL:-INFO}
+    volumes:
+      - ocr_models:/root/.paddleocr
+    tmpfs:
+      - /tmp:size=256m
+    networks:
+      - hola-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    # ── Security ──
+    security_opt:
+      - no-new-privileges:true
+    # ── Resource limits ──────────────────────────────
+    mem_limit: 1536m
+    mem_reservation: 256m
+    cpus: 1.5
+    oom_score_adj: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "3"
+        tag: "{{.Name}}"
+    restart: unless-stopped
+    labels:
+      com.iliagpt.component: "ocr"
+      com.iliagpt.tier: "infrastructure"
+
+networks:
+  hola-net:
+    name: hola-net
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: hola_postgres_data
+  redis_data:
+    name: hola_redis_data
+  ocr_models:
+    name: hola_ocr_models
