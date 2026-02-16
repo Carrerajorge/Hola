@@ -179,6 +179,8 @@ const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const MAX_ENV_ENTRIES = 256;
 const MAX_ENV_KEY_LENGTH = 128;
 const MAX_ENV_VALUE_LENGTH = 4096;
+const MAX_FILE_OPERATION_BYTES = 5 * 1024 * 1024; // 5MB safety limit for file content/read operations
+const MAX_PATH_LENGTH = 2_048;
 const FORBIDDEN_SESSION_ENV_KEYS = new Set([
   "NODE_OPTIONS",
   "LD_PRELOAD",
@@ -247,6 +249,33 @@ function sanitizeProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 function resolveCommandEnvironment(sessionEnv: Record<string, string>, requestEnv?: Record<string, string>): Record<string, string> {
   const sanitized = requestEnv ? sanitizeIncomingEnv(requestEnv) : {};
   return { ...sessionEnv, ...sanitized };
+}
+
+function isPathInsideBase(basePath: string, targetPath: string): boolean {
+  const relativePath = path.relative(basePath, targetPath);
+  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath));
+}
+
+function validateStringOrThrow(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} is required and must be a string`);
+  }
+  if (value.includes("\u0000")) {
+    throw new Error(`${label} contains invalid characters`);
+  }
+  if (value.length > MAX_PATH_LENGTH) {
+    throw new Error(`${label} is too long`);
+  }
+  return value;
+}
+
+function validateTextPayload(value: unknown, maxBytes: number, label: string): string {
+  if (value === undefined || value === null) return "";
+  const text = typeof value === "string" ? value : String(value);
+  if (Buffer.byteLength(text) > maxBytes) {
+    throw new Error(`${label} exceeds maximum size of ${maxBytes} bytes`);
+  }
+  return text;
 }
 
 function getBaseCommand(command: string): string {
@@ -322,7 +351,7 @@ export class TerminalController extends EventEmitter {
     const requestedEnv = env ? sanitizeIncomingEnv(env) : {};
     const session: TerminalSession = {
       id: sessionId,
-      cwd: cwd || process.cwd(),
+      cwd: path.resolve(cwd || process.cwd()),
       env: { ...baseEnv, ...requestedEnv },
       history: [],
       activeProcesses: new Map(),
@@ -747,24 +776,34 @@ export class TerminalController extends EventEmitter {
 
   async fileOperation(sessionId: string, op: FileOperation): Promise<{ success: boolean; data?: any; error?: string }> {
     const session = this.getSessionOrFail(sessionId);
+    const relativePath = validateStringOrThrow(op.path, "path");
+    const resolvedPath = path.resolve(session.cwd, relativePath);
 
-    const resolvedPath = path.resolve(session.cwd, op.path);
+    if (!isPathInsideBase(session.cwd, resolvedPath)) {
+      return { success: false, error: "Path is outside session working directory" };
+    }
 
     try {
       switch (op.type) {
         case "read": {
+          const stats = await fs.stat(resolvedPath);
+          if (stats.size > MAX_FILE_OPERATION_BYTES) {
+            throw new Error(`File size exceeds ${MAX_FILE_OPERATION_BYTES} bytes`);
+          }
           const content = await fs.readFile(resolvedPath, "utf-8");
           return { success: true, data: content };
         }
 
         case "write": {
+          const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
           await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
-          await fs.writeFile(resolvedPath, op.content || "");
+          await fs.writeFile(resolvedPath, content);
           return { success: true };
         }
 
         case "append": {
-          await fs.appendFile(resolvedPath, op.content || "");
+          const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
+          await fs.appendFile(resolvedPath, content);
           return { success: true };
         }
 
@@ -775,14 +814,22 @@ export class TerminalController extends EventEmitter {
 
         case "copy": {
           if (!op.destination) return { success: false, error: "Destination required" };
-          const destPath = path.resolve(session.cwd, op.destination);
+          const destination = validateStringOrThrow(op.destination, "destination");
+          const destPath = path.resolve(session.cwd, destination);
+          if (!isPathInsideBase(session.cwd, destPath)) {
+            return { success: false, error: "Destination is outside session working directory" };
+          }
           await fs.cp(resolvedPath, destPath, { recursive: op.recursive || false });
           return { success: true };
         }
 
         case "move": {
           if (!op.destination) return { success: false, error: "Destination required" };
-          const moveDest = path.resolve(session.cwd, op.destination);
+          const destination = validateStringOrThrow(op.destination, "destination");
+          const moveDest = path.resolve(session.cwd, destination);
+          if (!isPathInsideBase(session.cwd, moveDest)) {
+            return { success: false, error: "Destination is outside session working directory" };
+          }
           await fs.rename(resolvedPath, moveDest);
           return { success: true };
         }
@@ -819,12 +866,18 @@ export class TerminalController extends EventEmitter {
         }
 
         case "search": {
+          const pattern = validateStringOrThrow(op.pattern || "*", "pattern");
           const result = await this.executeCommand(sessionId, {
-            command: `find "${resolvedPath}" -name "${op.pattern || "*"}" -type f 2>/dev/null | head -50`,
+            command: "find",
+            args: [resolvedPath, "-name", pattern, "-type", "f"],
+            timeout: 10_000,
           });
+          if (!result.success) {
+            return { success: false, error: result.stderr || result.stdout || "Search failed" };
+          }
           return {
             success: true,
-            data: result.stdout.trim().split("\n").filter(Boolean),
+            data: result.stdout.trim().split("\n").filter(Boolean).slice(0, 200),
           };
         }
 
