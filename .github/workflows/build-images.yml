@@ -6,6 +6,11 @@ on:
       sha:
         required: true
         type: string
+      allow_publish:
+        description: "Allow image build/push for this invocation"
+        required: false
+        type: boolean
+        default: false
     outputs:
       image_tag:
         description: "The image tag that was pushed"
@@ -35,11 +40,12 @@ jobs:
       - name: Evaluate build gate
         id: gate
         run: |
-          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" && "${{ inputs.allow_publish }}" == "true" ]]; then
             echo "run_build=true" >> "$GITHUB_OUTPUT"
+            echo "reason=build requested and gate conditions met." >> "$GITHUB_OUTPUT"
           else
             echo "run_build=false" >> "$GITHUB_OUTPUT"
-            echo "reason=Image publishing is only executed for push events on main." >> "$GITHUB_OUTPUT"
+            echo "reason=Image publishing requires push/main invocation and allow_publish=true." >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout

@@ -29,9 +29,11 @@ jobs:
         language: [javascript-typescript]
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v6
 
       - name: Initialize CodeQL
+        id: init
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
@@ -39,4 +41,16 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       - name: Analyze
+        id: analyze
         uses: github/codeql-action/analyze@v4
+
+      - name: Emit CodeQL summary
+        if: always()
+        run: |
+          echo "## CodeQL Outcome" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Checkout | \`${{ steps.checkout.conclusion }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Initialize CodeQL | \`${{ steps.init.conclusion }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Analyze | \`${{ steps.analyze.conclusion }}\` |" >> "$GITHUB_STEP_SUMMARY"
