@@ -78,6 +78,7 @@ ENV PORT=5000
 # Install Playwright Chromium system dependencies + wget for healthcheck.
 # These are the shared libraries Playwright's bundled Chromium needs on Debian.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash \
       wget ca-certificates fonts-liberation \
       libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 \
       libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \

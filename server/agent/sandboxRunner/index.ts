@@ -90,7 +90,7 @@ function spawnDockerJob(params: { runId: string; command: string; timeoutMs: num
     "-w",
     "/workspace",
     DOCKER_IMAGE,
-    "/bin/bash",
+    "/usr/bin/bash",
     "-lc",
     command,
   ];
