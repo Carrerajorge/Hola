@@ -181,6 +181,8 @@ const MAX_ENV_KEY_LENGTH = 128;
 const MAX_ENV_VALUE_LENGTH = 4096;
 const MAX_FILE_OPERATION_BYTES = 5 * 1024 * 1024; // 5MB safety limit for file content/read operations
 const MAX_PATH_LENGTH = 2_048;
+const MAX_SCRIPT_ARGS = 64;
+const MAX_SCRIPT_ARG_LENGTH = 2_048;
 const FORBIDDEN_SESSION_ENV_KEYS = new Set([
   "NODE_OPTIONS",
   "LD_PRELOAD",
@@ -276,6 +278,29 @@ function validateTextPayload(value: unknown, maxBytes: number, label: string): s
     throw new Error(`${label} exceeds maximum size of ${maxBytes} bytes`);
   }
   return text;
+}
+
+function validateScriptArgs(args?: unknown): string[] {
+  if (!args) return [];
+  if (!Array.isArray(args)) {
+    throw new Error("args must be an array");
+  }
+  if (args.length > MAX_SCRIPT_ARGS) {
+    throw new Error(`Too many script arguments (max ${MAX_SCRIPT_ARGS})`);
+  }
+
+  return args.map((arg) => {
+    if (typeof arg !== "string") {
+      throw new Error("Each script argument must be a string");
+    }
+    if (arg.includes("\u0000")) {
+      throw new Error("Script arguments cannot contain null bytes");
+    }
+    if (arg.length > MAX_SCRIPT_ARG_LENGTH) {
+      throw new Error(`Script argument too long (max ${MAX_SCRIPT_ARG_LENGTH} chars)`);
+    }
+    return arg;
+  });
 }
 
 function getBaseCommand(command: string): string {
@@ -1077,21 +1102,30 @@ export class TerminalController extends EventEmitter {
       ruby: "rb", go: "go", rust: "rs", php: "php",
     };
 
-    const interpreters: Record<string, string> = {
-      python: "python3", javascript: "node", typescript: "npx ts-node",
-      bash: "bash", ruby: "ruby", php: "php", go: "go run",
+    const interpreters: Record<string, { command: string; args?: string[] }> = {
+      python: { command: "python3" },
+      javascript: { command: "node" },
+      typescript: { command: "npx", args: ["ts-node"] },
+      bash: { command: "bash" },
+      ruby: { command: "ruby" },
+      go: { command: "go", args: ["run"] },
+      rust: { command: "rust" },
+      php: { command: "php" },
     };
 
-    const ext = extensions[language] || "txt";
-    const interpreter = interpreters[language] || language;
+    const normalizedLanguage = language.toLowerCase();
+    const ext = extensions[normalizedLanguage] || "txt";
+    const interpreter = interpreters[normalizedLanguage] || { command: normalizedLanguage };
     const scriptFile = path.join(tempDir, `script-${randomUUID().slice(0, 8)}.${ext}`);
+    const scriptArgs = validateScriptArgs(options?.args);
 
     await fs.writeFile(scriptFile, code);
 
     try {
-      const args = options?.args?.join(" ") || "";
+      const args = [scriptFile, ...scriptArgs];
       return await this.executeCommand(sessionId, {
-        command: `${interpreter} "${scriptFile}" ${args}`,
+        command: interpreter.command,
+        args: interpreter.args ? [...interpreter.args, ...args] : args,
         timeout: options?.timeout || 60000,
       });
     } finally {
