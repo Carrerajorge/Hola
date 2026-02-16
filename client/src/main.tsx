@@ -3,6 +3,7 @@ import App from "./App";
 import "./index.css";
 import "katex/dist/katex.min.css";
 import "katex/contrib/mhchem";
+import "@/lib/i18n";
 
 // Force Service Worker update and cache clear on new version
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";

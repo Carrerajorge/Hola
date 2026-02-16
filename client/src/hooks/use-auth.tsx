@@ -323,6 +323,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [refetch, queryClient]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    window.dispatchEvent(
+      new CustomEvent("auth:changed", {
+        detail: {
+          userId: user?.id ?? null,
+          isAuthenticated: !!user && !isAnonymousUser(user),
+        },
+      })
+    );
+  }, [user]);
+
   return (
     <AuthContext.Provider value={{
       user: user ?? null,

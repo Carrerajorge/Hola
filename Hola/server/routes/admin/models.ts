@@ -407,6 +407,26 @@ modelsRouter.get("/health", async (req, res) => {
                 isSupported: isModelProviderSupported("openai"),
                 isIntegrated: isModelProviderIntegrated("openai"),
                 runtimeProvider: "openai",
+            },
+            anthropic: {
+                name: "Anthropic (Claude)",
+                available: healthStatus?.anthropic?.available ?? false,
+                latencyMs: healthStatus?.anthropic?.latencyMs ?? null,
+                error: healthStatus?.anthropic?.error ?? null,
+                hasApiKey: checkApiKeyExists("anthropic"),
+                isSupported: isModelProviderSupported("anthropic"),
+                isIntegrated: isModelProviderIntegrated("anthropic"),
+                runtimeProvider: "anthropic",
+            },
+            deepseek: {
+                name: "DeepSeek",
+                available: healthStatus?.deepseek?.available ?? false,
+                latencyMs: healthStatus?.deepseek?.latencyMs ?? null,
+                error: healthStatus?.deepseek?.error ?? null,
+                hasApiKey: checkApiKeyExists("deepseek"),
+                isSupported: isModelProviderSupported("deepseek"),
+                isIntegrated: isModelProviderIntegrated("deepseek"),
+                runtimeProvider: "deepseek",
             }
         };
 

@@ -2397,8 +2397,6 @@ ${attachmentContext}`;
           provider: effectiveProvider,
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
-          model: effectiveModel,
-          provider,
         }
       );
 

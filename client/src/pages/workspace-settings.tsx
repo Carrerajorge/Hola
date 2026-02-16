@@ -46,6 +46,7 @@ import { apiFetch } from "@/lib/apiClient";
 import { trackWorkspaceEvent as trackAnalyticsEvent } from "@/lib/analytics";
 import { isAdminUser } from "@/lib/admin";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
+import { formatCurrency as i18nFormatCurrency, formatDate as i18nFormatDate, formatNumber as i18nFormatNumber } from "@/lib/i18n";
 import { useCloudLibrary } from "@/hooks/use-cloud-library";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -472,21 +473,21 @@ export default function WorkspaceSettingsPage() {
 
   const formatNumber = (value: number | null | undefined) => {
     if (typeof value !== "number") return "—";
-    return value.toLocaleString("es-ES");
+    return i18nFormatNumber(value);
   };
 
   const formatDateShort = (iso: string | null | undefined) => {
     if (!iso) return "—";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { month: "short", day: "numeric" });
+    return i18nFormatDate(d, { month: "short", day: "numeric" });
   };
 
   const formatDateLong = (iso: string | null | undefined) => {
     if (!iso) return "—";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
+    return i18nFormatDate(d, { year: "numeric", month: "short", day: "numeric" });
   };
 
   const copyToClipboard = (text: string) => {
@@ -567,7 +568,7 @@ export default function WorkspaceSettingsPage() {
   const formatCycleShort = (iso: string) => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { month: "short", day: "numeric" });
+    return i18nFormatDate(d, { month: "short", day: "numeric" });
   };
 
   const planLabel = (planRaw: string | null | undefined) => {
@@ -618,7 +619,7 @@ export default function WorkspaceSettingsPage() {
     if (typeof amountCents !== "number") return "—";
     const cur = String(currency || "usd").toUpperCase();
     try {
-      return new Intl.NumberFormat("es-ES", { style: "currency", currency: cur }).format(amountCents / 100);
+      return i18nFormatCurrency(amountCents / 100, cur);
     } catch {
       return `${(amountCents / 100).toFixed(2)} ${cur}`;
     }
@@ -646,10 +647,10 @@ export default function WorkspaceSettingsPage() {
     if (!iso) return "—";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("es-ES", { year: "numeric", month: "short", day: "numeric" });
+    return i18nFormatDate(d, { year: "numeric", month: "short", day: "numeric" });
   };
 
-  const memberCountLabel = memberCount === null ? "—" : memberCount.toLocaleString("es-ES");
+  const memberCountLabel = memberCount === null ? "—" : i18nFormatNumber(memberCount);
   const memberCountUnit = memberCount === 1 ? "miembro" : "miembros";
   const selectedMetric = useMemo(
     () => analyticsMetricOptions.find((metric) => metric.value === analyticsMetric) ?? analyticsMetricOptions[0],

@@ -5888,24 +5888,6 @@ IMPORTANTE:
 
 
       } catch (error: any) {
-        if (error?.name === "AbortError") {
-          return;
-        }
-
-        if (streamIntervalRef.current) {
-          clearInterval(streamIntervalRef.current);
-          streamIntervalRef.current = null;
-        }
-
-        const errorMessage = error?.message || "Error desconocido";
-        console.error("Chat error:", error);
-
-        //   onSendMessage(errorMsg);
-        //   setAiState("idle");
-        //   setAiProcessSteps([]);
-        //   abortControllerRef.current = null;
-        // }
-      } catch (error: any) {
         console.error("[handleSubmit] Error:", error);
         // Restore files on error so user doesn't lose them
         if (savedMainFiles.length > 0) {
@@ -5925,7 +5907,6 @@ IMPORTANTE:
       }
     } catch (outerError: any) {
       console.error("[handleSubmit] Outer error:", outerError);
-      // Restore files on outer error
       if (savedMainFiles.length > 0) {
         setUploadedFiles(savedMainFiles);
       }

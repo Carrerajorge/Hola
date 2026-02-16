@@ -32,7 +32,6 @@ import {
   Folder,
   FolderOpen,
   Zap,
-  Code,
   SquarePen,
   Pin,
   Download,

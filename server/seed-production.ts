@@ -1,22 +1,18 @@
 import { db } from "./db";
 import { users, aiModels } from "@shared/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
+import { syncAllProviders } from "./services/aiModelSyncService";
+import { isChatModelType, normalizeModelProviderToRuntime, isChatModelIdCompatible } from "./services/modelIntegration";
 
 const ADMIN_EMAIL_RAW = (process.env.ADMIN_EMAIL || "").trim();
 const ADMIN_EMAIL = ADMIN_EMAIL_RAW.toLowerCase();
-const GEMINI_MODELS_TO_ENABLE = [
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-3-flash-preview",
-  "gemini-2.0-flash",
-];
 
 interface SeedResult {
   userUpdated: boolean;
   userMissing: boolean;
   modelsEnabled: number;
   modelsAlreadyEnabled: number;
-  modelsMissing: number;
+  modelsSynced: number;
   errors: string[];
 }
 
@@ -38,7 +34,7 @@ export async function seedProductionData(): Promise<SeedResult> {
     userMissing: false,
     modelsEnabled: 0,
     modelsAlreadyEnabled: 0,
-    modelsMissing: 0,
+    modelsSynced: 0,
     errors: [],
   };
 
@@ -56,6 +52,7 @@ export async function seedProductionData(): Promise<SeedResult> {
 
   console.log(`[seed] Starting production seed...`);
 
+  // ---------- Admin User ----------
   try {
     const hasUsersTable = await tableExists("public.users");
     if (!hasUsersTable) {
@@ -76,7 +73,6 @@ export async function seedProductionData(): Promise<SeedResult> {
         .limit(1);
 
       if (existingUser.length > 0) {
-        // Always update password and role for the admin user to ensure access
         await db
           .update(users)
           .set({
@@ -88,7 +84,6 @@ export async function seedProductionData(): Promise<SeedResult> {
         result.userUpdated = true;
         console.log(`[seed] User ${ADMIN_EMAIL} updated to admin with configured password`);
       } else {
-        // CREATE the admin user if they don't exist
         await db.insert(users).values({
           email: ADMIN_EMAIL,
           password: hashedPassword,
@@ -110,72 +105,84 @@ export async function seedProductionData(): Promise<SeedResult> {
     console.error(`[seed] ${errMsg}`);
   }
 
+  // ---------- Sync + Enable ALL Models ----------
   try {
     const hasAiModelsTable = await tableExists("public.ai_models");
     if (!hasAiModelsTable) {
-      console.warn("[seed] AI models table missing; skipping model enablement.");
-      result.modelsMissing = GEMINI_MODELS_TO_ENABLE.length;
-      console.log(`[seed] WARNING: Missing ${result.modelsMissing} model rows: ${GEMINI_MODELS_TO_ENABLE.join(", ")} - these must exist in ai_models table`);
-      console.log(`[seed] WARNING: No Gemini models found in ai_models table - run initial migration/seed first`);
-      console.log(`[seed] Completed: userUpdated=${result.userUpdated}, userMissing=${result.userMissing}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, modelsMissing=${result.modelsMissing}, errors=${result.errors.length}`);
+      console.warn("[seed] AI models table missing; skipping model sync.");
       return result;
     }
 
-    const geminiModels = await db
-      .select({
-        id: aiModels.id,
-        modelId: aiModels.modelId,
-        isEnabled: aiModels.isEnabled,
-        name: aiModels.name
-      })
-      .from(aiModels)
-      .where(
-        and(
-          eq(aiModels.provider, "google"),
-          inArray(aiModels.modelId, GEMINI_MODELS_TO_ENABLE)
-        )
-      );
-
-    const foundModelIds = geminiModels.map(m => m.modelId);
-    const missingModels = GEMINI_MODELS_TO_ENABLE.filter(id => !foundModelIds.includes(id));
-    result.modelsMissing = missingModels.length;
-
-    if (missingModels.length > 0) {
-      console.log(`[seed] WARNING: Missing ${missingModels.length} model rows: ${missingModels.join(", ")} - these must exist in ai_models table`);
-    }
-
-    for (const model of geminiModels) {
-      if (model.isEnabled === "true") {
-        result.modelsAlreadyEnabled++;
-      } else {
-        try {
-          await db
-            .update(aiModels)
-            .set({
-              isEnabled: "true",
-              enabledAt: new Date()
-            })
-            .where(eq(aiModels.id, model.id));
-          result.modelsEnabled++;
-          console.log(`[seed] Enabled model: ${model.name} (${model.modelId})`);
-        } catch (modelError) {
-          const errMsg = `Failed to enable ${model.modelId}: ${modelError instanceof Error ? modelError.message : String(modelError)}`;
-          result.errors.push(errMsg);
-          console.error(`[seed] ${errMsg}`);
-        }
+    // 1) Sync all known models from every provider into the DB
+    console.log("[seed] Syncing models from all providers...");
+    const syncResults = await syncAllProviders();
+    for (const [provider, provResult] of Object.entries(syncResults)) {
+      result.modelsSynced += provResult.added + provResult.updated;
+      if (provResult.added > 0 || provResult.updated > 0) {
+        console.log(`[seed]   ${provider}: ${provResult.added} added, ${provResult.updated} updated`);
+      }
+      if (provResult.errors.length > 0) {
+        result.errors.push(...provResult.errors);
       }
     }
 
-    if (geminiModels.length === 0) {
-      console.log(`[seed] WARNING: No Gemini models found in ai_models table - run initial migration/seed first`);
+    // 2) Activate all chat-capable, non-deprecated models: set status=active + isEnabled=true
+    const allModels = await db
+      .select({
+        id: aiModels.id,
+        modelId: aiModels.modelId,
+        provider: aiModels.provider,
+        modelType: aiModels.modelType,
+        isEnabled: aiModels.isEnabled,
+        status: aiModels.status,
+        name: aiModels.name,
+        isDeprecated: aiModels.isDeprecated,
+      })
+      .from(aiModels);
+
+    for (const model of allModels) {
+      // Skip deprecated models
+      if (model.isDeprecated === "true") continue;
+
+      // Only activate chat-capable models (TEXT/MULTIMODAL with matching provider IDs)
+      if (!isChatModelType(model.modelType)) continue;
+
+      const runtime = normalizeModelProviderToRuntime(model.provider);
+      if (!runtime) continue;
+      if (!isChatModelIdCompatible(runtime, model.modelId)) continue;
+
+      const needsUpdate = model.status !== "active" || model.isEnabled !== "true";
+      if (!needsUpdate) {
+        result.modelsAlreadyEnabled++;
+        continue;
+      }
+
+      try {
+        await db
+          .update(aiModels)
+          .set({
+            status: "active",
+            isEnabled: "true",
+            enabledAt: new Date(),
+          })
+          .where(eq(aiModels.id, model.id));
+        result.modelsEnabled++;
+        console.log(`[seed] Enabled: ${model.name} (${model.provider}/${model.modelId})`);
+      } catch (modelError) {
+        const errMsg = `Failed to enable ${model.modelId}: ${modelError instanceof Error ? modelError.message : String(modelError)}`;
+        result.errors.push(errMsg);
+        console.error(`[seed] ${errMsg}`);
+      }
     }
+
+    console.log(`[seed] Models: ${result.modelsEnabled} enabled, ${result.modelsAlreadyEnabled} already active`);
   } catch (error) {
-    const errMsg = `Models query failed: ${error instanceof Error ? error.message : String(error)}`;
+    const errMsg = `Models sync/enable failed: ${error instanceof Error ? error.message : String(error)}`;
     result.errors.push(errMsg);
     console.error(`[seed] ${errMsg}`);
   }
 
-  console.log(`[seed] Completed: userUpdated=${result.userUpdated}, userMissing=${result.userMissing}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, modelsMissing=${result.modelsMissing}, errors=${result.errors.length}`);
+  console.log(`[seed] Completed: userUpdated=${result.userUpdated}, modelsEnabled=${result.modelsEnabled}, modelsSynced=${result.modelsSynced}, errors=${result.errors.length}`);
 
   return result;
 }
@@ -183,26 +190,22 @@ export async function seedProductionData(): Promise<SeedResult> {
 export async function getSeedStatus(): Promise<{
   adminUser: { email: string | null; role: string | null } | null;
   enabledModels: { name: string; provider: string; modelId: string }[];
-  geminiModelsStatus: { modelId: string; isEnabled: boolean; exists: boolean }[];
   summary: {
     userExists: boolean;
     userIsAdmin: boolean;
-    geminiModelsTotal: number;
-    geminiModelsEnabled: number;
-    geminiModelsMissing: number;
+    totalModels: number;
+    enabledModels: number;
   };
 }> {
   if (!ADMIN_EMAIL_RAW) {
     return {
       adminUser: null,
       enabledModels: [],
-      geminiModelsStatus: GEMINI_MODELS_TO_ENABLE.map((modelId) => ({ modelId, isEnabled: false, exists: false })),
       summary: {
         userExists: false,
         userIsAdmin: false,
-        geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
-        geminiModelsEnabled: 0,
-        geminiModelsMissing: GEMINI_MODELS_TO_ENABLE.length,
+        totalModels: 0,
+        enabledModels: 0,
       },
     };
   }
@@ -213,27 +216,14 @@ export async function getSeedStatus(): Promise<{
   ]);
 
   if (!hasUsersTable || !hasAiModelsTable) {
-    if (!hasUsersTable) {
-      console.warn("[seed-status] Users table missing; cannot read admin user.");
-    }
-    if (!hasAiModelsTable) {
-      console.warn("[seed-status] AI models table missing; cannot read model status.");
-    }
-
     return {
       adminUser: null,
       enabledModels: [],
-      geminiModelsStatus: GEMINI_MODELS_TO_ENABLE.map((modelId) => ({
-        modelId,
-        exists: false,
-        isEnabled: false,
-      })),
       summary: {
         userExists: false,
         userIsAdmin: false,
-        geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
-        geminiModelsEnabled: 0,
-        geminiModelsMissing: GEMINI_MODELS_TO_ENABLE.length,
+        totalModels: 0,
+        enabledModels: 0,
       },
     };
   }
@@ -244,55 +234,28 @@ export async function getSeedStatus(): Promise<{
     .where(sql`lower(${users.email}) = ${ADMIN_EMAIL}`)
     .limit(1);
 
-  const enabledModels = await db
+  const allModels = await db
     .select({
       name: aiModels.name,
       provider: aiModels.provider,
-      modelId: aiModels.modelId
-    })
-    .from(aiModels)
-    .where(eq(aiModels.isEnabled, "true"));
-
-  const geminiModels = await db
-    .select({
       modelId: aiModels.modelId,
-      isEnabled: aiModels.isEnabled
+      isEnabled: aiModels.isEnabled,
     })
-    .from(aiModels)
-    .where(
-      and(
-        eq(aiModels.provider, "google"),
-        inArray(aiModels.modelId, GEMINI_MODELS_TO_ENABLE)
-      )
-    );
+    .from(aiModels);
 
-  const foundModelIds = geminiModels.map(m => m.modelId);
-  const geminiModelsStatus = GEMINI_MODELS_TO_ENABLE.map(modelId => {
-    const found = geminiModels.find(m => m.modelId === modelId);
-    return {
-      modelId,
-      exists: !!found,
-      isEnabled: found?.isEnabled === "true",
-    };
-  });
+  const enabledModels = allModels.filter(m => m.isEnabled === "true");
 
   const userExists = adminUser.length > 0;
   const userIsAdmin = userExists && adminUser[0].role === "admin";
-  const geminiModelsEnabled = geminiModelsStatus.filter(m => m.isEnabled).length;
-  const geminiModelsMissing = geminiModelsStatus.filter(m => !m.exists).length;
-
-  console.log(`[seed-status] userExists=${userExists}, userIsAdmin=${userIsAdmin}, geminiModelsEnabled=${geminiModelsEnabled}/${GEMINI_MODELS_TO_ENABLE.length}, geminiModelsMissing=${geminiModelsMissing}`);
 
   return {
     adminUser: adminUser.length > 0 ? adminUser[0] : null,
     enabledModels,
-    geminiModelsStatus,
     summary: {
       userExists,
       userIsAdmin,
-      geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
-      geminiModelsEnabled,
-      geminiModelsMissing,
+      totalModels: allModels.length,
+      enabledModels: enabledModels.length,
     },
   };
 }

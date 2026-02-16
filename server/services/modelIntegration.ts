@@ -1,4 +1,4 @@
-export type ChatRuntimeProvider = "xai" | "gemini" | "openai";
+export type ChatRuntimeProvider = "xai" | "gemini" | "openai" | "anthropic" | "deepseek";
 
 export function normalizeModelProviderToRuntime(provider: string): ChatRuntimeProvider | null {
   const normalized = String(provider || "").toLowerCase().trim();
@@ -12,6 +12,12 @@ export function normalizeModelProviderToRuntime(provider: string): ChatRuntimePr
 
   // OpenAI models
   if (normalized === "openai") return "openai";
+
+  // Anthropic (Claude) models
+  if (normalized === "anthropic") return "anthropic";
+
+  // DeepSeek models
+  if (normalized === "deepseek") return "deepseek";
 
   return null;
 }
@@ -33,6 +39,12 @@ export function hasApiKeyForRuntimeProvider(runtime: ChatRuntimeProvider): boole
   if (runtime === "openai") {
     return !!process.env.OPENAI_API_KEY;
   }
+  if (runtime === "anthropic") {
+    return !!process.env.ANTHROPIC_API_KEY;
+  }
+  if (runtime === "deepseek") {
+    return !!process.env.DEEPSEEK_API_KEY;
+  }
   return false;
 }
 
@@ -50,6 +62,12 @@ export function isChatModelIdCompatible(runtime: ChatRuntimeProvider, modelId?: 
   if (runtime === "openai") {
     // All OpenAI chat models: GPT, O-series, ChatGPT, Codex (text)
     return /^(gpt|o\d|chatgpt|codex-mini)/.test(id);
+  }
+  if (runtime === "anthropic") {
+    return /^claude/.test(id);
+  }
+  if (runtime === "deepseek") {
+    return /^deepseek/.test(id);
   }
   return false;
 }
@@ -70,7 +88,7 @@ export function isModelProviderIntegrated(provider: string): boolean {
 // Provider ids as stored in ai_models.provider (plus known aliases).
 export function getSupportedModelProviderIds(): string[] {
   // Provider ids as stored in `ai_models.provider` plus known legacy aliases.
-  return ["xai", "google", "openai", "grok", "gemini"];
+  return ["xai", "google", "openai", "grok", "gemini", "anthropic", "deepseek"];
 }
 
 export function getIntegratedModelProviderIds(): string[] {
