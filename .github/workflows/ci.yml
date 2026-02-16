@@ -331,6 +331,10 @@ jobs:
     steps:
       - name: Publish deterministic run summary
         run: |
+          md_code() {
+            printf '\`%s\`' "$1"
+          }
+
           typecheck_cause="executed"
           if [[ "${{ needs.typecheck.result }}" != "success" ]]; then
             typecheck_cause="failure in mandatory Type Check"
@@ -350,33 +354,33 @@ jobs:
           if [[ "${{ needs.typecheck.result }}" == "success" ]]; then
             tests_cause="executed after Type Check success"
           else
-            tests_cause="intentionally skipped because Type Check was `${{ needs.typecheck.result }}`"
+            tests_cause="intentionally skipped because Type Check was $(md_code "${{ needs.typecheck.result }}")"
           fi
 
           build_cause="executed"
           if [[ "${{ needs.test.result }}" == "success" ]]; then
             build_cause="executed after Unit Tests success"
           else
-            build_cause="intentionally skipped because Unit Tests were `${{ needs.test.result }}`"
+            build_cause="intentionally skipped because Unit Tests were $(md_code "${{ needs.test.result }}")"
           fi
 
           audit_cause="executed"
           if [[ "${{ needs.typecheck.result }}" == "success" ]]; then
             audit_cause="executed after Type Check success"
           else
-            audit_cause="intentionally skipped because Type Check was `${{ needs.typecheck.result }}`"
+            audit_cause="intentionally skipped because Type Check was $(md_code "${{ needs.typecheck.result }}")"
           fi
 
           e2e_run_label="${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-e2e') }}"
           e2e_cause="intentionally skipped"
           if [[ "${{ needs.build.result }}" != "success" ]]; then
-            e2e_cause="blocked by Build result `${{ needs.build.result }}`"
+            e2e_cause="blocked by Build result $(md_code "${{ needs.build.result }}")"
           elif [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            e2e_cause="intentionally skipped (Playwright runs only on PRs with `run-e2e` label)"
+            e2e_cause="intentionally skipped (Playwright runs only on PRs with 'run-e2e' label)"
           elif [[ "${e2e_run_label}" == "true" ]]; then
-            e2e_cause="executed (`run-e2e` label detected)"
+            e2e_cause="executed ('run-e2e' label detected)"
           else
-            e2e_cause="intentionally skipped (`run-e2e` label not present)"
+            e2e_cause="intentionally skipped ('run-e2e' label not present)"
           fi
 
           docker_publish="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.typecheck.result == 'success' && needs.test.result == 'success' && needs.build.result == 'success' && needs.audit.result == 'success' }}"
@@ -384,7 +388,7 @@ jobs:
           if [[ "${docker_publish}" == "true" ]]; then
             docker_cause="executed (publish gate allowed)"
           elif [[ "${{ needs.typecheck.result }}" == "success" && "${{ needs.test.result }}" == "success" && "${{ needs.build.result }}" == "success" && "${{ needs.audit.result }}" == "success" ]]; then
-            docker_cause="intentionally skipped by publish gate (`build` job only)"
+            docker_cause="intentionally skipped by publish gate ('build' job only)"
           else
             docker_cause="blocked by mandatory upstream dependency failure"
           fi
@@ -393,63 +397,63 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Job | Result | Cause |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Type Check | \`${{ needs.typecheck.result }}\` | ${typecheck_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Python Syntax | \`${{ needs.python.result }}\` | ${python_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| OCR Service (Python) | \`${{ needs.ocr_service.result }}\` | ${ocr_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Unit Tests | \`${{ needs.test.result }}\` | ${tests_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build | \`${{ needs.build.result }}\` | ${build_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Security Audit | \`${{ needs.audit.result }}\` | ${audit_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| E2E (Playwright) | \`${{ needs.e2e.result }}\` | ${e2e_cause} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Docker Images | \`${{ needs.docker.result }}\` | ${docker_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Type Check | $(md_code "${{ needs.typecheck.result }}") | ${typecheck_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Python Syntax | $(md_code "${{ needs.python.result }}") | ${python_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| OCR Service (Python) | $(md_code "${{ needs.ocr_service.result }}") | ${ocr_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Unit Tests | $(md_code "${{ needs.test.result }}") | ${tests_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | $(md_code "${{ needs.build.result }}") | ${build_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Audit | $(md_code "${{ needs.audit.result }}") | ${audit_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| E2E (Playwright) | $(md_code "${{ needs.e2e.result }}") | ${e2e_cause} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Docker Images | $(md_code "${{ needs.docker.result }}") | ${docker_cause} |" >> "$GITHUB_STEP_SUMMARY"
 
           FINAL_OUTCOME="success"
           FAILURE_CAUSES=""
 
           if [[ "${{ needs.typecheck.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Type Check result was \`${{ needs.typecheck.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Type Check result was $(md_code "${{ needs.typecheck.result }}")."
           fi
 
           if [[ "${{ needs.python.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Python Syntax result was \`${{ needs.python.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Python Syntax result was $(md_code "${{ needs.python.result }}")."
           fi
 
           if [[ "${{ needs.ocr_service.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- OCR Service (Python) result was \`${{ needs.ocr_service.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- OCR Service (Python) result was $(md_code "${{ needs.ocr_service.result }}")."
           fi
 
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Unit Tests result was \`${{ needs.test.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Unit Tests result was $(md_code "${{ needs.test.result }}")."
           fi
 
           if [[ "${{ needs.build.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Build result was \`${{ needs.build.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Build result was $(md_code "${{ needs.build.result }}")."
           fi
 
           if [[ "${{ needs.audit.result }}" != "success" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Security Audit result was \`${{ needs.audit.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Security Audit result was $(md_code "${{ needs.audit.result }}")."
           fi
 
           if [[ "${{ needs.e2e.result }}" != "success" && "${{ needs.e2e.result }}" != "skipped" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- E2E (Playwright) result was \`${{ needs.e2e.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- E2E (Playwright) result was $(md_code "${{ needs.e2e.result }}")."
           fi
 
           if [[ "${{ needs.docker.result }}" != "success" && "${{ needs.docker.result }}" != "skipped" ]]; then
             FINAL_OUTCOME="failure"
-            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Docker Images result was \`${{ needs.docker.result }}\`."
+            FAILURE_CAUSES="${FAILURE_CAUSES}\n- Docker Images result was $(md_code "${{ needs.docker.result }}")."
           fi
 
-          echo "| Final outcome | \`${FINAL_OUTCOME}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Final outcome | $(md_code "${FINAL_OUTCOME}") |" >> "$GITHUB_STEP_SUMMARY"
           if [ "${FINAL_OUTCOME}" = "failure" ]; then
             echo "| Failure causes | <br>$(printf "%s" "${FAILURE_CAUSES}") |" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "| Failure causes | \`none\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Failure causes | $(md_code "none") |" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "${FINAL_OUTCOME}" != "success" ]; then
