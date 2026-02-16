@@ -277,7 +277,6 @@ jobs:
   docker:
     name: Docker Images
     needs: [build, audit]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
