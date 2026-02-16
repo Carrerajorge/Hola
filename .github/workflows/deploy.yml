@@ -130,7 +130,6 @@ jobs:
              cd ${{ env.DEPLOY_PATH }} && \
              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
              APP_VERSION='${{ steps.tag.outputs.app_version }}' \
-             bash scripts/vps-bootstrap-bluegreen.sh --force && \
              bash scripts/deploy-bluegreen.sh"
 
       - name: Verify production
@@ -290,7 +289,6 @@ jobs:
              cd ${{ env.DEPLOY_PATH }} && \
              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
              APP_VERSION='${{ steps.tag.outputs.app_version }}' \
-             bash scripts/vps-bootstrap-bluegreen.sh --force && \
              bash scripts/deploy-bluegreen.sh"
 
       - name: Verify production

@@ -107,10 +107,10 @@ cleanup_on_failure() {
     slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
   fi
 
-  # If we swapped Nginx but something failed after, revert
-  if [ "${NGINX_SWAPPED}" = "true" ] && [ -n "${ACTIVE_SLOT:-}" ]; then
-    log "  Reverting Nginx upstream to ${ACTIVE_SLOT}..."
-    ln -sf "${NGINX_CONF_DIR}/iliagpt-upstream-${ACTIVE_SLOT}.conf" "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || true
+  # If we swapped Nginx but something failed after, revert to old port
+  if [ "${NGINX_SWAPPED}" = "true" ] && [ -n "${ACTIVE_PORT:-}" ]; then
+    log "  Reverting Nginx upstream to port ${ACTIVE_PORT}..."
+    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || true
     nginx -s reload 2>/dev/null || true
   fi
 
@@ -481,42 +481,42 @@ echo ""
 # ── Step 9: Swap Nginx upstream ────────────────────────────
 log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
 
-# Auto-bootstrap upstream configs if missing (first blue-green deploy)
-ensure_upstream_conf() {
-  local slot="$1" port="$2" path="${NGINX_CONF_DIR}/iliagpt-upstream-${1}.conf"
-  if [ ! -f "${path}" ]; then
-    logw "Auto-creating missing ${path}"
-    cat > "${path}" << UPEOF
-upstream iliagpt {
-    server 127.0.0.1:${port};
-    keepalive 32;
-    keepalive_timeout 60s;
-    keepalive_requests 1000;
-}
-UPEOF
-    logok "Created ${path}"
-  fi
-}
-ensure_upstream_conf "blue" "5000"
-ensure_upstream_conf "green" "5001"
+UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
 
-if [ ! -f "${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf" ]; then
-  loge "Missing ${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf (auto-create failed)"
-  slot "${NEW_SLOT}" down --remove-orphans || true
-  NEW_SLOT_STARTED=false
-  exit 1
+# Remove legacy per-slot conf files that cause "duplicate upstream" errors
+# (old bootstrap created both iliagpt-upstream-blue.conf and iliagpt-upstream-green.conf)
+for legacy in "${NGINX_CONF_DIR}/iliagpt-upstream-blue.conf" "${NGINX_CONF_DIR}/iliagpt-upstream-green.conf"; do
+  if [ -f "${legacy}" ]; then
+    logw "Removing legacy upstream conf: ${legacy}"
+    rm -f "${legacy}"
+  fi
+done
+
+# Remove symlink if present (migrate to direct file)
+if [ -L "${UPSTREAM_CONF}" ]; then
+  logw "Removing legacy symlink: ${UPSTREAM_CONF}"
+  rm -f "${UPSTREAM_CONF}"
 fi
 
-# Backup current upstream symlink target
-PREV_UPSTREAM_TARGET="$(readlink -f "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || echo "")"
-log "  Previous upstream: ${PREV_UPSTREAM_TARGET}"
+# Backup current upstream for rollback
+PREV_UPSTREAM=""
+if [ -f "${UPSTREAM_CONF}" ]; then
+  PREV_UPSTREAM="$(cat "${UPSTREAM_CONF}")"
+fi
+log "  Previous upstream port: $(echo "${PREV_UPSTREAM}" | grep -oP 'server 127\.0\.0\.1:\K[0-9]+' 2>/dev/null || echo 'none')"
 
-ln -sf "${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf" "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
+# Write new upstream pointing to the new slot
+printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${NEW_PORT}" > "${UPSTREAM_CONF}"
+logok "Upstream written: port ${NEW_PORT}"
 
 log "  Testing Nginx config..."
 if ! nginx -t 2>&1; then
   loge "Nginx config test failed! Reverting upstream..."
-  ln -sf "${NGINX_CONF_DIR}/iliagpt-upstream-${ACTIVE_SLOT}.conf" "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
+  if [ -n "${PREV_UPSTREAM}" ]; then
+    echo "${PREV_UPSTREAM}" > "${UPSTREAM_CONF}"
+  else
+    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${UPSTREAM_CONF}"
+  fi
   slot "${NEW_SLOT}" down --remove-orphans || true
   NEW_SLOT_STARTED=false
   exit 1
@@ -552,7 +552,7 @@ done
 
 if [ "${NGINX_OK}" != "true" ]; then
   loge "Nginx routing verification failed. Reverting upstream..."
-  ln -sf "${NGINX_CONF_DIR}/iliagpt-upstream-${ACTIVE_SLOT}.conf" "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
+  printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${ACTIVE_PORT}" > "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
   nginx -s reload
   NGINX_SWAPPED=false
   slot "${NEW_SLOT}" down --remove-orphans || true

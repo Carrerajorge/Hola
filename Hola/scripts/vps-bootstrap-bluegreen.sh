@@ -78,43 +78,41 @@ fi
 logok "Nginx conf.d exists"
 echo ""
 
-# ── 1. Create Nginx upstream configs ──────────────────────
-log "[1/6] Creating Nginx upstream configs..."
+# ── 1. Create Nginx upstream config ───────────────────────
+log "[1/6] Creating Nginx upstream config..."
 
-write_upstream() {
-  local slot="$1" port="$2" path="${NGINX_CONF_DIR}/iliagpt-upstream-${1}.conf"
-  if [ -f "${path}" ] && [ "${FORCE}" != "true" ]; then
-    logw "${path} already exists (use --force to overwrite)"
-    return
-  fi
-  # Backup existing
-  if [ -f "${path}" ]; then
-    cp "${path}" "${path}.bak.$(date +%s)"
-    logw "Backed up existing: ${path}.bak.*"
-  fi
-  cat > "${path}" << EOF
-upstream iliagpt {
-    server 127.0.0.1:${port};
-    keepalive 32;
-    keepalive_timeout 60s;
-    keepalive_requests 1000;
-}
-EOF
-  logok "Created: ${path} (port ${port})"
-}
+UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
 
-write_upstream "blue" "5000"
-write_upstream "green" "5001"
+# Remove legacy per-slot files that cause "duplicate upstream" errors
+for legacy in "${NGINX_CONF_DIR}/iliagpt-upstream-blue.conf" "${NGINX_CONF_DIR}/iliagpt-upstream-green.conf"; do
+  if [ -f "${legacy}" ]; then
+    logw "Removing legacy per-slot file: ${legacy}"
+    rm -f "${legacy}"
+  fi
+done
+
+# Remove symlink if it exists (migrate to direct file)
+if [ -L "${UPSTREAM_CONF}" ]; then
+  logw "Removing legacy symlink: ${UPSTREAM_CONF}"
+  rm -f "${UPSTREAM_CONF}"
+fi
+
+# Create single upstream file (blue=5000 is default starting point)
+if [ -f "${UPSTREAM_CONF}" ] && [ "${FORCE}" != "true" ]; then
+  logw "${UPSTREAM_CONF} already exists (use --force to overwrite)"
+else
+  printf 'upstream iliagpt {\n    server 127.0.0.1:5000;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' > "${UPSTREAM_CONF}"
+  logok "Created: ${UPSTREAM_CONF} (default port 5000)"
+fi
 echo ""
 
-# ── 2. Create initial symlink (blue = active) ────────────
-log "[2/6] Creating upstream symlink..."
-if [ -L "${NGINX_CONF_DIR}/iliagpt-upstream.conf" ] && [ "${FORCE}" != "true" ]; then
-  CURRENT_TARGET="$(readlink -f "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || echo "unknown")"
-  logw "Symlink already exists → ${CURRENT_TARGET} (use --force to reset)"
+# ── 2. Verify upstream config ─────────────────────────────
+log "[2/6] Verifying upstream config..."
+if [ -f "${UPSTREAM_CONF}" ]; then
+  logok "Upstream config exists: ${UPSTREAM_CONF}"
 else
-  ln -sf "${NGINX_CONF_DIR}/iliagpt-upstream-blue.conf" "${NGINX_CONF_DIR}/iliagpt-upstream.conf"
-  logok "Symlink: iliagpt-upstream.conf → iliagpt-upstream-blue.conf"
+  loge "Failed to create upstream config"
+  exit 1
 fi
 echo ""
 
