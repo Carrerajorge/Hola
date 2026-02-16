@@ -61,6 +61,7 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
                 // Request refresh tokens (Google often only returns refresh_token on the first consent)
                 accessType: "offline",
                 prompt: "consent",
+                state: true,
                 passReqToCallback: true,
             },
             async (req, accessToken, refreshToken, profile, done) => {
@@ -147,6 +148,7 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
                 scope: ["openid", "profile", "email", "User.Read", "offline_access"],
                 authorizationURL: `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`,
                 tokenURL: `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`,
+                state: true,
             },
             async (accessToken: string, refreshToken: string, profile: any, done: any) => {
                 try {
@@ -209,6 +211,7 @@ if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
                 clientID: env.AUTH0_CLIENT_ID,
                 clientSecret: env.AUTH0_CLIENT_SECRET,
                 callbackURL: `${env.BASE_URL}/api/auth/auth0/callback`,
+                state: true,
                 // scope is not part of the options interface, pass it as extra param if needed or rely on default
             },
             async (accessToken: string, refreshToken: string, extraParams: any, profile: any, done: any) => {

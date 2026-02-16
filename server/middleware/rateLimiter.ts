@@ -1,7 +1,7 @@
 import { RateLimiterRedis, RateLimiterMemory } from "rate-limiter-flexible";
 import { Request, Response, NextFunction } from "express";
 import { createClient } from "redis";
-import { env } from "../config/env";
+import crypto from "crypto";
 
 // Cliente Redis para Rate Limiter
 const redisClient = createClient({
@@ -9,9 +9,22 @@ const redisClient = createClient({
   password: process.env.REDIS_PASSWORD,
 });
 
+redisClient.on("error", (error) => {
+  console.error("[RateLimiter] Redis client error:", error);
+});
+
 let rateLimiterGlobal: RateLimiterRedis | RateLimiterMemory;
 let rateLimiterAuth: RateLimiterRedis | RateLimiterMemory;
 let rateLimiterAi: RateLimiterRedis | RateLimiterMemory;
+const MAX_KEY_LENGTH = 256;
+const MAX_IP_LENGTH = 128;
+const MAX_USER_ID_LENGTH = 128;
+
+function sanitizeRateLimitKey(part: unknown): string {
+  const raw = String(part || "").trim().toLowerCase();
+  if (!raw) return "";
+  return raw.slice(0, MAX_KEY_LENGTH);
+}
 
 // Track initialization state
 let initialized = false;
@@ -80,20 +93,37 @@ async function waitForRateLimiterInit(timeoutMs = 2000): Promise<boolean> {
  * As a fallback, we use req.ip which Express resolves based on trust proxy setting.
  */
 function getClientKey(req: Request): string {
-  // Prefer authenticated user ID for per-user limiting
-  const userId = (req as any).user?.id;
-  if (userId && typeof userId === "string") {
-    return `user:${userId}`;
-  }
+    // Security: avoid unbounded key material via malformed user IDs
+    const userId = sanitizeRateLimitKey((req as any).user?.id);
+    if (userId) {
+      if (userId.length <= MAX_USER_ID_LENGTH) {
+        return `user:${userId}`;
+      }
+    }
 
+  // Prefer authenticated user ID for per-user limiting
   // Use req.ip which respects Express 'trust proxy' setting
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const normalizedIp = sanitizeRateLimitKey(
+    typeof ip === "string" && ip.length <= MAX_IP_LENGTH
+      ? ip
+      : String(ip).slice(0, MAX_IP_LENGTH)
+  );
 
-  // Security: normalize IPv6-mapped IPv4 addresses
-  if (ip.startsWith("::ffff:")) { return ip.slice(7);
+  if (!normalizedIp) {
+    return "unknown";
   }
 
-  return ip;
+  // Security: normalize IPv6-mapped IPv4 addresses and sanitize brackets
+  if (normalizedIp.startsWith("::ffff:")) {
+    return `ip:${normalizedIp.slice(7)}`;
+  }
+
+  if (normalizedIp.startsWith("[") && normalizedIp.includes("]")) {
+    return `ip:${normalizedIp.replace("[", "").replace("]", "")}`;
+  }
+
+  return `ip:${normalizedIp}`;
 }
 
 const consumeLimiter = async (
@@ -117,12 +147,19 @@ const consumeLimiter = async (
     }
   }
 
-  // Terminal file uploads are currently intentionally rate-limited by default now to avoid abuse.
-
   const key = getClientKey(req);
+  if (!key || key.length > MAX_KEY_LENGTH) {
+    res.status(400).json({
+      status: "error",
+      message: "Invalid client key",
+    });
+    return;
+  }
+
+  const keyHash = key.length > 64 ? crypto.createHash("sha256").update(key).digest("hex") : key;
 
   limiter
-    .consume(key)
+    .consume(keyHash)
     .then(() => next())
     .catch((rateLimiterRes) => {
       const retryAfter = Math.round((rateLimiterRes?.msBeforeNext || 60000) / 1000);

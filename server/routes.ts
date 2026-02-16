@@ -11,7 +11,6 @@ import { StepUpdate } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
-import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
 import { passport } from "./lib/auth/passport";

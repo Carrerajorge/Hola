@@ -76,6 +76,10 @@ function buildCSPHeader(directives: Record<string, string[]>): string {
     .join("; ");
 }
 
+function sanitizeHeaderValue(value: string | number): string {
+  return String(value).replace(/[\r\n]/g, " ");
+}
+
 function buildPermissionsPolicyHeader(directives: Record<string, string[]>): string {
   return Object.entries(directives)
     .map(([feature, allowlist]) => {
@@ -141,7 +145,7 @@ export function securityHeaders(config: SecurityHeadersConfig = {}) {
 
     if (mergedConfig.enableCSP) {
       const cspHeader = buildCSPHeader(mergedConfig.cspDirectives);
-      res.setHeader("Content-Security-Policy", cspHeader);
+      res.setHeader("Content-Security-Policy", sanitizeHeaderValue(cspHeader));
     }
 
     if (mergedConfig.enableXFrameOptions) {
@@ -164,16 +168,18 @@ export function securityHeaders(config: SecurityHeadersConfig = {}) {
       const permissionsPolicy = buildPermissionsPolicyHeader(
         mergedConfig.permissionsPolicyDirectives
       );
-      res.setHeader("Permissions-Policy", permissionsPolicy);
+      res.setHeader("Permissions-Policy", sanitizeHeaderValue(permissionsPolicy));
     }
 
     // Security: Cross-Origin-Opener-Policy prevents window.opener attacks
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
 
     res.removeHeader("X-Powered-By");
 
     for (const [headerName, headerValue] of Object.entries(mergedConfig.customHeaders)) {
-      res.setHeader(headerName, headerValue);
+      res.setHeader(headerName, sanitizeHeaderValue(headerValue));
     }
 
     next();
