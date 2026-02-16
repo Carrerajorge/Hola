@@ -125,7 +125,7 @@ jobs:
       - name: Skip tests due to upstream dependency
         if: ${{ needs.typecheck.result != 'success' }}
         run: |
-          echo "::notice::Skipping Unit Tests because Type Check result was `${{ needs.typecheck.result }}`."
+          echo "::notice::Skipping Unit Tests because Type Check result was '${{ needs.typecheck.result }}'."
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -165,7 +165,7 @@ jobs:
       - name: Skip build due to upstream dependency
         if: ${{ needs.test.result != 'success' }}
         run: |
-          echo "::notice::Skipping Build because Unit Tests result was `${{ needs.test.result }}`."
+          echo "::notice::Skipping Build because Unit Tests result was '${{ needs.test.result }}'."
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -206,7 +206,7 @@ jobs:
       - name: Skip audit due to upstream dependency
         if: ${{ needs.typecheck.result != 'success' }}
         run: |
-          echo "::notice::Skipping Security Audit because Type Check result was `${{ needs.typecheck.result }}`."
+          echo "::notice::Skipping Security Audit because Type Check result was '${{ needs.typecheck.result }}'."
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -261,7 +261,7 @@ jobs:
       - name: Skip E2E due to upstream dependency
         if: ${{ needs.build.result != 'success' }}
         run: |
-          echo "::notice::Skipping E2E because Build result was `${{ needs.build.result }}`."
+          echo "::notice::Skipping E2E because Build result was '${{ needs.build.result }}'."
 
       - name: Checkout
         if: ${{ steps.e2e_gate.outputs.should_run == 'true' && needs.build.result == 'success' }}
