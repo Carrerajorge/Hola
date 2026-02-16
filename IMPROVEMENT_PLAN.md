@@ -5,6 +5,31 @@
 
 ---
 
+## 20 mejoras accionables para este software agéntico
+
+1. Definir objetivos por sesión del agente (meta, criterio de éxito y límites).
+2. Añadir memoria de corto plazo por conversación (resumen incremental cada N mensajes).
+3. Añadir memoria de largo plazo con TTL y política de olvido configurable.
+4. Implementar evaluación automática de respuestas (relevancia, factualidad, seguridad).
+5. Incorporar trazabilidad completa de tools usadas por cada respuesta del agente.
+6. Añadir reintentos con backoff por herramienta externa y por proveedor LLM.
+7. Incluir enrutador multi-modelo por tipo de tarea (rápido, razonamiento, código).
+8. Activar fallback automático cuando un proveedor supere latencia o error umbral.
+9. Implementar guardrails de entrada/salida (PII, prompt injection y contenido riesgoso).
+10. Versionar prompts del sistema y habilitar rollback inmediato por versión.
+11. Crear conjunto de pruebas de regresión de prompts con casos críticos del negocio.
+12. Añadir simulador de carga para conversaciones concurrentes con herramientas.
+13. Implementar presupuesto por usuario/proyecto (tokens, coste diario y alertas).
+14. Registrar métricas de calidad por respuesta (rating, corrección, tiempo, coste).
+15. Habilitar explicación de decisiones del agente en modo debug para administradores.
+16. Mejorar observabilidad con panel de SLOs (latencia p95, error rate, éxito de tools).
+17. Añadir sistema de feedback que reentrene heurísticas de routing semanalmente.
+18. Implementar permisos granulares por herramienta (RBAC por rol y workspace).
+19. Crear workflow de aprobación humana para acciones sensibles del agente.
+20. Publicar checklist de despliegue seguro con validaciones automáticas previas.
+
+---
+
 ## PRIORIDAD 1: Responsive Design + Mobile
 
 ### Tareas:
