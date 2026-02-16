@@ -107,8 +107,13 @@ function createResilientPgSessionStore(sessionTtl: number) {
 
 const getOidcConfig = memoize(
   async () => {
-    // Mock OIDC config for local development to prevent startup hang
-    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
+    // Mock OIDC config for local development to prevent startup hang.
+    // Must be explicitly enabled to avoid accidental insecure local-dev drift.
+    if (
+      process.env.REPL_ID === 'local-dev'
+      && process.env.NODE_ENV !== 'production'
+      && process.env.LOCAL_OIDC_MOCK === 'true'
+    ) {
       console.log('[Auth] Using mock OIDC config for local-dev (development only)');
       // openid-client v6 Strategy expects a Configuration object with serverMetadata and clientMetadata
       return {
@@ -125,6 +130,12 @@ const getOidcConfig = memoize(
           redirect_uris: ['http://localhost:5050/api/callback'],
         }
       } as any;
+    }
+
+    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
+      throw new Error(
+        "[Auth] LOCAL_OIDC_MOCK must be true when REPL_ID=local-dev."
+      );
     }
 
     const maxRetries = 5;

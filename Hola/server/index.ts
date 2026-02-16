@@ -27,7 +27,7 @@ import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
 import { idempotency } from "./middleware/idempotency";
-import { globalLimiter, authLimiter } from "./middleware/rateLimiter";
+import { globalLimiter, authLimiter, billingLimiter } from "./middleware/rateLimiter";
 import { Logger } from "./lib/logger";
 import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
@@ -209,6 +209,9 @@ export function log(message: string, source = "express") {
   // Rate Limiting (User-based) - Applied AFTER auth to use req.user
   app.use("/api", globalLimiter);
   app.use("/api/auth", authLimiter);
+  app.use("/api/checkout", billingLimiter);
+  app.use("/api/billing", billingLimiter);
+  app.use("/api/stripe", billingLimiter);
 
   // Idempotency for mutations
   app.use("/api", idempotency);

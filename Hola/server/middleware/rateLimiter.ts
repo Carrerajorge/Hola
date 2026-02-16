@@ -118,6 +118,32 @@ const consumeLimiter = (limiter: RateLimiterRedis | RateLimiterMemory, req: Requ
         });
 };
 
+// Billing/Stripe: tighter limits — 20 requests per 15 min per user/IP
+let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
+
+(async () => {
+  const waitForInit = () => new Promise<void>((resolve) => {
+    const check = () => { if (initialized) resolve(); else setTimeout(check, 50); };
+    check();
+  });
+  await waitForInit();
+
+  if (rateLimiterGlobal instanceof RateLimiterRedis) {
+    rateLimiterBilling = new RateLimiterRedis({
+      storeClient: redisClient,
+      keyPrefix: "middleware_billing",
+      points: 20,
+      duration: 60 * 15,
+    });
+  } else {
+    rateLimiterBilling = new RateLimiterMemory({
+      points: 20,
+      duration: 60 * 15,
+    });
+  }
+})();
+
 export const globalLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterGlobal, req, res, next);
 export const authLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAuth, req, res, next);
 export const aiLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAi, req, res, next);
+export const billingLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterBilling, req, res, next);

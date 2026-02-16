@@ -1,6 +1,60 @@
 import { Router } from "express";
 import { storage } from "../../storage";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { securityAlerts } from "../../services/securityAlerts";
+
+const MAX_LIMIT = 500;
+const MAX_LIMIT_EXPORT = 5000;
+const MAX_AUDIT_LOG_LIMIT = 1000;
+const MAX_EXPORT_LIMIT = 10000;
+const MAX_TEXT_FILTER_LENGTH = 200;
+const MAX_IP_LENGTH = 45;
+const MAX_AUDIT_EXPORT_BYTES = 5 * 1024 * 1024;
+
+function getQueryValue(query: unknown): string {
+  return typeof query === "string" ? query.trim() : "";
+}
+
+function parseQueryLimit(value: unknown, fallback: number, max: number): number {
+  const parsed = parseInt(getQueryValue(value), 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
+  return Math.min(Math.max(parsed, 1), max);
+}
+
+function parseQueryDate(value: unknown): Date | undefined {
+  const raw = getQueryValue(value);
+  if (!raw) return undefined;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed;
+}
+
+function sanitizeTextFilter(value: unknown, maxLength = MAX_TEXT_FILTER_LENGTH): string | undefined {
+  const normalized = getQueryValue(value).slice(0, maxLength);
+  return normalized.length > 0 ? normalized.toLowerCase() : undefined;
+}
+
+function parsePageLimit(page: unknown, fallback = 1, max = MAX_LIMIT): number {
+  return parsePositiveInt(page, fallback, 1, max);
+}
+
+const EXPORT_FORMATS = new Set(["json", "csv"]);
+
+function parsePositiveInt(value: unknown, fallback: number, min = 1, max = MAX_LIMIT): number {
+    const parsed = parseInt(String(value || ""), 10);
+    if (!Number.isFinite(parsed) || parsed < min) return fallback;
+    return Math.min(parsed, max);
+}
+
+function parseBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") return value;
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+    return undefined;
+}
 
 export const securityRouter = Router();
 
@@ -48,7 +102,12 @@ securityRouter.get("/policies", async (req, res) => {
             policies = policies.filter(p => p.appliedTo === appliedTo);
         }
         if (isEnabled !== undefined) {
-            policies = policies.filter(p => p.isEnabled === isEnabled);
+            const parsedIsEnabled = parseBoolean(isEnabled);
+            if (parsedIsEnabled === undefined) {
+                return res.status(400).json({ error: "isEnabled must be a boolean" });
+            }
+            const expected = parsedIsEnabled ? "true" : "false";
+            policies = policies.filter(p => String(p.isEnabled).toLowerCase() === expected);
         }
 
         res.json(policies);
@@ -196,49 +255,61 @@ securityRouter.get("/audit-logs", async (req, res) => {
             page = "1",
             limit = "50"
         } = req.query;
-        const pageNum = parseInt(page as string);
-        const limitNum = Math.min(parseInt(limit as string), 100);
+        const pageNum = parsePageLimit(page, 1, 500);
+        const limitNum = parseQueryLimit(limit, 50, 100);
 
-        let logs = await storage.getAuditLogs(500);
-
-        if (action) {
-            logs = logs.filter(l => l.action?.includes(action as string));
-        }
-        
-        const normalizedUserQuery = String(userId || user_id || "").trim().toLowerCase();
-        if (normalizedUserQuery) {
-            logs = logs.filter(l => (l.userId ? String(l.userId) : "").toLowerCase().includes(normalizedUserQuery));
+        const dateFrom = parseQueryDate(date_from);
+        const dateTo = parseQueryDate(date_to);
+        if (dateFrom && dateTo && dateFrom.getTime() > dateTo.getTime()) {
+            return res.status(400).json({ error: "date_from must be before or equal to date_to" });
         }
 
-        const normalizedRoleQuery = String(role || "").trim().toLowerCase();
-        if (normalizedRoleQuery) {
+        const parsedAction = sanitizeTextFilter(action);
+        const parsedActor = sanitizeTextFilter(actor);
+        const parsedUserQuery = sanitizeTextFilter(userId || user_id);
+        const parsedRoleQuery = sanitizeTextFilter(role);
+        const parsedCategoryQuery = sanitizeTextFilter(category);
+        const parsedSeverityQuery = sanitizeTextFilter(severity);
+        const normalizedStatus = sanitizeTextFilter(status);
+        const excludeAdminRaw = getQueryValue(exclude_admin ?? excludeAdminParam);
+        const excludeAdmins = parseBoolean(excludeAdminRaw);
+        if (excludeAdminRaw && excludeAdmins === undefined) {
+            return res.status(400).json({ error: "exclude_admin must be a boolean" });
+        }
+
+        let logs = await storage.getAuditLogs(MAX_AUDIT_LOG_LIMIT);
+
+        if (parsedAction) {
+            logs = logs.filter(l => l.action?.toLowerCase().includes(parsedAction));
+        }
+        if (parsedUserQuery) {
+            logs = logs.filter(l => (l.userId ? String(l.userId) : "").toLowerCase().includes(parsedUserQuery));
+        }
+
+        if (parsedRoleQuery) {
             logs = logs.filter(l => {
                 const details: any = l.details || {};
                 const actorRole = details.actorRole ? String(details.actorRole).toLowerCase() : "";
-                return actorRole.includes(normalizedRoleQuery);
+                return actorRole.includes(parsedRoleQuery);
             });
         }
 
-        const normalizedCategoryQuery = String(category || "").trim().toLowerCase();
-        if (normalizedCategoryQuery) {
+        if (parsedCategoryQuery) {
             logs = logs.filter(l => {
                 const details: any = l.details || {};
                 const cat = details.category ? String(details.category).toLowerCase() : "";
-                return cat.includes(normalizedCategoryQuery);
+                return cat.includes(parsedCategoryQuery);
             });
         }
 
-        const normalizedSeverityQuery = String(severity || "").trim().toLowerCase();
-        if (normalizedSeverityQuery) {
+        if (parsedSeverityQuery) {
             logs = logs.filter(l => {
                 const details: any = l.details || {};
                 const sev = details.severity ? String(details.severity).toLowerCase() : "";
-                return sev.includes(normalizedSeverityQuery);
+                return sev.includes(parsedSeverityQuery);
             });
         }
 
-        const excludeAdminRaw = String(exclude_admin || excludeAdminParam || "").trim().toLowerCase();
-        const excludeAdmins = excludeAdminRaw === "true" || excludeAdminRaw === "1" || excludeAdminRaw === "yes";
         if (excludeAdmins) {
             logs = logs.filter(l => {
                 const details: any = l.details || {};
@@ -248,8 +319,8 @@ securityRouter.get("/audit-logs", async (req, res) => {
             });
         }
 
-        if (actor) {
-            const q = String(actor).toLowerCase();
+        if (parsedActor) {
+            const q = parsedActor;
             logs = logs.filter(l => {
                 const id = l.userId ? String(l.userId).toLowerCase() : "";
                 const details: any = l.details || {};
@@ -258,16 +329,24 @@ securityRouter.get("/audit-logs", async (req, res) => {
                 return id.includes(q) || email.includes(q);
             });
         }
-        if (resource) {
-            logs = logs.filter(l => l.resource === resource);
+        if (normalizedStatus) {
+            logs = logs.filter(l => {
+                const details: any = l.details || {};
+                const statusValue = details.status ? String(details.status).toLowerCase() : "";
+                return statusValue === normalizedStatus || String(l.action || "").toLowerCase() === normalizedStatus;
+            });
         }
-        if (date_from) {
-            const fromDate = new Date(date_from as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= fromDate);
+
+        const resourceQuery = sanitizeTextFilter(resource);
+        if (resourceQuery) {
+            logs = logs.filter(l => (l.resource || "").toLowerCase() === resourceQuery);
         }
-        if (date_to) {
-            const toDate = new Date(date_to as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
+        if (dateFrom) {
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= dateFrom);
+        }
+        if (dateTo) {
+            dateTo.setHours(23, 59, 59, 999);
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= dateTo);
         }
 
         const total = logs.length;
@@ -292,7 +371,7 @@ securityRouter.get("/stats", async (req, res) => {
     try {
         const [policies, auditLogs] = await Promise.all([
             storage.getSecurityPolicies(),
-            storage.getAuditLogs(1000)
+            storage.getAuditLogs(MAX_AUDIT_LOG_LIMIT)
         ]);
 
         const now = new Date();
@@ -334,7 +413,7 @@ securityRouter.get("/stats", async (req, res) => {
 securityRouter.get("/logs", async (req, res) => {
     try {
         // Security: cap limit to prevent excessive data retrieval
-        const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 100, 1000));
+        const limit = parseQueryLimit(req.query.limit, 100, 1000);
         const logs = await storage.getAuditLogs(limit);
         res.json(logs);
     } catch (error: any) {
@@ -447,6 +526,9 @@ securityRouter.post("/ip/block", async (req, res) => {
 
         // Security: validate IP format to prevent injection in policy names
         const trimmedIp = ip.trim();
+        if (trimmedIp.length > MAX_IP_LENGTH) {
+            return res.status(400).json({ error: "IP address is too long" });
+        }
         if (!/^[\d.:a-fA-F]{3,45}$/.test(trimmedIp)) {
             return res.status(400).json({ error: "Invalid IP address format" });
         }
@@ -504,21 +586,44 @@ securityRouter.delete("/ip/unblock/:ip", async (req, res) => {
 // GET /api/admin/security/audit-logs/export - Export audit logs as CSV
 securityRouter.get("/audit-logs/export", async (req, res) => {
     try {
-        const { format = "csv", date_from, date_to, action } = req.query;
+        const { date_from, date_to, action, limit = String(MAX_LIMIT_EXPORT) } = req.query;
+        const format = getQueryValue(req.query.format).toLowerCase() || "csv";
+        const requestedLimit = parseQueryLimit(limit, MAX_LIMIT_EXPORT, MAX_EXPORT_LIMIT);
+
+        if (!EXPORT_FORMATS.has(format)) {
+            return res.status(400).json({ error: "format must be csv or json" });
+        }
+
+        const dateFrom = parseQueryDate(date_from);
+        const dateTo = parseQueryDate(date_to);
+        if (dateFrom && dateTo && dateFrom.getTime() > dateTo.getTime()) {
+            return res.status(400).json({ error: "date_from must be before or equal to date_to" });
+        }
+
+        const parsedAction = sanitizeTextFilter(action);
+        if (action && !parsedAction) {
+            return res.status(400).json({ error: "Invalid action filter" });
+        }
         
-        let logs = await storage.getAuditLogs(10000);
+        let logs = await storage.getAuditLogs(Math.min(requestedLimit, MAX_EXPORT_LIMIT));
         
         // Apply filters
-        if (action) {
-            logs = logs.filter(l => l.action?.includes(action as string));
+        if (parsedAction) {
+            logs = logs.filter(l => l.action?.includes(parsedAction));
         }
-        if (date_from) {
-            const fromDate = new Date(date_from as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= fromDate);
+        if (dateFrom) {
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= dateFrom);
         }
-        if (date_to) {
-            const toDate = new Date(date_to as string);
-            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
+        if (dateTo) {
+            dateTo.setHours(23, 59, 59, 999);
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= dateTo);
+        }
+
+        if (logs.length > 0) {
+            const estimatedBytes = JSON.stringify(logs).length;
+            if (estimatedBytes > MAX_AUDIT_EXPORT_BYTES) {
+                logs = logs.slice(0, Math.max(100, Math.floor(logs.length / 2)));
+            }
         }
         
         // Log the export action
@@ -564,16 +669,18 @@ securityRouter.get("/audit-logs/export", async (req, res) => {
     }
 });
 
-// Import security alerts service
-import { securityAlerts } from "../../services/securityAlerts";
-
 // GET /api/admin/security/alerts - Get security alerts
 securityRouter.get("/alerts", async (req, res) => {
     try {
         const { limit = "50", unresolved } = req.query;
+        const resolvedLimit = parseQueryLimit(limit, 50, 500);
+        const resolvedUnresolved = parseBoolean(unresolved);
+        if (unresolved && resolvedUnresolved === undefined) {
+            return res.status(400).json({ error: "unresolved must be a boolean" });
+        }
         const alerts = securityAlerts.getAlerts(
-            parseInt(limit as string),
-            unresolved === "true"
+            resolvedLimit,
+            resolvedUnresolved ?? false
         );
         res.json({
             alerts,

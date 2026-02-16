@@ -28,13 +28,20 @@ const isProductionEnv = process.env.NODE_ENV === "production";
 
 const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
-  // Allow inline scripts (required for React hydration and PWA); unsafe-eval only in development
+  // Avoid inline execution in production.
   "script-src": [
-    "'self'", "'unsafe-inline'",
-    ...(isProductionEnv ? [] : ["'unsafe-eval'"]),
+    "'self'",
+    ...(!isProductionEnv ? ["'unsafe-inline'", "'unsafe-eval'"] : []),
     "https://cdn.jsdelivr.net", "https://accounts.google.com",
   ],
-  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
+  "style-src": [
+    "'self'",
+    ...(!isProductionEnv ? ["'unsafe-inline'"] : []),
+    "https://fonts.googleapis.com",
+    "https://cdn.jsdelivr.net",
+    "https://cdnjs.cloudflare.com",
+    "https://accounts.google.com",
+  ],
   "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
   // Security: removed blanket "https:" - only allow specific trusted image sources
   "img-src": ["'self'", "data:", "blob:", "https://lh3.googleusercontent.com", "https://*.googleusercontent.com", "https://replit.com", "https://files.stripe.com"],

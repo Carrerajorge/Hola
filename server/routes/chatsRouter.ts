@@ -16,7 +16,18 @@ const messageBodyLimit = express.json({ limit: '5mb' });
 // SECURITY FIX #44: Message content length limits
 const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
 const MAX_TITLE_LENGTH = 200;
+const MAX_MESSAGES_PER_CREATE = 100;
+const MAX_ATTACHMENTS_PER_MESSAGE = 20;
+const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
+const MAX_ATTACHMENT_NAME_LENGTH = 200;
+const MAX_SHARE_PARTICIPANTS = 50;
+const MAX_REQUEST_ID_LENGTH = 128;
+const MAX_SHARE_ROLE_LENGTH = 20;
+const MAX_VALIDATED_MESSAGE_IDS = 300;
+const ALLOWED_MESSAGE_ROLES = new Set(["user", "assistant", "system"]);
+const ALLOWED_SHARE_ROLES = new Set(["viewer", "editor"]);
 const CHAT_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{7,120}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // SECURITY FIX #45: Validate and sanitize message content
 function validateMessageContent(content: any): { valid: boolean; error?: string; sanitized?: string } {
@@ -29,6 +40,75 @@ function validateMessageContent(content: any): { valid: boolean; error?: string;
   // Remove null bytes which can cause issues
   const sanitized = content.replace(/\0/g, '');
   return { valid: true, sanitized };
+}
+
+function sanitizeChatTitle(title: unknown): string | undefined {
+  if (typeof title !== 'string') return undefined;
+  return title.trim().slice(0, MAX_TITLE_LENGTH);
+}
+
+function validateMessageRole(role: unknown): role is "user" | "assistant" | "system" {
+  return typeof role === 'string' && ALLOWED_MESSAGE_ROLES.has(role.toLowerCase());
+}
+
+function normalizeRole(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseShareRole(role: unknown): string | undefined {
+  const normalized = normalizeRole(role);
+  if (!normalized || normalized.length > MAX_SHARE_ROLE_LENGTH) return undefined;
+  return ALLOWED_SHARE_ROLES.has(normalized) ? normalized : undefined;
+}
+
+function parseBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function sanitizeAndValidateAttachment(att: any) {
+  if (!att || typeof att !== 'object') return null;
+  const name = typeof att.name === 'string' ? att.name.trim().slice(0, MAX_ATTACHMENT_NAME_LENGTH) : '';
+  const fileId = typeof att.fileId === 'string' ? att.fileId.trim() : '';
+  const type = typeof att.type === 'string' ? att.type.trim() : '';
+  if (!name || !type) return null;
+
+  const storagePath = typeof att.storagePath === 'string' ? att.storagePath.trim() : '';
+  if (storagePath && !storagePath.startsWith('/objects/')) {
+    return null;
+  }
+
+  const size = Number.isFinite(Number(att.size)) ? Number(att.size) : undefined;
+  if (size !== undefined && (size < 0 || size > MAX_ATTACHMENT_SIZE_BYTES)) {
+    return null;
+  }
+
+  const clean: Record<string, any> = {
+    id: fileId || undefined,
+    fileId,
+    name,
+    type,
+    mimeType: typeof att.mimeType === 'string' ? att.mimeType.trim() : type,
+    size,
+    storagePath: storagePath || null
+  };
+
+  if (att.spreadsheetData && typeof att.spreadsheetData === 'object') {
+    clean.spreadsheetData = {
+      uploadId: typeof att.spreadsheetData.uploadId === 'string' ? att.spreadsheetData.uploadId : undefined,
+      sheets: typeof att.spreadsheetData.sheets === 'number' ? att.spreadsheetData.sheets : undefined,
+      analysisId: typeof att.spreadsheetData.analysisId === 'string' ? att.spreadsheetData.analysisId : undefined,
+      sessionId: typeof att.spreadsheetData.sessionId === 'string' ? att.spreadsheetData.sessionId : undefined
+    };
+  }
+
+  return clean;
 }
 
 export function createChatsRouter() {
@@ -135,7 +215,7 @@ export function createChatsRouter() {
    */
   router.post("/chats", async (req, res) => {
     try {
-      const { id: rawChatId, title, messages } = req.body;
+      const { id: rawChatId, title, messages, role } = req.body;
       const requestedChatId =
         typeof rawChatId === "string" && rawChatId.trim().length > 0
           ? rawChatId.trim()
@@ -149,11 +229,57 @@ export function createChatsRouter() {
       const chatHistoryEnabled = userId && !userId.startsWith("anon_")
         ? (await storage.getUserSettings(userId))?.privacySettings?.chatHistoryEnabled ?? true
         : true;
+      const titleValue = sanitizeChatTitle(title) || "New Chat";
+      const normalizedRole = normalizeRole(role);
+      if (normalizedRole && !ALLOWED_MESSAGE_ROLES.has(normalizedRole)) {
+        return res.status(400).json({ error: "Invalid role. Must be 'user', 'assistant', or 'system'" });
+      }
 
       // If messages provided with requestIds, check if any already exist (reconciliation scenario)
       if (messages && Array.isArray(messages) && messages.length > 0) {
+        if (messages.length > MAX_MESSAGES_PER_CREATE) {
+          return res.status(400).json({ error: "Too many messages in one request" });
+        }
+
+        const sanitizedMessages = [];
+
+      for (const rawMessage of messages) {
+          const messageRole = normalizeRole(rawMessage?.role);
+          if (!validateMessageRole(rawMessage?.role)) {
+            return res.status(400).json({ error: "Each message role must be user|assistant|system" });
+          }
+          const validation = validateMessageContent(rawMessage?.content);
+          if (!validation.valid) {
+            return res.status(400).json({ error: validation.error });
+          }
+
+          const attachments = Array.isArray(rawMessage?.attachments)
+            ? rawMessage.attachments
+                .slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
+                .map((att: any) => sanitizeAndValidateAttachment(att))
+                .filter((att): att is Record<string, any> => att !== null)
+            : null;
+          if (rawMessage?.attachments && !Array.isArray(rawMessage.attachments)) {
+            return res.status(400).json({ error: "attachments must be an array" });
+          }
+          if (Array.isArray(rawMessage?.attachments) && rawMessage.attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+            return res.status(400).json({ error: "Too many attachments" });
+          }
+          if (Array.isArray(rawMessage?.attachments) && attachments.length < rawMessage.attachments.length) {
+            return res.status(400).json({ error: "Invalid attachment payload" });
+          }
+
+          sanitizedMessages.push({
+            role: messageRole,
+            content: validation.sanitized || '',
+            requestId: typeof rawMessage?.requestId === 'string' && rawMessage.requestId.length <= MAX_REQUEST_ID_LENGTH ? rawMessage.requestId : null,
+            userMessageId: typeof rawMessage?.userMessageId === 'string' ? rawMessage.userMessageId : null,
+            attachments,
+          });
+        }
+
         // Check first message's requestId to detect duplicate reconciliation attempts
-        const firstMsgWithRequestId = messages.find((m: any) => m.requestId);
+        const firstMsgWithRequestId = sanitizedMessages.find((m: any) => m.requestId);
         if (firstMsgWithRequestId?.requestId) {
           const existingMsg = await storage.findMessageByRequestId(firstMsgWithRequestId.requestId);
           if (existingMsg) {
@@ -168,14 +294,8 @@ export function createChatsRouter() {
 
         // Create chat with messages atomically using transaction
         const result = await storage.createChatWithMessages(
-          { id: requestedChatId, title: title || "New Chat", userId },
-          messages.map((msg: any) => ({
-            role: msg.role,
-            content: msg.content,
-            requestId: msg.requestId,
-            userMessageId: msg.userMessageId,
-            attachments: msg.attachments
-          }))
+          { id: requestedChatId, title: titleValue, userId },
+          sanitizedMessages
         );
         if (!chatHistoryEnabled) {
           // Store the chat transiently (accessible by id) but hide it from history listings.
@@ -185,7 +305,7 @@ export function createChatsRouter() {
       }
 
       // Simple chat creation without messages
-      const chat = await storage.createChat({ id: requestedChatId, title: title || "New Chat", userId });
+      const chat = await storage.createChat({ id: requestedChatId, title: titleValue, userId });
       if (!chatHistoryEnabled) {
         await storage.softDeleteChat(chat.id);
       }
@@ -256,6 +376,12 @@ export function createChatsRouter() {
       // Pagination support
       const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
       const before = req.query.before ? new Date(req.query.before as string) : undefined;
+      if (limit !== undefined && (!Number.isFinite(limit) || limit < 1 || limit > 200)) {
+        return res.status(400).json({ error: "Invalid limit. Must be between 1 and 200" });
+      }
+      if (req.query.before && (!before || Number.isNaN(before.getTime()))) {
+        return res.status(400).json({ error: "Invalid before timestamp" });
+      }
 
       const messages = await storage.getChatMessages(req.params.id, { limit, before });
       // Also include conversationDocuments so the frontend can hydrate attachment display data
@@ -306,18 +432,50 @@ export function createChatsRouter() {
 
       // Parse client message IDs if provided
       let clientIds: string[] = [];
-      if (clientMessageIds && typeof clientMessageIds === 'string') {
-        try {
-          clientIds = JSON.parse(clientMessageIds);
-        } catch {
-          clientIds = clientMessageIds.split(',');
+      if (clientMessageIds) {
+        if (typeof clientMessageIds === 'string') {
+          const trimmedIds = clientMessageIds.trim();
+          if (trimmedIds.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(trimmedIds);
+              if (!Array.isArray(parsed)) {
+                return res.status(400).json({ error: "Invalid clientMessageIds" });
+              }
+              clientIds = parsed;
+            } catch {
+              return res.status(400).json({ error: "Invalid clientMessageIds" });
+            }
+          } else {
+            clientIds = trimmedIds.length > 0 ? trimmedIds.split(',') : [];
+          }
+        } else if (Array.isArray(clientMessageIds)) {
+          clientIds = clientMessageIds;
+        } else {
+          return res.status(400).json({ error: "clientMessageIds must be an array or JSON string" });
         }
+
+        clientIds = clientIds
+          .map(id => typeof id === 'string' ? id.trim() : '')
+          .filter(id => id.length > 0);
+
+        if (clientIds.length > MAX_VALIDATED_MESSAGE_IDS) {
+          return res.status(400).json({ error: "clientMessageIds too large" });
+        }
+
+        if (!clientIds.every(id => typeof id === 'string' && id.length <= MAX_REQUEST_ID_LENGTH)) {
+          return res.status(400).json({ error: "Invalid clientMessageIds" });
+        }
+
+        clientIds = [...new Set(clientIds)];
       }
 
       // Calculate sync status
       const missingOnClient = serverMessageIds.filter(id => !clientIds.includes(id));
       const extraOnClient = clientIds.filter(id => !serverMessageIds.includes(id));
-      const clientCount = clientMessageCount ? parseInt(clientMessageCount as string) : clientIds.length;
+      const clientCount = clientMessageCount ? parseInt(clientMessageCount as string, 10) : clientIds.length;
+      if (clientMessageCount && (!Number.isFinite(clientCount) || clientCount < 0)) {
+        return res.status(400).json({ error: "Invalid clientMessageCount" });
+      }
 
       const valid = missingOnClient.length === 0 &&
         extraOnClient.length === 0 &&
@@ -412,11 +570,36 @@ export function createChatsRouter() {
 
       const { title, archived, hidden, pinned, pinnedAt } = req.body;
       const updates: any = {};
-      if (title !== undefined) updates.title = title;
-      if (archived !== undefined) updates.archived = archived.toString();
-      if (hidden !== undefined) updates.hidden = hidden.toString();
-      if (pinned !== undefined) updates.pinned = pinned.toString();
+      if (title !== undefined) {
+        const normalizedTitle = sanitizeChatTitle(title);
+        if (!normalizedTitle) {
+          return res.status(400).json({ error: "Invalid title" });
+        }
+        updates.title = normalizedTitle;
+      }
+      const parsedArchived = parseBoolean(archived);
+      if (archived !== undefined && parsedArchived === undefined) {
+        return res.status(400).json({ error: "archived must be a boolean" });
+      }
+      if (archived !== undefined) updates.archived = parsedArchived ? "true" : "false";
+
+      const parsedHidden = parseBoolean(hidden);
+      if (hidden !== undefined && parsedHidden === undefined) {
+        return res.status(400).json({ error: "hidden must be a boolean" });
+      }
+      if (hidden !== undefined) updates.hidden = parsedHidden ? "true" : "false";
+
+      const parsedPinned = parseBoolean(pinned);
+      if (pinned !== undefined && parsedPinned === undefined) {
+        return res.status(400).json({ error: "pinned must be a boolean" });
+      }
+      if (pinned !== undefined) updates.pinned = parsedPinned ? "true" : "false";
+
       if (pinnedAt !== undefined) updates.pinnedAt = pinnedAt;
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid updates provided" });
+      }
 
       const chat = await storage.updateChat(req.params.id, updates);
       res.json(chat);
@@ -559,63 +742,97 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage, webSources, confidence, uncertaintyReason, retrievalSteps, skipRun } = req.body;
-      if (!role || !content) {
+      const {
+        role,
+        content,
+        requestId,
+        clientRequestId,
+        userMessageId,
+        attachments,
+        sources,
+        figmaDiagram,
+        googleFormPreview,
+        gmailPreview,
+        generatedImage,
+        webSources,
+        confidence,
+        uncertaintyReason,
+        retrievalSteps,
+        skipRun
+      } = req.body;
+      const normalizedRole = normalizeRole(role);
+      const sanitizedContent = sanitizeMessageContent(typeof content === 'string' ? content : "");
+
+      const parsedSkipRun = parseBoolean(skipRun);
+      if (skipRun !== undefined && parsedSkipRun === undefined) {
+        setServerTiming();
+        return res.status(400).json({ error: "skipRun must be a boolean" });
+      }
+
+      if (!sanitizedContent) {
         setServerTiming();
         return res.status(400).json({ error: "role and content are required" });
       }
 
-      // Validate and sanitize message content (defense in depth).
-      const contentValidation = validateMessageContent(content);
-      if (!contentValidation.valid) {
-        setServerTiming();
-        return res.status(400).json({ error: contentValidation.error });
-      }
-
       // Validate role is allowed value
-      if (!['user', 'assistant', 'system'].includes(role)) {
+      if (!normalizedRole || !ALLOWED_MESSAGE_ROLES.has(normalizedRole)) {
         setServerTiming();
         return res.status(400).json({ error: "Invalid role. Must be 'user', 'assistant', or 'system'" });
       }
 
+      // Validate request identifiers to avoid oversized index values
+      if (requestId && (typeof requestId !== 'string' || requestId.length > MAX_REQUEST_ID_LENGTH)) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid requestId" });
+      }
+      if (clientRequestId && (typeof clientRequestId !== 'string' || clientRequestId.length > MAX_REQUEST_ID_LENGTH)) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid clientRequestId" });
+      }
+      if (userMessageId && (typeof userMessageId !== 'string' || userMessageId.length > MAX_REQUEST_ID_LENGTH)) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid userMessageId" });
+      }
+      if (attachments && !Array.isArray(attachments)) {
+        setServerTiming();
+        return res.status(400).json({ error: "attachments must be an array" });
+      }
+      if (attachments && attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+        setServerTiming();
+        return res.status(400).json({ error: "Too many attachments" });
+      }
+
+      // Validate and sanitize message content (defense in depth).
+      const contentValidation = validateMessageContent(sanitizedContent);
+      if (!contentValidation.valid) {
+        setServerTiming();
+        return res.status(400).json({ error: contentValidation.error });
+      }
       // Prevent XSS in persisted message content
-      const sanitizedContent = sanitizeMessageContent(contentValidation.sanitized || content);
+      const safeContent = sanitizeMessageContent(contentValidation.sanitized || content);
 
       // SERVER-SIDE ATTACHMENT SANITIZATION: Defense-in-depth
       // Strip all large data fields (imageUrl, content, thumbnail, dataUrl) that should not be
       // stored in JSONB. The actual file data lives in object storage (storagePath) and
       // conversationDocuments. Only lightweight metadata is persisted in the message JSONB.
       const sanitizedAttachments = attachments && Array.isArray(attachments)
-        ? attachments.map((att: any) => {
-            // Build a clean attachment with only metadata fields
-            const clean: Record<string, any> = {
-              id: att.id || att.fileId,
-              fileId: att.fileId,
-              name: att.name,
-              type: att.type,
-              mimeType: att.mimeType || att.type,
-              size: att.size,
-              storagePath: att.storagePath,
-            };
-            // Preserve spreadsheet metadata (without large preview data)
-            if (att.spreadsheetData) {
-              clean.spreadsheetData = {
-                uploadId: att.spreadsheetData.uploadId,
-                sheets: att.spreadsheetData.sheets,
-                analysisId: att.spreadsheetData.analysisId,
-                sessionId: att.spreadsheetData.sessionId,
-              };
-            }
-            // Validate storagePath format
-            if (clean.storagePath && typeof clean.storagePath === 'string' && !clean.storagePath.startsWith('/objects/')) {
-              console.warn(`[Attachment] Invalid storagePath stripped: ${clean.storagePath}`);
-              delete clean.storagePath;
-            }
-            return clean;
-          }).filter((att: any) => att.name && att.type) // Must have at least name and type
+        ? attachments
+          .slice(0, MAX_ATTACHMENTS_PER_MESSAGE)
+          .map((att: any) => sanitizeAndValidateAttachment(att))
+          .filter((att): att is Record<string, any> => att !== null)
         : null;
 
-      const shouldCreateRun = role === 'user' && !skipRun && !!clientRequestId;
+      if (attachments && (!Array.isArray(attachments) || !Array.isArray(sanitizedAttachments))) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid attachments payload" });
+      }
+
+      if (Array.isArray(attachments) && sanitizedAttachments && sanitizedAttachments.length < attachments.length) {
+        setServerTiming();
+        return res.status(400).json({ error: "Invalid attachments payload" });
+      }
+
+      const shouldCreateRun = normalizedRole === 'user' && !parsedSkipRun && !!clientRequestId;
 
       // Run-based idempotency for user messages when enabled.
       if (shouldCreateRun) {
@@ -647,7 +864,7 @@ export function createChatsRouter() {
           {
             chatId: req.params.id,
             role: 'user',
-            content: sanitizedContent,
+            content: safeContent,
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
@@ -714,8 +931,8 @@ export function createChatsRouter() {
       const tCreateLegacy = performance.now();
       const message = await storage.createChatMessage({
         chatId: req.params.id,
-        role,
-        content: sanitizedContent,
+        role: normalizedRole,
+        content: safeContent,
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
@@ -736,7 +953,7 @@ export function createChatsRouter() {
 
       // Set a quick placeholder title from the user's message (legacy flow).
       // The AI-generated title will replace this during streaming via chatTitleGenerator.
-      if (isTitlePlaceholder(chat.title) && role === "user") {
+      if (isTitlePlaceholder(chat.title) && normalizedRole === "user") {
         const newTitle = sanitizedContent.slice(0, 50) + (sanitizedContent.length > 50 ? "..." : "");
         void storage.updateChat(req.params.id, { title: newTitle }).catch((err) => {
           console.warn("[Chats] Failed to update placeholder title:", err);
@@ -811,25 +1028,49 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const { participants } = req.body;
+      const { participants, settings } = req.body;
       if (!participants || !Array.isArray(participants)) {
         return res.status(400).json({ error: "participants array is required" });
+      }
+      if (participants.length > MAX_SHARE_PARTICIPANTS) {
+        return res.status(400).json({ error: "Too many participants" });
+      }
+      if (settings && typeof settings !== 'object') {
+        return res.status(400).json({ error: "Invalid settings payload" });
       }
 
       const createdShares = [];
       const emailsToNotify = [];
+      const seenEmails = new Set<string>();
 
       for (const p of participants) {
-        if (!p.email || !p.role) continue;
+        if (!p || typeof p !== 'object') {
+          return res.status(400).json({ error: "Each participant must be an object" });
+        }
+        if (!p.email || !p.role) {
+          return res.status(400).json({ error: "Each participant needs email and role" });
+        }
 
-        const normalizedEmail = p.email.toLowerCase().trim();
+        const normalizedEmail = String(p.email).trim().toLowerCase();
+        if (!EMAIL_REGEX.test(normalizedEmail) || normalizedEmail.length > 254) {
+          return res.status(400).json({ error: `Invalid email: ${normalizedEmail}` });
+        }
+        if (seenEmails.has(normalizedEmail)) {
+          continue;
+        }
+        seenEmails.add(normalizedEmail);
+
+        const normalizedRole = parseShareRole(p.role);
+        if (!normalizedRole) {
+          return res.status(400).json({ error: `Invalid role for ${normalizedEmail}` });
+        }
 
         const recipientUser = await storage.getUserByEmail(normalizedEmail);
 
         const existing = await storage.getChatShareByEmailAndChat(normalizedEmail, req.params.id);
         if (existing) {
           const updates: any = {};
-          if (existing.role !== p.role) updates.role = p.role;
+          if (existing.role !== normalizedRole) updates.role = normalizedRole;
           if (recipientUser && existing.recipientUserId !== recipientUser.id) {
             updates.recipientUserId = recipientUser.id;
           }
@@ -843,12 +1084,12 @@ export function createChatsRouter() {
           chatId: req.params.id,
           email: normalizedEmail,
           recipientUserId: recipientUser?.id || null,
-          role: p.role,
+          role: normalizedRole,
           invitedBy: userId,
           notificationSent: "false"
         });
         createdShares.push(share);
-        emailsToNotify.push({ email: normalizedEmail, role: p.role, shareId: share.id });
+        emailsToNotify.push({ email: normalizedEmail, role: normalizedRole, shareId: share.id });
       }
 
       for (const notify of emailsToNotify) {
@@ -885,6 +1126,11 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
 
+      const sharesForChat = await storage.getChatShares(req.params.id);
+      const shareExists = sharesForChat.some(share => share.id === req.params.shareId);
+      if (!shareExists) {
+        return res.status(404).json({ error: "Share not found for this chat" });
+      }
       await storage.deleteChatShare(req.params.shareId);
       res.json({ success: true });
     } catch (error: any) {

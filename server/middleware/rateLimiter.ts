@@ -17,7 +17,7 @@ let rateLimiterAi: RateLimiterRedis | RateLimiterMemory;
 let initialized = false;
 
 // Inicialización asíncrona segura
-(async () => {
+const initLimiterPromise = (async () => {
   try {
     if (process.env.REDIS_URL) {
       await redisClient.connect();
@@ -65,6 +65,14 @@ let initialized = false;
   initialized = true;
 })();
 
+async function waitForRateLimiterInit(timeoutMs = 2000): Promise<boolean> {
+  const start = Date.now();
+  while (!initialized && Date.now() - start < timeoutMs) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  return initialized;
+}
+
 /**
  * Security: extract the real client IP behind reverse proxies.
  * Trusts X-Forwarded-For only when app.set('trust proxy') is enabled,
@@ -88,26 +96,28 @@ function getClientKey(req: Request): string {
   return ip;
 }
 
-const consumeLimiter = (
-  limiter: RateLimiterRedis | RateLimiterMemory,
+const consumeLimiter = async (
+  getLimiter: () => RateLimiterRedis | RateLimiterMemory | undefined,
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  // Security: if rate limiter not yet initialized (startup race), allow through
+  // Security: during startup/init issues, fail closed for a short window.
+  let limiter = getLimiter();
   if (!initialized || !limiter) {
-    console.warn("[RateLimiter] Not yet initialized, allowing request through");
-    return next();
+    const ready = await waitForRateLimiterInit();
+    limiter = getLimiter();
+    if (!ready || !limiter) {
+      console.error("[RateLimiter] Not initialized, request blocked to preserve security guarantees.");
+      res.status(503).json({
+        status: "error",
+        message: "Rate limiter not ready. Retry in a few seconds.",
+      });
+      return;
+    }
   }
 
-  // ✅ BYPASS: Terminal file ops (evita 429 y evita romper UI Files)
-  const pathOnly = (req.originalUrl || req.url || req.path || "").split("?")[0];
-  const skipRateLimit =
-    req.method === "POST" &&
-    (/^\/api\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly) ||
-      /^\/terminal\/sessions\/[^/]+\/file$/.test(pathOnly));
-
-  if (skipRateLimit) return next();
+  // Terminal file uploads are currently intentionally rate-limited by default now to avoid abuse.
 
   const key = getClientKey(req);
 
@@ -127,6 +137,44 @@ const consumeLimiter = (
       });
     });
 };
-export const globalLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterGlobal, req, res, next);
-export const authLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAuth, req, res, next);
-export const aiLimiter = (req: Request, res: Response, next: NextFunction) => consumeLimiter(rateLimiterAi, req, res, next);
+// Billing/Stripe: tighter limits — 20 requests per 15 min per user/IP
+let rateLimiterBilling: RateLimiterRedis | RateLimiterMemory;
+
+(async () => {
+  // Wait for main init to finish, then create billing limiter with same store
+  const waitForInit = () => new Promise<void>((resolve) => {
+    const check = () => { if (initialized) resolve(); else setTimeout(check, 50); };
+    check();
+  });
+  await waitForInit();
+
+  if (rateLimiterGlobal instanceof RateLimiterRedis) {
+    rateLimiterBilling = new RateLimiterRedis({
+      storeClient: redisClient,
+      keyPrefix: "middleware_billing",
+      points: 20,
+      duration: 60 * 15,
+    });
+  } else {
+    rateLimiterBilling = new RateLimiterMemory({
+      points: 20,
+      duration: 60 * 15,
+    });
+  }
+})();
+
+export const globalLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterGlobal, req, res, next);
+};
+
+export const authLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterAuth, req, res, next);
+};
+
+export const aiLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterAi, req, res, next);
+};
+
+export const billingLimiter = async (req: Request, res: Response, next: NextFunction) => {
+  await consumeLimiter(() => rateLimiterBilling, req, res, next);
+};

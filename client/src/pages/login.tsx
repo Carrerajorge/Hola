@@ -1,24 +1,50 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck } from "lucide-react";
+import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from "@/components/ui/input-otp";
+import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft, CheckCircle2, XCircle, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePlatformSettings } from "@/contexts/PlatformSettingsContext";
 import { apiFetch } from "@/lib/apiClient";
 
+const COUNTRY_CODES = [
+  { code: "+1", country: "US", flag: "\u{1F1FA}\u{1F1F8}", name: "Estados Unidos" },
+  { code: "+52", country: "MX", flag: "\u{1F1F2}\u{1F1FD}", name: "M\u00e9xico" },
+  { code: "+51", country: "PE", flag: "\u{1F1F5}\u{1F1EA}", name: "Per\u00fa" },
+  { code: "+54", country: "AR", flag: "\u{1F1E6}\u{1F1F7}", name: "Argentina" },
+  { code: "+55", country: "BR", flag: "\u{1F1E7}\u{1F1F7}", name: "Brasil" },
+  { code: "+56", country: "CL", flag: "\u{1F1E8}\u{1F1F1}", name: "Chile" },
+  { code: "+57", country: "CO", flag: "\u{1F1E8}\u{1F1F4}", name: "Colombia" },
+  { code: "+58", country: "VE", flag: "\u{1F1FB}\u{1F1EA}", name: "Venezuela" },
+  { code: "+593", country: "EC", flag: "\u{1F1EA}\u{1F1E8}", name: "Ecuador" },
+  { code: "+591", country: "BO", flag: "\u{1F1E7}\u{1F1F4}", name: "Bolivia" },
+  { code: "+595", country: "PY", flag: "\u{1F1F5}\u{1F1FE}", name: "Paraguay" },
+  { code: "+598", country: "UY", flag: "\u{1F1FA}\u{1F1FE}", name: "Uruguay" },
+  { code: "+506", country: "CR", flag: "\u{1F1E8}\u{1F1F7}", name: "Costa Rica" },
+  { code: "+507", country: "PA", flag: "\u{1F1F5}\u{1F1E6}", name: "Panam\u00e1" },
+  { code: "+34", country: "ES", flag: "\u{1F1EA}\u{1F1F8}", name: "Espa\u00f1a" },
+  { code: "+44", country: "GB", flag: "\u{1F1EC}\u{1F1E7}", name: "Reino Unido" },
+  { code: "+49", country: "DE", flag: "\u{1F1E9}\u{1F1EA}", name: "Alemania" },
+  { code: "+33", country: "FR", flag: "\u{1F1EB}\u{1F1F7}", name: "Francia" },
+  { code: "+39", country: "IT", flag: "\u{1F1EE}\u{1F1F9}", name: "Italia" },
+  { code: "+81", country: "JP", flag: "\u{1F1EF}\u{1F1F5}", name: "Jap\u00f3n" },
+  { code: "+86", country: "CN", flag: "\u{1F1E8}\u{1F1F3}", name: "China" },
+  { code: "+91", country: "IN", flag: "\u{1F1EE}\u{1F1F3}", name: "India" },
+];
+
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
-  auth_failed: "Error de autenticación con Google. Por favor intenta de nuevo.",
-  no_user: "No se pudo obtener la información del usuario. Por favor intenta de nuevo.",
-  login_failed: "Error al iniciar sesión. Por favor intenta de nuevo.",
-  invalid_token: "Enlace mágico inválido o expirado.",
-  magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
-  session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
+  auth_failed: "Error de autenticaci\u00f3n con Google. Por favor intenta de nuevo.",
+  no_user: "No se pudo obtener la informaci\u00f3n del usuario. Por favor intenta de nuevo.",
+  login_failed: "Error al iniciar sesi\u00f3n. Por favor intenta de nuevo.",
+  invalid_token: "Enlace m\u00e1gico inv\u00e1lido o expirado.",
+  magic_link_expired: "El enlace m\u00e1gico ha expirado. Solicita uno nuevo.",
+  session_error: "Error al crear la sesi\u00f3n. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
-  google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
-  microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
-  auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
-  replit_disabled: "El inicio de sesión con Replit fue desactivado. Usa Google, teléfono o correo.",
+  google_failed: "Error al iniciar sesi\u00f3n con Google. Por favor intenta de nuevo.",
+  microsoft_failed: "Error al iniciar sesi\u00f3n con Microsoft. Por favor intenta de nuevo.",
+  auth0_failed: "Error al iniciar sesi\u00f3n con Auth0. Por favor intenta de nuevo.",
+  replit_disabled: "El inicio de sesi\u00f3n con Replit fue desactivado. Usa Google, tel\u00e9fono o correo.",
 };
 
 export default function LoginPage() {
@@ -45,6 +71,9 @@ export default function LoginPage() {
   const [isPhoneLoading, setIsPhoneLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRY_CODES[2]); // Peru default
+  const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const countryDropdownRef = useRef<HTMLDivElement>(null);
 
   // MFA states (push approval and/or TOTP)
   const [mfaRequired, setMfaRequired] = useState(false);
@@ -128,9 +157,9 @@ export default function LoginPage() {
 
         if (!data.active) {
           if (status === "denied") {
-            setError("Solicitud rechazada. Intenta iniciar sesión de nuevo.");
+            setError("Solicitud rechazada. Intenta iniciar sesi\u00f3n de nuevo.");
           } else if (status === "expired") {
-            setError("La solicitud expiró. Intenta iniciar sesión de nuevo.");
+            setError("La solicitud expir\u00f3. Intenta iniciar sesi\u00f3n de nuevo.");
           }
           if (intervalId) window.clearInterval(intervalId);
           intervalId = null;
@@ -151,7 +180,7 @@ export default function LoginPage() {
               window.location.href = "/";
               return;
             }
-            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesión.");
+            setError((verifyData as any)?.message || "No se pudo completar el inicio de sesi\u00f3n.");
           } finally {
             setIsMfaVerifying(false);
           }
@@ -169,6 +198,19 @@ export default function LoginPage() {
       if (intervalId) window.clearInterval(intervalId);
     };
   }, [mfaRequired, mfaMethods?.push, isMfaVerifying]);
+
+  // Close country dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(e.target as Node)) {
+        setShowCountryDropdown(false);
+      }
+    };
+    if (showCountryDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showCountryDropdown]);
 
   const cancelMfa = async () => {
     try {
@@ -198,9 +240,9 @@ export default function LoginPage() {
         window.location.href = "/";
         return;
       }
-      setError((data as any)?.message || "No se pudo verificar el código.");
+      setError((data as any)?.message || "No se pudo verificar el c\u00f3digo.");
     } catch {
-      setError("Error al verificar el código.");
+      setError("Error al verificar el c\u00f3digo.");
     } finally {
       setIsMfaVerifying(false);
     }
@@ -233,14 +275,14 @@ export default function LoginPage() {
           return;
         }
 
-        setError((data as any)?.message || "Credenciales inválidas");
+        setError((data as any)?.message || "Credenciales inv\u00e1lidas");
       } catch (err) {
-        setError("Error al iniciar sesión");
+        setError("Error al iniciar sesi\u00f3n");
       } finally {
         setIsLoading(false);
       }
     } else if (email && !password) {
-      setError("Por favor ingresa tu contraseña");
+      setError("Por favor ingresa tu contrase\u00f1a");
     }
   };
 
@@ -252,7 +294,7 @@ export default function LoginPage() {
 
   const handleMagicLink = async () => {
     if (!email) {
-      setError("Ingresa tu correo electrónico para recibir el enlace mágico");
+      setError("Ingresa tu correo electr\u00f3nico para recibir el enlace m\u00e1gico");
       return;
     }
 
@@ -276,10 +318,10 @@ export default function LoginPage() {
           setMagicLinkUrl(data.magicLinkUrl);
         }
       } else {
-        setError(data.message || "Error al enviar el enlace mágico");
+        setError(data.message || "Error al enviar el enlace m\u00e1gico");
       }
     } catch (err) {
-      setError("Error al enviar el enlace mágico");
+      setError("Error al enviar el enlace m\u00e1gico");
     } finally {
       setIsMagicLinkLoading(false);
     }
@@ -288,18 +330,20 @@ export default function LoginPage() {
   // Phone authentication handlers
   const handleSendOtp = async () => {
     if (!phoneNumber) {
-      setError("Ingresa tu número de teléfono");
+      setError("Ingresa tu n\u00famero de tel\u00e9fono");
       return;
     }
 
     setIsPhoneLoading(true);
     setError("");
 
+    const fullPhone = `${selectedCountry.code}${phoneNumber.replace(/\D/g, "")}`;
+
     try {
       const response = await apiFetch("/api/auth/phone/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneNumber }),
+        body: JSON.stringify({ phone: fullPhone }),
       });
 
       const data = await response.json();
@@ -311,10 +355,10 @@ export default function LoginPage() {
           setDevCode(data.devCode);
         }
       } else {
-        setError(data.message || "Error al enviar el código");
+        setError(data.message || "Error al enviar el c\u00f3digo");
       }
     } catch (err) {
-      setError("Error al enviar el código");
+      setError("Error al enviar el c\u00f3digo");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -322,7 +366,7 @@ export default function LoginPage() {
 
   const handleVerifyOtp = async () => {
     if (!otpCode) {
-      setError("Ingresa el código de verificación");
+      setError("Ingresa el c\u00f3digo de verificaci\u00f3n");
       return;
     }
 
@@ -330,10 +374,11 @@ export default function LoginPage() {
     setError("");
 
     try {
+      const fullPhone = `${selectedCountry.code}${phoneNumber.replace(/\D/g, "")}`;
       const response = await apiFetch("/api/auth/phone/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneNumber, code: otpCode }),
+        body: JSON.stringify({ phone: fullPhone, code: otpCode }),
       });
 
       const data = await response.json().catch(() => ({} as any));
@@ -355,9 +400,9 @@ export default function LoginPage() {
         return;
       }
 
-      setError((data as any)?.message || "Código incorrecto");
+      setError((data as any)?.message || "C\u00f3digo incorrecto");
     } catch (err) {
-      setError("Error al verificar el código");
+      setError("Error al verificar el c\u00f3digo");
     } finally {
       setIsPhoneLoading(false);
     }
@@ -391,13 +436,13 @@ export default function LoginPage() {
               <Icon className="h-5 w-5 text-muted-foreground" />
               <span className="text-muted-foreground">{label}</span>
               <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                Próximamente
+                Pr\u00f3ximamente
               </span>
             </Button>
           </div>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Esta opción estará disponible pronto</p>
+          <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -405,7 +450,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen paper-grid flex items-center justify-center p-4">
-      <div className="w-full max-w-md relative">
+      <div className={`w-full relative transition-all duration-300 ${showPhoneAuth ? "max-w-2xl" : "max-w-md"}`}>
         <div className="rounded-3xl border border-border bg-card p-8 shadow-sm">
           <Button
             variant="ghost"
@@ -420,13 +465,13 @@ export default function LoginPage() {
           <div className="text-center mb-8 fade-in-up">
             <h1 className="text-3xl font-extrabold tracking-tight mb-3 text-foreground">
               Bienvenido a{" "}
-	              <span className="inline-flex items-center px-2 py-1 rounded-xl bg-muted text-foreground">
-	                {appName}
-	              </span>
-	            </h1>
-	            <p className="text-muted-foreground">
-	              Obtén respuestas más inteligentes, carga archivos e imágenes, y más.
-	            </p>
+              <span className="inline-flex items-center px-2 py-1 rounded-xl bg-muted text-foreground">
+                {appName}
+              </span>
+            </h1>
+            <p className="text-muted-foreground">
+              Obt\u00e9n respuestas m\u00e1s inteligentes, carga archivos e im\u00e1genes, y m\u00e1s.
+            </p>
           </div>
 
           {!showPhoneAuth && !mfaRequired && (
@@ -467,7 +512,7 @@ export default function LoginPage() {
               {/* Coming Soon Options */}
               <ComingSoonButton icon={Apple} label="Continuar con Apple" />
 
-              {/* Microsoft - Coming Soon (requires Azure AD setup) */}
+              {/* Microsoft - Coming Soon */}
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -485,13 +530,13 @@ export default function LoginPage() {
                         </svg>
                         <span className="text-muted-foreground">Continuar con Microsoft</span>
                         <span className="ml-auto text-xs bg-background text-muted-foreground border border-border px-2 py-0.5 rounded-full font-medium">
-                          Próximamente
+                          Pr\u00f3ximamente
                         </span>
                       </Button>
                     </div>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Esta opción estará disponible pronto</p>
+                    <p>Esta opci\u00f3n estar\u00e1 disponible pronto</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -504,7 +549,7 @@ export default function LoginPage() {
                 data-testid="button-login-phone"
               >
                 <Phone className="h-5 w-5" />
-                Continuar con el teléfono
+                Continuar con el tel\u00e9fono
               </Button>
             </div>
           )}
@@ -522,7 +567,7 @@ export default function LoginPage() {
               <div className="space-y-4 fade-in-up">
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <Sparkles className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Enlace mágico enviado</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Enlace m\u00e1gico enviado</h3>
                   <p className="text-sm text-muted-foreground">{successMessage}</p>
                 </div>
 
@@ -530,7 +575,7 @@ export default function LoginPage() {
                 {magicLinkUrl && (
                   <div className="bg-muted/20 border border-border rounded-xl p-4">
                     <p className="text-xs text-muted-foreground mb-2 font-semibold">
-                      Modo desarrollo: click para iniciar sesión
+                      Modo desarrollo: click para iniciar sesi\u00f3n
                     </p>
                     <a href={magicLinkUrl} className="text-sm text-foreground underline break-all">
                       {magicLinkUrl}
@@ -564,11 +609,11 @@ export default function LoginPage() {
 
                 <div className="bg-muted/30 border border-border rounded-xl p-4 text-center">
                   <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <h3 className="font-semibold text-foreground mb-1">Verificación de seguridad</h3>
+                  <h3 className="font-semibold text-foreground mb-1">Verificaci\u00f3n de seguridad</h3>
                   <p className="text-sm text-muted-foreground">
                     {mfaMethods?.push
-                      ? "Aprueba el inicio de sesión en tu dispositivo de confianza o ingresa tu código 2FA."
-                      : "Ingresa tu código 2FA para continuar."}
+                      ? "Aprueba el inicio de sesi\u00f3n en tu dispositivo de confianza o ingresa tu c\u00f3digo 2FA."
+                      : "Ingresa tu c\u00f3digo 2FA para continuar."}
                   </p>
                 </div>
 
@@ -594,7 +639,7 @@ export default function LoginPage() {
                               : "Pendiente"}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Revisa la notificación push en tu dispositivo de confianza.
+                        Revisa la notificaci\u00f3n push en tu dispositivo de confianza.
                       </p>
                       {mfaApprovalId ? (
                         <p className="text-[11px] text-muted-foreground mt-2 break-all">
@@ -612,7 +657,7 @@ export default function LoginPage() {
                   <div className="space-y-3">
                     <Input
                       type="text"
-                      placeholder="Código 2FA"
+                      placeholder="C\u00f3digo 2FA"
                       value={mfaCode}
                       onChange={(e) => setMfaCode(e.target.value)}
                       className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -643,7 +688,7 @@ export default function LoginPage() {
               <div className="space-y-4 fade-in-up fade-in-up-delay-4">
                 <Input
                   type="email"
-                  placeholder="Dirección de correo electrónico"
+                  placeholder="Direcci\u00f3n de correo electr\u00f3nico"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -651,7 +696,7 @@ export default function LoginPage() {
                 />
                 <Input
                   type="password"
-                  placeholder="Contraseña"
+                  placeholder="Contrase\u00f1a"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
@@ -693,7 +738,7 @@ export default function LoginPage() {
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Iniciar sesión con enlace mágico (sin contraseña)</p>
+                        <p>Iniciar sesi\u00f3n con enlace m\u00e1gico (sin contrase\u00f1a)</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -701,95 +746,209 @@ export default function LoginPage() {
               </div>
             ))}
 
-	          {/* Phone Authentication View */}
-	          {showPhoneAuth && (
-	            <div className="space-y-4 fade-in-up">
-	              <Button
-	                variant="ghost"
-	                size="sm"
-	                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 -ml-2"
-	                onClick={handleBackFromPhone}
-	              >
-	                <ArrowLeft className="h-4 w-4 mr-1" />
-	                Volver
-	              </Button>
+          {/* ─── Phone Authentication View ─── */}
+          {showPhoneAuth && (
+            <div className="space-y-5 fade-in-up">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted/60 -ml-2"
+                onClick={handleBackFromPhone}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Volver
+              </Button>
 
-	              <div className="text-center mb-4">
-	                <Phone className="h-10 w-10 text-foreground mx-auto mb-2" />
-	                <h3 className="text-lg font-semibold text-foreground">
-	                  {otpSent ? "Ingresa el código" : "Ingresa tu número"}
-	                </h3>
-	                <p className="text-sm text-muted-foreground">
-	                  {otpSent 
-	                    ? "Te enviamos un código de 6 dígitos" 
-	                    : "Te enviaremos un código de verificación"}
-	                </p>
-	              </div>
+              {/* Two-panel layout */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* LEFT: Phone number */}
+                <div className={`rounded-2xl border p-5 transition-all ${
+                  otpSent
+                    ? "border-border/50 bg-muted/20 opacity-80"
+                    : "border-primary/30 bg-card shadow-sm"
+                }`}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                      otpSent
+                        ? "bg-primary/20 text-primary"
+                        : "bg-primary text-primary-foreground"
+                    }`}>1</div>
+                    <h3 className="text-sm font-semibold text-foreground">Tu n\u00famero</h3>
+                  </div>
 
-              {!otpSent ? (
-                <>
-	                  <Input
-	                    type="tel"
-	                    placeholder="+51 918 714 054"
-	                    value={phoneNumber}
-	                    onChange={(e) => setPhoneNumber(e.target.value)}
-	                    className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
-	                    data-testid="input-phone-number"
-	                  />
-	                  {error && (
-	                    <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg">{error}</p>
-	                  )}
-	                  <Button
-	                    className="w-full h-12 text-base bg-primary hover:bg-primary/90 border border-border text-primary-foreground font-semibold transition-colors rounded-xl"
-	                    onClick={handleSendOtp}
-	                    disabled={isPhoneLoading}
-	                    data-testid="button-send-otp"
-	                  >
-	                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Enviar código"}
-	                  </Button>
-	                </>
-	              ) : (
-	                <>
-	                  {devCode && (
-	                    <div className="bg-muted/20 border border-border rounded-xl p-3 text-center">
-	                      <p className="text-xs text-muted-foreground font-semibold">Modo desarrollo: tu código es</p>
-	                      <p className="text-2xl font-mono text-foreground tracking-widest">{devCode}</p>
-	                    </div>
-	                  )}
-	                  <Input
-	                    type="text"
-	                    placeholder="000000"
-	                    value={otpCode}
-	                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-	                    className="h-14 text-2xl text-center tracking-widest font-mono rounded-xl bg-white border-black/10 text-zinc-900 placeholder:text-zinc-400"
-	                    maxLength={6}
-	                    data-testid="input-otp-code"
-	                    onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
-	                  />
-	                  {error && (
-	                    <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg">{error}</p>
-	                  )}
-	                  <Button
-	                    className="w-full h-12 text-base bg-black hover:bg-zinc-900 border border-black/10 text-white font-semibold transition-colors rounded-xl"
-	                    onClick={handleVerifyOtp}
-	                    disabled={isPhoneLoading || otpCode.length !== 6}
-	                    data-testid="button-verify-otp"
-	                  >
-	                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Verificar"}
-	                  </Button>
-	                  <Button
-	                    variant="ghost"
-	                    className="w-full text-zinc-700 hover:text-zinc-900 hover:bg-black/5"
-	                    onClick={() => {
-	                      setOtpSent(false);
-	                      setOtpCode("");
-	                      setDevCode(null);
-                      setError("");
-                    }}
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Selecciona tu pa\u00eds e ingresa tu n\u00famero sin el c\u00f3digo de \u00e1rea.
+                  </p>
+
+                  {/* Country selector */}
+                  <div className="relative mb-3" ref={countryDropdownRef}>
+                    <button
+                      type="button"
+                      className="w-full h-11 flex items-center gap-2 px-3 rounded-xl border border-input bg-background text-sm text-foreground hover:bg-muted/40 transition-colors"
+                      onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                      disabled={otpSent}
+                    >
+                      <span className="text-lg">{selectedCountry.flag}</span>
+                      <span className="font-medium truncate">{selectedCountry.name}</span>
+                      <span className="text-muted-foreground ml-auto shrink-0">{selectedCountry.code}</span>
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform shrink-0 ${showCountryDropdown ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {showCountryDropdown && (
+                      <div className="absolute z-50 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                        {COUNTRY_CODES.map((c) => (
+                          <button
+                            key={c.country}
+                            type="button"
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors first:rounded-t-xl last:rounded-b-xl ${
+                              selectedCountry.country === c.country ? "bg-primary/10 font-medium" : ""
+                            }`}
+                            onClick={() => {
+                              setSelectedCountry(c);
+                              setShowCountryDropdown(false);
+                            }}
+                          >
+                            <span className="text-base">{c.flag}</span>
+                            <span className="text-foreground">{c.name}</span>
+                            <span className="text-muted-foreground ml-auto text-xs">{c.code}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Phone input with country code prefix */}
+                  <div className="flex items-center">
+                    <span className="text-sm font-mono text-muted-foreground bg-muted/40 px-3 h-11 flex items-center rounded-l-xl border border-r-0 border-input shrink-0">
+                      {selectedCountry.code}
+                    </span>
+                    <Input
+                      type="tel"
+                      placeholder="918 714 054"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d\s]/g, ""))}
+                      className="h-11 text-base rounded-r-xl rounded-l-none bg-background border-input text-foreground placeholder:text-muted-foreground font-mono"
+                      data-testid="input-phone-number"
+                      disabled={otpSent}
+                      onKeyDown={(e) => e.key === "Enter" && !otpSent && handleSendOtp()}
+                    />
+                  </div>
+
+                  {!otpSent && (
+                    <Button
+                      className="w-full h-11 text-sm bg-primary hover:bg-primary/90 border border-border text-primary-foreground font-semibold transition-colors rounded-xl mt-3"
+                      onClick={handleSendOtp}
+                      disabled={isPhoneLoading || !phoneNumber.replace(/\D/g, "")}
+                      data-testid="button-send-otp"
+                    >
+                      {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enviar c\u00f3digo"}
+                    </Button>
+                  )}
+
+                  {otpSent && (
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline mt-2 inline-block"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtpCode("");
+                        setDevCode(null);
+                        setError("");
+                      }}
+                    >
+                      Cambiar n\u00famero
+                    </button>
+                  )}
+                </div>
+
+                {/* RIGHT: OTP Code */}
+                <div className={`rounded-2xl border p-5 transition-all ${
+                  otpSent
+                    ? "border-primary/30 bg-card shadow-sm"
+                    : "border-border/50 bg-muted/10 opacity-50 pointer-events-none"
+                }`}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
+                      otpSent
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    }`}>2</div>
+                    <h3 className="text-sm font-semibold text-foreground">C\u00f3digo de verificaci\u00f3n</h3>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mb-3">
+                    {otpSent
+                      ? `Enviado a ${selectedCountry.code} ${phoneNumber}`
+                      : "Ingresa el c\u00f3digo de 6 d\u00edgitos que recibir\u00e1s."}
+                  </p>
+
+                  {devCode && otpSent && (
+                    <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-2.5 text-center mb-3">
+                      <p className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold uppercase tracking-wider">Dev code</p>
+                      <p className="text-xl font-mono text-amber-900 dark:text-amber-200 tracking-[0.3em]">{devCode}</p>
+                    </div>
+                  )}
+
+                  {/* OTP boxes */}
+                  <div className="flex justify-center mb-4">
+                    <InputOTP
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(val) => setOtpCode(val)}
+                      data-testid="input-otp-code"
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                        <InputOTPSlot index={1} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                        <InputOTPSlot index={2} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                      </InputOTPGroup>
+                      <InputOTPSeparator />
+                      <InputOTPGroup>
+                        <InputOTPSlot index={3} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                        <InputOTPSlot index={4} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                        <InputOTPSlot index={5} className="w-10 h-12 text-lg font-mono rounded-lg border-input" />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+
+                  <Button
+                    className="w-full h-11 text-sm bg-primary hover:bg-primary/90 border border-border text-primary-foreground font-semibold transition-colors rounded-xl"
+                    onClick={handleVerifyOtp}
+                    disabled={isPhoneLoading || otpCode.length !== 6}
+                    data-testid="button-verify-otp"
                   >
-                    Reenviar código
+                    {isPhoneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verificar e ingresar"}
                   </Button>
-                </>
+
+                  {otpSent && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground mt-2 inline-block"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtpCode("");
+                        setDevCode(null);
+                        setError("");
+                        handleSendOtp();
+                      }}
+                    >
+                      Reenviar c\u00f3digo
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Error / success messages */}
+              {error && (
+                <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-2 px-3 rounded-lg">
+                  {error}
+                </p>
+              )}
+
+              {successMessage && !error && otpSent && (
+                <p className="text-sm text-emerald-700 text-center bg-emerald-50 border border-emerald-200 py-2 px-3 rounded-lg">
+                  {successMessage}
+                </p>
               )}
             </div>
           )}
@@ -797,13 +956,13 @@ export default function LoginPage() {
           {!showPhoneAuth && (
             allowRegistration ? (
               <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
-                ¿No tienes una cuenta?{" "}
+                \u00bfNo tienes una cuenta?{" "}
                 <button
                   onClick={() => setLocation("/signup")}
                   className="text-foreground font-semibold hover:underline transition-colors"
                   data-testid="link-goto-signup"
                 >
-                  Suscríbete gratis
+                  Suscr\u00edbete gratis
                 </button>
               </p>
             ) : (

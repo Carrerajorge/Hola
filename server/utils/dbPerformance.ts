@@ -50,25 +50,55 @@ export async function batchInsert<T>(
   }
 }
 
+/** Allowed table names for batch updates (whitelist to prevent SQL injection) */
+const ALLOWED_TABLES = new Set([
+  "users", "chats", "chat_messages", "files", "payments", "invoices",
+  "api_logs", "billing_credit_grants", "spreadsheet_uploads",
+  "knowledge_documents", "gpt_configs", "audit_logs",
+]);
+
+/** Allowed column name pattern: only alphanumeric + underscore */
+const SAFE_COLUMN_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+
 /**
- * Batch update with chunking
+ * Batch update with chunking — uses parameterized queries to prevent SQL injection.
+ * Table names and column names are validated against whitelists.
+ * Values are passed as parameterized bindings via Drizzle's sql`` template.
  */
 export async function batchUpdate(
   tableName: string,
   updates: Array<{ id: string; data: Record<string, any> }>,
   chunkSize: number = 100
 ): Promise<void> {
+  if (!ALLOWED_TABLES.has(tableName)) {
+    throw new Error(`[batchUpdate] Table "${tableName}" is not in the whitelist`);
+  }
   for (let i = 0; i < updates.length; i += chunkSize) {
     const chunk = updates.slice(i, i + chunkSize);
-    
-    // Use transaction for batch
+
     await db.transaction(async (tx) => {
       for (const update of chunk) {
-        const setClauses = Object.entries(update.data)
-          .map(([key, value]) => `${key} = '${value}'`)
-          .join(', ');
-        
-        await tx.execute(sql.raw(`UPDATE ${tableName} SET ${setClauses} WHERE id = '${update.id}'`));
+        const entries = Object.entries(update.data);
+        if (entries.length === 0) continue;
+
+        // Validate column names against strict pattern
+        for (const [key] of entries) {
+          if (!SAFE_COLUMN_RE.test(key)) {
+            throw new Error(`[batchUpdate] Invalid column name: "${key}"`);
+          }
+        }
+
+        // Build parameterized query using Drizzle sql template.
+        // Column names are validated above (safe identifiers only).
+        // Values + id are bound as parameters (never interpolated).
+        const setFragments = entries.map(
+          ([key, value]) => sql.join([sql.raw(key), sql` = ${value}`])
+        );
+        const setClause = sql.join(setFragments, sql`, `);
+
+        await tx.execute(
+          sql`UPDATE ${sql.raw(tableName)} SET ${setClause} WHERE id = ${update.id}`
+        );
       }
     });
   }
@@ -132,19 +162,22 @@ export async function getTableStats(tableName: string): Promise<{
   sizeBytes: number;
   indexCount: number;
 }> {
+  if (!SAFE_COLUMN_RE.test(tableName)) {
+    throw new Error(`[getTableStats] Invalid table name: "${tableName}"`);
+  }
   try {
-    const [countResult] = await db.execute(sql.raw(`
-      SELECT COUNT(*) as count FROM ${tableName}
-    `)) as any;
-    
+    const [countResult] = await db.execute(
+      sql`SELECT COUNT(*) as count FROM ${sql.raw(tableName)}`
+    ) as any;
+
     const [sizeResult] = await db.execute(sql`
       SELECT pg_total_relation_size(${tableName}) as size
     `) as any;
-    
+
     const [indexResult] = await db.execute(sql`
       SELECT COUNT(*) as count FROM pg_indexes WHERE tablename = ${tableName}
     `) as any;
-    
+
     return {
       rowCount: parseInt(countResult?.count || '0'),
       sizeBytes: parseInt(sizeResult?.size || '0'),
@@ -159,7 +192,10 @@ export async function getTableStats(tableName: string): Promise<{
  * Vacuum table (PostgreSQL maintenance)
  */
 export async function vacuumTable(tableName: string): Promise<void> {
-  await db.execute(sql.raw(`VACUUM ANALYZE ${tableName}`));
+  if (!SAFE_COLUMN_RE.test(tableName)) {
+    throw new Error(`[vacuumTable] Invalid table name: "${tableName}"`);
+  }
+  await db.execute(sql`VACUUM ANALYZE ${sql.raw(tableName)}`);
 }
 
 /**

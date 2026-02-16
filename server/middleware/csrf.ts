@@ -48,7 +48,8 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         return next();
     }
 
-    // Exempt pre-authentication endpoints and essential API routes from CSRF
+    // Exempt pre-auth and webhook endpoints from CSRF.
+    // Webhooks are validated with provider signatures; auth endpoints are not session-authenticated yet.
     const CSRF_EXEMPT_PATHS = [
         "/api/auth/login",
         "/api/auth/admin-login",
@@ -61,95 +62,16 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/auth/magic-link/verify",
         "/api/callback",
         "/api/login",
+        "/api/webhooks",
     ];
 
-    // Also exempt chat API routes (session cookie is sufficient auth)
-    // Note: security-sensitive routes like /api/api-keys/, /api/security/, /api/settings/
-    // are NOT exempted and require CSRF tokens for state-changing requests.
-    const CSRF_EXEMPT_PREFIXES_EXTENDED = [
-        "/api/chat/",
-        "/api/chat",
-        "/api/chats/",
-        "/api/chats",
-        "/api/super/",
-        "/api/super-agent/",
-        "/api/runs/",
-        "/api/image/",
-        "/api/user/",
-        "/api/users/",
-        "/api/memory/",
-        "/api/sandbox/",
-        "/api/agent/",
-        "/api/agents/",
-        "/api/word-pipeline/",
-        "/api/ai/",
-        "/api/spreadsheet/",
-        "/api/document",
-        "/api/gpts/",
-        "/api/gpts",
-        "/api/files/",
-        "/api/folders/",
-        "/api/rag/",
-        "/api/power/",
-        "/api/academic/",
-        "/api/ppt/",
-        "/api/ppt",
-        "/api/integrations/",
-        "/api/oauth/",
-        "/api/orchestrator/",
-        "/api/templates/",
-        "/api/sse/",
-        "/api/streaming/",
-        "/api/context/",
-        "/api/execution/",
-        "/api/scientific/",
-        "/api/planning/",
-        "/api/document-analysis/",
-        "/api/feedback/",
-        "/api/superintelligence/",
-        "/api/super-intelligence/",
-        "/api/understanding/",
-        "/api/audit/",
-        "/api/browser-control/",
-        "/api/terminal/",
-        "/api/workflows/",
-        "/api/artifacts/",
-        "/api/python-agent/",
-        "/api/observability/",
-        "/api/connectors/",
-        "/api/tools",
-        "/api/models/",
-        "/api/session/",
-        "/api/errors/",
-        "/api/2fa/",
-        "/api/openclaw/",
-        "/api/objects/",
-        "/api/objects",
-        "/api/local-upload/",
-        "/api/local-upload",
-        "/api/local-files/",
-        "/api/files",
-        "/api/analyze",
-        "/api/library/",
-        "/api/library",
-    ];
-    if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
+    if (CSRF_EXEMPT_PATHS.some((path) => req.path === path || req.originalUrl === path)) {
         return next();
     }
 
-    // Also exempt paths that start with certain prefixes
-    const CSRF_EXEMPT_PREFIXES = [
-        "/api/webhooks", // Webhooks (Stripe, etc) usually have their own signature verification
-    ];
-
-    if (CSRF_EXEMPT_PATHS.some(path => req.path === path || req.originalUrl === path)) {
+    if (req.path.startsWith("/api/webhooks") || req.originalUrl.startsWith("/api/webhooks")) {
         return next();
     }
-
-    if (CSRF_EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
-        return next();
-    }
-
 
     const cookies = ensureCookies(req);
 

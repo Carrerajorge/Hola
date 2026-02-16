@@ -19,6 +19,7 @@ async function cleanupDirectory(dirPath: string) {
     const files = await fs.readdir(fullPath);
     const now = Date.now();
     let deletedCount = 0;
+    let deletedDirs = 0;
 
     for (const file of files) {
       if (file === ".gitkeep") continue;
@@ -29,8 +30,8 @@ async function cleanupDirectory(dirPath: string) {
         if (now - stats.mtimeMs > MAX_AGE_MS) {
           // Es viejo, borrar
           if (stats.isDirectory()) {
-            // Opcional: borrar subdirectorios viejos recursivamente si se desea
-            // await fs.rm(filePath, { recursive: true, force: true });
+            await fs.rm(filePath, { recursive: true, force: true });
+            deletedDirs++;
           } else {
             await fs.unlink(filePath);
             deletedCount++;
@@ -41,8 +42,8 @@ async function cleanupDirectory(dirPath: string) {
       }
     }
 
-    if (deletedCount > 0) {
-      Logger.info(`[Cleanup] Deleted ${deletedCount} old files from ${dirPath}`);
+    if (deletedCount > 0 || deletedDirs > 0) {
+      Logger.info(`[Cleanup] Deleted ${deletedCount} old files and ${deletedDirs} old directories from ${dirPath}`);
     }
   } catch (error) {
     Logger.error(`[Cleanup] Failed to cleanup ${dirPath}:`, error);

@@ -17,6 +17,21 @@ const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interva
   price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
 
+/** Valid subscription amounts (cents) — reject anything not on this list */
+const VALID_PLAN_AMOUNTS = new Set([500, 1000, 2500, 20000]);
+
+/** Webhook event idempotency cache — prevents replayed events (TTL: 24h) */
+const processedWebhookEvents = new Map<string, number>();
+const WEBHOOK_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function cleanupWebhookCache() {
+  const now = Date.now();
+  for (const [id, ts] of processedWebhookEvents.entries()) {
+    if (now - ts > WEBHOOK_IDEMPOTENCY_TTL_MS) processedWebhookEvents.delete(id);
+  }
+  if (processedWebhookEvents.size > 10_000) processedWebhookEvents.clear();
+}
+
 const BILLING_CONTACT_COOLDOWN_MS = 10 * 60 * 1000;
 const billingContactCooldown = new Map<string, number>();
 const billingContactIpCooldown = new Map<string, number>();
@@ -280,9 +295,21 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión para suscribirte" });
       }
 
-      const { priceId, utmSource, utmMedium, utmCampaign, referrer } = req.body;
-      if (!priceId) {
-        return res.status(400).json({ error: "priceId is required" });
+      const parsedCheckout = z.object({
+        priceId: z.string().trim().min(1).max(200),
+        utmSource: z.string().trim().max(100).optional(),
+        utmMedium: z.string().trim().max(100).optional(),
+        utmCampaign: z.string().trim().max(100).optional(),
+        referrer: z.string().trim().max(200).optional(),
+      }).safeParse(req.body);
+      if (!parsedCheckout.success) {
+        return res.status(400).json({ error: "Invalid request body" });
+      }
+      const { priceId, utmSource, utmMedium, utmCampaign, referrer } = parsedCheckout.data;
+
+      // Validate priceId format (must look like a Stripe price ID)
+      if (!priceId.startsWith("price_")) {
+        return res.status(400).json({ error: "Invalid priceId format" });
       }
 
       const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
@@ -493,19 +520,25 @@ export function createStripeRouter() {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
     if (!sig || !webhookSecret) {
-      return res.status(400).send("Webhook Error: Missing signature or secret");
+      return res.status(400).json({ error: "Bad request" });
     }
 
     let event;
 
     try {
       const stripe = await getUncachableStripeClient();
-      // Use rawBody from server/index.ts middleware
       event = stripe.webhooks.constructEvent((req as any).rawBody, sig, webhookSecret);
     } catch (err: any) {
-      console.error(`Webhook signature verification failed: ${err.message}`);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
+      console.error(`[Stripe Webhook] Signature verification failed: ${err.message}`);
+      return res.status(400).json({ error: "Webhook signature verification failed" });
     }
+
+    // Idempotency: skip already-processed events
+    if (processedWebhookEvents.has(event.id)) {
+      return res.json({ received: true, deduplicated: true });
+    }
+    processedWebhookEvents.set(event.id, Date.now());
+    cleanupWebhookCache();
 
     try {
       const { usageQuotaService } = await import("../services/usageQuotaService");
@@ -832,7 +865,7 @@ export function createStripeRouter() {
       res.json({ received: true });
     } catch (err: any) {
       console.error(`[Stripe Webhook] Handler error for ${event.type}: ${err.message}`);
-      res.status(500).send(`Webhook Handler Error: ${err.message}`);
+      res.status(500).json({ error: "Internal webhook error" });
     }
   });
 

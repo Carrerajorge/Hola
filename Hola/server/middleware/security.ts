@@ -12,7 +12,6 @@ export const setupSecurity = (app: Express) => {
           scriptSrc: [
             "'self'",
             "'unsafe-inline'", // Required for React/Vite hydration
-            // Only allow unsafe-eval in development (needed for dev tools/HMR)
             ...(isProduction ? [] : ["'unsafe-eval'"]),
             "https://js.stripe.com",
             "https://accounts.google.com",
@@ -56,12 +55,24 @@ export const setupSecurity = (app: Express) => {
           baseUri: ["'self'"],
           formAction: ["'self'", "https://accounts.google.com"],
           frameAncestors: ["'self'"],
-          upgradeInsecureRequests: [],
+          workerSrc: ["'self'", "blob:"],
+          ...(isProduction ? { upgradeInsecureRequests: [] } : {}),
         },
       },
-      crossOriginEmbedderPolicy: false, // Can break cross-origin resource loading
+      crossOriginEmbedderPolicy: false,
       crossOriginResourcePolicy: { policy: "cross-origin" },
       crossOriginOpenerPolicy: { policy: "same-origin" },
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+      hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
     })
   );
+
+  // Permissions-Policy: restrict sensitive browser APIs
+  app.use((_req, res, next) => {
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=(self), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
+    );
+    next();
+  });
 };

@@ -66,6 +66,25 @@ function setStoredUser(user: User | null): void {
   }
 }
 
+function parseUserPayload(payload: unknown): User | null {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Record<string, unknown>;
+  if (typeof data.id !== "string" || data.id.trim().length === 0 || data.id.length > 128) {
+    return null;
+  }
+  return {
+    id: data.id,
+    email: typeof data.email === "string" ? data.email : undefined,
+    fullName: typeof data.fullName === "string" ? data.fullName : undefined,
+    role: typeof data.role === "string" ? data.role : undefined,
+    plan: typeof data.plan === "string" ? data.plan : undefined,
+    avatarUrl: typeof data.avatarUrl === "string" ? data.avatarUrl : undefined,
+    isAnonymous: data.isAnonymous === true,
+    username: typeof data.username === "string" ? data.username : undefined,
+    authProvider: typeof data.authProvider === "string" ? data.authProvider : undefined,
+  } as User;
+}
+
 function clearOldUserData(): void {
   try {
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -150,7 +169,11 @@ async function fetchUser(): Promise<User | null> {
   });
 
   if (response.ok) {
-    const user = await response.json();
+    const user = parseUserPayload(await response.json());
+    if (!user) {
+      clearOldUserData();
+      return null;
+    }
     setStoredUser(user);
     clearAnonUserId();
     setForcedSignedOut(false);

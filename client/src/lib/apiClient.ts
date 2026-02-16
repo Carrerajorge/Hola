@@ -6,7 +6,16 @@ function getCookie(name: string): string | null {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
+function resolveSafeUrl(url: string): string {
+  const target = new URL(url, window.location.origin);
+  if (target.origin !== window.location.origin) {
+    throw new Error("Cross-origin requests are not allowed");
+  }
+  return target.toString();
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const safeUrl = resolveSafeUrl(url);
   const anonUserId = getStoredAnonUserId();
   const anonToken = getStoredAnonToken();
   const headers = new Headers(options.headers);
@@ -25,7 +34,7 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
     headers.set("X-CSRF-Token", csrfToken);
   }
 
-  return fetch(url, {
+  return fetch(safeUrl, {
     ...options,
     headers,
     credentials: "include",

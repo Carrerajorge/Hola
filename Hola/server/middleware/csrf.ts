@@ -120,8 +120,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/session/",
         "/api/errors/",
         "/api/2fa/",
-        "/api/security/",
-        "/api/api-keys/",
+        // NOTE: /api/security/ and /api/api-keys/ intentionally NOT exempted — they require CSRF tokens
         "/api/openclaw/",
         "/api/objects/",
         "/api/objects",
@@ -130,8 +129,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/local-files/",
         "/api/files",
         "/api/analyze",
-        "/api/settings/",
-        "/api/settings",
+        // NOTE: /api/settings/ intentionally NOT exempted — settings changes require CSRF tokens
         "/api/library/",
         "/api/library",
         "/api/integrations/",

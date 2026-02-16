@@ -279,7 +279,7 @@ class AuthStorage implements IAuthStorage {
           authProvider: userData.authProvider ?? "email",
           emailVerified: userData.emailVerified ?? "false",
           // Use a builtin workspace admin role by default so RBAC + workspace settings work out of the box.
-          role: userData.role ?? "team_admin",
+          role: userData.role ?? "user",
           plan: "free",
           createdAt: new Date(),
           updatedAt: new Date(),
