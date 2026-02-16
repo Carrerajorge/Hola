@@ -186,7 +186,7 @@
     "katex": "^0.16.27",
     "konva": "^10.0.12",
     "lru-cache": "^11.2.4",
-    "lucide-react": "^0.563.0",
+    "lucide-react": "^0.564.0",
     "mammoth": "^1.11.0",
     "mathjax": "^3.2.2",
     "memoizee": "^0.4.17",
