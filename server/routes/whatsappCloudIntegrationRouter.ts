@@ -5,6 +5,7 @@ import { db } from "../db";
 import { getUserId } from "../types/express";
 import { integrationAccounts } from "@shared/schema";
 import { ensureIntegrationCatalogSeeded } from "../services/integrationCatalog";
+import { extractRuntimeSettings, runtimeSettingsUpdateSchema, withRuntimeSettingsMetadata } from "../channels/runtimeConfigHttp";
 
 const connectSchema = z
   .object({
@@ -53,7 +54,7 @@ export function createWhatsAppCloudIntegrationRouter(): Router {
     const now = new Date();
 
     const [existing] = await db
-      .select({ id: integrationAccounts.id })
+      .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
       .from(integrationAccounts)
       .where(
         and(
@@ -72,6 +73,7 @@ export function createWhatsAppCloudIntegrationRouter(): Router {
           displayName: displayName ?? integrationAccounts.displayName,
           status: "active",
           metadata: {
+            ...(existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {}),
             phoneNumberId,
             wabaId: wabaId ?? null,
           },
@@ -96,6 +98,54 @@ export function createWhatsAppCloudIntegrationRouter(): Router {
     });
 
     return res.json({ success: true, created: true });
+  });
+
+  router.get("/settings", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const phoneNumberId = typeof req.query.phoneNumberId === "string" ? req.query.phoneNumberId : "";
+    if (!phoneNumberId) return res.status(400).json({ error: "phoneNumberId is required" });
+
+    const [account] = await db
+      .select({ metadata: integrationAccounts.metadata })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.providerId, "whatsapp_cloud"),
+        sql`${integrationAccounts.metadata} ->> 'phoneNumberId' = ${phoneNumberId}`,
+      ))
+      .limit(1);
+
+    return res.json({ success: true, settings: extractRuntimeSettings(account?.metadata) });
+  });
+
+  router.put("/settings", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const phoneNumberId = typeof req.body?.phoneNumberId === "string" ? req.body.phoneNumberId : "";
+    if (!phoneNumberId) return res.status(400).json({ error: "phoneNumberId is required" });
+
+    const rawSettings = req.body?.settings ?? (({ phoneNumberId: _omit, ...rest }: any) => rest)(req.body ?? {});
+    const parsed = runtimeSettingsUpdateSchema.safeParse(rawSettings);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid settings", details: parsed.error.message });
+
+    const [account] = await db
+      .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.providerId, "whatsapp_cloud"),
+        sql`${integrationAccounts.metadata} ->> 'phoneNumberId' = ${phoneNumberId}`,
+      ))
+      .limit(1);
+
+    if (!account) return res.status(404).json({ error: "Integration account not found" });
+
+    await db.update(integrationAccounts)
+      .set({ metadata: withRuntimeSettingsMetadata(account.metadata, parsed.data), updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, account.id));
+
+    return res.json({ success: true, settings: extractRuntimeSettings(withRuntimeSettingsMetadata(account.metadata, parsed.data)) });
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {

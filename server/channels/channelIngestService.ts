@@ -12,6 +12,7 @@ import {
   findWhatsAppCloudAccountByPhoneNumberId,
   findMessengerAccountByPageId,
   findWeChatAccountByAppId,
+  findTelegramAccountByUserId,
 } from "./channelStore";
 import { telegramSendMessage, telegramSendDocument } from "./telegram/telegramApi";
 import { sendWhatsAppCloudText, sendWhatsAppCloudDocument } from "./whatsappCloud/whatsappCloudApi";
@@ -21,6 +22,8 @@ import { evaluateMessengerPolicy } from "./messenger/messengerPolicy";
 import { wechatSendText, wechatSendDocument, parseWeChatXml } from "./wechat/wechatApi";
 import { evaluateWeChatPolicy } from "./wechat/wechatPolicy";
 import { createUnifiedRun, executeUnifiedChat } from "../agent/unifiedChatHandler";
+import { normalizeMessengerMessages, normalizeWeChatMessage, normalizeWhatsAppMessages } from "./inboundNormalization";
+import { buildResponseStyleSystemPrompt, isSenderAllowedByPolicy, resolveRuntimeConfig } from "./runtimeConfig";
 import { MemorySseResponse } from "../integrations/whatsappWebAutoReply";
 import type { Response } from "express";
 import fs from "fs/promises";
@@ -229,6 +232,29 @@ async function sendChannelArtifacts(
   }
 }
 
+const inboundMessageDedupe = new Map<string, number>();
+const senderRateWindow = new Map<string, number[]>();
+const DEDUPE_TTL_MS = 10 * 60 * 1000;
+
+function isDuplicateInbound(key: string): boolean {
+  const now = Date.now();
+  for (const [k, ts] of inboundMessageDedupe.entries()) {
+    if (now - ts > DEDUPE_TTL_MS) inboundMessageDedupe.delete(k);
+  }
+  if (inboundMessageDedupe.has(key)) return true;
+  inboundMessageDedupe.set(key, now);
+  return false;
+}
+
+function isRateLimited(senderKey: string, limitPerMinute: number): boolean {
+  const now = Date.now();
+  const windowStart = now - 60_000;
+  const bucket = (senderRateWindow.get(senderKey) ?? []).filter((t) => t >= windowStart);
+  bucket.push(now);
+  senderRateWindow.set(senderKey, bucket);
+  return bucket.length > limitPerMinute;
+}
+
 function parseTelegramStartCode(text: string): string | null {
   const trimmed = text.trim();
   const first = trimmed.split(/\s+/)[0] || "";
@@ -323,7 +349,17 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
     return;
   }
 
-  const requestId = `telegram:${inbound.tgChatId}:${inbound.tgMessageId}`;
+  const senderId = inbound.from?.id != null ? String(inbound.from.id) : inbound.tgChatId;
+  const providerMessageId = inbound.tgMessageId;
+  if (isDuplicateInbound(`telegram:default:${providerMessageId}`)) return;
+
+  const telegramAccount = await findTelegramAccountByUserId(convo.userId);
+  const runtimeConfig = resolveRuntimeConfig(telegramAccount?.metadata);
+  if (!runtimeConfig.responder_enabled) return;
+  if (!isSenderAllowedByPolicy(runtimeConfig, senderId)) return;
+  if (isRateLimited(`telegram:${senderId}`, runtimeConfig.rate_limit_per_minute)) return;
+
+  const requestId = `telegram:${inbound.tgChatId}:${providerMessageId}`;
   const userMsg = await upsertUserMessage({
     chatId: convo.chatId,
     requestId,
@@ -332,10 +368,11 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
       channel: "telegram",
       channelKey: "default",
       externalConversationId: inbound.tgChatId,
+      messageType: "text",
       telegram: {
         updateId: inbound.updateId,
-        messageId: inbound.tgMessageId,
-        fromId: inbound.from?.id != null ? String(inbound.from.id) : null,
+        messageId: providerMessageId,
+        fromId: senderId,
         username: inbound.from?.username ?? null,
       },
     },
@@ -344,7 +381,11 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
   const already = await getAssistantForUserMessage(userMsg.id);
   if (already) return;
 
-  const messages = [{ role: "user" as const, content: inbound.text }];
+  const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "Telegram");
+  const messages = [
+    ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
+    { role: "user" as const, content: inbound.text },
+  ];
 
   const { assistantText, memRes } = await runChannelLlm({
     channel: "Telegram",
@@ -382,50 +423,8 @@ async function handleTelegram(updateUnknown: unknown): Promise<void> {
   }
 }
 
-type WhatsAppInbound = {
-  phoneNumberId: string;
-  from: string;
-  messageId: string;
-  text: string;
-  contactName: string | null;
-};
-
-function extractWhatsAppInbounds(payload: any): WhatsAppInbound[] {
-  const inbounds: WhatsAppInbound[] = [];
-  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
-  for (const entry of entries) {
-    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-    for (const change of changes) {
-      const value = change?.value;
-      const phoneNumberId = value?.metadata?.phone_number_id;
-      const messages = Array.isArray(value?.messages) ? value.messages : [];
-      if (!phoneNumberId) continue;
-
-      const contactName =
-        Array.isArray(value?.contacts) && value.contacts[0]?.profile?.name
-          ? String(value.contacts[0].profile.name)
-          : null;
-
-      for (const m of messages) {
-        if (!m || m.type !== "text") continue;
-        const body = m?.text?.body;
-        if (typeof body !== "string" || !body.trim()) continue;
-        if (!m.from || !m.id) continue;
-        inbounds.push({
-          phoneNumberId: String(phoneNumberId),
-          from: String(m.from),
-          messageId: String(m.id),
-          text: body,
-          contactName,
-        });
-      }
-    }
-  }
-  return inbounds;
-}
-
 async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
-  const inbounds = extractWhatsAppInbounds(payloadUnknown as any);
+  const inbounds = normalizeWhatsAppMessages(payloadUnknown as any);
   if (inbounds.length === 0) return;
 
   for (const inbound of inbounds) {
@@ -436,26 +435,32 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
     if (!userId) {
       Logger.warn("[WhatsAppCloud] No owner user configured for phone_number_id", {
         phoneNumberId: inbound.phoneNumberId,
-        from: inbound.from,
+        from: inbound.senderId,
       });
       continue;
     }
+
+    const runtimeConfig = resolveRuntimeConfig(account?.metadata);
+    if (!runtimeConfig.responder_enabled) continue;
+    if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) continue;
+    if (isDuplicateInbound(`whatsapp_cloud:${inbound.phoneNumberId}:${inbound.providerMessageId}`)) continue;
+    if (isRateLimited(`whatsapp_cloud:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) continue;
 
     const convo = await getOrCreateChannelConversation({
       userId,
       channel: "whatsapp_cloud",
       channelKey: inbound.phoneNumberId,
-      externalConversationId: inbound.from,
-      title: `WhatsApp: ${inbound.contactName ? inbound.contactName : inbound.from}`,
+      externalConversationId: inbound.senderId,
+      title: `WhatsApp: ${inbound.contactName ? inbound.contactName : inbound.senderId}`,
       metadata: {
         whatsapp: {
           phoneNumberId: inbound.phoneNumberId,
-          from: inbound.from,
+          from: inbound.senderId,
         },
       },
     });
 
-    const requestId = `whatsapp_cloud:${inbound.phoneNumberId}:${inbound.messageId}`;
+    const requestId = `whatsapp_cloud:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
     const userMsg = await upsertUserMessage({
       chatId: convo.chatId,
       requestId,
@@ -463,11 +468,12 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
       metadata: {
         channel: "whatsapp_cloud",
         channelKey: inbound.phoneNumberId,
-        externalConversationId: inbound.from,
+        externalConversationId: inbound.senderId,
+        messageType: inbound.messageType,
         whatsapp: {
           phoneNumberId: inbound.phoneNumberId,
-          messageId: inbound.messageId,
-          from: inbound.from,
+          messageId: inbound.providerMessageId,
+          from: inbound.senderId,
           contactName: inbound.contactName,
         },
       },
@@ -479,7 +485,7 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
     const decision = evaluateWhatsAppPolicy(inbound.text, { baseUrl: env.BASE_URL });
 
     if (!decision.allowed) {
-      const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.messageId}`;
+      const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
       await upsertAssistantMessage({
         chatId: convo.chatId,
         requestId: assistantRequestId,
@@ -496,7 +502,7 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
         try {
           await sendWhatsAppCloudText({
             phoneNumberId: inbound.phoneNumberId,
-            to: inbound.from,
+            to: inbound.senderId,
             text: decision.reply,
             accessToken,
           });
@@ -507,14 +513,16 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
       continue;
     }
 
-    const systemPrompt =
+    const baseSystemPrompt =
       "Eres un asistente de un negocio atendiendo por WhatsApp. " +
       "Tu alcance es: reservas, soporte y seguimiento. " +
       "Responde breve y pide solo los datos minimos necesarios. " +
       "No ofrezcas acciones fuera de esos flujos.";
 
+    const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "WhatsApp");
     const messages = [
-      { role: "system" as const, content: systemPrompt },
+      { role: "system" as const, content: baseSystemPrompt },
+      ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
       { role: "user" as const, content: inbound.text },
     ];
 
@@ -527,7 +535,7 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
       fallbackText: "Ahora mismo no puedo atender tu solicitud. Intenta de nuevo en unos minutos.",
     });
 
-    const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.messageId}`;
+    const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
 
     await upsertAssistantMessage({
       chatId: convo.chatId,
@@ -545,7 +553,7 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
       try {
         await sendWhatsAppCloudText({
           phoneNumberId: inbound.phoneNumberId,
-          to: inbound.from,
+          to: inbound.senderId,
           text: assistantText,
           accessToken,
         });
@@ -553,9 +561,8 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
         Logger.error("[WhatsAppCloud] Failed to send reply", err);
       }
 
-      // Send generated artifacts (documents) if any
       try {
-        await sendChannelArtifacts(memRes, "whatsapp_cloud", inbound.from, {
+        await sendChannelArtifacts(memRes, "whatsapp_cloud", inbound.senderId, {
           phoneNumberId: inbound.phoneNumberId,
           accessToken,
         });
@@ -568,55 +575,25 @@ async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
 
 // ── Messenger ─────────────────────────────────────────────────────
 
-type MessengerInbound = {
-  senderId: string;
-  recipientId: string;
-  messageId: string;
-  text: string;
-  timestamp: number;
-};
-
-function extractMessengerInbounds(payload: any): MessengerInbound[] {
-  const inbounds: MessengerInbound[] = [];
-  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
-  for (const entry of entries) {
-    const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-    for (const event of messaging) {
-      // Skip echo messages (messages sent BY our page, not TO it) to prevent infinite loops
-      if (event?.message?.is_echo) continue;
-      // Skip delivery/read receipts
-      if (event?.delivery || event?.read) continue;
-      const senderId = event?.sender?.id;
-      const recipientId = event?.recipient?.id;
-      const message = event?.message;
-      if (!senderId || !recipientId || !message) continue;
-      const text = message?.text;
-      if (typeof text !== "string" || !text.trim()) continue;
-      inbounds.push({
-        senderId: String(senderId),
-        recipientId: String(recipientId),
-        messageId: String(message.mid || `msg_${Date.now()}`),
-        text,
-        timestamp: event.timestamp || Date.now(),
-      });
-    }
-  }
-  return inbounds;
-}
-
 async function handleMessenger(payloadUnknown: unknown): Promise<void> {
-  const inbounds = extractMessengerInbounds(payloadUnknown as any);
+  const inbounds = normalizeMessengerMessages(payloadUnknown as any);
   if (inbounds.length === 0) return;
 
   for (const inbound of inbounds) {
-    const account = await findMessengerAccountByPageId(inbound.recipientId);
+    const account = await findMessengerAccountByPageId(inbound.recipientId || "");
     const userId = account?.userId || env.MESSENGER_DEFAULT_USER_ID || null;
     const accessToken = account?.accessToken || env.MESSENGER_PAGE_ACCESS_TOKEN || null;
 
-    if (!userId) {
+    if (!userId || !inbound.recipientId) {
       Logger.warn("[Messenger] No owner user configured for page", { pageId: inbound.recipientId, senderId: inbound.senderId });
       continue;
     }
+
+    const runtimeConfig = resolveRuntimeConfig(account?.metadata);
+    if (!runtimeConfig.responder_enabled) continue;
+    if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) continue;
+    if (isDuplicateInbound(`messenger:${inbound.recipientId}:${inbound.providerMessageId}`)) continue;
+    if (isRateLimited(`messenger:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) continue;
 
     const convo = await getOrCreateChannelConversation({
       userId,
@@ -627,7 +604,7 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
       metadata: { messenger: { pageId: inbound.recipientId, senderId: inbound.senderId } },
     });
 
-    const requestId = `messenger:${inbound.recipientId}:${inbound.messageId}`;
+    const requestId = `messenger:${inbound.recipientId}:${inbound.providerMessageId}`;
     const userMsg = await upsertUserMessage({
       chatId: convo.chatId,
       requestId,
@@ -636,7 +613,8 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
         channel: "messenger",
         channelKey: inbound.recipientId,
         externalConversationId: inbound.senderId,
-        messenger: { messageId: inbound.messageId, senderId: inbound.senderId },
+        messageType: inbound.messageType,
+        messenger: { messageId: inbound.providerMessageId, senderId: inbound.senderId },
       },
     });
 
@@ -645,7 +623,7 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
 
     const decision = evaluateMessengerPolicy(inbound.text);
     if (!decision.allowed) {
-      const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.messageId}`;
+      const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
       await upsertAssistantMessage({
         chatId: convo.chatId,
         requestId: assistantRequestId,
@@ -663,7 +641,11 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
       continue;
     }
 
-    const messages = [{ role: "user" as const, content: inbound.text }];
+    const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "Messenger");
+    const messages = [
+      ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
+      { role: "user" as const, content: inbound.text },
+    ];
 
     const { assistantText, memRes } = await runChannelLlm({
       channel: "Messenger",
@@ -674,7 +656,7 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
       fallbackText: "No puedo responder en este momento. Intenta de nuevo más tarde.",
     });
 
-    const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.messageId}`;
+    const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
 
     await upsertAssistantMessage({
       chatId: convo.chatId,
@@ -701,15 +683,6 @@ async function handleMessenger(payloadUnknown: unknown): Promise<void> {
 
 // ── WeChat ────────────────────────────────────────────────────────
 
-type WeChatInbound = {
-  toUserName: string;
-  fromUserName: string;
-  msgId: string;
-  msgType: string;
-  content: string;
-  createTime: number;
-};
-
 type WeChatParsed = {
   toUserName: string;
   fromUserName: string;
@@ -734,29 +707,6 @@ function parseWeChatPayload(payloadUnknown: unknown): WeChatParsed | null {
   };
 }
 
-function extractWeChatInbound(payloadUnknown: unknown): WeChatInbound | null {
-  const raw = typeof payloadUnknown === "string" ? payloadUnknown : null;
-  if (!raw) return null;
-
-  const parsed = parseWeChatXml(raw);
-  if (!parsed) return null;
-
-  const msgType = parsed.MsgType;
-  if (msgType !== "text") return null;
-
-  const content = parsed.Content;
-  if (!content || !content.trim()) return null;
-
-  return {
-    toUserName: parsed.ToUserName || "",
-    fromUserName: parsed.FromUserName || "",
-    msgId: parsed.MsgId || `wc_${Date.now()}`,
-    msgType,
-    content,
-    createTime: parseInt(parsed.CreateTime || "0", 10),
-  };
-}
-
 async function handleWeChat(payloadUnknown: unknown): Promise<void> {
   // Handle subscribe events (new followers) with a welcome message
   const wechatEvent = parseWeChatPayload(payloadUnknown);
@@ -778,7 +728,10 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
     return;
   }
 
-  const inbound = extractWeChatInbound(payloadUnknown);
+  const raw = typeof payloadUnknown === "string" ? payloadUnknown : null;
+  if (!raw) return;
+  const parsed = parseWeChatXml(raw);
+  const inbound = parsed ? normalizeWeChatMessage(raw, parsed) : null;
   if (!inbound) return;
 
   const appId = env.WECHAT_APP_ID || null;
@@ -786,39 +739,46 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
   const account = appId ? await findWeChatAccountByAppId(appId) : null;
   const userId = account?.userId || env.WECHAT_DEFAULT_USER_ID || null;
 
-  if (!userId) {
-    Logger.warn("[WeChat] No owner user configured", { appId, fromUserName: inbound.fromUserName });
+  if (!userId || !inbound.recipientId) {
+    Logger.warn("[WeChat] No owner user configured", { appId, senderId: inbound.senderId });
     return;
   }
+
+  const runtimeConfig = resolveRuntimeConfig(account?.metadata);
+  if (!runtimeConfig.responder_enabled) return;
+  if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) return;
+  if (isDuplicateInbound(`wechat:${inbound.recipientId}:${inbound.providerMessageId}`)) return;
+  if (isRateLimited(`wechat:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) return;
 
   const convo = await getOrCreateChannelConversation({
     userId,
     channel: "wechat",
     channelKey: appId || "default",
-    externalConversationId: inbound.fromUserName,
-    title: `WeChat: ${inbound.fromUserName}`,
-    metadata: { wechat: { toUserName: inbound.toUserName, fromUserName: inbound.fromUserName } },
+    externalConversationId: inbound.senderId,
+    title: `WeChat: ${inbound.senderId}`,
+    metadata: { wechat: { toUserName: inbound.recipientId, fromUserName: inbound.senderId } },
   });
 
-  const requestId = `wechat:${inbound.toUserName}:${inbound.msgId}`;
+  const requestId = `wechat:${inbound.recipientId}:${inbound.providerMessageId}`;
   const userMsg = await upsertUserMessage({
     chatId: convo.chatId,
     requestId,
-    content: inbound.content,
+    content: inbound.text,
     metadata: {
       channel: "wechat",
       channelKey: appId || "default",
-      externalConversationId: inbound.fromUserName,
-      wechat: { msgId: inbound.msgId, fromUserName: inbound.fromUserName },
+      externalConversationId: inbound.senderId,
+      messageType: inbound.messageType,
+      wechat: { msgId: inbound.providerMessageId, fromUserName: inbound.senderId },
     },
   });
 
   const already = await getAssistantForUserMessage(userMsg.id);
   if (already) return;
 
-  const decision = evaluateWeChatPolicy(inbound.content);
+  const decision = evaluateWeChatPolicy(inbound.text);
   if (!decision.allowed) {
-    const assistantRequestId = `wechat:assistant:${inbound.toUserName}:${inbound.msgId}`;
+    const assistantRequestId = `wechat:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
     await upsertAssistantMessage({
       chatId: convo.chatId,
       requestId: assistantRequestId,
@@ -828,7 +788,7 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
     });
     if (appId && appSecret) {
       try {
-        await wechatSendText({ openId: inbound.fromUserName, text: decision.reply, appId, appSecret });
+        await wechatSendText({ openId: inbound.senderId, text: decision.reply, appId, appSecret });
       } catch (err) {
         Logger.error("[WeChat] Failed to send policy reply", err);
       }
@@ -836,7 +796,11 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
     return;
   }
 
-  const messages = [{ role: "user" as const, content: inbound.content }];
+  const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "WeChat");
+  const messages = [
+    ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
+    { role: "user" as const, content: inbound.text },
+  ];
 
   const { assistantText, memRes } = await runChannelLlm({
     channel: "WeChat",
@@ -847,7 +811,7 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
     fallbackText: "暂时无法回复，请稍后再试。",
   });
 
-  const assistantRequestId = `wechat:assistant:${inbound.toUserName}:${inbound.msgId}`;
+  const assistantRequestId = `wechat:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
 
   await upsertAssistantMessage({
     chatId: convo.chatId,
@@ -859,12 +823,12 @@ async function handleWeChat(payloadUnknown: unknown): Promise<void> {
 
   if (appId && appSecret) {
     try {
-      await wechatSendText({ openId: inbound.fromUserName, text: assistantText, appId, appSecret });
+      await wechatSendText({ openId: inbound.senderId, text: assistantText, appId, appSecret });
     } catch (err) {
       Logger.error("[WeChat] Failed to send reply", err);
     }
     try {
-      await sendChannelArtifacts(memRes, "wechat", inbound.fromUserName, { appId, appSecret });
+      await sendChannelArtifacts(memRes, "wechat", inbound.senderId, { appId, appSecret });
     } catch (err) {
       Logger.error("[WeChat] Failed to send artifacts", err);
     }

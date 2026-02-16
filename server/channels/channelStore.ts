@@ -165,6 +165,23 @@ export async function findWhatsAppCloudAccountByPhoneNumberId(
   return row ?? null;
 }
 
+export async function findTelegramAccountByUserId(
+  userId: string,
+): Promise<IntegrationAccount | null> {
+  const [row] = await db
+    .select()
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.providerId, "telegram"),
+        eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function findMessengerAccountByPageId(
   pageId: string,
 ): Promise<IntegrationAccount | null> {

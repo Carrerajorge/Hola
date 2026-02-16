@@ -5,6 +5,7 @@ import { db } from "../db";
 import { getUserId } from "../types/express";
 import { integrationAccounts } from "@shared/schema";
 import { ensureIntegrationCatalogSeeded } from "../services/integrationCatalog";
+import { extractRuntimeSettings, runtimeSettingsUpdateSchema, withRuntimeSettingsMetadata } from "../channels/runtimeConfigHttp";
 
 const configSchema = z
   .object({
@@ -31,7 +32,7 @@ export function createMessengerIntegrationRouter(): Router {
     const now = new Date();
 
     const [existing] = await db
-      .select({ id: integrationAccounts.id })
+      .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
       .from(integrationAccounts)
       .where(
         and(
@@ -48,7 +49,10 @@ export function createMessengerIntegrationRouter(): Router {
         .set({
           accessToken,
           status: "active",
-          metadata: { pageId },
+          metadata: {
+            ...(existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {}),
+            pageId,
+          },
           updatedAt: now,
         })
         .where(eq(integrationAccounts.id, existing.id));
@@ -87,6 +91,57 @@ export function createMessengerIntegrationRouter(): Router {
       .where(and(eq(integrationAccounts.userId, userId), eq(integrationAccounts.providerId, "messenger")));
 
     return res.json({ success: true, accounts });
+  });
+
+  router.get("/settings", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const pageId = typeof req.query.pageId === "string" ? req.query.pageId : "";
+    if (!pageId) return res.status(400).json({ error: "pageId is required" });
+
+    const [account] = await db
+      .select({ metadata: integrationAccounts.metadata })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.providerId, "messenger"),
+        sql`${integrationAccounts.metadata} ->> 'pageId' = ${pageId}`,
+      ))
+      .limit(1);
+
+    return res.json({ success: true, settings: extractRuntimeSettings(account?.metadata) });
+  });
+
+  router.put("/settings", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const pageId = typeof req.body?.pageId === "string" ? req.body.pageId : "";
+    if (!pageId) return res.status(400).json({ error: "pageId is required" });
+
+    const rawSettings = req.body?.settings ?? (({ pageId: _omit, ...rest }: any) => rest)(req.body ?? {});
+    const parsed = runtimeSettingsUpdateSchema.safeParse(rawSettings);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid settings", details: parsed.error.message });
+
+    const [account] = await db
+      .select({ id: integrationAccounts.id, metadata: integrationAccounts.metadata })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.providerId, "messenger"),
+        sql`${integrationAccounts.metadata} ->> 'pageId' = ${pageId}`,
+      ))
+      .limit(1);
+
+    if (!account) return res.status(404).json({ error: "Integration account not found" });
+
+    const mergedMetadata = withRuntimeSettingsMetadata(account.metadata, parsed.data);
+    await db.update(integrationAccounts)
+      .set({ metadata: mergedMetadata, updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, account.id));
+
+    return res.json({ success: true, settings: extractRuntimeSettings(mergedMetadata) });
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {
