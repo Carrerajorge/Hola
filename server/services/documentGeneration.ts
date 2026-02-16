@@ -922,7 +922,7 @@ function renderSlideContent(slide: PptxGenJS.Slide, slideData: { title: string; 
       w: 8.9,
       h: bodyH,
       border: { pt: 0.75, color: CORPORATE_PPT_DESIGN_SYSTEM.palette.border },
-      colW: Math.round((CORPORATE_PPT_DESIGN_SYSTEM.components.gridWidth * 100) / Math.max(...tableRows.map(row => row.length)) / 100,
+      colW: Math.round((CORPORATE_PPT_DESIGN_SYSTEM.components.gridWidth * 100) / Math.max(...tableRows.map(row => row.length))) / 100,
     } as any);
     addCorporateButton(slide, "Ver análisis", 8.18, 5.05, 1.27);
     return;

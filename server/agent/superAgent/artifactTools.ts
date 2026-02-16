@@ -339,7 +339,7 @@ export async function createPptx(spec: PptxSpec): Promise<ArtifactMeta> {
       trace: {
         source: "superAgent",
       },
-    }]);
+    });
   }
 
   await fs.writeFile(filepath, pptxBuffer);

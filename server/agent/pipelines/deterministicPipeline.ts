@@ -954,7 +954,7 @@ Responde en formato JSON con la siguiente estructura:
         trace: {
           source: "deterministicPipeline",
         },
-      }]);
+      });
     }
 
     return {

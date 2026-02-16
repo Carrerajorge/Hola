@@ -291,7 +291,7 @@ export async function renderPresentation(
       trace: {
         source: "artifactRenderer",
       },
-    }]);
+    });
     return {
       buffer: fallback,
       filename: `${sanitizeFilename(safeTitle)}.pptx`,

@@ -992,7 +992,7 @@ export class EnterpriseDocumentService {
           trace: {
             source: "enterpriseDocumentService",
           },
-        }]);
+        });
         return {
           success: true,
           buffer,

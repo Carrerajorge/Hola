@@ -426,7 +426,7 @@ export class DocumentEngine {
         trace: {
           source: "documentEngine",
         },
-      }]);
+      });
     }
   }
 

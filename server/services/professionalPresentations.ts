@@ -440,7 +440,7 @@ export class ProfessionalPresentationGenerator {
           trace: {
             source: "professionalPresentations",
           },
-        }]);
+        });
 
         return {
           success: true,

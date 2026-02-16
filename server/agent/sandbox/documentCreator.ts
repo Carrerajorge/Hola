@@ -161,7 +161,7 @@ export class DocumentCreator {
           trace: {
             source: "documentCreator",
           },
-        ]);
+        });
 
         const publicUrl = await getStorageService().upload(
           outputKey,

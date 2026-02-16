@@ -65,7 +65,7 @@ export async function renderEnhancedPresentation(
       trace: {
         source: "enhancedArtifactRenderer",
       },
-    }]);
+    });
 
     return {
       buffer: fallback,
