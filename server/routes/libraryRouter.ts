@@ -691,24 +691,26 @@ export function createLibraryRouter() {
   router.post("/api/library/save-from-editor", async (req, res) => {
     try {
       const userId = getOrCreateSecureUserId(req);
-      const { title, content, type } = req.body;
+      const { title, content, type } = req.body ?? {};
 
-      if (!title || !content || !type) {
-        return res.status(400).json({ error: "title, content, and type are required" });
+      // Strict type validation (replaces loose truthy checks)
+      if (typeof title !== "string" || typeof content !== "string" || typeof type !== "string") {
+        return res.status(400).json({ error: "title, content, and type must be non-empty strings" });
       }
 
-      if (!['word', 'excel', 'ppt'].includes(type)) {
+      const ALLOWED_TYPES = ["word", "excel", "ppt"] as const;
+      if (!(ALLOWED_TYPES as readonly string[]).includes(type)) {
         return res.status(400).json({ error: "type must be 'word', 'excel', or 'ppt'" });
       }
 
       // Content size validation (prevent huge payloads from consuming memory)
       const MAX_TITLE_LENGTH = 500;
-      const MAX_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB
-      if (typeof title !== "string" || title.length > MAX_TITLE_LENGTH) {
-        return res.status(400).json({ error: `Title must be a string of max ${MAX_TITLE_LENGTH} characters` });
+      const MAX_CONTENT_SIZE = 5 * 1024 * 1024; // 5MB (Express body limit is 1MB, but be safe)
+      if (title.length === 0 || title.length > MAX_TITLE_LENGTH) {
+        return res.status(400).json({ error: `Title must be 1-${MAX_TITLE_LENGTH} characters` });
       }
-      if (typeof content !== "string" || content.length > MAX_CONTENT_SIZE) {
-        return res.status(400).json({ error: `Content must be a string of max ${MAX_CONTENT_SIZE / 1024 / 1024}MB` });
+      if (content.length === 0 || content.length > MAX_CONTENT_SIZE) {
+        return res.status(400).json({ error: "Content must be non-empty and under 5MB" });
       }
 
       // Generate binary document via DocumentCompiler (unified pipeline)
@@ -767,18 +769,20 @@ export function createLibraryRouter() {
 
       // Save to local uploads directory (with cleanup on failure)
       const fileUuid = randomUUID();
-      // Sanitize filename: strip unsafe chars, cap at 200 chars to prevent filesystem issues
-      const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').substring(0, 200);
+      // Sanitize filename: strip unsafe chars, cap at 80 chars to prevent filesystem issues
+      const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').substring(0, 80);
       const filename = `${safeTitle || 'document'}_${fileUuid.slice(0, 8)}.${ext}`;
       const uploadsDir = path.join(process.cwd(), "uploads");
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
+      await fs.promises.mkdir(uploadsDir, { recursive: true });
       const filePath = path.join(uploadsDir, fileUuid);
+      const tmpPath = filePath + ".tmp";
 
       try {
-        await fs.promises.writeFile(filePath, buffer);
+        // Atomic write: write to tmp first, then rename
+        await fs.promises.writeFile(tmpPath, buffer, { mode: 0o640 });
+        await fs.promises.rename(tmpPath, filePath);
       } catch (writeErr: any) {
+        await fs.promises.unlink(tmpPath).catch(() => {}); // cleanup tmp on error
         if (writeErr?.code === "ENOSPC") {
           return res.status(507).json({ error: "Insufficient disk space to save document" });
         }
@@ -800,7 +804,11 @@ export function createLibraryRouter() {
         });
       } catch (dbErr) {
         // Clean up written file if DB save fails
-        try { await fs.promises.unlink(filePath); } catch { /* best-effort */ }
+        try {
+          await fs.promises.unlink(filePath);
+        } catch (cleanupErr) {
+          console.warn(`[Library] Failed to cleanup orphaned file ${fileUuid}: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+        }
         throw dbErr;
       }
 
@@ -817,10 +825,11 @@ export function createLibraryRouter() {
         },
       });
     } catch (error: any) {
-      console.error("Error saving document to library:", error);
+      console.error("Error saving document to library:", error instanceof Error ? error.message : String(error));
       if (error?.code === "ENOSPC") {
         return res.status(507).json({ error: "Insufficient disk space" });
       }
+      // Don't leak internal error details to client
       res.status(500).json({ error: "Failed to save document to library" });
     }
   });

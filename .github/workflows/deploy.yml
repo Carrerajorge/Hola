@@ -190,6 +190,10 @@ jobs:
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
 
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
       - name: Notify on failure
         if: failure()
         run: |
@@ -335,6 +339,10 @@ jobs:
           echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
 
       - name: Notify on failure
         if: failure()

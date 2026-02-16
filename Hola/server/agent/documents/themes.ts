@@ -145,13 +145,10 @@ export function resolveTheme(
     }
     return THEMES[nameOrTokens];
   }
-  // Check for prototype pollution attempts
+  // Recursive check for prototype pollution attempts (not just top-level)
   if (typeof nameOrTokens === "object" && nameOrTokens !== null) {
-    for (const key of Object.keys(nameOrTokens)) {
-      if (DANGEROUS_KEYS.has(key)) {
-        console.warn(`[Theme] Rejecting theme with dangerous key: ${key}`);
-        return THEMES.default;
-      }
+    if (hasDangerousKeys(nameOrTokens)) {
+      return THEMES.default;
     }
   }
   // Partial tokens override — parse through Zod to strip unknown keys
@@ -161,4 +158,17 @@ export function resolveTheme(
     console.warn(`[Theme] Failed to parse theme tokens: ${err instanceof Error ? err.message : String(err)}, using default`);
     return THEMES.default;
   }
+}
+
+/** Recursively check for dangerous keys (__proto__, constructor, prototype) at all nesting levels */
+function hasDangerousKeys(obj: unknown, depth: number = 0): boolean {
+  if (depth > 5 || obj === null || typeof obj !== "object") return false;
+  for (const key of Object.keys(obj as Record<string, unknown>)) {
+    if (DANGEROUS_KEYS.has(key)) {
+      console.warn(`[Theme] Rejecting theme with dangerous key: ${key}`);
+      return true;
+    }
+    if (hasDangerousKeys((obj as Record<string, unknown>)[key], depth + 1)) return true;
+  }
+  return false;
 }

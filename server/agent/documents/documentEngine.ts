@@ -20,8 +20,9 @@ import { z } from "zod";
 
 /** Strip control characters from text */
 function sanitizeText(text: string): string {
-  // Single-pass: strip null bytes + all control chars (except \t \n \r)
-  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Single-pass: strip null bytes, control chars (except \t \n \r),
+  // bidi overrides (U+202A-U+202E, U+2066-U+2069), zero-width chars, and BOM
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
 }
 
 const EXCEL_FORMULA_PREFIXES = ["=", "+", "-", "@", "\t", "\r", "|", "\\"];
@@ -40,13 +41,14 @@ function sanitizeExcelValue(value: unknown): unknown {
 /** Block remote/absolute image paths to prevent SSRF and path traversal */
 function isImagePathSafe(imagePath: string): boolean {
   if (!imagePath || typeof imagePath !== "string") return false;
+  if (imagePath.length > 4096) return false; // reject absurdly long paths
   const lower = imagePath.trim().toLowerCase();
   // Block remote URLs
   if (lower.startsWith("http://") || lower.startsWith("https://")) return false;
   // Block file:// protocol
   if (lower.startsWith("file://")) return false;
-  // Block SMB / UNC paths
-  if (lower.startsWith("\\\\") || lower.startsWith("//")) return false;
+  // Block SMB / UNC / extended-length paths
+  if (lower.startsWith("\\\\") || lower.startsWith("//") || lower.startsWith("\\\\?\\")) return false;
   // Block absolute paths outside of project
   if (lower.startsWith("/etc/") || lower.startsWith("/proc/") || lower.startsWith("/sys/") || lower.startsWith("/dev/")) return false;
   // Block path traversal
@@ -396,6 +398,7 @@ export class LayoutEngine {
     truncated: string;
     overflow: boolean;
   } {
+    if (box.h <= 0 || box.w <= 0 || fontSize <= 0) return { fits: false, truncated: text.substring(0, 100), overflow: true };
     const charsPerInch = 72 / fontSize * 1.5; // rough estimate
     const maxCharsPerLine = box.w * charsPerInch;
     const maxLines = Math.floor(box.h / (fontSize / 72 * 1.5));
@@ -460,7 +463,8 @@ export class LayoutEngine {
     const dataRows = rows.slice(1);
     const chunks: { rows: any[][]; includesHeader: boolean }[] = [];
 
-    for (let i = 0; i < dataRows.length; i += maxRowsPerPage) {
+    const MAX_CHUNKS = 200; // cap to prevent memory exhaustion on huge tables
+    for (let i = 0; i < dataRows.length && chunks.length < MAX_CHUNKS; i += maxRowsPerPage) {
       const chunk = dataRows.slice(i, i + maxRowsPerPage);
       chunks.push({
         rows: [header, ...chunk],
@@ -514,11 +518,12 @@ export class LayoutEngine {
     box: LayoutBox,
     fontSize: number,
   ): string[][] {
-    const lineHeight = fontSize / 72 * 1.5; // inches per line
+    const lineHeight = Math.max(0.01, fontSize / 72 * 1.5); // inches per line, min 0.01
     const maxItems = Math.max(1, Math.floor(box.h / lineHeight));
     const groups: string[][] = [];
+    const MAX_GROUPS = 200; // cap to prevent memory exhaustion
 
-    for (let i = 0; i < items.length; i += maxItems) {
+    for (let i = 0; i < items.length && groups.length < MAX_GROUPS; i += maxItems) {
       groups.push(items.slice(i, i + maxItems));
     }
 
@@ -596,9 +601,14 @@ export class DocumentEngine {
     const { generateWordFromMarkdown } = await import("../../services/markdownToDocx");
 
     // Convert spec sections to markdown for the existing renderer
+    const MAX_MARKDOWN_SIZE = 2 * 1024 * 1024; // 2MB cap on generated markdown
     let markdown = `# ${parsed.title}\n\n`;
 
     for (const section of parsed.sections) {
+      if (markdown.length > MAX_MARKDOWN_SIZE) {
+        markdown += "\n[Document truncated due to size limits]\n";
+        break;
+      }
       switch (section.type) {
         case "heading": {
           const level = section.level || 1;
@@ -734,13 +744,16 @@ export class DocumentEngine {
           // Data validation (sanitize list values)
           if (colDef.validation?.type === "list" && colDef.validation.values) {
             const safeValues = colDef.validation.values
-              .map(v => String(v).replace(/"/g, '""').substring(0, 255))
+              .map(v => String(v).replace(/"/g, "").replace(/,/g, "").substring(0, 255))
+              .filter(v => v.length > 0)
               .slice(0, 100);
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`"${safeValues.join(",")}"`],
-            };
+            if (safeValues.length > 0) {
+              cell.dataValidation = {
+                type: "list",
+                allowBlank: true,
+                formulae: [`"${safeValues.join(",")}"`],
+              };
+            }
           }
         }
       }

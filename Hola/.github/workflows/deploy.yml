@@ -1,6 +1,8 @@
 name: Deploy to Production (Blue-Green)
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       skip_ci:
@@ -13,10 +15,6 @@ on:
         required: false
         default: ''
         type: string
-  workflow_run:
-    workflows: ["CI"]
-    branches: [main]
-    types: [completed]
 
 concurrency:
   group: deploy-production
@@ -34,25 +32,17 @@ env:
   REGISTRY: ghcr.io/carrerajorge
 
 jobs:
-  # ── CI Gate (manual dispatch only) ──────────────────────
+  # ── CI Gate ──────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true) }}
     uses: ./.github/workflows/ci.yml
 
   # ── Build & Push Docker Images to GHCR ─────────────────
   build_images:
     name: Build Docker Images
     needs: [ci]
-    if: >-
-      always()
-      && github.event_name == 'workflow_dispatch'
-      && github.event.inputs.image_tag == ''
-      && (
-        github.event.inputs.skip_ci == 'true'
-        || github.event.inputs.skip_ci == true
-        || needs.ci.result == 'success'
-      )
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.result == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag == '' && ((github.event.inputs.skip_ci == 'true' || github.event.inputs.skip_ci == true) || needs.ci.result == 'success')) }}
     uses: ./.github/workflows/build-images.yml
     with:
       sha: ${{ github.sha }}
@@ -200,6 +190,10 @@ jobs:
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
 
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
       - name: Notify on failure
         if: failure()
         run: |
@@ -207,11 +201,12 @@ jobs:
           echo "::error::Check state: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cat /opt/hola/deploy-state.json'"
           echo "::error::Rollback: ssh -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} 'cd /opt/hola && bash scripts/rollback-bluegreen.sh --force'"
 
-  # ── Auto Deploy (after CI workflow_run) ─────────────────
+  # ── Auto Deploy (push to main) ──────────────────────────
   deploy_auto:
     name: Blue-Green Deploy (Auto)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    needs: [ci, build_images]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() && needs.ci.result == 'success' && needs.build_images.result == 'success' }}
     timeout-minutes: 25
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -226,13 +221,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
 
       - name: Compute image tag
         id: tag
         run: |
           set -euo pipefail
-          SHORT_SHA="${{ github.event.workflow_run.head_sha }}"
+          SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:8}"
           echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
@@ -341,9 +336,13 @@ jobs:
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Version | \`${{ steps.tag.outputs.app_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Image Tag | \`${{ steps.tag.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | CI workflow_run |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | push(main) |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | https://iliagpt.com |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
 
       - name: Notify on failure
         if: failure()

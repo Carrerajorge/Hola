@@ -12,11 +12,11 @@ IFS=$'\n\t'
 #
 #  Optional env vars:
 #    DEPLOY_PATH          — defaults to /opt/hola
-#    SKIP_CANARY          — set to "true" to skip canary HTTP checks
+#    SKIP_CANARY          — set to "true" to skip canary + smoke checks
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.0.0"
+readonly SCRIPT_VERSION="3.1.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -283,10 +283,17 @@ for img in "${IMAGES[@]}"; do
 done
 
 # Verify digests are present (proves images are authentic from registry)
+APP_DIGEST="none"
 for img in "${IMAGES[@]}"; do
   DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "${img}" 2>/dev/null || echo "none")"
   if [ "${DIGEST}" = "none" ]; then
     logw "No digest for ${img} — image may not be from registry"
+  else
+    logok "Digest: ${DIGEST}"
+    # Capture app digest for state file
+    if echo "${img}" | grep -q "iliagpt-app:"; then
+      APP_DIGEST="${DIGEST}"
+    fi
   fi
 done
 logok "All images pulled and verified. ($(elapsed))"
@@ -357,14 +364,22 @@ fi
 logok "Migrations complete. ($(elapsed))"
 echo ""
 
-# ── Step 5: Start new slot ─────────────────────────────────
-log "[5/14] Starting ${NEW_SLOT} slot on port ${NEW_PORT}..."
+# ── Step 5: Clean stale containers for new slot ──────────
+log "[5/15] Cleaning stale ${NEW_SLOT} containers (if any)..."
+STALE_APP="$(docker ps -aq --filter "name=hola-${NEW_SLOT}-app" 2>/dev/null || echo "")"
+if [ -n "${STALE_APP}" ]; then
+  logw "Found stale ${NEW_SLOT} containers — removing before deploy."
+  slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
+fi
+
+# ── Step 6: Start new slot ─────────────────────────────────
+log "[6/15] Starting ${NEW_SLOT} slot on port ${NEW_PORT}..."
 slot "${NEW_SLOT}" up -d --force-recreate --remove-orphans
 NEW_SLOT_STARTED=true
 echo ""
 
 # ── Step 6: Healthcheck new slot ───────────────────────────
-log "[6/14] Waiting for ${NEW_SLOT} slot health check (max $(( HEALTHCHECK_RETRIES * HEALTHCHECK_INTERVAL ))s)..."
+log "[7/15] Waiting for ${NEW_SLOT} slot health check (max $(( HEALTHCHECK_RETRIES * HEALTHCHECK_INTERVAL ))s)..."
 HEALTHY=false
 for i in $(seq 1 ${HEALTHCHECK_RETRIES}); do
   HTTP_CODE="$(curl -sf -o /dev/null -w '%{http_code}' "http://127.0.0.1:${NEW_PORT}/api/health/ready" 2>/dev/null || echo "000")"
@@ -399,7 +414,7 @@ fi
 echo ""
 
 # ── Step 7: Verify APP_VERSION ─────────────────────────────
-log "[7/14] Verifying APP_VERSION on ${NEW_SLOT}..."
+log "[8/15] Verifying APP_VERSION on ${NEW_SLOT}..."
 HEALTH_JSON="$(curl -sf --max-time 10 "http://127.0.0.1:${NEW_PORT}/api/health" || echo "{}")"
 if ! echo "${HEALTH_JSON}" | grep -q "\"version\":\"${APP_VERSION}\""; then
   loge "Version mismatch on ${NEW_SLOT} slot."
@@ -424,7 +439,7 @@ echo ""
 
 # ── Step 8: Canary HTTP checks ────────────────────────────
 if [ "${SKIP_CANARY:-false}" != "true" ]; then
-  log "[8/14] Canary HTTP checks on ${NEW_SLOT}..."
+  log "[9/15] Canary HTTP checks on ${NEW_SLOT}..."
 
   # Test critical endpoints
   CANARY_ENDPOINTS=(
@@ -459,12 +474,12 @@ if [ "${SKIP_CANARY:-false}" != "true" ]; then
     exit 1
   fi
 else
-  log "[8/14] Canary checks skipped (SKIP_CANARY=true)"
+  log "[9/15] Canary checks skipped (SKIP_CANARY=true)"
 fi
 echo ""
 
 # ── Step 9: Swap Nginx upstream ────────────────────────────
-log "[9/14] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
+log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
 if [ ! -f "${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf" ]; then
   loge "Missing ${NGINX_CONF_DIR}/iliagpt-upstream-${NEW_SLOT}.conf"
   log "  Run scripts/vps-bootstrap-bluegreen.sh first."
@@ -494,12 +509,12 @@ logok "Nginx reloaded. ($(elapsed))"
 echo ""
 
 # ── Step 10: Wait for in-flight requests ────────────────────
-log "[10/14] Waiting ${DRAIN_WAIT}s for in-flight requests to drain..."
+log "[11/15] Waiting ${DRAIN_WAIT}s for in-flight requests to drain..."
 sleep "${DRAIN_WAIT}"
 echo ""
 
 # ── Step 11: Verify through Nginx (end-to-end) ─────────────
-log "[11/14] Verifying traffic flows through Nginx (port 443)..."
+log "[12/15] Verifying traffic flows through Nginx (port 443)..."
 NGINX_OK=false
 for i in $(seq 1 15); do
   # Check via the new slot port directly first
@@ -529,7 +544,7 @@ fi
 echo ""
 
 # ── Step 12: Drain and stop old slot ──────────────────────
-log "[12/14] Stopping old ${ACTIVE_SLOT} slot (graceful drain, ${STOP_TIMEOUT}s timeout)..."
+log "[13/15] Stopping old ${ACTIVE_SLOT} slot (graceful drain, ${STOP_TIMEOUT}s timeout)..."
 
 # Check if old slot is actually running before trying to stop
 OLD_RUNNING="$(docker ps --filter "name=hola-${ACTIVE_SLOT}-app" --filter "status=running" -q 2>/dev/null || echo "")"
@@ -544,7 +559,7 @@ fi
 echo ""
 
 # ── Step 13: Verify OCR + infrastructure health ──────────
-log "[13/14] Verifying infrastructure health post-deploy..."
+log "[14/15] Verifying infrastructure health post-deploy..."
 
 # OCR
 OCR_OK=false
@@ -577,7 +592,7 @@ fi
 echo ""
 
 # ── Step 14: Update state file ────────────────────────────
-log "[14/14] Updating deploy state..."
+log "[15/15] Updating deploy state..."
 PREV_IMAGE="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('image_tag','unknown'))" 2>/dev/null || echo "unknown")"
 PREV_VERSION="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('app_version','unknown'))" 2>/dev/null || echo "unknown")"
 
@@ -592,6 +607,7 @@ state = {
     'previous_slot': '${ACTIVE_SLOT}',
     'previous_image': '${PREV_IMAGE}',
     'previous_version': '${PREV_VERSION}',
+    'app_image_digest': '${APP_DIGEST}',
     'deploy_script_version': '${SCRIPT_VERSION}',
     'deploy_duration_sec': $(( $(date +%s) - DEPLOY_START_EPOCH ))
 }
@@ -602,6 +618,65 @@ print(json.dumps(state, indent=2))
 
 # Remove state backup (deploy succeeded)
 rm -f "${STATE_FILE_BAK}"
+
+# ── Post-deploy smoke tests (non-fatal) ──────────────────
+if [ "${SKIP_CANARY:-false}" != "true" ]; then
+  log "Running post-deploy smoke tests..."
+  SMOKE_FAIL=0
+
+  # 1. Health JSON returns valid JSON with version
+  SMOKE_HEALTH="$(curl -sf --max-time 10 "http://127.0.0.1:${NEW_PORT}/api/health" 2>/dev/null || echo "")"
+  if echo "${SMOKE_HEALTH}" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+    logok "Smoke: /api/health returns valid JSON"
+  else
+    logw "Smoke: /api/health did not return valid JSON"
+    SMOKE_FAIL=$(( SMOKE_FAIL + 1 ))
+  fi
+
+  # 2. SPA serves HTML
+  SPA_TYPE="$(curl -sf -o /dev/null -w '%{content_type}' --max-time 10 "http://127.0.0.1:${NEW_PORT}/" 2>/dev/null || echo "")"
+  if echo "${SPA_TYPE}" | grep -qi "text/html"; then
+    logok "Smoke: SPA serves HTML"
+  else
+    logw "Smoke: SPA content-type unexpected: ${SPA_TYPE}"
+    SMOKE_FAIL=$(( SMOKE_FAIL + 1 ))
+  fi
+
+  # 3. Response time < 3s
+  RESP_TIME="$(curl -sf -o /dev/null -w '%{time_total}' --max-time 10 "http://127.0.0.1:${NEW_PORT}/api/health" 2>/dev/null || echo "99")"
+  RESP_MS="$(echo "${RESP_TIME}" | awk '{printf "%d", $1*1000}')"
+  if [ "${RESP_MS}" -lt 3000 ]; then
+    logok "Smoke: Response time ${RESP_MS}ms"
+  else
+    logw "Smoke: Response time ${RESP_MS}ms (>3s)"
+    SMOKE_FAIL=$(( SMOKE_FAIL + 1 ))
+  fi
+
+  # 4. Worker container is running
+  WORKER_STATUS="$(docker inspect --format='{{.State.Status}}' "hola-${NEW_SLOT}-worker" 2>/dev/null || echo "missing")"
+  if [ "${WORKER_STATUS}" = "running" ]; then
+    logok "Smoke: Worker container running"
+  else
+    logw "Smoke: Worker container status: ${WORKER_STATUS}"
+    SMOKE_FAIL=$(( SMOKE_FAIL + 1 ))
+  fi
+
+  # 5. Sandbox container is running
+  SANDBOX_STATUS="$(docker inspect --format='{{.State.Status}}' "hola-${NEW_SLOT}-sandbox" 2>/dev/null || echo "missing")"
+  if [ "${SANDBOX_STATUS}" = "running" ]; then
+    logok "Smoke: Sandbox container running"
+  else
+    logw "Smoke: Sandbox container status: ${SANDBOX_STATUS}"
+    SMOKE_FAIL=$(( SMOKE_FAIL + 1 ))
+  fi
+
+  if [ "${SMOKE_FAIL}" -gt 0 ]; then
+    logw "${SMOKE_FAIL} smoke test(s) failed (non-fatal — deploy succeeded)"
+  else
+    logok "All smoke tests passed"
+  fi
+  echo ""
+fi
 
 # ── Cleanup old images (keep last 3 tags) ─────────────────
 log "Cleaning up unused Docker images..."
