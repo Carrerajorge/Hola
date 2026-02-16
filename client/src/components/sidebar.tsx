@@ -635,8 +635,11 @@ export function Sidebar({
           onClick={onOpenSkills}
           data-testid="button-skills"
         >
-          <Zap className="h-4 w-4" />
-          Skills
+          <Zap className="h-4 w-4 shrink-0" />
+          <span className="flex flex-col items-start leading-tight">
+            <span>Skills</span>
+            <span className="text-[10px] font-normal text-muted-foreground">Capacidades modulares de IliaGPT</span>
+          </span>
         </Button>
         <Button
           variant="ghost"
