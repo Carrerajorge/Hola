@@ -33,6 +33,7 @@ import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
 import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
+import { buildSkillSystemPromptSection, drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -204,7 +205,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
+      const { messages: clientMessages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id, skillId, skill } = req.body;
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -366,10 +367,29 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
 
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat", {
+          userId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
+      }
+
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
+
+      const messagesWithSkill = skillSystemSection
+        ? [{ role: "system" as const, content: skillSystemSection }, ...formattedMessages]
+        : formattedMessages;
 
       // Build gptSession info - prefer contract-based session over legacy gptConfig
       const gptSession = gptSessionContract ? {
@@ -379,7 +399,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         legacyConfig: gptConfig
       } : undefined;
 
-      const response = await chatService.chat(formattedMessages, {
+      const response = await chatService.chat(messagesWithSkill, {
         useRag,
         conversationId,
         userId,
@@ -740,7 +760,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         webSearchAuto,
         latencyMode: rawLatencyMode,
         lastImageBase64,
-        lastImageId
+        lastImageId,
+        skillId,
+        skill
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
@@ -752,6 +774,22 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      const resolvedSkillContext = await resolveSkillContextFromRequest(drizzleSkillStore, {
+        userId: effectiveUserId,
+        skillId,
+        skill,
+      });
+      const skillSystemSection = buildSkillSystemPromptSection(resolvedSkillContext);
+      if (skillSystemSection) {
+        console.info("[SkillContext] Applied to /api/chat/stream", {
+          requestId,
+          userId: effectiveUserId,
+          source: resolvedSkillContext?.source,
+          skillId: resolvedSkillContext?.id || null,
+          skillName: resolvedSkillContext?.name,
+        });
       }
 
       const clientRequestId =
@@ -1026,8 +1064,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       ) {
         try {
           const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(userQuery, false);
+          const fastPathSystemPrompt = `${answerFirstPrompt.fullPrompt}${skillSystemSection}`;
           const llmMessages = [
-            { role: "system" as const, content: answerFirstPrompt.fullPrompt },
+            { role: "system" as const, content: fastPathSystemPrompt },
             ...clientMessages.map((m: any) => ({
               role: m.role as "user" | "assistant" | "system",
               content: String(m.content ?? "")
@@ -1860,7 +1899,7 @@ ${attachmentContext}`;
       const now = new Date();
       const currentDateTimeContext = `\n\nFECHA Y HORA ACTUAL:\n- ISO: ${now.toISOString()}`;
 
-      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}`;
+      systemContent += `${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${semanticMemoryContext ? `\n\n${semanticMemoryContext}` : ''}${codeInterpreterPrompt}${webSearchContextForLLM}${skillSystemSection}`;
 
       // DOC TOOL: Add format-specific system prompt so the LLM outputs structured content
       // that the client-side editors can render (markdown for Word, CSV for Excel, JSON for PPT)

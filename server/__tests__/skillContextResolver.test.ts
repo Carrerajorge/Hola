@@ -56,9 +56,36 @@ describe("skillContextResolver", () => {
     expect(store.trackSkillUsed).not.toHaveBeenCalled();
   });
 
+  it("falls back to activeSkillId from user preferences when request does not provide skillId", async () => {
+    const store: SkillStore = {
+      getSkillForUser: vi.fn().mockResolvedValue({
+        id: "skill_active",
+        name: "Active Skill",
+        instructions: "Usa formato ejecutivo.",
+        enabled: true,
+      }),
+      getActiveSkillIdForUser: vi.fn().mockResolvedValue("skill_active"),
+      trackSkillUsed: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const ctx = await resolveSkillContextFromRequest(store, {
+      userId: "user_1",
+      skill: { name: "Client", instructions: "Legacy" },
+    });
+
+    expect(store.getActiveSkillIdForUser).toHaveBeenCalledWith("user_1");
+    expect(ctx).toEqual({
+      source: "custom_skill",
+      id: "skill_active",
+      name: "Active Skill",
+      instructions: "Usa formato ejecutivo.",
+    });
+  });
+
   it("bounds client instructions length (max 8000 chars)", async () => {
     const store: SkillStore = {
       getSkillForUser: vi.fn().mockResolvedValue(null),
+      getActiveSkillIdForUser: vi.fn().mockResolvedValue(null),
     };
 
     const long = "a".repeat(9000);
