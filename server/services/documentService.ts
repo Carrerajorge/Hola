@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import fs from "node:fs/promises";
 import { generatePdfFromHtml, PdfOptions } from "./pdfGeneration";
 import {
   generateWordDocument,
@@ -8,6 +9,8 @@ import {
   parseExcelFromText,
   parseSlidesFromText
 } from "./documentGeneration";
+import { documentCliToolRunner } from "../toolRunner/orchestrator";
+import { ToolAssetRef, ToolRunnerReport } from "../toolRunner/types";
 
 // ============================================
 // SECURITY: HTML entity escaping to prevent XSS
@@ -45,6 +48,8 @@ export const DocumentRenderRequestSchema = z.object({
   templateId: z.string().min(1, "Template ID is required"),
   type: DocumentTypeSchema,
   data: z.record(z.any()),
+  locale: z.string().max(16).optional(),
+  designTokens: z.record(z.any()).optional(),
   options: z.object({
     format: z.enum(["A4", "Letter", "Legal", "Tabloid", "A3", "A5"]).optional(),
     landscape: z.boolean().optional(),
@@ -57,6 +62,23 @@ export const DocumentRenderRequestSchema = z.object({
     printBackground: z.boolean().optional(),
     scale: z.number().min(0.1).max(2).optional(),
   }).optional(),
+  theme: z
+    .object({
+      id: z.string().optional(),
+      name: z.string().optional(),
+      tokens: z.record(z.any()).optional(),
+    })
+    .optional(),
+  assets: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        path: z.string().min(1),
+        mediaType: z.string().optional(),
+        sha256: z.string().optional(),
+      })
+    )
+    .optional(),
 });
 
 export type DocumentRenderRequest = z.infer<typeof DocumentRenderRequestSchema>;
@@ -76,6 +98,7 @@ export interface GeneratedDocument {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
+  generationReport?: ToolRunnerReport;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -438,6 +461,30 @@ async function generatePptx(template: DocumentTemplate, data: Record<string, any
   });
 }
 
+async function generateWithToolRunner(
+  request: DocumentRenderRequest,
+  documentType: "docx" | "xlsx" | "pptx"
+): Promise<{ buffer: Buffer; report: ToolRunnerReport | undefined }> {
+  const runnerRequest = {
+    documentType,
+    title: String((request.data?.title as string | undefined) || "Documento"),
+    templateId: request.templateId,
+    data: request.data,
+    locale: request.locale || "es",
+    options: request.options,
+    designTokens: request.designTokens,
+    theme: request.theme,
+    assets: request.assets as ToolAssetRef[] | undefined,
+  };
+
+  const runnerOutput = await documentCliToolRunner.generate(runnerRequest);
+  const buffer = await fs.readFile(runnerOutput.artifactPath);
+  return {
+    buffer,
+    report: runnerOutput.report,
+  };
+}
+
 export async function renderDocument(request: DocumentRenderRequest): Promise<GeneratedDocument> {
   const template = getTemplateById(request.templateId);
   if (!template) {
@@ -455,19 +502,38 @@ export async function renderDocument(request: DocumentRenderRequest): Promise<Ge
   }
   
   let buffer: Buffer;
+  let generationReport: ToolRunnerReport | undefined;
   
   switch (request.type) {
     case "pdf":
       buffer = await generatePdf(template, request.data, request.options);
       break;
     case "docx":
-      buffer = await generateDocx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "docx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for docx, falling back to legacy generator.", error);
+        generationReport = undefined;
+        buffer = await generateDocx(template, request.data);
+      }
       break;
     case "xlsx":
-      buffer = await generateXlsx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "xlsx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for xlsx, falling back to legacy generator.", error);
+        generationReport = undefined;
+        buffer = await generateXlsx(template, request.data);
+      }
       break;
     case "pptx":
-      buffer = await generatePptx(template, request.data);
+      try {
+        ({ buffer, report: generationReport } = await generateWithToolRunner(request, "pptx"));
+      } catch (error) {
+        console.warn("[documentService] Tool runner failed for pptx, falling back to legacy generator.", error);
+        generationReport = undefined;
+        buffer = await generatePptx(template, request.data);
+      }
       break;
     default:
       throw new Error(`Unsupported document type: ${request.type}`);
@@ -481,6 +547,7 @@ export async function renderDocument(request: DocumentRenderRequest): Promise<Ge
     id: docId,
     fileName,
     mimeType: getMimeType(request.type),
+    generationReport,
     buffer,
     createdAt: new Date(),
     expiresAt: new Date(Date.now() + DOCUMENT_EXPIRY_MS),

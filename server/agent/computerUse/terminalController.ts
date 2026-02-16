@@ -160,6 +160,94 @@ const SAFE_COMMAND_PREFIX_SET = new Set(SAFE_COMMAND_PREFIXES.map((command) => c
 const ENFORCE_COMMAND_ALLOWLIST =
   process.env.TERMINAL_ENFORCE_ALLOWLIST === "true" || process.env.NODE_ENV === "production";
 const ALLOW_DANGEROUS_CONFIRM_BYPASS = process.env.TERMINAL_ALLOW_DANGEROUS_CONFIRM === "true";
+const SESSION_TTL_MS = (() => {
+  const rawValue = process.env.TERMINAL_SESSION_TTL_MS;
+  if (rawValue === undefined) {
+    return 15 * 60 * 1000;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  if (Number.isNaN(parsed)) {
+    return 15 * 60 * 1000;
+  }
+  return Math.max(60_000, parsed);
+})();
+const SESSION_CLEANUP_INTERVAL_MS = Math.max(
+  5_000,
+  Math.min(60_000, Math.floor(SESSION_TTL_MS / 4))
+);
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MAX_ENV_ENTRIES = 256;
+const MAX_ENV_KEY_LENGTH = 128;
+const MAX_ENV_VALUE_LENGTH = 4096;
+const FORBIDDEN_SESSION_ENV_KEYS = new Set([
+  "NODE_OPTIONS",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "PYTHONSTARTUP",
+  "PYTHONPATH",
+  "BASH_ENV",
+  "PROMPT_COMMAND",
+  "LD_AUDIT",
+  "RUST_BACKTRACE",
+  "TERM",
+  "DISPLAY",
+  "SSH_AUTH_SOCK",
+  "SHELLOPTS",
+  "ENV",
+  "BASH_FUNC_",
+]);
+
+function sanitizeIncomingEnv(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Environment block must be an object");
+  }
+
+  const entries = Object.entries(raw);
+  if (entries.length > MAX_ENV_ENTRIES) {
+    throw new Error(`Too many environment variables (max ${MAX_ENV_ENTRIES})`);
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    if (typeof key !== "string") {
+      continue;
+    }
+
+    const trimmedKey = key.trim();
+    if (!trimmedKey || trimmedKey.length > MAX_ENV_KEY_LENGTH || !ENV_KEY_PATTERN.test(trimmedKey)) {
+      continue;
+    }
+
+    const keyUpper = trimmedKey.toUpperCase();
+    if (FORBIDDEN_SESSION_ENV_KEYS.has(keyUpper) || keyUpper.startsWith("BASH_FUNC_")) {
+      continue;
+    }
+
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    const valueText = typeof value === "string" ? value : String(value);
+    normalized[trimmedKey] = valueText.slice(0, MAX_ENV_VALUE_LENGTH);
+  }
+
+  return normalized;
+}
+
+function sanitizeProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function resolveCommandEnvironment(sessionEnv: Record<string, string>, requestEnv?: Record<string, string>): Record<string, string> {
+  const sanitized = requestEnv ? sanitizeIncomingEnv(requestEnv) : {};
+  return { ...sessionEnv, ...sanitized };
+}
 
 function getBaseCommand(command: string): string {
   const trimmed = command.trim();
@@ -186,21 +274,56 @@ export class TerminalController extends EventEmitter {
   private sessions: Map<string, TerminalSession> = new Map();
   private maxOutputSize = 1024 * 1024; // 1MB max output
   private defaultTimeout = 30000; // 30 seconds
+  private cleanupTimer: NodeJS.Timeout;
 
   constructor() {
     super();
+    this.cleanupTimer = setInterval(
+      () => this.cleanupExpiredSessions(),
+      SESSION_CLEANUP_INTERVAL_MS
+    );
+    if (typeof this.cleanupTimer.unref === "function") {
+      this.cleanupTimer.unref();
+    }
   }
 
   // ============================================
   // Session Management
   // ============================================
 
+  private getSessionOrFail(sessionId: string): TerminalSession {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const now = Date.now();
+    if (now - session.lastActivity > SESSION_TTL_MS) {
+      this.closeSession(sessionId);
+      throw new Error(`Session expired: ${sessionId}`);
+    }
+
+    session.lastActivity = now;
+    return session;
+  }
+
+  private cleanupExpiredSessions(): void {
+    const now = Date.now();
+    for (const [sessionId, session] of Array.from(this.sessions.entries())) {
+      if (now - session.lastActivity > SESSION_TTL_MS) {
+        this.closeSession(sessionId);
+      }
+    }
+  }
+
   createSession(cwd?: string, env?: Record<string, string>): string {
     const sessionId = randomUUID();
+    const baseEnv = sanitizeProcessEnv(process.env);
+    const requestedEnv = env ? sanitizeIncomingEnv(env) : {};
     const session: TerminalSession = {
       id: sessionId,
       cwd: cwd || process.cwd(),
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: { ...baseEnv, ...requestedEnv },
       history: [],
       activeProcesses: new Map(),
       createdAt: Date.now(),
@@ -210,6 +333,19 @@ export class TerminalController extends EventEmitter {
     this.sessions.set(sessionId, session);
     this.emit("session:created", { sessionId });
     return sessionId;
+  }
+
+  setSessionEnv(sessionId: string, variables: Record<string, string>): { updated: Record<string, string> } {
+    const session = this.getSessionOrFail(sessionId);
+
+    const sanitized = sanitizeIncomingEnv(variables);
+    Object.assign(session.env, sanitized);
+    return { updated: { ...sanitized } };
+  }
+
+  getSessionEnv(sessionId: string): Record<string, string> | undefined {
+    const session = this.getSessionOrFail(sessionId);
+    return { ...session.env };
   }
 
   closeSession(sessionId: string): void {
@@ -239,8 +375,7 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async executeCommand(sessionId: string, request: CommandRequest): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
 
     const commandId = randomUUID();
     const startTime = Date.now();
@@ -318,7 +453,7 @@ export class TerminalController extends EventEmitter {
       const shell = request.shell || "bash";
       const timeout = request.timeout || this.defaultTimeout;
 
-      const env = { ...session.env, ...request.env };
+      const env = resolveCommandEnvironment(session.env, request.env);
       const cwd = request.cwd || session.cwd;
       const canDirectSpawn =
         typeof request.command === "string" &&
@@ -427,8 +562,7 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executePtyCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error("Session lost");
+    const session = this.getSessionOrFail(sessionId);
 
     return new Promise((resolve) => {
         const shell = request.shell || "bash";
@@ -437,7 +571,7 @@ export class TerminalController extends EventEmitter {
             cols: 80,
             rows: 30,
             cwd: session.cwd,
-            env: { ...session.env, ...request.env }
+            env: resolveCommandEnvironment(session.env, request.env),
         });
 
         let output = "";
@@ -493,14 +627,14 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   private async executeDockerCommand(sessionId: string, commandId: string, request: CommandRequest, startTime: number): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error("Session lost");
+    const session = this.getSessionOrFail(sessionId);
 
     const image = request.dockerImage || "node:22-alpine";
     const cmd = request.args ? [request.command, ...request.args] : [request.command]; // CMD format for Docker
 
     // Prepare Env
-    const envVars = Object.entries({ ...session.env, ...request.env }).map(([k, v]) => `${k}=${v}`);
+    const env = resolveCommandEnvironment(session.env, request.env);
+    const envVars = Object.entries(env).map(([k, v]) => `${k}=${v}`);
 
     let stdout = "";
     let stderr = "";
@@ -612,8 +746,7 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   async fileOperation(sessionId: string, op: FileOperation): Promise<{ success: boolean; data?: any; error?: string }> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
 
     const resolvedPath = path.resolve(session.cwd, op.path);
 
@@ -881,8 +1014,7 @@ export class TerminalController extends EventEmitter {
     timeout?: number;
     args?: string[];
   }): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    this.getSessionOrFail(sessionId);
 
     const tempDir = path.join(os.tmpdir(), "iliagpt-scripts");
     await fs.mkdir(tempDir, { recursive: true });
@@ -953,14 +1085,12 @@ export class TerminalController extends EventEmitter {
   // ============================================
 
   getHistory(sessionId: string, limit: number = 50): CommandResult[] {
-    const session = this.sessions.get(sessionId);
-    if (!session) return [];
+    const session = this.getSessionOrFail(sessionId);
     return session.history.slice(-limit);
   }
 
   async replayCommand(sessionId: string, commandId: string): Promise<CommandResult> {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const session = this.getSessionOrFail(sessionId);
 
     const original = session.history.find(h => h.id === commandId);
     if (!original) throw new Error(`Command not found: ${commandId}`);
@@ -969,8 +1099,8 @@ export class TerminalController extends EventEmitter {
   }
 
   getCwd(sessionId: string): string {
-    const session = this.sessions.get(sessionId);
-    return session?.cwd || process.cwd();
+    const session = this.getSessionOrFail(sessionId);
+    return session.cwd;
   }
 
   cleanup(): void {

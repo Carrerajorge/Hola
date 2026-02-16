@@ -5886,7 +5886,6 @@ IMPORTANTE:
           }
         }
 
-
       } catch (error: any) {
         console.error("[handleSubmit] Error:", error);
         // Restore files on error so user doesn't lose them
@@ -5918,6 +5917,7 @@ IMPORTANTE:
       });
       setAiState("idle");
       setAiProcessSteps([]);
+      abortControllerRef.current = null;
     }
   };
 
