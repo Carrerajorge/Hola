@@ -134,6 +134,7 @@ export interface Chat {
 
 const STORAGE_KEY = "sira-gpt-chats";
 const PENDING_CHAT_PREFIX = "pending-";
+const SERVER_CHAT_ID_PREFIX = "chat_";
 const FAILED_QUEUE_KEY = "ilia_failed_message_queue";
 const MAX_FAILED_QUEUE_ITEMS = 20;
 const MAX_FAILED_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
@@ -730,8 +731,21 @@ export function resolveRealChatId(chatId: string): string {
 
 // Check if a chat ID is pending (not yet created on server)
 export function isPendingChat(chatId: string): boolean {
+  if (chatId.startsWith(PENDING_CHAT_PREFIX)) return true;
   const resolved = resolveRealChatId(chatId);
   return resolved.startsWith(PENDING_CHAT_PREFIX);
+}
+
+function generateStableServerChatId(): string {
+  try {
+    const c: any = (globalThis as any).crypto;
+    if (c && typeof c.randomUUID === "function") {
+      return `${SERVER_CHAT_ID_PREFIX}${c.randomUUID()}`;
+    }
+  } catch {
+    // ignore
+  }
+  return `${SERVER_CHAT_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // Check if a chat has an active run (pending or processing)
@@ -1373,7 +1387,10 @@ export function useChats() {
   }, []);
 
   const createChat = useCallback((): { pendingId: string; stableKey: string } => {
-    const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
+    const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const provisionalRealId = generateStableServerChatId();
+    // Pre-assign a stable server chatId so first-message stream can start immediately.
+    pendingToRealIdMap.set(pendingId, provisionalRealId);
     const stableKey = `stable-${Date.now()}`; // Stable key that won't change
     const pendingChat: Chat = {
       id: pendingId,
@@ -1586,7 +1603,7 @@ export function useChats() {
 
   const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
     const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
-    const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
+    const isPending = chatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
 
     const normalizedMessage: Message = {
@@ -1741,11 +1758,19 @@ export function useChats() {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
+        const requestedChatId =
+          resolvedChatId && !resolvedChatId.startsWith(PENDING_CHAT_PREFIX)
+            ? resolvedChatId
+            : generateStableServerChatId();
+        if (requestedChatId !== resolvedChatId) {
+          pendingToRealIdMap.set(chatId, requestedChatId);
+        }
+
         const res = await fetchWithTimeout("/api/chats", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
           credentials: "include",
-          body: JSON.stringify({ title }),
+          body: JSON.stringify({ id: requestedChatId, title }),
         }, MESSAGE_SAVE_TIMEOUT_MS);
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
@@ -1761,7 +1786,7 @@ export function useChats() {
         }
 
         const newChat = await res.json();
-        const realChatId = newChat.id;
+        const realChatId = newChat.id || requestedChatId;
 
         pendingToRealIdMap.set(chatId, realChatId);
 

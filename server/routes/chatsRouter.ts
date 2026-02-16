@@ -16,6 +16,7 @@ const messageBodyLimit = express.json({ limit: '5mb' });
 // SECURITY FIX #44: Message content length limits
 const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
 const MAX_TITLE_LENGTH = 200;
+const CHAT_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{7,120}$/;
 
 // SECURITY FIX #45: Validate and sanitize message content
 function validateMessageContent(content: any): { valid: boolean; error?: string; sanitized?: string } {
@@ -134,7 +135,16 @@ export function createChatsRouter() {
    */
   router.post("/chats", async (req, res) => {
     try {
-      const { title, messages } = req.body;
+      const { id: rawChatId, title, messages } = req.body;
+      const requestedChatId =
+        typeof rawChatId === "string" && rawChatId.trim().length > 0
+          ? rawChatId.trim()
+          : undefined;
+
+      if (requestedChatId && !CHAT_ID_REGEX.test(requestedChatId)) {
+        return res.status(400).json({ error: "Invalid chat id format" });
+      }
+
       const userId = getOrCreateSecureUserId(req);
       const chatHistoryEnabled = userId && !userId.startsWith("anon_")
         ? (await storage.getUserSettings(userId))?.privacySettings?.chatHistoryEnabled ?? true
@@ -158,7 +168,7 @@ export function createChatsRouter() {
 
         // Create chat with messages atomically using transaction
         const result = await storage.createChatWithMessages(
-          { title: title || "New Chat", userId },
+          { id: requestedChatId, title: title || "New Chat", userId },
           messages.map((msg: any) => ({
             role: msg.role,
             content: msg.content,
@@ -175,14 +185,33 @@ export function createChatsRouter() {
       }
 
       // Simple chat creation without messages
-      const chat = await storage.createChat({ title: title || "New Chat", userId });
+      const chat = await storage.createChat({ id: requestedChatId, title: title || "New Chat", userId });
       if (!chatHistoryEnabled) {
         await storage.softDeleteChat(chat.id);
       }
       res.json(chat);
     } catch (error: any) {
       // Handle duplicate key constraint gracefully
-      if (error.code === '23505' && error.constraint?.includes('request')) {
+      if (error.code === '23505') {
+        const requestedChatId =
+          typeof req.body?.id === "string" && req.body.id.trim().length > 0
+            ? req.body.id.trim()
+            : undefined;
+        if (requestedChatId) {
+          const existingById = await storage.getChat(requestedChatId);
+          if (existingById) {
+            if (req.body?.messages && Array.isArray(req.body.messages)) {
+              const existingMessages = await storage.getChatMessages(existingById.id);
+              return res.json({ ...existingById, messages: existingMessages, alreadyExists: true });
+            }
+            return res.json({ ...existingById, alreadyExists: true });
+          }
+        }
+
+        if (!error.constraint?.includes('request')) {
+          return res.status(409).json({ error: "Chat already exists" });
+        }
+
         // Duplicate requestId - try to find and return existing chat
         const requestId = req.body.messages?.find((m: any) => m.requestId)?.requestId;
         if (requestId) {

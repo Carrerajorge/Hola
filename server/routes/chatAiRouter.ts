@@ -728,6 +728,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         conversationId,
         runId,
         chatId,
+        clientRequestId: rawClientRequestId,
+        userRequestId: rawUserRequestId,
         attachments,
         gptId,
         model,
@@ -736,7 +738,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         docTool,
         forceWebSearch,
         webSearchAuto,
-        latencyMode: rawLatencyMode
+        latencyMode: rawLatencyMode,
+        lastImageBase64,
+        lastImageId
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
@@ -750,57 +754,160 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      const clientRequestId =
+        typeof rawClientRequestId === "string" && rawClientRequestId.trim().length > 0
+          ? rawClientRequestId.trim()
+          : undefined;
+      const userRequestId =
+        typeof rawUserRequestId === "string" && rawUserRequestId.trim().length > 0
+          ? rawUserRequestId.trim()
+          : undefined;
+      const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
+      const latestUserTextForRun =
+        typeof latestUserForRun?.content === "string"
+          ? latestUserForRun.content
+          : String(latestUserForRun?.content || "");
+      const sanitizedRunAttachments =
+        attachments && Array.isArray(attachments)
+          ? attachments
+              .map((att: any) => ({
+                id: att?.id || att?.fileId,
+                fileId: att?.fileId,
+                name: att?.name,
+                type: att?.type,
+                mimeType: att?.mimeType || att?.type,
+                size: att?.size,
+                storagePath: att?.storagePath,
+              }))
+              .filter((att: any) => !!att.name)
+          : null;
+
       // Claim run as early as possible (before any expensive routing/search work).
       // This avoids duplicate processing and ensures idempotency responses are true JSON
       // (before SSE headers are sent).
-      if (runId && chatId && !claimedRun) {
+      if (chatId && !claimedRun && (runId || clientRequestId)) {
         const claimStageStart = performance.now();
-        const existingRun = await storage.getChatRun(runId);
+
+        let existingRun =
+          runId
+            ? await storage.getChatRun(runId)
+            : await storage.getChatRunByClientRequestId(chatId, clientRequestId!);
+
+        // If caller did not provide runId but did provide clientRequestId,
+        // create the user-message+run atomically here so streaming can start
+        // without waiting for /chats/:id/messages round-trip.
+        if (!existingRun && !runId && clientRequestId && latestUserTextForRun) {
+          try {
+            // If stream starts before /api/chats finishes, make sure the chat row exists
+            // so createUserMessageAndRun won't fail with FK violations.
+            const existingChat = await storage.getChat(chatId);
+            if (!existingChat) {
+              try {
+                await storage.createChat({
+                  id: chatId,
+                  title: "New Chat",
+                  userId: effectiveUserId || undefined,
+                });
+              } catch (chatCreateError: any) {
+                if (chatCreateError?.code !== "23505") {
+                  throw chatCreateError;
+                }
+              }
+            }
+
+            const created = await storage.createUserMessageAndRun(
+              chatId,
+              {
+                chatId,
+                role: "user",
+                content: latestUserTextForRun,
+                status: "done",
+                requestId: userRequestId || `${requestId}:user`,
+                userMessageId: null,
+                attachments: sanitizedRunAttachments,
+              } as any,
+              clientRequestId
+            );
+            existingRun = created.run;
+          } catch (createRunError: any) {
+            // Unique violation means another concurrent request created it first.
+            if (createRunError?.code !== "23505") {
+              throw createRunError;
+            }
+            existingRun = await storage.getChatRunByClientRequestId(chatId, clientRequestId);
+          }
+        }
+
         if (!existingRun) {
           recordStage("run_claim_ms", claimStageStart);
-          return res.status(404).json({
-            error: "Run not found",
-            traceId: requestId,
-            timings: reportTimings("run_not_found"),
-          });
-        }
+          if (runId) {
+            return res.status(404).json({
+              error: "Run not found",
+              traceId: requestId,
+              timings: reportTimings("run_not_found"),
+            });
+          }
+          // No run found for clientRequestId yet: continue in legacy mode
+          // (best-effort), /chat/stream will still function.
+        } else {
+          if (existingRun.status === "processing") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} is already being processed, returning status`);
+            return res.json({
+              status: "already_processing",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_processing"),
+            });
+          }
+          if (existingRun.status === "done") {
+            recordStage("run_claim_ms", claimStageStart);
+            console.log(`[Run] Run ${existingRun.id} already completed`);
+            return res.json({
+              status: "already_done",
+              run: existingRun,
+              traceId: requestId,
+              timings: reportTimings("already_done"),
+            });
+          }
+          if (existingRun.status === "failed") {
+            console.log(`[Run] Run ${existingRun.id} previously failed`);
+          }
 
-        if (existingRun.status === "processing") {
+          const claimKey = existingRun.clientRequestId || clientRequestId;
+          claimedRun = await storage.claimPendingRun(chatId, claimKey || undefined);
           recordStage("run_claim_ms", claimStageStart);
-          console.log(`[Run] Run ${runId} is already being processed, returning status`);
-          return res.json({
-            status: "already_processing",
-            run: existingRun,
-            traceId: requestId,
-            timings: reportTimings("already_processing"),
-          });
+          if (!claimedRun) {
+            const refreshedRun =
+              runId
+                ? await storage.getChatRun(runId)
+                : (claimKey ? await storage.getChatRunByClientRequestId(chatId, claimKey) : null);
+            if (refreshedRun?.status === "processing") {
+              return res.json({
+                status: "already_processing",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_processing"),
+              });
+            }
+            if (refreshedRun?.status === "done") {
+              return res.json({
+                status: "already_done",
+                run: refreshedRun,
+                traceId: requestId,
+                timings: reportTimings("already_done"),
+              });
+            }
+            console.log(`[Run] Failed to claim run ${existingRun.id} - may have been claimed by another request`);
+            return res.json({
+              status: "claim_failed",
+              message: "Run already claimed or not pending",
+              traceId: requestId,
+              timings: reportTimings("claim_failed"),
+            });
+          }
+          console.log(`[Run] Successfully claimed run ${claimedRun.id}`);
         }
-        if (existingRun.status === "done") {
-          recordStage("run_claim_ms", claimStageStart);
-          console.log(`[Run] Run ${runId} already completed`);
-          return res.json({
-            status: "already_done",
-            run: existingRun,
-            traceId: requestId,
-            timings: reportTimings("already_done"),
-          });
-        }
-        if (existingRun.status === "failed") {
-          console.log(`[Run] Run ${runId} previously failed`);
-        }
-
-        claimedRun = await storage.claimPendingRun(chatId, existingRun.clientRequestId);
-        recordStage("run_claim_ms", claimStageStart);
-        if (!claimedRun || claimedRun.id !== runId) {
-          console.log(`[Run] Failed to claim run ${runId} - may have been claimed by another request`);
-          return res.json({
-            status: "claim_failed",
-            message: "Run already claimed or not pending",
-            traceId: requestId,
-            timings: reportTimings("claim_failed"),
-          });
-        }
-        console.log(`[Run] Successfully claimed run ${runId}`);
       }
 
       const provider = (
@@ -1453,7 +1560,13 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           // Convert resolved attachments to BatchAttachment format
           // storagePaths were already resolved earlier
           const batchAttachments: BatchAttachment[] = resolvedAttachments
-            .filter((att: any) => att.storagePath || att.content)
+            .filter((att: any) => {
+              if (!(att.storagePath || att.content)) return false;
+              // Exclude image attachments — they are handled by the Vision pipeline below
+              const mime = (att.mimeType || att.type || "").toLowerCase();
+              if (mime.startsWith("image/")) return false;
+              return true;
+            })
             .map((att: any) => ({
               name: att.name || 'document',
               mimeType: att.mimeType || att.type || 'application/octet-stream',
@@ -1461,55 +1574,62 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
               content: att.content
             }));
 
-          batchResult = await batchProcessor.processBatch(batchAttachments);
+          // Skip batch processing if all attachments were images (handled by Vision pipeline)
+          if (batchAttachments.length === 0) {
+            console.log(`[Stream] All attachments are images — skipping DocumentBatchProcessor`);
+          } else {
+            batchResult = await batchProcessor.processBatch(batchAttachments);
+          }
 
-          // Log observability metrics per file
-          console.log(`[Stream] Batch processing complete:`, {
-            attachmentsCount: batchResult.attachmentsCount,
-            processedFiles: batchResult.processedFiles,
-            failedFiles: batchResult.failedFiles.length,
-            totalChunks: batchResult.chunks.length,
-            totalTokens: batchResult.totalTokens
-          });
-
-          // Log per-file stats
-          for (const stat of batchResult.stats) {
-            console.log(`[Stream] File stats: ${stat.filename}`, {
-              bytesRead: stat.bytesRead,
-              pagesProcessed: stat.pagesProcessed,
-              tokensExtracted: stat.tokensExtracted,
-              parseTimeMs: stat.parseTimeMs,
-              chunkCount: stat.chunkCount,
-              status: stat.status
+          if (batchResult) {
+            // Log observability metrics per file
+            console.log(`[Stream] Batch processing complete:`, {
+              attachmentsCount: batchResult.attachmentsCount,
+              processedFiles: batchResult.processedFiles,
+              failedFiles: batchResult.failedFiles.length,
+              totalChunks: batchResult.chunks.length,
+              totalTokens: batchResult.totalTokens
             });
-          }
 
-          // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
-          if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
-            const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
-            const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
-            console.error(`[Stream] ${errorMsg}`);
+            // Log per-file stats
+            for (const stat of batchResult.stats) {
+              console.log(`[Stream] File stats: ${stat.filename}`, {
+                bytesRead: stat.bytesRead,
+                pagesProcessed: stat.pagesProcessed,
+                tokensExtracted: stat.tokensExtracted,
+                parseTimeMs: stat.parseTimeMs,
+                chunkCount: stat.chunkCount,
+                status: stat.status
+              });
+            }
 
-            res.write(`event: error\ndata: ${JSON.stringify({
-              type: 'coverage_failure',
-              message: 'No se pudieron procesar todos los archivos solicitados',
-              details: {
-                requested: batchResult.attachmentsCount,
-                processed: batchResult.processedFiles,
-                failedFiles: batchResult.failedFiles
-              },
-              requestId,
-              timestamp: Date.now()
-            })}\n\n`);
+            // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
+            if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
+              const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
+              const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
+              console.error(`[Stream] ${errorMsg}`);
 
-            clearInterval(heartbeatInterval);
-            return res.end();
-          }
+              res.write(`event: error\ndata: ${JSON.stringify({
+                type: 'coverage_failure',
+                message: 'No se pudieron procesar todos los archivos solicitados',
+                details: {
+                  requested: batchResult.attachmentsCount,
+                  processed: batchResult.processedFiles,
+                  failedFiles: batchResult.failedFiles
+                },
+                requestId,
+                timestamp: Date.now()
+              })}\n\n`);
 
-          // Use unified context from batch processor
-          if (batchResult.unifiedContext) {
-            attachmentContext = batchResult.unifiedContext;
-            console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+              clearInterval(heartbeatInterval);
+              return res.end();
+            }
+
+            // Use unified context from batch processor
+            if (batchResult.unifiedContext) {
+              attachmentContext = batchResult.unifiedContext;
+              console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+            }
           }
 
         } catch (batchError: any) {

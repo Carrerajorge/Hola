@@ -393,7 +393,7 @@ export default function Home() {
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
     const result = await addMessage(pendingId, message);
-    const realId = resolveRealChatId(pendingId);
+    const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
     if (realId && !realId.startsWith("pending-")) {
       setLocation(`/chat/${realId}`, { replace: true });
     }

@@ -1683,6 +1683,8 @@ export function ChatInterface({
         conversationId: stableChatId,
         chatId: stableChatId,
         runId: effectiveRunId,
+        clientRequestId: msg.clientRequestId,
+        userRequestId: msg.requestId,
         attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
         docTool: selectedDocTool || null,
         provider: selectedProvider,
@@ -3796,29 +3798,26 @@ export function ChatInterface({
         ));
 
 	        // Ensure abort controller is active
-	        if (!abortControllerRef.current) {
-	          abortControllerRef.current = new AbortController();
-	        }
+		        if (!abortControllerRef.current) {
+		          abortControllerRef.current = new AbortController();
+		        }
 
 		        try {
-			          const persisted = await persistGenerationUserMessagePromise;
-			          const effectiveRunId: string | undefined = persisted?.run?.id;
-			          const runChatId: string | undefined = persisted?.run?.chatId;
+            const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
+            const immediateChatId =
+              resolvedCurrentChatId && !resolvedCurrentChatId.startsWith("pending-")
+                ? resolvedCurrentChatId
+                : null;
+            const quickPersisted = await Promise.race<
+              { run?: { id: string; chatId: string } } | undefined
+            >([
+              persistGenerationUserMessagePromise as Promise<{ run?: { id: string; chatId: string } } | undefined>,
+              new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 180)),
+            ]);
+            const effectiveRunId: string | undefined = quickPersisted?.run?.id;
+            const runChatId: string | undefined = quickPersisted?.run?.chatId;
 
-			          if (!effectiveRunId) {
-			            toast({
-			              title: "Error al guardar tu mensaje",
-			              description: "No pudimos confirmar el envío. Reintenta.",
-			              variant: "destructive",
-			              duration: 5000,
-			            });
-			            setAiState("idle");
-			            setAiProcessSteps([]);
-			            abortControllerRef.current = null;
-			            return;
-			          }
-
-			          const effectiveChatIdForStream = runChatId || await waitForStableChatId({
+			          const effectiveChatIdForStream = runChatId || immediateChatId || await waitForStableChatId({
 			            timeoutMs: 8000,
 			            signal: abortControllerRef.current.signal,
 			          });
@@ -3839,14 +3838,16 @@ export function ChatInterface({
 	            method: "POST",
 	            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
 	            credentials: "include",
-	            body: JSON.stringify({
-		              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
-		              chatId: effectiveChatIdForStream,
-		              conversationId: effectiveChatIdForStream,
-		              runId: effectiveRunId,
-		              provider: selectedProvider,
-		              model: selectedModel,
-		              lastImageBase64,
+		            body: JSON.stringify({
+			              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+			              chatId: effectiveChatIdForStream,
+			              conversationId: effectiveChatIdForStream,
+			              runId: effectiveRunId,
+                    clientRequestId: userMsg.clientRequestId,
+                    userRequestId: userMsg.requestId,
+			              provider: selectedProvider,
+			              model: selectedModel,
+			              lastImageBase64,
 		              lastImageId,
 		              latencyMode,
             }),
@@ -4740,21 +4741,28 @@ export function ChatInterface({
 	        return undefined;
 	      });
 
-      // Start image detection early (runs in parallel with intent checks below).
-      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
-      const isImageTool = selectedTool === "image";
-      const imageDetectPromise: Promise<boolean> = (
-        !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles
-      )
-        ? fetch("/api/image/detect", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userInput })
-          })
-            .then(r => r.json())
-            .then(d => !!d.isImageRequest)
-            .catch(() => false)
-        : Promise.resolve(!!isImageTool);
+	      // Start image detection early (runs in parallel with intent checks below).
+	      // Previously this was sequential AFTER onSendMessage, adding another 200-500ms.
+	      const isImageTool = selectedTool === "image";
+        const shouldAutoDetectImage =
+          !isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles;
+        const imageDetectController =
+          shouldAutoDetectImage && typeof AbortController !== "undefined"
+            ? new AbortController()
+            : null;
+	      const imageDetectPromise: Promise<boolean> = (
+	        shouldAutoDetectImage
+	      )
+	        ? fetch("/api/image/detect", {
+	            method: "POST",
+	            headers: { "Content-Type": "application/json" },
+	            body: JSON.stringify({ message: userInput }),
+              signal: imageDetectController?.signal ?? undefined,
+	          })
+	            .then(r => r.json())
+	            .then(d => !!d.isImageRequest)
+	            .catch(() => false)
+	        : Promise.resolve(!!isImageTool);
 
       // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
       const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -4924,9 +4932,19 @@ export function ChatInterface({
       try {
         abortControllerRef.current = new AbortController();
 
-        // Await the image detection that was started in parallel above.
-        // By now it has had time to run during intent checks (~0ms extra wait).
-        let shouldGenerateImage = await imageDetectPromise;
+	        // Await image detection with a strict timeout so chat streaming is not blocked.
+	        // If detection is slow, default to chat mode and continue immediately.
+          const IMAGE_DETECT_TIMEOUT_MS = 180;
+	        const detectResult = await Promise.race<boolean | null>([
+            imageDetectPromise,
+            new Promise<boolean | null>((resolve) => setTimeout(() => resolve(null), IMAGE_DETECT_TIMEOUT_MS)),
+          ]);
+          const imageDetectTimedOut = detectResult === null;
+	        let shouldGenerateImage = detectResult ?? false;
+          if (imageDetectTimedOut) {
+            imageDetectController?.abort();
+            console.debug("[Perf] image_detect_timeout_ms", IMAGE_DETECT_TIMEOUT_MS);
+          }
 
         // If files are attached, log that we're skipping image detection
         if (hasAttachedFiles && !isImageTool) {
@@ -5135,24 +5153,23 @@ IMPORTANTE:
 
 	          // Always use SSE streaming — but ONLY against a stable, real chatId.
 	          // Never fall back to a synthetic ID here; that creates "ghost" chats and splits persistence.
-	          const persisted = await persistUserMessagePromise;
-	          const effectiveRunId: string | undefined = persisted?.run?.id;
-	          const runChatId: string | undefined = persisted?.run?.chatId;
-
-	          if (!effectiveRunId) {
-	            toast({
-	              title: "Error al guardar tu mensaje",
-	              description: "No pudimos confirmar el envío. Reintenta.",
-	              variant: "destructive",
-	              duration: 5000,
-	            });
-	            setAiState("idle");
-	            setAiProcessSteps([]);
-	            abortControllerRef.current = null;
-	            return;
-	          }
-
-	          const effectiveStreamChatId = runChatId || await waitForStableChatId({ timeoutMs: 8000, signal: abortControllerRef.current?.signal });
+            const resolvedCurrentChatId = chatId ? resolveRealChatId(chatId) : null;
+            const immediateChatId =
+              resolvedCurrentChatId && !resolvedCurrentChatId.startsWith("pending-")
+                ? resolvedCurrentChatId
+                : null;
+            const quickPersisted = await Promise.race<
+              { run?: { id: string; chatId: string } } | undefined
+            >([
+              persistUserMessagePromise as Promise<{ run?: { id: string; chatId: string } } | undefined>,
+              new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 180)),
+            ]);
+	          const effectiveRunId: string | undefined = quickPersisted?.run?.id;
+	          const runChatId: string | undefined = quickPersisted?.run?.chatId;
+	          const effectiveStreamChatId =
+              runChatId ||
+              immediateChatId ||
+              await waitForStableChatId({ timeoutMs: 8000, signal: abortControllerRef.current?.signal });
 	          if (!effectiveStreamChatId) {
 	            toast({
 	              title: "Error",
@@ -5162,12 +5179,12 @@ IMPORTANTE:
             });
             setAiState("idle");
             setAiProcessSteps([]);
-            abortControllerRef.current = null;
-            return;
-          }
-          if (effectiveRunId) {
-            // SSE streaming mode - real-time streaming from server
-            setAiState("responding");
+	            abortControllerRef.current = null;
+	            return;
+	          }
+	          if (effectiveStreamChatId) {
+	            // SSE streaming mode - real-time streaming from server
+	            setAiState("responding");
 
             // Update steps: mark processing done, searching active
             setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
@@ -5256,18 +5273,20 @@ IMPORTANTE:
             // DEBUG: Log selectedDocTool value before making request
             console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
-            const response = await fetch("/api/chat/stream", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
-              credentials: "include",
-	              body: JSON.stringify({
-	                messages: finalChatHistory,
-	                conversationId: effectiveStreamChatId,
-	                chatId: effectiveStreamChatId,
-	                runId: effectiveRunId,
-	                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-	                // Send selected doc tool for production mode activation
-	                docTool: selectedDocTool || null,
+	            const response = await fetch("/api/chat/stream", {
+	              method: "POST",
+	              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+	              credentials: "include",
+		              body: JSON.stringify({
+		                messages: finalChatHistory,
+		                conversationId: effectiveStreamChatId,
+		                chatId: effectiveStreamChatId,
+		                runId: effectiveRunId,
+                    clientRequestId: userMsg.clientRequestId,
+                    userRequestId: userMsg.requestId,
+		                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+		                // Send selected doc tool for production mode activation
+		                docTool: selectedDocTool || null,
 	                latencyMode,
               }),
               signal: abortControllerRef.current?.signal
