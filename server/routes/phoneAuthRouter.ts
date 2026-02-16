@@ -96,7 +96,21 @@ phoneAuthRouter.post("/send-code", async (req, res) => {
     });
     
     // Integrate with SMS provider (Twilio)
-    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
+    const hasTwilio = Boolean(
+      process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      process.env.TWILIO_PHONE_NUMBER
+    );
+
+    if (!hasTwilio && !isDev) {
+      console.error('[PhoneAuth] Twilio not configured in production');
+      return res.status(503).json({
+        success: false,
+        message: "Servicio de verificación no disponible. Intenta más tarde."
+      });
+    }
+
+    if (hasTwilio) {
       try {
         const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilio.messages.create({
@@ -107,14 +121,17 @@ phoneAuthRouter.post("/send-code", async (req, res) => {
         console.log(`[PhoneAuth] SMS sent to ${normalizedPhone.slice(0, 6)}***`);
       } catch (smsError: any) {
         console.error('[PhoneAuth] SMS sending failed:', smsError.message);
-        // Continue with dev mode fallback
+        if (!isDev) {
+          return res.status(502).json({
+            success: false,
+            message: "No se pudo enviar el código. Verifica tu número o intenta más tarde."
+          });
+        }
       }
-    } else if (!isDev) {
-      console.warn('[PhoneAuth] Twilio not configured - SMS not sent');
     }
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: "Código enviado",
       expiresIn: OTP_EXPIRY_MS / 1000,
       // Development only - remove in production
