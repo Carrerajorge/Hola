@@ -1,6 +1,8 @@
 name: Deploy to Production
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       skip_ci:
@@ -8,10 +10,6 @@ on:
         required: false
         default: 'false'
         type: boolean
-  workflow_run:
-    workflows: ["CI"]
-    branches: [main]
-    types: [completed]
 
 concurrency:
   group: deploy-production
@@ -35,7 +33,7 @@ jobs:
   # ── CI Gate ─────────────────────────────────────────────
   ci:
     name: CI Checks
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.skip_ci != 'true' && github.event.inputs.skip_ci != true) }}
     uses: ./.github/workflows/ci.yml
 
   # ── Manual Deploy ───────────────────────────────────────
@@ -336,7 +334,8 @@ jobs:
   deploy_auto:
     name: Deploy to VPS (Auto)
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    needs: [ci]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && success() && needs.ci.result == 'success' }}
     timeout-minutes: 35
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
@@ -352,7 +351,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
 
       - name: Preflight target host
         run: |
@@ -373,7 +372,7 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          TARGET_SHA="${{ github.event.workflow_run.head_sha }}"
+          TARGET_SHA="${{ github.sha }}"
           # Keep SSH alive during long docker builds (some hosts/NATs drop idle sessions).
           ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
             -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
@@ -573,7 +572,7 @@ jobs:
       - name: Verify production
         run: |
           set -euo pipefail
-          EXPECTED_SHA="${{ github.event.workflow_run.head_sha }}"
+          EXPECTED_SHA="${{ github.sha }}"
           EXPECTED_SHA="${EXPECTED_SHA:0:8}"
           echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED_SHA})..."
           sleep 10

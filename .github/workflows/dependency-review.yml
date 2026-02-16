@@ -19,13 +19,11 @@ jobs:
       - name: Dependency review
         id: dep_review
         uses: actions/dependency-review-action@v4
-        continue-on-error: true
         with:
           fail-on-severity: high
 
       - name: Note (Dependency graph not enabled)
-        if: ${{ steps.dep_review.outcome == 'failure' }}
+        if: ${{ failure() }}
         run: |
           echo "Dependency review failed. This commonly happens when GitHub Dependency graph is disabled for the repo."
           echo "Enable it in Settings → Security & analysis → Dependency graph (requires admin access)."
-

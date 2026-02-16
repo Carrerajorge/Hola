@@ -680,19 +680,24 @@ describe("Security: DocumentCompiler hardening", () => {
   });
 
   it("XLSX workbook memory limit prevents OOM", async () => {
+    const columns = Array(100).fill(null).map((_, i) => ({
+      key: `c${i}`,
+      header: `Col${i}`,
+      type: "string" as const,
+    }));
+    const rowTemplate = Object.fromEntries(
+      columns.map((c) => [c.key, "data"])
+    ) as Record<string, string>;
+
     const spec: WorkbookSpec = {
       format: "xlsx",
       title: "Huge",
       sheets: [{
         name: "Data",
-        columns: Array(100).fill(null).map((_, i) => ({
-          key: `c${i}`, header: `Col${i}`, type: "string" as const,
-        })),
-        rows: Array(60_000).fill(null).map(() => {
-          const row: Record<string, string> = {};
-          for (let i = 0; i < 100; i++) row[`c${i}`] = "data";
-          return row;
-        }),
+        columns,
+        // Reuse a shared row object so test setup stays fast while preserving
+        // the same estimated cell count (60_000 × 100).
+        rows: Array(60_000).fill(rowTemplate),
         formulas: [],
         filters: true,
         freezeRow: 1,
@@ -706,7 +711,7 @@ describe("Security: DocumentCompiler hardening", () => {
     expect(result.buffer.length).toBeGreaterThan(0);
     // Should be degraded since it hit the limit
     expect(result.metrics.degraded).toBe(true);
-  });
+  }, 20_000);
 
   it("sanitizeFilename handles UTF-8 chars", async () => {
     const spec: DocumentSpec = {

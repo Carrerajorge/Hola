@@ -77,11 +77,31 @@ function logWarn(event: string, data?: Record<string, unknown>): void {
 const KEY_CACHE_TTL_MS = 60_000;
 let _keyCacheTime = 0;
 const _keyCache = new Map<ChatRuntimeProvider, boolean>();
+let _lastEnvSignature = "";
+
+const TRACKED_ENV_KEYS: readonly string[] = Object.freeze(
+  Array.from(new Set(Object.values(API_KEY_ENV_VARS).flat()))
+);
+
+function computeEnvSignature(): string {
+  // Presence/emptiness signature only; avoids storing secret values.
+  return TRACKED_ENV_KEYS
+    .map((key) => {
+      const raw = process.env[key];
+      const present = typeof raw === "string" && raw.trim().length > 0 ? "1" : "0";
+      return `${key}:${present}`;
+    })
+    .join("|");
+}
 
 function refreshKeyCache(): void {
   const now = Date.now();
-  if (now - _keyCacheTime < KEY_CACHE_TTL_MS && _keyCache.size > 0) return;
+  const envSignature = computeEnvSignature();
+  const cacheFresh = now - _keyCacheTime < KEY_CACHE_TTL_MS && _keyCache.size > 0;
+  if (cacheFresh && envSignature === _lastEnvSignature) return;
+
   _keyCacheTime = now;
+  _lastEnvSignature = envSignature;
   for (const runtime of ALL_RUNTIME_PROVIDERS) {
     const envVars = API_KEY_ENV_VARS[runtime];
     const hasKey = envVars.some(v => {
@@ -95,6 +115,7 @@ function refreshKeyCache(): void {
 /** Force-refresh the API-key cache (useful after hot-loading .env). */
 export function invalidateKeyCache(): void {
   _keyCacheTime = 0;
+  _lastEnvSignature = "";
   _keyCache.clear();
 }
 
