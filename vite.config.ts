@@ -110,7 +110,7 @@ export default defineConfig(async () => {
               "lucide-react",
               "framer-motion",
             ],
-            "vendor-office": ["exceljs", "pptxgenjs", "docx", "mammoth", "html-to-docx"],
+            "vendor-office": ["exceljs", "pptxgenjs", "docx", "mammoth"],
             "vendor-spreadsheet": ["@handsontable/react", "handsontable"],
             "vendor-visualization": ["echarts", "echarts-for-react", "recharts", "d3", "three", "konva", "react-konva"],
             "vendor-editor": ["@monaco-editor/react", "prismjs"],
