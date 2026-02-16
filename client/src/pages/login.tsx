@@ -685,7 +685,13 @@ export default function LoginPage() {
                 )}
               </div>
             ) : (
-              <div className="space-y-4 fade-in-up fade-in-up-delay-4">
+              <form
+                className="space-y-4 fade-in-up fade-in-up-delay-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleContinue();
+                }}
+              >
                 <Input
                   type="email"
                   placeholder="Direcci\u00f3n de correo electr\u00f3nico"
@@ -701,7 +707,6 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="h-12 text-base rounded-xl bg-background border-input text-foreground placeholder:text-muted-foreground"
                   data-testid="input-login-password"
-                  onKeyDown={(e) => e.key === "Enter" && handleContinue()}
                 />
                 {error && (
                   <p
@@ -713,8 +718,8 @@ export default function LoginPage() {
                 )}
                 <div className="flex gap-2">
                   <Button
+                    type="submit"
                     className="flex-1 h-12 text-base bg-primary hover:bg-primary/90 border border-border text-primary-foreground font-semibold transition-colors rounded-xl"
-                    onClick={handleContinue}
                     disabled={isLoading}
                     data-testid="button-login-continue"
                   >
@@ -743,7 +748,7 @@ export default function LoginPage() {
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-              </div>
+              </form>
             ))}
 
           {/* ─── Phone Authentication View ─── */}

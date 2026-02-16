@@ -38,12 +38,24 @@ export function getAnalyticsSessionId(): string {
   return id;
 }
 
+function hasAuthContextForTracking(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const hasUser = Boolean(localStorage.getItem("siragpt_auth_user"));
+    const hasAnon = Boolean(localStorage.getItem("siragpt_anon_user_id"));
+    return hasUser || hasAnon;
+  } catch {
+    return false;
+  }
+}
+
 export async function trackWorkspaceEvent(payload: AnalyticsEventPayload): Promise<void> {
   if (typeof window === "undefined") return;
+  if (!hasAuthContextForTracking()) return;
 
   const sessionId = payload.sessionId || getAnalyticsSessionId();
   try {
-    await apiFetch("/api/workspace/analytics/track", {
+    const res = await apiFetch("/api/workspace/analytics/track", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -51,6 +63,9 @@ export async function trackWorkspaceEvent(payload: AnalyticsEventPayload): Promi
         ...payload,
       }),
     });
+
+    // keep console clean for expected unauthenticated transitions
+    if (res.status === 401 || res.status === 403) return;
   } catch {
     // Avoid blocking UI on tracking failures
   }
