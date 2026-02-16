@@ -5283,8 +5283,9 @@ IMPORTANTE:
               return;
             }
 
-            // DEBUG: Log selectedDocTool value before making request
-            console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
+            if (import.meta.env.DEV) {
+              chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
+            }
 
 	            // Send first image dataUrl as lastImageBase64 for direct vision fallback
 	            // (bypasses storagePath resolution — belt-and-suspenders for production reliability)
