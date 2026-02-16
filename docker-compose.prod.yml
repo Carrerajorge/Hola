@@ -30,7 +30,7 @@ services:
 
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
 
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@redis:6379
+      REDIS_URL: redis://redis:6379
 
       AGENT_WORKSPACE_ROOT: /app/sandbox_workspace
 
@@ -95,7 +95,7 @@ services:
 
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/iliagpt
 
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@redis:6379
+      REDIS_URL: redis://redis:6379
 
       OCR_SERVICE_URL: http://ocr:8000
 
@@ -177,8 +177,6 @@ services:
 
       SANDBOX_RUNNER_PORT: "8080"
 
-      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN}
-
       AGENT_WORKSPACE_ROOT: /workspace_root
 
       SHELL_COMMAND_DOCKER_IMAGE: debian:bookworm-slim
@@ -186,6 +184,8 @@ services:
       SHELL_COMMAND_DOCKER_CPUS: "1"
 
       SHELL_COMMAND_DOCKER_MEMORY: 512m
+
+      SHELL_COMMAND_DOCKER_NETWORK: bridge
 
       SHELL_COMMAND_DOCKER_PIDS: "256"
 

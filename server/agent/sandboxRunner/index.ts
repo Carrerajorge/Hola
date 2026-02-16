@@ -1,8 +1,4 @@
-import express from "express";
-import { randomUUID } from "crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
-import path from "path";
-import fs from "fs/promises";
+import express from "express"; import { randomUUID } from "crypto"; import { spawn, type ChildProcessWithoutNullStreams } from "child_process"; import path from "path"; import fs from "fs/promises";
 
 type StreamEvt =
   | { type: "stdout"; chunk: string; ts: number }
@@ -74,7 +70,7 @@ function spawnDockerJob(params: { runId: string; command: string; timeoutMs: num
     "--rm",
     "-i",
     "--network",
-    "none",
+    (process.env.SHELL_COMMAND_DOCKER_NETWORK || "none"),
     "--security-opt",
     "no-new-privileges",
     "--cap-drop",

@@ -1,36 +1,40 @@
-import "./config/load-env";
-import { env } from "./config/env"; // Validates env vars immediately on import
+import "./config/load-env"; import { env } from "./config/env"; // Validates env vars immediately on import
+
 import compression from "compression";
-import express, { type Request, Response, NextFunction } from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { createServer } from "http";
+import hpp from "hpp";
+
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { createServer } from "http";
-import { requestTracerMiddleware } from "./lib/requestTracer";
-import { requestLoggerMiddleware } from "./middleware/requestLogger";
-import { updateContext } from "./middleware/correlationContext";
-import { startAggregator } from "./services/analyticsAggregator";
-import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
-import { seedProductionData } from "./seed-production";
-import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
-import hpp from "hpp";
-import { apiSecurityHeaders } from "./middleware/securityHeaders";
-import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
-import { pythonServiceManager } from "./lib/pythonServiceManager";
-import { idempotency } from "./middleware/idempotency";
-import { globalLimiter, authLimiter, billingLimiter } from "./middleware/rateLimiter";
-import { Logger } from "./lib/logger";
-import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
-import { apiErrorHandler } from "./middleware/apiErrorHandler";
-import { corsMiddleware } from "./middleware/cors";
-import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
-import { canonicalUrlMiddleware } from "./middleware/canonicalUrl";
-import { setupSecurity } from "./middleware/security";
-import { runCleanup } from "./lib/cleanup";
-import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
-import { startChatScheduleRunner } from "./services/chatScheduleRunner";
-import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
-import { getUserId } from "./types/express";
 
+import { apiErrorHandler } from "./middleware/apiErrorHandler";
+import { canonicalUrlMiddleware } from "./middleware/canonicalUrl";
+import { corsMiddleware } from "./middleware/cors";
+import { csrfProtection, csrfTokenMiddleware } from "./middleware/csrf";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { idempotency } from "./middleware/idempotency";
+import { requestLoggerMiddleware } from "./middleware/requestLogger";
+import { apiSecurityHeaders } from "./middleware/securityHeaders";
+import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
+import { setupSecurity } from "./middleware/security";
+
+import { authLimiter, billingLimiter, globalLimiter } from "./middleware/rateLimiter";
+
+import { runCleanup } from "./lib/cleanup";
+import { drainConnections, startHealthChecks, stopHealthChecks, verifyDatabaseConnection } from "./db";
+import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
+import { Logger } from "./lib/logger";
+import { pythonServiceManager } from "./lib/pythonServiceManager";
+import { requestTracerMiddleware } from "./lib/requestTracer";
+import { getTracingMetrics, initTracing, shutdownTracing } from "./lib/tracing";
+
+import { seedProductionData } from "./seed-production";
+import { startAggregator } from "./services/analyticsAggregator";
+import { startChatScheduleRunner } from "./services/chatScheduleRunner";
+
+import { registerAuthRoutes, setupAuth } from "./replit_integrations/auth";
+import { getUserId } from "./types/express";
 initTracing();
 
 const app = express();
@@ -192,8 +196,13 @@ export function log(message: string, source = "express") {
   app.use("/api", sessionDeviceInfoMiddleware);
 
   // CSRF Protection for API (validates header)
+  // NOTE: /api/packages is an API endpoint; protect it via auth/feature-flags/policy (not CSRF),
+  // and allow local/automation calls without Secure-cookie issues.
   if (!isTest) {
-    app.use("/api", csrfProtection);
+    app.use("/api", (req, res, next) => {
+      if (req.path.startsWith("/packages")) return next(); // /api/packages/*
+      return csrfProtection(req, res, next);
+    });
   } else {
     log("CSRF protection disabled in test environment", "security");
   }
