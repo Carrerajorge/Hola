@@ -121,8 +121,8 @@ if ! validate_file_path "$COMPOSE_PROJECT"; then
   exit 1
 fi
 
-if [ ! -d "$DEPLOY_PATH" ]; then
-  echo "DEPLOY_PATH does not exist locally: $DEPLOY_PATH"
+if ! validate_file_path "$DEPLOY_PATH"; then
+  echo "Invalid DEPLOY_PATH: '${DEPLOY_PATH}'"
   exit 1
 fi
 
@@ -215,7 +215,8 @@ SSH_OPTS=(
   -o ExitOnForwardFailure=yes
 )
 
-ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" <<'DEPLOY'
+ssh "${SSH_OPTS[@]}" "${VPS_USER}@${VPS_HOST}" \
+  "DEPLOY_PATH='${DEPLOY_PATH}' COMPOSE_PROJECT='${COMPOSE_PROJECT}' COMPOSE_FILE='${COMPOSE_FILE}' DEPLOY_BRANCH='${DEPLOY_BRANCH}' bash -s" <<'DEPLOY'
 set -euo pipefail
 
 extract_env_value() {
@@ -229,16 +230,26 @@ extract_env_value() {
   echo "$value"
 }
 
-if ! command -v git >/dev/null 2>&1; then
-  echo "Git is not available on VPS"
-  exit 1
-fi
+for cmd in git docker python3 curl awk; do
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "${cmd} is not available on VPS"
+    exit 1
+  fi
+done
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-iliagpt}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
+if [ ! -d "$DEPLOY_PATH" ]; then
+  echo "✗ DEPLOY_PATH does not exist on VPS: $DEPLOY_PATH"
+  exit 1
+fi
+if [ -L "$DEPLOY_PATH" ]; then
+  echo "✗ DEPLOY_PATH must not be a symlink: $DEPLOY_PATH"
+  exit 1
+fi
 cd "$DEPLOY_PATH"
 
 echo "▸ Pulling latest code (${DEPLOY_BRANCH})..."
@@ -259,6 +270,11 @@ echo "▸ Current commit: $(git rev-parse --short HEAD)"
 APP_VERSION="$(git rev-parse --short HEAD)"
 export APP_VERSION
 echo "▸ APP_VERSION: ${APP_VERSION}"
+
+if [ ! -f "${COMPOSE_FILE}" ]; then
+  echo "✗ Compose file missing on VPS: ${COMPOSE_FILE}"
+  exit 1
+fi
 
 if [ ! -f .env.production ]; then
   echo "✗ Missing .env.production on VPS"
