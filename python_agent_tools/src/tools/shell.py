@@ -7,6 +7,7 @@ import asyncio
 import shlex
 import os
 import re
+import tempfile
 
 class ShellInput(ToolInput):
     command: str = Field(..., description="Command to execute", max_length=1000)
@@ -27,7 +28,13 @@ class SecureCommandExecutor:
     
     FORBIDDEN_CHARS = re.compile(r'[;&|`$<>\\]|\.\.')
     MAX_ARG_LEN = 500
-    ALLOWED_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
+    SECURE_TMP_DIR = tempfile.gettempdir()
+    SHELL_ENV = {
+        "PATH": "/bin:/usr/bin",
+        "HOME": SECURE_TMP_DIR,
+        "LANG": "C.UTF-8",
+    }
+    ALLOWED_DIRS: Tuple[str, ...] = (SECURE_TMP_DIR, "/home", "/var/log")
     
     @staticmethod
     def _sanitize_arg(arg: str) -> Optional[str]:
@@ -116,7 +123,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -135,7 +142,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -154,7 +161,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -173,7 +180,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -192,7 +199,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -211,7 +218,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -230,7 +237,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -249,7 +256,7 @@ class SecureCommandExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+                env=SecureCommandExecutor.SHELL_ENV
             )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -262,14 +269,14 @@ class SecureCommandExecutor:
         if not valid:
             return False, None, error, None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "/usr/bin/wc",
-                *clean_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
-            )
+                proc = await asyncio.create_subprocess_exec(
+                    "/usr/bin/wc",
+                    *clean_args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=safe_cwd,
+                    env=SecureCommandExecutor.SHELL_ENV
+                )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
             return False, None, str(e), None
