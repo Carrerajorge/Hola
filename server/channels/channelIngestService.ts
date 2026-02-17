@@ -124,6 +124,19 @@ const POLICY_CONTROLLED_RESPONSE_LENGTH = 420;
 const MAX_DEDUPE_KEY_PART_LENGTH = 128;
 const MAX_DEDUPE_MESSAGE_ID_LENGTH = MAX_ID_LENGTH;
 const MAX_DEDUPE_CONVERSATION_KEY_LENGTH = 512;
+const MAX_CONVERSATION_RESERVATIONS = 20_000;
+const CONVERSATION_RUN_RESERVATION_TTL_MS = parsePositiveInt(
+  process.env.CHANNEL_RUN_RESERVATION_TTL_MS,
+  90_000,
+  10_000,
+  15 * 60_000,
+);
+const OUTBOUND_SEND_TIMEOUT_MS = parsePositiveInt(
+  process.env.CHANNEL_OUTBOUND_SEND_TIMEOUT_MS,
+  30_000,
+  1_000,
+  120_000,
+);
 const LOCAL_HOST_SUFFIXES = [
   "localhost",
   "127.",
@@ -141,11 +154,18 @@ type TimedPromise<T> = {
   promise: Promise<T>;
 };
 
+type ConversationRunReservation = {
+  requestId: string;
+  startedAt: number;
+  expiresAt: number;
+};
+
 const inFlightRunsByConversation = new Map<string, InFlightRunState>();
 const conversationQueues = new Map<string, Promise<void>>();
 const seenProviderMessageIdsByConversation = new Map<string, number>();
 const conversationRateBuckets = new Map<string, { startedAt: number; count: number }>();
 const outboundCircuitState = new Map<ExternalChannel, { failures: number; openedUntil?: number; lastFailureAt: number }>();
+const conversationRunReservations = new Map<string, ConversationRunReservation>();
 
 const ENFORCED_INBOUND_MESSAGE_ID_TTL_MS = parsePositiveInt(
   process.env.CHANNEL_INBOUND_MESSAGE_ID_TTL_MS,
@@ -576,6 +596,69 @@ function pruneMessageIdLedger(ttlMs = ENFORCED_INBOUND_MESSAGE_ID_TTL_MS): void 
   }
 }
 
+function pruneConversationRunReservations(nowMs = Date.now()): void {
+  for (const [key, reservation] of conversationRunReservations.entries()) {
+    if (nowMs - reservation.startedAt >= CONVERSATION_RUN_RESERVATION_TTL_MS) {
+      conversationRunReservations.delete(key);
+    }
+  }
+
+  if (conversationRunReservations.size <= MAX_CONVERSATION_RESERVATIONS) {
+    return;
+  }
+
+  const excess = conversationRunReservations.size - MAX_CONVERSATION_RESERVATIONS;
+  let removed = 0;
+  for (const key of conversationRunReservations.keys()) {
+    conversationRunReservations.delete(key);
+    removed += 1;
+    if (removed >= excess) break;
+  }
+}
+
+function acquireConversationRunReservation(
+  conversationKey: string,
+  requestId: string,
+): boolean {
+  const now = Date.now();
+  pruneConversationRunReservations(now);
+
+  const existing = conversationRunReservations.get(conversationKey);
+  if (existing && existing.expiresAt > now) {
+    if (existing.requestId === requestId) {
+      Logger.warn("[Channels] conversation run reservation skipped duplicate event", {
+        conversation: conversationKey,
+        requestId,
+        previousRequestId: existing.requestId,
+      });
+      return false;
+    }
+
+    Logger.warn("[Channels] conversation run reservation blocked by in-flight run", {
+      conversation: conversationKey,
+      requestId,
+      previousRequestId: existing.requestId,
+    });
+    return false;
+  }
+
+  conversationRunReservations.set(conversationKey, {
+    requestId,
+    startedAt: now,
+    expiresAt: now + CONVERSATION_RUN_RESERVATION_TTL_MS,
+  });
+  return true;
+}
+
+function releaseConversationRunReservation(
+  conversationKey: string,
+  requestId: string,
+): void {
+  const existing = conversationRunReservations.get(conversationKey);
+  if (!existing || existing.requestId !== requestId) return;
+  conversationRunReservations.delete(conversationKey);
+}
+
 async function resolveChannelAccount(channel: ExternalChannel, envelope: MessageEnvelope): Promise<ChannelAccount | null> {
   if (channel === "whatsapp_cloud") {
     const account = await findWhatsAppCloudAccountByPhoneNumberId(envelope.channelKey);
@@ -903,7 +986,11 @@ async function sendTextWithRetries(
         throw new Error(`Unsupported channel '${channel}'`);
       }
 
-      await sender();
+      await withTimeoutGuard(
+        `channel_send_${channel}`,
+        OUTBOUND_SEND_TIMEOUT_MS,
+        async () => Promise.race([sender(), waitForAbortSignal(abortSignal)]),
+      );
       markOutboundCircuitSuccess(channel);
       return;
     } catch (error: unknown) {
@@ -1232,6 +1319,17 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     });
     return;
   }
+
+  const runReservationAcquired = acquireConversationRunReservation(conversationKey, safeScopedRequestId);
+  if (!runReservationAcquired) {
+    Logger.warn("[Channels] inbound message skipped due to active conversation run reservation", {
+      conversation: safeEnvelope.conversationKey,
+      channel: jobChannel,
+      requestId: safeScopedRequestId,
+    });
+    return;
+  }
+
   const safePolicyScopedRequestId = safeScopedRequestId.slice(0, MAX_REQUEST_ID_LENGTH);
   const eventTraceId = buildEventTraceId(conversationKey, messageId, safeScopedRequestId);
   Logger.debug("[Channels] inbound message accepted for processing", {
@@ -1733,6 +1831,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       traceId: eventTraceId,
     });
   } finally {
+    releaseConversationRunReservation(conversationKey, safeScopedRequestId);
     unregisterInFlightRun(conversationKey, {
       requestId: safeScopedRequestId,
       runId: safeRunId,
