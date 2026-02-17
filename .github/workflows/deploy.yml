@@ -13,7 +13,10 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: true
+  # CRITICAL: false prevents new pushes from cancelling in-progress deploys.
+  # With true, rapid pushes meant no deploy ever completed — production was stuck
+  # on a broken version for hours.
+  cancel-in-progress: false
 
 permissions:
   actions: read
