@@ -18,6 +18,8 @@ jobs:
     env:
       VPS_HOST: ${{ secrets.VPS_HOST || '69.62.98.126' }}
       VPS_USER: ${{ secrets.VPS_USER || 'root' }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
+      VPS_CONNECT_TIMEOUT: "10"
       DEPLOY_DIR: ${{ secrets.VPS_DIR || '/root/ILIACODEX' }}
 
     steps:
@@ -46,20 +48,22 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
 
           ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p "${VPS_PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -p 2222 -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -p 22 -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Pick reachable SSH port
         id: sshport
         run: |
           set -euo pipefail
-          for p in 2222 22; do
-            if ssh -i ~/.ssh/deploy_key -p "$p" -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=6 \
+          for p in "${VPS_PORT}" 2222 22; do
+            if ssh -i ~/.ssh/deploy_key -4 -p "$p" -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout="${VPS_CONNECT_TIMEOUT}" \
               "${VPS_USER}@${VPS_HOST}" "echo port-$p-ok" >/dev/null 2>&1; then
               echo "port=$p" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
-          echo "::error::No SSH access on ports 2222 and 22"
+          echo "::error::No SSH access on ports ${VPS_PORT}, 2222, and 22"
           exit 1
 
       - name: Deploy to production VPS
@@ -126,7 +130,8 @@ jobs:
 
           chmod +x /tmp/deploy-remote.sh
 
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+          ssh -i ~/.ssh/deploy_key -4 -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout="${VPS_CONNECT_TIMEOUT}" \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o IdentitiesOnly=yes \
             "${VPS_USER}@${VPS_HOST}" \
             TARGET_DIR="$TARGET_DIR" BRANCH="$BRANCH" REPO="$REPO" bash -s < /tmp/deploy-remote.sh
 
