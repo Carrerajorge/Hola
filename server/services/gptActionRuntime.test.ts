@@ -503,6 +503,193 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.message).toContain("Too many request headers");
     });
 
+    it("rejects domain allowlist wildcard bypass attempts", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const action = {
+        id: "action-11",
+        name: "action-test-11",
+        endpoint: "https://badexample.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        domainAllowlist: ["*.example.com"],
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("security_blocked");
+      expect(result.error?.message).toContain("not in allowed domains");
+    });
+
+    it("rejects invalid domain allowlist entries", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const action = {
+        id: "action-12",
+        name: "action-test-12",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        domainAllowlist: [123 as any, "example.com"],
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid domain allowlist entry");
+    });
+
+    it("rejects malformed wildcard allowlist expressions", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const action = {
+        id: "action-16",
+        name: "action-test-16",
+        endpoint: "https://api.example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        domainAllowlist: ["bad*domain.com", "*.allowed.com*"],
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid domain allowlist entry");
+    });
+
+    it("rejects allowlist arrays above hard limits", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const action = {
+        id: "action-17",
+        name: "action-test-17",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        domainAllowlist: Array.from({ length: 50 }, (_, index) => `example${index}.com`),
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Domain allowlist is too long");
+    });
+
+    it("rejects unsafe header names that could pollute prototype", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const headers = Object.create(null) as Record<string, unknown>;
+      headers.__proto__ = "danger";
+      headers["x-safe"] = "ok";
+
+      const action = {
+        id: "action-13",
+        name: "action-test-13",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        headers,
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Unsupported header name");
+    });
+
+    it("rejects oversized aggregated headers", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const headers = Object.fromEntries(
+        Array.from({ length: 12 }, (_, index) => [`x-test-${index}`, "x".repeat(1700)])
+      );
+
+      const action = {
+        id: "action-14",
+        name: "action-test-14",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        headers,
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Request headers are too large");
+    });
     it("rejects deeply nested requests before making outbound call", async () => {
       let called = false;
       const runtime = new GptActionRuntime({

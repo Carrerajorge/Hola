@@ -70,12 +70,33 @@ interface MultipartCompletionCacheEntry {
   fingerprint: string;
 }
 
+interface UploadActorRateState {
+  windowStart: number;
+  count: number;
+  blockedUntil: number;
+}
+
+interface LocalUploadIntent {
+  actorId: string;
+  storagePath: string;
+  expiresAt: number;
+}
+
 // ============================================
 // SECURITY: Multipart session limits & cleanup
 // ============================================
 
 /** Maximum concurrent multipart upload sessions */
 const MAX_MULTIPART_SESSIONS = 100;
+const MAX_MULTIPART_CHUNKS = Math.min(
+  Number(process.env.MAX_MULTIPART_CHUNKS || "2048"),
+  50000
+);
+const MAX_UPLOAD_RATE_PER_MINUTE = Number(process.env.MAX_UPLOAD_RATE_PER_MINUTE || 120);
+const UPLOAD_RATE_WINDOW_MS = 60 * 1000;
+const UPLOAD_RATE_BLOCK_MS = 30 * 1000;
+const LOCAL_UPLOAD_INTENTS_TTL_MS = 10 * 60 * 1000;
+const MAX_LOCAL_UPLOAD_INTENTS = Number(process.env.MAX_LOCAL_UPLOAD_INTENTS || 5000);
 
 const UPLOAD_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_IDEMPOTENCY_ENTRIES = 2000;
@@ -94,6 +115,165 @@ const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const multipartSessions: Map<string, MultipartUploadSession> = new Map();
 const fileRegistrationCache = new Map<string, FileRegistrationCacheEntry>();
 const multipartCompletionCache = new Map<string, MultipartCompletionCacheEntry>();
+const uploadActorRateState = new Map<string, UploadActorRateState>();
+const localUploadIntents = new Map<string, LocalUploadIntent>();
+
+const MAX_RATE_LIMIT_BOUNDARY = 10000;
+const MIN_RATE_LIMIT_BOUNDARY = 20;
+
+function resolveUploadRateLimit(rawLimit: unknown): number {
+  const parsed = Number(rawLimit);
+  if (!Number.isFinite(parsed)) return MAX_UPLOAD_RATE_PER_MINUTE;
+
+  const rounded = Math.floor(parsed);
+  if (rounded < MIN_RATE_LIMIT_BOUNDARY) return MIN_RATE_LIMIT_BOUNDARY;
+  if (rounded > MAX_RATE_LIMIT_BOUNDARY) return MAX_RATE_LIMIT_BOUNDARY;
+  return rounded;
+}
+
+function hashUploadActor(value: string): string {
+  if (!value || value.length < 12) return "invalid";
+  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+function getUploadActorId(req: Request): string {
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
+    if (token.startsWith("ilgpt_")) {
+      return `apiToken:${hashUploadActor(token)}`;
+    }
+    return `bearer:${hashUploadActor(token)}`;
+  }
+
+  const apiKey = (req as any).apiKey;
+  if (apiKey && typeof apiKey === "object" && typeof apiKey.id === "string" && apiKey.id.length > 0) {
+    return `apiKey:${apiKey.id}`;
+  }
+
+  return getOrCreateSecureUserId(req);
+}
+
+function cleanupUploadRateStates(now: number): void {
+  for (const [actorId, state] of uploadActorRateState) {
+    if (state.blockedUntil && state.blockedUntil < now) {
+      state.blockedUntil = 0;
+    }
+
+    if (state.windowStart + UPLOAD_RATE_WINDOW_MS * 2 < now && state.count === 0) {
+      uploadActorRateState.delete(actorId);
+    }
+  }
+}
+
+function consumeUploadQuota(req: Request, actorId: string): {
+  allowed: boolean;
+  remaining: number;
+  retryAfterMs: number;
+  limit: number;
+} {
+  const now = Date.now();
+  const limit = resolveUploadRateLimit((req as any).apiKey?.rateLimit ?? MAX_UPLOAD_RATE_PER_MINUTE);
+  const state = uploadActorRateState.get(actorId) || {
+    windowStart: now,
+    count: 0,
+    blockedUntil: 0,
+  };
+
+  if (state.blockedUntil && state.blockedUntil > now) {
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfterMs: state.blockedUntil - now,
+      limit,
+    };
+  }
+
+  if (state.windowStart + UPLOAD_RATE_WINDOW_MS <= now) {
+    state.windowStart = now;
+    state.count = 0;
+    state.blockedUntil = 0;
+  }
+
+  state.count += 1;
+  if (state.count > limit) {
+    state.blockedUntil = now + UPLOAD_RATE_BLOCK_MS;
+    uploadActorRateState.set(actorId, state);
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfterMs: UPLOAD_RATE_BLOCK_MS,
+      limit,
+    };
+  }
+
+  uploadActorRateState.set(actorId, state);
+  return {
+    allowed: true,
+    remaining: Math.max(limit - state.count, 0),
+    retryAfterMs: 0,
+    limit,
+  };
+}
+
+function enforceUploadRateLimit(req: Request, res: Response): boolean {
+  const actorId = getUploadActorId(req);
+  const quota = consumeUploadQuota(req, actorId);
+  if (quota.allowed) {
+    res.setHeader("X-Upload-RateLimit-Limit", String(quota.limit));
+    res.setHeader("X-Upload-RateLimit-Remaining", String(quota.remaining));
+    return true;
+  }
+
+  const retryAfter = Math.max(1, Math.ceil(quota.retryAfterMs / 1000));
+  res.setHeader("Retry-After", String(retryAfter));
+  res.setHeader("X-Upload-RateLimit-Limit", String(quota.limit));
+  res.setHeader("X-Upload-RateLimit-Remaining", "0");
+  res.setHeader("X-Upload-RateLimit-Reset", String(Math.ceil(Date.now() / 1000) + retryAfter));
+  res.status(429).json({
+    error: "Upload rate limit exceeded",
+    retryAfter,
+  });
+  return false;
+}
+
+function registerLocalUploadIntent(objectId: string, actorId: string, storagePath: string): void {
+  localUploadIntents.set(objectId, {
+    actorId,
+    storagePath,
+    expiresAt: Date.now() + LOCAL_UPLOAD_INTENTS_TTL_MS,
+  });
+
+  if (localUploadIntents.size <= MAX_LOCAL_UPLOAD_INTENTS) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const [id, intent] of localUploadIntents) {
+    if (intent.expiresAt <= now || id < objectId) {
+      localUploadIntents.delete(id);
+    }
+    if (localUploadIntents.size <= MAX_LOCAL_UPLOAD_INTENTS) {
+      break;
+    }
+  }
+}
+
+function consumeLocalUploadIntent(objectId: string, actorId: string): LocalUploadIntent | null {
+  const intent = localUploadIntents.get(objectId);
+  if (!intent || intent.expiresAt < Date.now() || intent.actorId !== actorId) {
+    return null;
+  }
+  return intent;
+}
+
+function clearLocalUploadIntents(prefix: string): void {
+  for (const key of localUploadIntents.keys()) {
+    if (key.startsWith(prefix)) {
+      localUploadIntents.delete(key);
+    }
+  }
+}
 
 // Periodic cleanup of stale multipart sessions to prevent memory leaks
 setInterval(() => {
@@ -102,6 +282,17 @@ setInterval(() => {
     if (now - session.createdAt.getTime() > SESSION_TTL_MS) {
       multipartSessions.delete(id);
       console.log(`[FilesRouter] Expired multipart session: ${id}`);
+    }
+  }
+}, SESSION_CLEANUP_INTERVAL_MS).unref();
+
+setInterval(() => {
+  const now = Date.now();
+  cleanupUploadRateStates(now);
+
+  for (const [id, intent] of localUploadIntents) {
+    if (intent.expiresAt < now) {
+      localUploadIntents.delete(id);
     }
   }
 }, SESSION_CLEANUP_INTERVAL_MS).unref();
