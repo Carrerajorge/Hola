@@ -80,7 +80,7 @@ const DEFAULT_MEDIA_LABEL = {
 
 const inFlightRunsByConversation = new Map<string, AbortController>();
 const conversationQueues = new Map<string, Promise<void>>();
-const seenProviderMessageIds = new Map<string, number>();
+const seenProviderMessageIdsByConversation = new Map<string, number>();
 const conversationRateBuckets = new Map<string, { startedAt: number; count: number }>();
 
 function isAllowedByRateLimit(conversationKey: string, perMinute: number): { allowed: boolean; retryAfterMs?: number } {
@@ -155,10 +155,15 @@ function envelopeFromRaw(raw: ChannelIngestJob, channel: ExternalChannel): Messa
   return normalizeTelegramMessages((raw as any).update);
 }
 
-function isAllowedToQueue(providerMessageId: string): boolean {
-  const lastSeen = seenProviderMessageIds.get(providerMessageId) || 0;
+function buildMessageDedupeKey(conversationKey: string, providerMessageId: string): string {
+  return `${conversationKey}|${providerMessageId}`;
+}
+
+function isAllowedToQueue(conversationKey: string, providerMessageId: string): boolean {
+  const dedupeKey = buildMessageDedupeKey(conversationKey, providerMessageId);
+  const lastSeen = seenProviderMessageIdsByConversation.get(dedupeKey) || 0;
   if (!lastSeen) {
-    seenProviderMessageIds.set(providerMessageId, Date.now());
+    seenProviderMessageIdsByConversation.set(dedupeKey, Date.now());
     return true;
   }
   return false;
@@ -166,8 +171,8 @@ function isAllowedToQueue(providerMessageId: string): boolean {
 
 function pruneMessageIdLedger(ttlMs = 5 * 60 * 1000): void {
   const now = Date.now();
-  for (const [id, seenAt] of seenProviderMessageIds.entries()) {
-    if (now - seenAt > ttlMs) seenProviderMessageIds.delete(id);
+  for (const [id, seenAt] of seenProviderMessageIdsByConversation.entries()) {
+    if (now - seenAt > ttlMs) seenProviderMessageIdsByConversation.delete(id);
   }
 }
 
@@ -532,7 +537,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     return;
   }
 
-  if (!isAllowedToQueue(messageId)) {
+  if (!isAllowedToQueue(conversationKey, messageId)) {
     const existing = await storage.findMessageByRequestId(messageId);
     if (existing) {
       Logger.info("[Channels] Duplicate inbound message ignored", {
@@ -602,10 +607,12 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     globalResponderEnabled: runtimeConfig.responder_enabled,
   };
 
-  const policy = evaluateChannelPolicy(policyContext, getConversationWindowState(conversation), {
+  const policyResult = evaluateChannelPolicy(policyContext, getConversationWindowState(conversation), {
     allowed: rateControl.allowed,
     retryAfterIso: rateControl.retryAfterMs ? new Date(Date.now() + rateControl.retryAfterMs).toISOString() : undefined,
   });
+  const policy = policyResult.ok ? policyResult.data : policyResult.data;
+
   if (!policy.allowed) {
     const shouldRespond = policy.shouldRespond !== false;
     Logger.warn("[Channels] inbound message blocked by policy", {

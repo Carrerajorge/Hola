@@ -21,6 +21,19 @@ export type ChannelPolicyDecision = {
   throttleUntilIso?: string;
 };
 
+export type ResultOk<T> = {
+  ok: true;
+  data: T;
+};
+
+export type ResultErr<T> = {
+  ok: false;
+  error: ChannelPolicyDecisionCode;
+  data: T;
+};
+
+export type ChannelPolicyResult = ResultOk<ChannelPolicyDecision> | ResultErr<ChannelPolicyDecision>;
+
 const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
   whatsapp_cloud: 24 * 60 * 60 * 1000,
   messenger: 24 * 60 * 60 * 1000,
@@ -239,7 +252,7 @@ export function evaluateChannelPolicy(
   context: ChannelPolicyContext,
   windowState: ChannelWindowState,
   rateControl?: { allowed: boolean; retryAfterIso?: string },
-): ChannelPolicyDecision {
+): ChannelPolicyResult {
   if (
     !context.envelope.providerMessageId ||
     !context.envelope.senderId ||
@@ -247,33 +260,45 @@ export function evaluateChannelPolicy(
     !context.envelope.threadId
   ) {
     return {
-      allowed: false,
-      code: "invalid_payload",
-      replyText: normalizePayloadErrorMessage(),
-      requiresOwnerHandshake: true,
-      shouldRespond: false,
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        requiresOwnerHandshake: true,
+        shouldRespond: false,
+      },
     };
   }
 
   const allowlist = toStringSet(context.runtimeConfig.allowlist);
   if (allowlist.size > 0 && !allowlist.has(context.envelope.senderId)) {
     return {
-      allowed: false,
-      code: "blocked_sender",
-      replyText: normalizeBlockedSenderMessage(),
-      requiresOwnerHandshake: false,
-      shouldRespond: false,
+      ok: false,
+      error: "blocked_sender",
+      data: {
+        allowed: false,
+        code: "blocked_sender",
+        replyText: normalizeBlockedSenderMessage(),
+        requiresOwnerHandshake: false,
+        shouldRespond: false,
+      },
     };
   }
 
   if (rateControl && !rateControl.allowed) {
     return {
-      allowed: false,
-      code: "rate_limited",
-      replyText: "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
-      requiresOwnerHandshake: true,
-      shouldRespond: false,
-      throttleUntilIso: rateControl.retryAfterIso,
+      ok: false,
+      error: "rate_limited",
+      data: {
+        allowed: false,
+        code: "rate_limited",
+        replyText: "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+        requiresOwnerHandshake: true,
+        shouldRespond: false,
+        throttleUntilIso: rateControl.retryAfterIso,
+      },
     };
   }
 
@@ -295,21 +320,30 @@ export function evaluateChannelPolicy(
 
   if (!conversationPolicyEnabled && !isOwner) {
     return {
-      allowed: false,
-      code: "off_for_owner_only",
-      replyText: normalizeOwnerBlockMessage(context.envelope.channel),
-      requiresOwnerHandshake: true,
-      shouldRespond: false,
+      ok: false,
+      error: "off_for_owner_only",
+      data: {
+        allowed: false,
+        code: "off_for_owner_only",
+        replyText: normalizeOwnerBlockMessage(context.envelope.channel),
+        requiresOwnerHandshake: true,
+        shouldRespond: false,
+      },
     };
   }
 
   if (ownerOnly && !isOwner) {
     return {
-      allowed: false,
-      code: "off_for_owner_only",
-      replyText: "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
-      requiresOwnerHandshake: true,
-      shouldRespond: false,
+      ok: false,
+      error: "off_for_owner_only",
+      data: {
+        allowed: false,
+        code: "off_for_owner_only",
+        replyText:
+          "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
+        requiresOwnerHandshake: true,
+        shouldRespond: false,
+      },
     };
   }
 
@@ -320,19 +354,26 @@ export function evaluateChannelPolicy(
 
   if (!nowWithinWindow(context.envelope.channel, latestTs, Date.now())) {
     return {
-      allowed: false,
-      code: "outside_window",
-      replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
-      requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
-      requiresOwnerHandshake: isOwner,
-      shouldRespond: true,
+      ok: false,
+      error: "outside_window",
+      data: {
+        allowed: false,
+        code: "outside_window",
+        replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
+        requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
+        requiresOwnerHandshake: isOwner,
+        shouldRespond: true,
+      },
     };
   }
 
   return {
-    allowed: true,
-    code: "ok",
-    replyText: "",
-    shouldRespond: true,
+    ok: true,
+    data: {
+      allowed: true,
+      code: "ok",
+      replyText: "",
+      shouldRespond: true,
+    },
   };
 }
