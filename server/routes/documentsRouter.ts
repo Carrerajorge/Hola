@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import fs from "node:fs/promises";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import multer from "multer";
 import {
@@ -44,6 +44,7 @@ import {
   MAX_SHARED_DOCUMENT_BYTES,
   SHARED_DOCUMENT_TTL_MS,
   validateSharedDocumentSignature,
+  hashSharedDownloadToken,
   applyDocumentSecurityHeaders,
   sanitizeErrorMessage,
 } from "../services/documentSecurity";
@@ -87,6 +88,11 @@ const SHARE_TTL_MS = SHARED_DOCUMENT_TTL_MS;
 const SHARE_ID_LENGTH = 16;
 const SHARE_ID_MAX_LENGTH = 64;
 const SHARE_ID_MAX_ATTEMPTS = 12;
+const SHARE_REQUIRE_DOWNLOAD_TOKEN = process.env.SHARE_REQUIRE_DOWNLOAD_TOKEN === "true";
+const SHARE_DOWNLOAD_TOKEN_BYTES = 24;
+const SHARE_DOWNLOAD_TOKEN_PARAM = "download_token";
+const SHARE_DOWNLOAD_TOKEN_SHORT_PARAM = "t";
+const SHARE_DOWNLOAD_TOKEN_RE = new RegExp(`^[a-f0-9]{${SHARE_DOWNLOAD_TOKEN_BYTES * 2}}$`);
 const SHARE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/;
 const SHARE_HOST_ALLOWLIST = new Set(
   (process.env.SHARE_HOST_ALLOWLIST || process.env.SHARE_HOSTS || "")
@@ -421,6 +427,44 @@ function normalizeShareId(value: unknown): string | null {
   }
 
   return trimmed;
+}
+
+function parseShareToken(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? parseShareToken(value[0]) : null;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().toLowerCase();
+  if (!SHARE_DOWNLOAD_TOKEN_RE.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function verifyShareDownloadToken(expectedHash: string | undefined, token: string | null): boolean {
+  if (!expectedHash || !token) {
+    return false;
+  }
+
+  if (!SHARE_DOWNLOAD_TOKEN_RE.test(token)) {
+    return false;
+  }
+
+  try {
+    const expected = Buffer.from(expectedHash, "hex");
+    const actual = Buffer.from(hashSharedDownloadToken(token), "hex");
+    if (expected.length !== actual.length) {
+      return false;
+    }
+    return timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 }
 
 function generateShareId(seed: string, attempt: number): string {
@@ -2462,6 +2506,8 @@ Generate the command plan:`;
       }
 
       const checksum = createHash("sha256").update(uploadedFile.buffer).digest("hex");
+      const downloadToken = SHARE_REQUIRE_DOWNLOAD_TOKEN ? randomBytes(SHARE_DOWNLOAD_TOKEN_BYTES).toString("hex") : null;
+      const downloadTokenHash = downloadToken ? hashSharedDownloadToken(downloadToken) : undefined;
 
       const safeHost = readSafeHost(req);
       if (!safeHost) {
@@ -2486,6 +2532,7 @@ Generate the command plan:`;
           size: uploadedFile.size,
           checksum,
           multipartBoundary: shareMeta.multipartBoundary,
+          downloadTokenRequired: SHARE_REQUIRE_DOWNLOAD_TOKEN,
         });
 
         if (idempotencyKey) {
@@ -2510,6 +2557,7 @@ Generate the command plan:`;
             blob: uploadedFile.buffer,
             filename,
             contentType: resolvedType.mimeType,
+            downloadTokenHash,
             createdBy: shareMeta.requestId,
           }, SHARE_TTL_MS);
           if (candidateStored) {
@@ -2522,13 +2570,25 @@ Generate the command plan:`;
           return res.status(503).json(safeErrorResponseWithRequest("Unable to generate unique share id", new Error("Capacity exceeded"), req));
         }
 
-        const shareUrl = `${req.protocol}://${safeHost}/api/documents/shared/${shareId}`;
-        const responsePayload = {
+        const shareUrl = `${req.protocol}://${safeHost}/api/documents/shared/${shareId}${
+          downloadToken ? `?${SHARE_DOWNLOAD_TOKEN_PARAM}=${encodeURIComponent(downloadToken)}` : ""
+        }`;
+        const responsePayload: {
+          shareId: string;
+          shareUrl: string;
+          expiresIn: string;
+          contentType: string;
+          downloadToken?: string;
+        } = {
           shareId,
           shareUrl,
           expiresIn: `${Math.max(1, Math.round(SHARE_TTL_MS / (60 * 60 * 1000))} hours`,
           contentType: normalizedContentType,
         };
+
+        if (downloadToken) {
+          responsePayload.downloadToken = downloadToken;
+        }
         const responseBody = Buffer.from(JSON.stringify(responsePayload));
 
         if (idempotencyKey) {
@@ -2620,6 +2680,25 @@ Generate the command plan:`;
           },
         });
         return res.status(404).json(safeErrorResponseWithRequest("Document not found or expired", new Error("Not found"), req));
+      }
+
+      const shareToken = parseShareToken(
+        req.query[SHARE_DOWNLOAD_TOKEN_PARAM] ?? req.query[SHARE_DOWNLOAD_TOKEN_SHORT_PARAM]
+      );
+      if (SHARE_REQUIRE_DOWNLOAD_TOKEN && !verifyShareDownloadToken(doc.downloadTokenHash, shareToken)) {
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "shared_failure",
+          docType: "share",
+          details: {
+            requestId,
+            shareId,
+            reason: shareToken ? "invalid_download_token" : "missing_download_token",
+          },
+        });
+        return res.status(403).json(
+          safeErrorResponseWithRequest("Download token validation failed", new Error("Invalid share token"), req)
+        );
       }
 
       if (!validateSharedDocumentSignature(doc.blob, doc.contentType, doc.filename)) {

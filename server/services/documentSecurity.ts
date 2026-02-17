@@ -458,10 +458,17 @@ interface SharedDocument {
   expiresAt: Date;
   filename: string;
   contentType: string;
+  downloadTokenHash?: string;
   createdBy?: string;
   createdAt: Date;
   etag: string;
   byteLength: number;
+}
+
+const SHARED_DOWNLOAD_TOKEN_HASH_RE = /^[a-f0-9]{64}$/;
+
+export function hashSharedDownloadToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 const MAX_SHARED_DOCUMENTS = 1000;
@@ -496,6 +503,12 @@ export class SharedDocumentStore {
       !doc.filename
     ) {
       return false;
+    }
+
+    if (doc.downloadTokenHash !== undefined) {
+      if (typeof doc.downloadTokenHash !== "string" || !SHARED_DOWNLOAD_TOKEN_HASH_RE.test(doc.downloadTokenHash)) {
+        return false;
+      }
     }
 
     if (this.documents.has(id)) {
