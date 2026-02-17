@@ -93,6 +93,24 @@ const SHARE_DOWNLOAD_TOKEN_BYTES = 24;
 const SHARE_DOWNLOAD_TOKEN_PARAM = "download_token";
 const SHARE_DOWNLOAD_TOKEN_SHORT_PARAM = "t";
 const SHARE_DOWNLOAD_TOKEN_RE = new RegExp(`^[a-f0-9]{${SHARE_DOWNLOAD_TOKEN_BYTES * 2}}$`);
+const SHARE_DOWNLOAD_RATE_WINDOW_MS = 60_000;
+const SHARE_DOWNLOAD_RATE_BLOCK_MS = 60_000;
+const SHARE_DOWNLOAD_STATE_TTL_MS = 10 * 60_000;
+const SHARE_DOWNLOAD_STATE_MAX_ENTRIES = 10_000;
+const SHARE_DOWNLOAD_MAX_PER_WINDOW = clampPositiveInt(
+  process.env.SHARE_DOWNLOAD_MAX_PER_WINDOW,
+  120,
+  20,
+  5000
+);
+const SHARE_DOWNLOAD_TOKEN_INVALID_WINDOW_MS = 10 * 60_000;
+const SHARE_DOWNLOAD_TOKEN_INVALID_BLOCK_MS = 15 * 60_000;
+const SHARE_DOWNLOAD_TOKEN_INVALID_MAX = clampPositiveInt(
+  process.env.SHARE_DOWNLOAD_TOKEN_INVALID_MAX,
+  12,
+  3,
+  1000
+);
 const SHARE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/;
 const SHARE_HOST_ALLOWLIST = new Set(
   (process.env.SHARE_HOST_ALLOWLIST || process.env.SHARE_HOSTS || "")
@@ -210,6 +228,223 @@ type IdempotencyRecord = {
 };
 
 const idempotencyStore = new Map<string, IdempotencyRecord>();
+type ShareDownloadRateState = {
+  windowStart: number;
+  count: number;
+  blockedUntil: number;
+  lastSeen: number;
+};
+
+type ShareTokenFailureState = {
+  windowStart: number;
+  failures: number;
+  blockedUntil: number;
+  lastSeen: number;
+};
+
+const shareDownloadRateStore = new Map<string, ShareDownloadRateState>();
+const shareTokenFailureStore = new Map<string, ShareTokenFailureState>();
+
+function clampPositiveInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const rounded = Math.floor(parsed);
+  if (rounded < min) {
+    return min;
+  }
+  if (rounded > max) {
+    return max;
+  }
+  return rounded;
+}
+
+function normalizeClientIp(raw: string | undefined): string {
+  if (!raw) {
+    return "unknown";
+  }
+
+  let normalized = raw.trim().toLowerCase();
+  if (!normalized) {
+    return "unknown";
+  }
+  if (normalized.startsWith("::ffff:")) {
+    normalized = normalized.slice(7);
+  }
+  if (normalized.includes("%")) {
+    normalized = normalized.split("%")[0] ?? normalized;
+  }
+  if (normalized.length > 64) {
+    normalized = normalized.slice(0, 64);
+  }
+  if (!/^[a-z0-9:.]+$/.test(normalized)) {
+    return "unknown";
+  }
+
+  return normalized;
+}
+
+function extractClientIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  const firstForwarded = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const parsedForwarded =
+    typeof firstForwarded === "string" ? firstForwarded.split(",")[0]?.trim() : undefined;
+  const directIp = typeof req.ip === "string" ? req.ip : undefined;
+  return normalizeClientIp(parsedForwarded || directIp);
+}
+
+function hashAuditIdentifier(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+function pruneShareDownloadState(now: number = Date.now()): void {
+  for (const [key, state] of shareDownloadRateStore) {
+    if (state.lastSeen + SHARE_DOWNLOAD_STATE_TTL_MS < now) {
+      shareDownloadRateStore.delete(key);
+    }
+  }
+
+  for (const [key, state] of shareTokenFailureStore) {
+    if (state.lastSeen + SHARE_DOWNLOAD_STATE_TTL_MS < now) {
+      shareTokenFailureStore.delete(key);
+    }
+  }
+
+  if (shareDownloadRateStore.size > SHARE_DOWNLOAD_STATE_MAX_ENTRIES) {
+    const byAge = [...shareDownloadRateStore.entries()].sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
+    const removeCount = shareDownloadRateStore.size - SHARE_DOWNLOAD_STATE_MAX_ENTRIES;
+    for (let index = 0; index < removeCount; index += 1) {
+      const entry = byAge[index];
+      if (entry) {
+        shareDownloadRateStore.delete(entry[0]);
+      }
+    }
+  }
+
+  if (shareTokenFailureStore.size > SHARE_DOWNLOAD_STATE_MAX_ENTRIES) {
+    const byAge = [...shareTokenFailureStore.entries()].sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
+    const removeCount = shareTokenFailureStore.size - SHARE_DOWNLOAD_STATE_MAX_ENTRIES;
+    for (let index = 0; index < removeCount; index += 1) {
+      const entry = byAge[index];
+      if (entry) {
+        shareTokenFailureStore.delete(entry[0]);
+      }
+    }
+  }
+}
+
+function consumeShareDownloadRate(clientIp: string): {
+  allowed: boolean;
+  retryAfterSeconds: number;
+  remaining: number;
+  limit: number;
+} {
+  const now = Date.now();
+  pruneShareDownloadState(now);
+
+  const limit = SHARE_DOWNLOAD_MAX_PER_WINDOW;
+  const state = shareDownloadRateStore.get(clientIp) ?? {
+    windowStart: now,
+    count: 0,
+    blockedUntil: 0,
+    lastSeen: now,
+  };
+
+  if (state.blockedUntil > now) {
+    state.lastSeen = now;
+    shareDownloadRateStore.set(clientIp, state);
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - now) / 1000)),
+      remaining: 0,
+      limit,
+    };
+  }
+
+  if (state.windowStart + SHARE_DOWNLOAD_RATE_WINDOW_MS <= now) {
+    state.windowStart = now;
+    state.count = 0;
+    state.blockedUntil = 0;
+  }
+
+  state.count += 1;
+  state.lastSeen = now;
+  if (state.count > limit) {
+    state.blockedUntil = now + SHARE_DOWNLOAD_RATE_BLOCK_MS;
+    shareDownloadRateStore.set(clientIp, state);
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil(SHARE_DOWNLOAD_RATE_BLOCK_MS / 1000)),
+      remaining: 0,
+      limit,
+    };
+  }
+
+  shareDownloadRateStore.set(clientIp, state);
+  return {
+    allowed: true,
+    retryAfterSeconds: 0,
+    remaining: Math.max(limit - state.count, 0),
+    limit,
+  };
+}
+
+function getShareTokenFailureKey(shareId: string, clientIp: string): string {
+  return `${shareId}:${clientIp}`;
+}
+
+function registerShareTokenFailure(
+  shareId: string,
+  clientIp: string
+): { blocked: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  pruneShareDownloadState(now);
+  const key = getShareTokenFailureKey(shareId, clientIp);
+  const state = shareTokenFailureStore.get(key) ?? {
+    windowStart: now,
+    failures: 0,
+    blockedUntil: 0,
+    lastSeen: now,
+  };
+
+  if (state.blockedUntil > now) {
+    state.lastSeen = now;
+    shareTokenFailureStore.set(key, state);
+    return {
+      blocked: true,
+      retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - now) / 1000)),
+    };
+  }
+
+  if (state.windowStart + SHARE_DOWNLOAD_TOKEN_INVALID_WINDOW_MS <= now) {
+    state.windowStart = now;
+    state.failures = 0;
+    state.blockedUntil = 0;
+  }
+
+  state.failures += 1;
+  state.lastSeen = now;
+  if (state.failures >= SHARE_DOWNLOAD_TOKEN_INVALID_MAX) {
+    state.blockedUntil = now + SHARE_DOWNLOAD_TOKEN_INVALID_BLOCK_MS;
+    shareTokenFailureStore.set(key, state);
+    return {
+      blocked: true,
+      retryAfterSeconds: Math.max(1, Math.ceil(SHARE_DOWNLOAD_TOKEN_INVALID_BLOCK_MS / 1000)),
+    };
+  }
+
+  shareTokenFailureStore.set(key, state);
+  return {
+    blocked: false,
+    retryAfterSeconds: 0,
+  };
+}
+
+function clearShareTokenFailureState(shareId: string, clientIp: string): void {
+  shareTokenFailureStore.delete(getShareTokenFailureKey(shareId, clientIp));
+}
 
 function canonicalizeForHash(value: unknown): unknown {
   if (value === null || value === undefined) {
@@ -2649,6 +2884,28 @@ Generate the command plan:`;
   router.get("/shared/:id", async (req, res) => {
     try {
       const requestId = getCorrelationId(req);
+      const clientIp = extractClientIp(req);
+      const clientHash = hashAuditIdentifier(clientIp);
+      const quota = consumeShareDownloadRate(clientIp);
+      res.setHeader("X-Share-RateLimit-Limit", String(quota.limit));
+      res.setHeader("X-Share-RateLimit-Remaining", String(quota.remaining));
+      if (!quota.allowed) {
+        res.setHeader("Retry-After", String(quota.retryAfterSeconds));
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "shared_failure",
+          docType: "share",
+          details: {
+            requestId,
+            clientHash,
+            reason: "download_rate_limited",
+            retryAfterSeconds: quota.retryAfterSeconds,
+          },
+        });
+        return res.status(429).json(
+          safeErrorResponseWithRequest("Too many download requests. Please retry later.", new Error("Rate limit exceeded"), req)
+        );
+      }
       const shareId = normalizeShareId(req.params.id);
       if (!shareId) {
         return res.status(400).json(safeErrorResponseWithRequest("Invalid share identifier", new Error("Invalid share id"), req));
@@ -2660,6 +2917,7 @@ Generate the command plan:`;
         details: {
           requestId,
           shareId,
+          clientHash,
         },
       });
 
@@ -2676,6 +2934,7 @@ Generate the command plan:`;
           details: {
             requestId,
             shareId,
+            clientHash,
             reason: "not_found_or_expired",
           },
         });
@@ -2686,6 +2945,30 @@ Generate the command plan:`;
         req.query[SHARE_DOWNLOAD_TOKEN_PARAM] ?? req.query[SHARE_DOWNLOAD_TOKEN_SHORT_PARAM]
       );
       if (SHARE_REQUIRE_DOWNLOAD_TOKEN && !verifyShareDownloadToken(doc.downloadTokenHash, shareToken)) {
+        const penalty = registerShareTokenFailure(shareId, clientIp);
+        if (penalty.blocked) {
+          res.setHeader("Retry-After", String(penalty.retryAfterSeconds));
+          logDocumentEvent({
+            timestamp: new Date().toISOString(),
+            event: "shared_failure",
+            docType: "share",
+            details: {
+              requestId,
+              shareId,
+              clientHash,
+              reason: "download_token_locked",
+              retryAfterSeconds: penalty.retryAfterSeconds,
+            },
+          });
+          return res.status(429).json(
+            safeErrorResponseWithRequest(
+              "Download token temporarily locked due to repeated invalid attempts",
+              new Error("Download token lock"),
+              req
+            )
+          );
+        }
+
         logDocumentEvent({
           timestamp: new Date().toISOString(),
           event: "shared_failure",
@@ -2693,6 +2976,7 @@ Generate the command plan:`;
           details: {
             requestId,
             shareId,
+            clientHash,
             reason: shareToken ? "invalid_download_token" : "missing_download_token",
           },
         });
@@ -2700,6 +2984,7 @@ Generate the command plan:`;
           safeErrorResponseWithRequest("Download token validation failed", new Error("Invalid share token"), req)
         );
       }
+      clearShareTokenFailureState(shareId, clientIp);
 
       if (!validateSharedDocumentSignature(doc.blob, doc.contentType, doc.filename)) {
         sharedDocumentStore.delete(shareId);
@@ -2743,6 +3028,7 @@ Generate the command plan:`;
         details: {
           requestId,
           shareId,
+          clientHash,
           filename,
           bytes: doc.blob.length,
         },
