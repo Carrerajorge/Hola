@@ -1,9 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
-import { randomUUID, createHash } from "crypto";
+import { randomUUID } from "crypto";
 import {
   checkIdempotencyKey,
   computePayloadHash,
-  type IdempotencyCheckResult
 } from "../lib/idempotencyStore";
 
 export interface PareContext {
@@ -27,14 +26,32 @@ declare global {
 
 const HEADER_REQUEST_ID = "x-request-id";
 const HEADER_IDEMPOTENCY_KEY = "x-idempotency-key";
+const IDEMPOTENCY_KEY_REGEX = /^[a-zA-Z0-9._-]{6,140}$/;
+const MAX_HEADER_VALUE_LENGTH = 256;
+const MAX_PAYLOAD_HASH_BODY_BYTES = 128_000;
+
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[\r\n]/g, "").trim().slice(0, MAX_HEADER_VALUE_LENGTH);
+}
+
+function obfuscateKey(key: string | null): string {
+  if (!key || key.length <= 6) {
+    return "[REDACTED]";
+  }
+  return `${key.slice(0, 3)}...${key.slice(-3)}`;
+}
 
 function getClientIp(req: Request): string {
   const forwardedFor = req.headers["x-forwarded-for"];
   if (forwardedFor) {
-    const ips = Array.isArray(forwardedFor) 
-      ? forwardedFor[0] 
-      : forwardedFor.split(",")[0];
-    return ips.trim();
+    const sanitized = Array.isArray(forwardedFor)
+      ? sanitizeHeaderValue(forwardedFor[0] ?? "")
+      : sanitizeHeaderValue(forwardedFor);
+    const firstIp = sanitized.split(",")[0]?.trim();
+    if (!firstIp || firstIp.length > 64) {
+      return req.ip || req.socket.remoteAddress || "unknown";
+    }
+    return firstIp;
   }
   return req.ip || req.socket.remoteAddress || "unknown";
 }
@@ -42,7 +59,9 @@ function getClientIp(req: Request): string {
 function extractHeader(req: Request, headerName: string): string | null {
   const value = req.headers[headerName];
   if (!value) return null;
-  return Array.isArray(value) ? value[0] : value;
+  const normalized = Array.isArray(value) ? value[0] : value;
+  if (!normalized) return null;
+  return sanitizeHeaderValue(normalized);
 }
 
 function isValidUUIDv4(uuid: string): boolean {
@@ -55,7 +74,7 @@ function countAttachments(req: Request): number {
   if (!attachments || !Array.isArray(attachments)) {
     return 0;
   }
-  return attachments.length;
+  return Math.min(attachments.length, 512);
 }
 
 function detectDataMode(attachmentsCount: number): boolean {
@@ -74,7 +93,10 @@ export function pareRequestContract(
     requestId = randomUUID();
   }
   
-  const idempotencyKey = extractHeader(req, HEADER_IDEMPOTENCY_KEY);
+  const idempotencyHeader = extractHeader(req, HEADER_IDEMPOTENCY_KEY);
+  const idempotencyKey = idempotencyHeader && IDEMPOTENCY_KEY_REGEX.test(idempotencyHeader)
+    ? idempotencyHeader
+    : null;
   
   const clientIp = getClientIp(req);
   
@@ -87,7 +109,28 @@ export function pareRequestContract(
   
   let payloadHash: string | null = null;
   if (idempotencyKey && req.body) {
-    payloadHash = computePayloadHash(req.body);
+    try {
+      const bodyByteLength = JSON.stringify(req.body).length;
+      if (bodyByteLength <= MAX_PAYLOAD_HASH_BODY_BYTES) {
+        payloadHash = computePayloadHash(req.body);
+      } else {
+        console.warn(JSON.stringify({
+          level: "warn",
+          event: "IDEMPOTENCY_PAYLOAD_TOO_LARGE",
+          requestId,
+          idempotencyKey: obfuscateKey(idempotencyKey),
+          bodyByteLength,
+        }));
+      }
+    } catch (error: unknown) {
+      console.error(JSON.stringify({
+        level: "error",
+        event: "IDEMPOTENCY_PAYLOAD_SERIALIZE_ERROR",
+        requestId,
+        idempotencyKey: obfuscateKey(idempotencyKey),
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
   }
   
   const pareContext: PareContext = {
@@ -109,7 +152,7 @@ export function pareRequestContract(
     level: "info",
     event: "PARE_REQUEST_RECEIVED",
     requestId,
-    idempotencyKey,
+    idempotencyKey: obfuscateKey(idempotencyKey),
     isDataMode,
     attachmentsCount,
     clientIp,
@@ -165,7 +208,7 @@ export async function pareIdempotencyGuard(
           level: "info",
           event: "IDEMPOTENCY_REPLAY",
           requestId,
-          idempotencyKey,
+          idempotencyKey: obfuscateKey(idempotencyKey),
           timestamp: new Date().toISOString()
         }));
         res.status(200).json(result.cachedResponse);
@@ -176,14 +219,14 @@ export async function pareIdempotencyGuard(
           level: "warn",
           event: "IDEMPOTENCY_IN_PROGRESS",
           requestId,
-          idempotencyKey,
+          idempotencyKey: obfuscateKey(idempotencyKey),
           timestamp: new Date().toISOString()
         }));
         res.status(409).json({
           error: "IDEMPOTENCY_IN_PROGRESS",
           message: "Request with this idempotency key is currently being processed. Please retry later.",
           requestId,
-          idempotencyKey
+          idempotencyKey: obfuscateKey(idempotencyKey),
         });
         return;
       
@@ -192,14 +235,14 @@ export async function pareIdempotencyGuard(
           level: "warn",
           event: "IDEMPOTENCY_CONFLICT",
           requestId,
-          idempotencyKey,
+          idempotencyKey: obfuscateKey(idempotencyKey),
           timestamp: new Date().toISOString()
         }));
         res.status(409).json({
           error: "IDEMPOTENCY_CONFLICT",
           message: "Request with this idempotency key exists with a different payload.",
           requestId,
-          idempotencyKey
+          idempotencyKey: obfuscateKey(idempotencyKey),
         });
         return;
     }
@@ -208,7 +251,7 @@ export async function pareIdempotencyGuard(
       level: "error",
       event: "IDEMPOTENCY_GUARD_ERROR",
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotencyKey ? obfuscateKey(idempotencyKey) : null,
       error: error.message,
       timestamp: new Date().toISOString()
     }));
