@@ -17,8 +17,7 @@
  * - Sudo elevation with confirmation
  */
 
-import { spawn, exec, ChildProcess } from "child_process";
-import { promisify } from "util";
+import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import path from "path";
@@ -27,7 +26,6 @@ import os from "os";
 import * as pty from "node-pty";
 import Docker from "dockerode";
 
-const execAsync = promisify(exec);
 const docker = new Docker();
 
 // ============================================
@@ -122,9 +120,10 @@ export interface FileOperation {
 export interface TerminalSession {
   id: string;
   cwd: string;
+  baseCwd: string;
   env: Record<string, string>;
   history: CommandResult[];
-  activeProcesses: Map<string, ChildProcess>;
+  activeProcesses: Map<string, ChildProcess | pty.IPty>;
   createdAt: number;
   lastActivity: number;
 }
@@ -206,6 +205,26 @@ const FORBIDDEN_SESSION_ENV_KEYS = new Set([
   "ENV",
   "BASH_FUNC_",
 ]);
+
+const MAX_ACTIVE_OUTPUT_BYTES = 1024 * 1024; // 1MB per command output cap
+const INFO_COMMAND_TIMEOUT_MS = 5_000;
+const ALLOWED_KILL_SIGNALS = new Set<NodeJS.Signals>([
+  "SIGABRT",
+  "SIGALRM",
+  "SIGHUP",
+  "SIGINT",
+  "SIGKILL",
+  "SIGQUIT",
+  "SIGTERM",
+  "SIGUSR1",
+  "SIGUSR2",
+]);
+
+type RunCommandForInfoResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+};
 
 function sanitizeIncomingEnv(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -415,6 +434,177 @@ function getBaseCommand(command: string): string {
   return "";
 }
 
+function resolveExecutionTimeout(rawTimeout: number | undefined, fallbackMs: number): number {
+  const requestTimeout = rawTimeout === undefined ? fallbackMs : Number(rawTimeout);
+  if (!Number.isFinite(requestTimeout) || requestTimeout <= 0) {
+    throw new Error("timeout must be a positive number");
+  }
+  return Math.min(600_000, Math.max(500, Math.floor(requestTimeout)));
+}
+
+function resolveSessionCwd(session: TerminalSession, rawCwd?: string): string {
+  const target = (rawCwd ?? "").trim();
+  const resolved = path.resolve(session.cwd, target || ".");
+  if (rawCwd && /[\\\u0000]/.test(rawCwd)) {
+    throw new Error("cwd contains invalid characters");
+  }
+  if (!isPathInsideBase(session.baseCwd, resolved)) {
+    throw new Error("cwd transition denied: outside session root");
+  }
+  return resolved;
+}
+
+function appendLimitedOutput(
+  current: string,
+  currentBytes: number,
+  chunk: string | Buffer,
+  maxBytes: number,
+): { output: string; bytes: number } {
+  const chunkText = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+  const chunkBuffer = Buffer.from(chunkText);
+  if (maxBytes <= 0 || chunkBuffer.length === 0 || currentBytes >= maxBytes) {
+    return { output: current, bytes: currentBytes };
+  }
+
+  const available = Math.max(0, maxBytes - currentBytes);
+  if (available <= 0) {
+    return { output: current, bytes: currentBytes };
+  }
+
+  if (chunkBuffer.length <= available) {
+    return { output: current + chunkText, bytes: currentBytes + chunkBuffer.length };
+  }
+
+  return {
+    output: current + chunkBuffer.subarray(0, available).toString("utf8"),
+    bytes: currentBytes + available,
+  };
+}
+
+function sanitizeKillSignal(rawSignal?: string): NodeJS.Signals {
+  const signal = (rawSignal ?? "SIGTERM").toUpperCase();
+  if (!ALLOWED_KILL_SIGNALS.has(signal as NodeJS.Signals)) {
+    throw new Error(`Unsupported signal: ${signal}`);
+  }
+  return signal as NodeJS.Signals;
+}
+
+function validatePermissions(rawPermissions: string): string {
+  const permissions = rawPermissions.trim();
+  if (!/^[0-7]{3,4}$/.test(permissions)) {
+    throw new Error("Invalid permissions format. Expected octal permissions, e.g. 0644");
+  }
+  return permissions;
+}
+
+function isPtyProcess(process: ChildProcess | pty.IPty): process is pty.IPty {
+  return typeof (process as pty.IPty).onData === "function";
+}
+
+function terminateChildProcess(proc: ChildProcess): void {
+  if (proc.exitCode !== null || proc.killed) return;
+  try {
+    proc.kill("SIGTERM");
+  } catch {
+    return;
+  }
+
+  setTimeout(() => {
+    if (proc.exitCode === null && !proc.killed) {
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+    }
+  }, 250).unref?.();
+}
+
+function terminatePtyProcess(proc: pty.IPty): void {
+  try {
+    proc.kill();
+  } catch {
+    return;
+  }
+
+  setTimeout(() => {
+    try {
+      proc.kill("SIGKILL" as any);
+    } catch {}
+  }, 250).unref?.();
+}
+
+function closeSessionProcess(proc: ChildProcess | pty.IPty): void {
+  if (isPtyProcess(proc)) {
+    terminatePtyProcess(proc);
+  } else {
+    terminateChildProcess(proc);
+  }
+}
+
+function sanitizeDockerImage(imageRaw: string): string {
+  const image = imageRaw.trim();
+  if (!image) {
+    throw new Error("dockerImage is required");
+  }
+  if (image.length > 255) {
+    throw new Error("dockerImage is too long");
+  }
+  if (/[ \r\n\t\\`$&|;<>'"]/g.test(image) || image.includes("\u0000") || image.includes("..")) {
+    throw new Error("dockerImage contains invalid characters");
+  }
+  return image;
+}
+
+function sanitizeCommandOutput(raw: string): string {
+  return raw.replace(/[\u0000-\u0009]/g, "");
+}
+
+async function runCommandForInfo(
+  command: string,
+  args: string[],
+  timeoutMs: number = INFO_COMMAND_TIMEOUT_MS,
+): Promise<RunCommandForInfoResult> {
+  const safeCommand = command.trim();
+  if (!safeCommand) {
+    throw new Error("system command is required");
+  }
+
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+
+    const proc = spawn(safeCommand, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: timeoutMs,
+      shell: false,
+    });
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      const appended = appendLimitedOutput(stdout, stdoutBytes, chunk, MAX_ACTIVE_OUTPUT_BYTES);
+      stdout = appended.output;
+      stdoutBytes = appended.bytes;
+    });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      const appended = appendLimitedOutput(stderr, stderrBytes, chunk, MAX_ACTIVE_OUTPUT_BYTES);
+      stderr = appended.output;
+      stderrBytes = appended.bytes;
+    });
+
+    proc.on("error", (error) => {
+      reject(error);
+    });
+
+    proc.on("close", (code) => {
+      resolve({
+        stdout: sanitizeCommandOutput(stdout),
+        stderr: sanitizeCommandOutput(stderr),
+        exitCode: code,
+      });
+    });
+  });
+}
+
 // ============================================
 // Terminal Controller
 // ============================================
@@ -469,9 +659,11 @@ export class TerminalController extends EventEmitter {
     const sessionId = randomUUID();
     const baseEnv = sanitizeProcessEnv(process.env);
     const requestedEnv = env ? sanitizeIncomingEnv(env) : {};
+    const baseCwd = path.resolve(cwd || process.cwd());
     const session: TerminalSession = {
       id: sessionId,
-      cwd: path.resolve(cwd || process.cwd()),
+      cwd: baseCwd,
+      baseCwd,
       env: { ...baseEnv, ...requestedEnv },
       history: [],
       activeProcesses: new Map(),
@@ -502,18 +694,10 @@ export class TerminalController extends EventEmitter {
     if (!session) return;
 
     // Kill all active processes
-    for (const [, proc] of session.activeProcesses) {
-      if ('kill' in proc) {
-        proc.kill("SIGTERM");
-      } else if ('destroy' in proc) {
-        // It's a PTY
-        proc.destroy();
-      }
+    for (const proc of Array.from(session.activeProcesses.values())) {
+      closeSessionProcess(proc);
     }
-
-    if (session.pty) {
-        session.pty.destroy();
-    }
+    session.activeProcesses.clear();
 
     this.sessions.delete(sessionId);
     this.emit("session:closed", { sessionId });
@@ -569,7 +753,35 @@ export class TerminalController extends EventEmitter {
     // Handle cd command specially
     if (fullCommand.trim().startsWith("cd ")) {
       const targetDir = fullCommand.trim().slice(3).trim().replace(/^["']|["']$/g, "");
-      const resolvedPath = path.resolve(session.cwd, targetDir);
+      let resolvedPath: string;
+      try {
+        resolvedPath = resolveSessionCwd(session, targetDir);
+      } catch (error: any) {
+        return {
+          id: commandId,
+          command: fullCommand,
+          exitCode: 1,
+          stdout: "",
+          stderr: error.message,
+          duration: Date.now() - startTime,
+          killed: false,
+          signal: null,
+          success: false,
+        };
+      }
+      if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
+        return {
+          id: commandId,
+          command: fullCommand,
+          exitCode: 1,
+          stdout: "",
+          stderr: "Cwd transition denied: outside session root",
+          duration: Date.now() - startTime,
+          killed: false,
+          signal: null,
+          success: false,
+        };
+      }
 
       try {
         await fs.access(resolvedPath);
@@ -606,10 +818,10 @@ export class TerminalController extends EventEmitter {
 
     return new Promise((resolve) => {
       const shell = request.shell || "bash";
-      const timeout = request.timeout || this.defaultTimeout;
+      const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
 
       const env = resolveCommandEnvironment(session.env, request.env);
-      const cwd = request.cwd || session.cwd;
+      const cwd = resolveSessionCwd(session, request.cwd);
       // Always use spawn with explicit args array and shell: false to prevent
       // command injection (CodeQL: uncontrolled-command-line).
       // Only fall back to shell -c when the command itself contains spaces
@@ -636,33 +848,33 @@ export class TerminalController extends EventEmitter {
 
       let stdout = "";
       let stderr = "";
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
       let killed = false;
 
       session.activeProcesses.set(commandId, proc);
 
       proc.stdout?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stdout.length < this.maxOutputSize) {
-          stdout += chunk;
-        }
+        const appended = appendLimitedOutput(stdout, stdoutBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+        stdout = appended.output;
+        stdoutBytes = appended.bytes;
         if (request.stream) {
-          this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk });
+          this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
         }
       });
 
       proc.stderr?.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        if (stderr.length < this.maxOutputSize) {
-          stderr += chunk;
-        }
+        const appended = appendLimitedOutput(stderr, stderrBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+        stderr = appended.output;
+        stderrBytes = appended.bytes;
         if (request.stream) {
-          this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk });
+          this.emit("command:output", { sessionId, commandId, stream: "stderr", chunk: data });
         }
       });
 
       const timer = setTimeout(() => {
         killed = true;
-        proc.kill("SIGKILL");
+        terminateChildProcess(proc);
       }, timeout);
 
       proc.on("close", (exitCode, signal) => {
@@ -722,6 +934,7 @@ export class TerminalController extends EventEmitter {
     const command = validateCommandString(request.command);
     const args = validateCommandArgs(request.args);
     const session = this.getSessionOrFail(sessionId);
+    const cwd = resolveSessionCwd(session, request.cwd);
 
     return new Promise((resolve) => {
         const shell = request.shell || "bash";
@@ -729,17 +942,20 @@ export class TerminalController extends EventEmitter {
             name: 'xterm-color',
             cols: 80,
             rows: 30,
-            cwd: session.cwd,
+            cwd,
             env: resolveCommandEnvironment(session.env, request.env),
         });
 
         let output = "";
+        let outputBytes = 0;
         let killed = false;
 
-        session.activeProcesses.set(commandId, ptyProc as any); // Cast because Map expects ChildProcess | IPty
+        session.activeProcesses.set(commandId, ptyProc);
 
         ptyProc.onData((data) => {
-            output += data;
+            const appended = appendLimitedOutput(output, outputBytes, data, MAX_ACTIVE_OUTPUT_BYTES);
+            output = appended.output;
+            outputBytes = appended.bytes;
             if (request.stream) {
                 this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: data });
             }
@@ -756,10 +972,11 @@ export class TerminalController extends EventEmitter {
         // For now, we assume simple execution in PTY
         // ptyProc.write("exit\r"); // Only if we want to close immediately
 
+        const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
         const timer = setTimeout(() => {
             killed = true;
-            ptyProc.kill();
-        }, request.timeout || this.defaultTimeout);
+            terminatePtyProcess(ptyProc);
+        }, timeout);
 
         ptyProc.onExit(({ exitCode, signal }) => {
             clearTimeout(timer);
@@ -793,7 +1010,7 @@ export class TerminalController extends EventEmitter {
     const args = validateCommandArgs(request.args);
     const session = this.getSessionOrFail(sessionId);
 
-    const image = request.dockerImage || "node:22-alpine";
+    const image = sanitizeDockerImage(request.dockerImage || "node:22-alpine");
     const fullCommand = buildCommandLine(command, args);
     const cmd = args.length ? [command, ...args] : [command]; // CMD format for Docker
 
@@ -825,28 +1042,15 @@ export class TerminalController extends EventEmitter {
             }
         });
 
-        // 2. Attach to streams
-        const stream = await container.attach({
-            stream: true,
-            stdout: true,
-            stderr: true
-        });
-
-        // Docker multiplexed stream handling is binary. 
-        // Simple hack: dockerode 'attach' returns a stream that needs demuxing if Tty=false.
-        // For simplicity, we'll read raw for now or use `logs` after execution if this gets complex.
-        // But `logs` is better for non-interactive one-off.
-        // Let's use `start` and then wait.
-
-        // 3. Start
         await container.start();
 
         // 4. Wait for finish
         const waitPromise = container.wait();
         
         // Timeout handling
+        const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
         const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Timeout")), request.timeout || this.defaultTimeout)
+            setTimeout(() => reject(new Error("Timeout")), timeout)
         );
 
         const result: any = await Promise.race([waitPromise, timeoutPromise]);
@@ -856,9 +1060,9 @@ export class TerminalController extends EventEmitter {
         // Note: logs() returns Buffer if not encoding specified
         const stdoutBuffer = await container.logs({ stdout: true, stderr: false });
         const stderrBuffer = await container.logs({ stdout: false, stderr: true });
-        
-        stdout = stdoutBuffer.toString().replace(/[\x00-\x09]/g, ''); // Basic sanitization of header bytes if demux failed
-        stderr = stderrBuffer.toString().replace(/[\x00-\x09]/g, '');
+
+        stdout = sanitizeCommandOutput(stdoutBuffer.toString()); // Basic sanitization of control bytes
+        stderr = sanitizeCommandOutput(stderrBuffer.toString());
 
         if (request.stream) {
              this.emit("command:output", { sessionId, commandId, stream: "stdout", chunk: stdout });
@@ -915,7 +1119,7 @@ export class TerminalController extends EventEmitter {
     const relativePath = validateStringOrThrow(op.path, "path");
     const resolvedPath = path.resolve(session.cwd, relativePath);
 
-    if (!isPathInsideBase(session.cwd, resolvedPath)) {
+    if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
       return { success: false, error: "Path is outside session working directory" };
     }
 
@@ -923,7 +1127,7 @@ export class TerminalController extends EventEmitter {
     // For operations on existing paths, verify the real (symlink-resolved) path is still inside base.
     if (op.type !== "write" && op.type !== "mkdir") {
       try {
-        const realBase = await fs.realpath(session.cwd);
+        const realBase = await fs.realpath(session.baseCwd);
         const realTarget = await fs.realpath(resolvedPath);
         if (realTarget !== realBase && !realTarget.startsWith(realBase + path.sep)) {
           return { success: false, error: "Path escapes session directory via symlink" };
@@ -951,7 +1155,7 @@ export class TerminalController extends EventEmitter {
           const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
           const parentDir = path.dirname(resolvedPath);
           // Verify parent directory is still inside base before creating (CodeQL: path-traversal)
-          if (!isPathInsideBase(session.cwd, parentDir)) {
+          if (!isPathInsideBase(session.baseCwd, parentDir)) {
             return { success: false, error: "Parent directory is outside session working directory" };
           }
           await fs.mkdir(parentDir, { recursive: true });
@@ -974,7 +1178,7 @@ export class TerminalController extends EventEmitter {
           if (!op.destination) return { success: false, error: "Destination required" };
           const destination = validateStringOrThrow(op.destination, "destination");
           const destPath = path.resolve(session.cwd, destination);
-          if (!isPathInsideBase(session.cwd, destPath)) {
+          if (!isPathInsideBase(session.baseCwd, destPath)) {
             return { success: false, error: "Destination is outside session working directory" };
           }
           await fs.cp(resolvedPath, destPath, { recursive: op.recursive || false });
@@ -985,7 +1189,7 @@ export class TerminalController extends EventEmitter {
           if (!op.destination) return { success: false, error: "Destination required" };
           const destination = validateStringOrThrow(op.destination, "destination");
           const moveDest = path.resolve(session.cwd, destination);
-          if (!isPathInsideBase(session.cwd, moveDest)) {
+          if (!isPathInsideBase(session.baseCwd, moveDest)) {
             return { success: false, error: "Destination is outside session working directory" };
           }
           await fs.rename(resolvedPath, moveDest);
@@ -1041,7 +1245,8 @@ export class TerminalController extends EventEmitter {
 
         case "chmod": {
           if (!op.permissions) return { success: false, error: "Permissions required" };
-          await fs.chmod(resolvedPath, parseInt(op.permissions, 8));
+          const safePermissions = validatePermissions(op.permissions);
+          await fs.chmod(resolvedPath, parseInt(safePermissions, 8));
           return { success: true };
         }
 
@@ -1065,27 +1270,33 @@ export class TerminalController extends EventEmitter {
     // Disk info
     let diskInfo: any[] = [];
     try {
-      const { stdout } = await execAsync("df -h 2>/dev/null || echo 'N/A'");
-      if (stdout.trim() !== "N/A") {
-        const lines = stdout.trim().split("\n").slice(1);
-        diskInfo = lines.map(line => {
-          const parts = line.split(/\s+/);
-          return {
-            filesystem: parts[0],
-            size: parts[1],
-            used: parts[2],
-            available: parts[3],
-            usagePercent: parts[4],
-            mount: parts[5],
-          };
-        });
+      const { stdout, exitCode } = await runCommandForInfo("df", ["-h"]);
+      if (exitCode === 0 && stdout.trim()) {
+        const lines = stdout.trim().split("\n").slice(1).filter(Boolean);
+        diskInfo = lines
+          .map((line) => {
+            const parts = line.split(/\s+/);
+            if (parts.length < 6) {
+              return null;
+            }
+            return {
+              filesystem: parts[0],
+              size: parts[1],
+              used: parts[2],
+              available: parts[3],
+              usagePercent: parts[4],
+              mount: parts[5],
+            };
+          })
+          .filter(Boolean);
       }
     } catch { /* ignore */ }
 
     // Network interfaces
     const nets = os.networkInterfaces();
-    const networkInfo = Object.entries(nets).flatMap(([name, interfaces]) =>
-      (interfaces || []).filter(i => !i.internal).map(i => ({
+    const networkEntries = Object.entries(nets || {}) as Array<[string, os.NetworkInterfaceInfo[] | undefined]>;
+    const networkInfo = networkEntries.flatMap(([name, interfaces]) =>
+      (interfaces || []).filter((i): i is os.NetworkInterfaceInfo => !i.internal).map((i) => ({
         interface: name,
         address: i.address,
         mac: i.mac,
@@ -1105,8 +1316,8 @@ export class TerminalController extends EventEmitter {
         cores: cpus.length,
         speed: cpus[0]?.speed || 0,
         usage: cpus.map(cpu => {
-          const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
-          return Math.round(((total - cpu.times.idle) / total) * 100);
+          const total = (Object.values(cpu.times) as number[]).reduce((acc, value) => acc + value, 0);
+          return Math.round(((total - Number(cpu.times.idle)) / total) * 100);
         }),
       },
       memory: {
@@ -1126,11 +1337,14 @@ export class TerminalController extends EventEmitter {
 
   async listProcesses(filter?: string): Promise<ProcessInfo[]> {
     try {
-      const { stdout } = await execAsync("ps aux --sort=-%mem 2>/dev/null | head -50");
-      const lines = stdout.trim().split("\n").slice(1);
+      const { stdout } = await runCommandForInfo("ps", ["aux", "--sort=-%mem"]);
+      const lines = stdout.trim().split("\n").slice(1, 51);
 
-      let processes = lines.map(line => {
+      let processes = lines.map((line): ProcessInfo | null => {
         const parts = line.trim().split(/\s+/);
+        if (parts.length < 11) {
+          return null;
+        }
         return {
           pid: parseInt(parts[1]),
           name: parts[10] || "",
@@ -1141,7 +1355,7 @@ export class TerminalController extends EventEmitter {
           user: parts[0],
           startTime: parts[8],
         };
-      });
+      }).filter((process): process is ProcessInfo => Boolean(process && !Number.isNaN(process.pid)));
 
       if (filter) {
         const filterLower = filter.toLowerCase();
@@ -1159,7 +1373,11 @@ export class TerminalController extends EventEmitter {
 
   async killProcess(pid: number, signal: string = "SIGTERM"): Promise<boolean> {
     try {
-      process.kill(pid, signal as NodeJS.Signals);
+      const safeSignal = sanitizeKillSignal(signal);
+      if (!Number.isInteger(pid) || pid <= 0) {
+        return false;
+      }
+      process.kill(pid, safeSignal);
       return true;
     } catch {
       return false;
@@ -1172,9 +1390,23 @@ export class TerminalController extends EventEmitter {
 
   async listPorts(): Promise<Array<{ port: number; pid: number; process: string; state: string }>> {
     try {
-      const { stdout } = await execAsync(
-        "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null || echo ''"
-      );
+      const commands: Array<[string, string[]]> = [
+        ["ss", ["-tlnp"]],
+        ["netstat", ["-tlnp"]],
+      ];
+
+      let stdout = "";
+      for (const [command, args] of commands) {
+        try {
+          const commandResult = await runCommandForInfo(command, args);
+          if (commandResult.exitCode === 0) {
+            stdout = commandResult.stdout;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
 
       const ports: Array<{ port: number; pid: number; process: string; state: string }> = [];
       const lines = stdout.trim().split("\n").slice(1);
@@ -1327,7 +1559,7 @@ export class TerminalController extends EventEmitter {
   }
 
   cleanup(): void {
-    for (const [id] of this.sessions) {
+    for (const id of Array.from(this.sessions.keys())) {
       this.closeSession(id);
     }
   }

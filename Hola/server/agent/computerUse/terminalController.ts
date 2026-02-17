@@ -204,10 +204,6 @@ export class TerminalController extends EventEmitter {
       }
     }
 
-    if (session.pty) {
-        session.pty.destroy();
-    }
-
     this.sessions.delete(sessionId);
     this.emit("session:closed", { sessionId });
   }
