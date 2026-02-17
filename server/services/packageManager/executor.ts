@@ -1,6 +1,4 @@
-import { spawn } from "child_process";
-import { Logger } from "../../lib/logger";
-import type { PackageManagerId } from "./capabilityProbe";
+import { spawn } from "child_process"; import { Logger } from "../../lib/logger"; import type { PackageManagerId } from "./capabilityProbe";
 
 export interface ExecSpec {
   /** Binary executed without a shell (spawn). */
@@ -44,14 +42,33 @@ export async function executeCommand(spec: ExecSpec, options: ExecuteOptions): P
   const start = Date.now();
 
   return await new Promise<ExecuteResult>((resolve) => {
-    const child = spawn(spec.bin, spec.args, {
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...(options.env ?? {}),
-      },
-    });
+    let settled = false;
+    const finish = (r: ExecuteResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+
+    let child;
+    try {
+      child = spawn(spec.bin, spec.args, {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          ...(options.env ?? {}),
+        },
+      });
+    } catch (e: any) {
+      return finish({
+        ok: false,
+        exitCode: 1,
+        signal: null,
+        stdout: "",
+        stderr: `Failed to spawn ${spec.bin}: ${e?.message || String(e)}`,
+        durationMs: Date.now() - start,
+      });
+    }
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -82,6 +99,19 @@ export async function executeCommand(spec: ExecSpec, options: ExecuteOptions): P
       stderrBytes += chunk.length;
     });
 
+    // Critical hardening: spawn failures (ENOENT, EACCES) arrive here.
+    child.on("error", (err: any) => {
+      clearTimeout(killTimer);
+      finish({
+        ok: false,
+        exitCode: 1,
+        signal: null,
+        stdout: "",
+        stderr: `Failed to spawn ${spec.bin}: ${err?.message || String(err)}`,
+        durationMs: Date.now() - start,
+      });
+    });
+
     child.on("close", (exitCode, signal) => {
       clearTimeout(killTimer);
       const durationMs = Date.now() - start;
@@ -92,7 +122,7 @@ export async function executeCommand(spec: ExecSpec, options: ExecuteOptions): P
       const stdout = truncateBytes(stdoutBuf, options.maxOutputBytes);
       const stderr = truncateBytes(stderrBuf, options.maxOutputBytes);
 
-      resolve({
+      finish({
         ok: exitCode === 0,
         exitCode,
         signal,
@@ -103,7 +133,6 @@ export async function executeCommand(spec: ExecSpec, options: ExecuteOptions): P
     });
   });
 }
-
 /**
  * Some managers may require interactive sudo. In Phase 2 we do not attempt to prompt.
  */

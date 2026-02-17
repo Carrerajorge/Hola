@@ -51,38 +51,48 @@ function withVersion(name: string, version?: string): string {
   return `${name}@${version}`;
 }
 
-function buildExecSpec(manager: PackageManagerId, action: PackageAction, pkg: string, version?: string, options: PlanOptions = {}) {
+function buildExecSpec(os: OSContext, manager: PackageManagerId, action: PackageAction, pkg: string, version?: string, options: PlanOptions = {}) {
   const { assumeYes = true, global = false } = options;
   const pkgWithVersion = withVersion(pkg, version);
 
   // Helpers to ensure we never shell out.
-  const sudo = (args: string[]) => ({ bin: "sudo", args, requiresSudo: true });
+  const maybeSudo = (bin: string, args: string[], displayNoSudo: string) => {
+    if (os.isContainer) {
+      return { bin, args, requiresSudo: false, display: displayNoSudo };
+    }
+    return { bin: "sudo", args: [bin, ...args], requiresSudo: true, display: `sudo ${displayNoSudo}` };
+  };
 
   switch (manager) {
     case "apt": {
-      const args = ["apt-get", action === "install" ? "install" : "remove", ...(assumeYes ? ["-y"] : []), pkgWithVersion];
-      return { ...sudo(args), display: `sudo apt-get ${action === "install" ? "install" : "remove"} ${assumeYes ? "-y " : ""}${pkgWithVersion}`.trim() };
+      const args = [action === "install" ? "install" : "remove", ...(assumeYes ? ["-y"] : []), pkgWithVersion];
+      const display = `apt-get ${action === "install" ? "install" : "remove"} ${assumeYes ? "-y " : ""}${pkgWithVersion}`.trim();
+      return maybeSudo("apt-get", args, display); 
     }
     case "dnf":
     case "yum": {
-      const args = [manager, action === "install" ? "install" : "remove", ...(assumeYes ? ["-y"] : []), pkgWithVersion];
-      return { ...sudo(args), display: `sudo ${manager} ${action === "install" ? "install" : "remove"} ${assumeYes ? "-y " : ""}${pkgWithVersion}`.trim() };
+      const args = [action === "install" ? "install" : "remove", ...(assumeYes ? ["-y"] : []), pkgWithVersion];
+      const display = `${manager} ${action === "install" ? "install" : "remove"} ${assumeYes ? "-y " : ""}${pkgWithVersion}`.trim();
+      return maybeSudo(manager, args, display);
     }
     case "apk": {
-      const args = ["apk", action === "install" ? "add" : "del", pkgWithVersion];
-      return { ...sudo(args), display: `sudo apk ${action === "install" ? "add" : "del"} ${pkgWithVersion}`.trim() };
+      const args = [action === "install" ? "add" : "del", pkgWithVersion];
+      const display = `apk ${action === "install" ? "add" : "del"} ${pkgWithVersion}`.trim();
+      return maybeSudo("apk", args, display); 
     }
     case "pacman": {
-      const args = ["pacman", action === "install" ? "-S" : "-R", ...(assumeYes ? ["--noconfirm"] : []), pkgWithVersion];
-      return { ...sudo(args), display: `sudo pacman ${action === "install" ? "-S" : "-R"} ${assumeYes ? "--noconfirm " : ""}${pkgWithVersion}`.trim() };
+      const args = [action === "install" ? "-S" : "-R", ...(assumeYes ? ["--noconfirm"] : []), pkgWithVersion];
+      const display = `pacman ${action === "install" ? "-S" : "-R"} ${assumeYes ? "--noconfirm " : ""}${pkgWithVersion}`.trim();
+      return maybeSudo("pacman", args, display);
     }
     case "brew": {
       const args = [action === "install" ? "install" : "uninstall", pkgWithVersion];
       return { bin: "brew", args, display: `brew ${action === "install" ? "install" : "uninstall"} ${pkgWithVersion}`.trim(), requiresSudo: false };
     }
     case "port": {
-      const args = ["port", action === "install" ? "install" : "uninstall", pkgWithVersion];
-      return { ...sudo(args), display: `sudo port ${action === "install" ? "install" : "uninstall"} ${pkgWithVersion}`.trim() };
+      const args = [action === "install" ? "install" : "uninstall", pkgWithVersion];
+      const display = `port ${action === "install" ? "install" : "uninstall"} ${pkgWithVersion}`.trim();
+      return maybeSudo("port", args, display);
     }
     case "winget": {
       const args = [action === "install" ? "install" : "uninstall", "--exact", "--id", pkgWithVersion];
@@ -148,7 +158,7 @@ export function buildPlan(input: BuildPlanInput): PackagePlan {
     warnings.push("Running inside a container; ensure host permissions are understood before applying changes.");
   }
 
-  const exec = buildExecSpec(input.manager.id, input.action, input.packageName, input.version, input.options);
+  const exec = buildExecSpec(input.os, input.manager.id, input.action, input.packageName, input.version, input.options);
 
   return {
     action: input.action,
