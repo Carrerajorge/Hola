@@ -14,6 +14,19 @@ import express from "express";
 
 const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
+const REQUIRE_WEBHOOK_SECRETS = env.NODE_ENV === "production";
+
+function parseWebhookQueryTimestamp(raw: unknown): number | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const normalized = raw.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function normalizeWebhookTimestamp(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null;
@@ -25,7 +38,11 @@ function getRawBodyBuffer(req: Request): Buffer {
   if (Buffer.isBuffer(raw)) return raw;
   if (typeof raw === "string") return Buffer.from(raw);
   // Fallback: re-stringify parsed body (won't match signature, but avoids crashes).
-  return Buffer.from(JSON.stringify(req.body ?? {}));
+  try {
+    return Buffer.from(JSON.stringify(req.body ?? {}));
+  } catch {
+    return Buffer.from("");
+  }
 }
 
 function hasTooLargePayload(req: Request): boolean {
@@ -35,10 +52,10 @@ function hasTooLargePayload(req: Request): boolean {
 
 function getWebhookTimestampFromRequest(channel: "telegram" | "whatsapp_cloud" | "messenger" | "wechat", req: Request): number | null {
   if (channel === "wechat") {
-    return normalizeWebhookTimestamp(Number.parseInt(String(req.query.timestamp || ""), 10));
+    return normalizeWebhookTimestamp(parseWebhookQueryTimestamp(req.query.timestamp));
   }
 
-  const queryTimestamp = Number.parseInt(String(req.query.timestamp || req.query["hub.timestamp"] || ""), 10);
+  const queryTimestamp = parseWebhookQueryTimestamp(req.query.timestamp ?? req.query["hub.timestamp"]);
   if (Number.isFinite(queryTimestamp)) {
     return normalizeWebhookTimestamp(queryTimestamp);
   }
@@ -64,6 +81,7 @@ export function createChannelWebhooksRouter(): Router {
       const ok = verifyTelegramSecretToken({
         providedToken: req.header("x-telegram-bot-api-secret-token") || undefined,
         expectedToken: env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
+        requireSecret: REQUIRE_WEBHOOK_SECRETS,
       });
       if (!ok) return res.status(403).send("forbidden");
 
@@ -113,6 +131,7 @@ export function createChannelWebhooksRouter(): Router {
         rawBody: getRawBodyBuffer(req),
         headerSignature: sig,
         appSecret: env.WHATSAPP_APP_SECRET,
+        requireSecret: REQUIRE_WEBHOOK_SECRETS,
       });
       if (!ok) return res.status(403).send("forbidden");
 
@@ -162,6 +181,7 @@ export function createChannelWebhooksRouter(): Router {
         rawBody: getRawBodyBuffer(req),
         headerSignature: sig,
         appSecret: env.MESSENGER_APP_SECRET,
+        requireSecret: REQUIRE_WEBHOOK_SECRETS,
       });
       if (!ok) return res.status(403).send("forbidden");
 
@@ -186,10 +206,11 @@ export function createChannelWebhooksRouter(): Router {
     }
 
     const ok = verifyWeChatSignature({
-      signature: String(req.query.signature || ""),
-      timestamp: String(req.query.timestamp || ""),
-      nonce: String(req.query.nonce || ""),
+      signature: typeof req.query.signature === "string" ? req.query.signature : undefined,
+      timestamp: typeof req.query.timestamp === "string" ? req.query.timestamp : undefined,
+      nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
       token: env.WECHAT_TOKEN,
+      requireSecret: REQUIRE_WEBHOOK_SECRETS,
     });
     if (!ok) return res.status(403).send("forbidden");
     return res.status(200).send(String(req.query.echostr || ""));
@@ -208,10 +229,11 @@ export function createChannelWebhooksRouter(): Router {
       }
 
       const ok = verifyWeChatSignature({
-        signature: String(req.query.signature || ""),
-        timestamp: String(req.query.timestamp || ""),
-        nonce: String(req.query.nonce || ""),
+        signature: typeof req.query.signature === "string" ? req.query.signature : undefined,
+        timestamp: typeof req.query.timestamp === "string" ? req.query.timestamp : undefined,
+        nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
         token: env.WECHAT_TOKEN,
+        requireSecret: REQUIRE_WEBHOOK_SECRETS,
       });
       if (!ok) return res.status(403).send("forbidden");
 

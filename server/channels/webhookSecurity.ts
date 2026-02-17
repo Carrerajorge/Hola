@@ -1,6 +1,9 @@
 import crypto from "crypto";
 
 const DEFAULT_WEBHOOK_CLOCK_SKEW_MS = 6 * 60 * 1000;
+const MAX_TRACKABLE_WEBHOOK_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_TIMESTAMP_CANDIDATES = 16;
+const REQUIRE_WEBHOOK_SECRETS = process.env.NODE_ENV === "production";
 
 export function timingSafeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -9,13 +12,32 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ab, bb);
 }
 
+function canonicalizeHeaderValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function canonicalizeSignature(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("sha256=") ? normalized : `sha256=${normalized}`;
+}
+
 export function verifyTelegramSecretToken(input: {
   providedToken: string | undefined;
   expectedToken: string | undefined;
+  requireSecret?: boolean;
 }): boolean {
-  if (!input.expectedToken) return true; // best-effort: allow if not configured
-  if (!input.providedToken) return false;
-  return timingSafeEqual(String(input.providedToken), String(input.expectedToken));
+  const requireSecret = input.requireSecret ?? REQUIRE_WEBHOOK_SECRETS;
+  if (!input.expectedToken) {
+    return !requireSecret;
+  }
+
+  const providedToken = canonicalizeHeaderValue(input.providedToken);
+  const expectedToken = canonicalizeHeaderValue(input.expectedToken);
+  if (!providedToken || !expectedToken) return false;
+
+  return timingSafeEqual(providedToken, expectedToken);
 }
 
 export function computeWhatsAppSignature256(input: {
@@ -30,11 +52,18 @@ export function verifyWhatsAppSignature256(input: {
   rawBody: Buffer;
   headerSignature: string | undefined;
   appSecret: string | undefined;
+  requireSecret?: boolean;
 }): boolean {
-  if (!input.appSecret) return true; // best-effort: allow if not configured
-  if (!input.headerSignature) return false;
+  const requireSecret = input.requireSecret ?? REQUIRE_WEBHOOK_SECRETS;
+  if (!input.appSecret) {
+    return !requireSecret;
+  }
+
+  const rawHeader = canonicalizeHeaderValue(input.headerSignature);
+  if (!rawHeader) return false;
+
   const expected = computeWhatsAppSignature256({ rawBody: input.rawBody, appSecret: input.appSecret });
-  return timingSafeEqual(input.headerSignature, expected);
+  return timingSafeEqual(canonicalizeSignature(rawHeader), canonicalizeSignature(expected));
 }
 
 /** Messenger uses the same HMAC-SHA256 pattern as WhatsApp (both Meta platforms). */
@@ -42,12 +71,19 @@ export function verifyMessengerSignature256(input: {
   rawBody: Buffer;
   headerSignature: string | undefined;
   appSecret: string | undefined;
+  requireSecret?: boolean;
 }): boolean {
-  if (!input.appSecret) return true;
-  if (!input.headerSignature) return false;
+  const requireSecret = input.requireSecret ?? REQUIRE_WEBHOOK_SECRETS;
+  if (!input.appSecret) {
+    return !requireSecret;
+  }
+
+  const rawHeader = canonicalizeHeaderValue(input.headerSignature);
+  if (!rawHeader) return false;
+
   const mac = crypto.createHmac("sha256", input.appSecret).update(input.rawBody).digest("hex");
   const expected = `sha256=${mac}`;
-  return timingSafeEqual(input.headerSignature, expected);
+  return timingSafeEqual(canonicalizeSignature(rawHeader), canonicalizeSignature(expected));
 }
 
 /** WeChat uses SHA1 of sorted [token, timestamp, nonce]. */
@@ -56,12 +92,22 @@ export function verifyWeChatSignature(input: {
   timestamp: string | undefined;
   nonce: string | undefined;
   token: string | undefined;
+  requireSecret?: boolean;
 }): boolean {
-  if (!input.token) return true;
-  if (!input.signature || !input.timestamp || !input.nonce) return false;
-  const arr = [input.token, input.timestamp, input.nonce].sort();
+  const requireSecret = input.requireSecret ?? REQUIRE_WEBHOOK_SECRETS;
+  const token = canonicalizeHeaderValue(input.token);
+  const signature = canonicalizeHeaderValue(input.signature);
+  const timestamp = canonicalizeHeaderValue(input.timestamp);
+  const nonce = canonicalizeHeaderValue(input.nonce);
+
+  if (!token) {
+    return !requireSecret;
+  }
+
+  if (!signature || !timestamp || !nonce) return false;
+  const arr = [token, timestamp, nonce].sort();
   const computed = crypto.createHash("sha1").update(arr.join("")).digest("hex");
-  return timingSafeEqual(computed, input.signature);
+  return timingSafeEqual(computed, signature);
 }
 
 function normalizeTimestampInput(value: unknown): number | null {
@@ -113,6 +159,9 @@ export function extractWebhookPayloadTimestamp(payload: unknown): number | null 
   }
 
   if (!candidates.length) return null;
+  if (candidates.length > MAX_TIMESTAMP_CANDIDATES) {
+    candidates.length = MAX_TIMESTAMP_CANDIDATES;
+  }
   return Math.max(...candidates);
 }
 
@@ -125,6 +174,6 @@ export function isWebhookTimestampFresh(
   const nowMs = options.nowMs ?? Date.now();
   const maxSkewMs = options.maxSkewMs ?? DEFAULT_WEBHOOK_CLOCK_SKEW_MS;
 
-  if (timestampMs > nowMs + 60_000) return false;
+  if (timestampMs > nowMs + 60_000 || nowMs - timestampMs > MAX_TRACKABLE_WEBHOOK_AGE_MS) return false;
   return nowMs - timestampMs <= maxSkewMs;
 }
