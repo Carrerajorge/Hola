@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     agent_max_retries: int = Field(default=3, alias="AGENT_MAX_RETRIES")
     
     workers: int = Field(default=4, alias="WORKERS")
-    host: str = Field(default="0.0.0.0", alias="HOST")
+    host: str = Field(default="127.0.0.1", alias="HOST")
     port: int = Field(default=8000, alias="PORT")
     
     @property
