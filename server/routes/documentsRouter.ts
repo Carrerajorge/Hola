@@ -84,9 +84,16 @@ const CORRELATION_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
 const SHARE_UPLOAD_FIELD = "file";
 const SHARE_MAX_DOCUMENT_SIZE = MAX_SHARED_DOCUMENT_BYTES;
 const SHARE_TTL_MS = SHARED_DOCUMENT_TTL_MS;
-const SHARE_ID_LENGTH = 8;
+const SHARE_ID_LENGTH = 16;
+const SHARE_ID_MAX_LENGTH = 64;
 const SHARE_ID_MAX_ATTEMPTS = 12;
 const SHARE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/;
+const SHARE_HOST_ALLOWLIST = new Set(
+  (process.env.SHARE_HOST_ALLOWLIST || process.env.SHARE_HOSTS || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => Boolean(entry))
+);
 const SHARE_FIELD_NAME_MAX_BYTES = 256;
 const SHARE_FORM_BOUNDARY_MAX_LENGTH = 70;
 const SHARE_FORM_BOUNDARY_HEADER = /;\s*boundary=([A-Za-z0-9'()+_,-./:=?]+)(?=\s*;|\s*$)/i;
@@ -381,12 +388,46 @@ function normalizeUploadedFileName(value: unknown): string {
   return value.trim().toLowerCase();
 }
 
+function isAllowedShareHost(host: string): boolean {
+  if (SHARE_HOST_ALLOWLIST.size === 0) {
+    return true;
+  }
+
+  const normalized = host.toLowerCase();
+  if (SHARE_HOST_ALLOWLIST.has(normalized)) {
+    return true;
+  }
+
+  const hostname = normalized.split(":")[0];
+  return SHARE_HOST_ALLOWLIST.has(hostname);
+}
+
 function getUploadedFileExtension(fileName: string): string {
   const index = fileName.lastIndexOf(".");
   if (index < 0) {
     return "";
   }
   return fileName.slice(index).toLowerCase();
+}
+
+function normalizeShareId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > SHARE_ID_MAX_LENGTH) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function generateShareId(seed: string, attempt: number): string {
+  return createHash("sha256")
+    .update(`${seed}:${attempt}:${Date.now()}:${randomUUID()}`)
+    .digest("hex")
+    .slice(0, SHARE_ID_LENGTH);
 }
 
 function resolveSharedDocumentType(input: { mimeType?: string; fileName?: string; } | undefined): {
@@ -476,6 +517,9 @@ function readSafeHost(req: CorrelatedRequest): string | null {
   }
   const normalized = rawHost.trim().toLowerCase();
   if (!SHARE_HOST_HEADER_RE.test(normalized)) {
+    return null;
+  }
+  if (!isAllowedShareHost(normalized)) {
     return null;
   }
   return normalized;
@@ -2458,10 +2502,7 @@ Generate the command plan:`;
         let shareId = "";
         const shareSeed = `${shareMeta.requestId}:${checksum}:${filename}:${shareMeta.multipartBoundary ?? "none"}`;
         for (let attempt = 0; attempt < SHARE_ID_MAX_ATTEMPTS; attempt += 1) {
-          const candidate = createHash("sha256")
-            .update(`${shareSeed}:${attempt}`)
-            .digest("hex")
-            .slice(0, SHARE_ID_LENGTH);
+          const candidate = generateShareId(shareSeed, attempt);
           if (!SHARE_ID_RE.test(candidate)) {
             continue;
           }
@@ -2548,7 +2589,10 @@ Generate the command plan:`;
   router.get("/shared/:id", async (req, res) => {
     try {
       const requestId = getCorrelationId(req);
-      const shareId = normalizeUploadedFileName(req.params.id);
+      const shareId = normalizeShareId(req.params.id);
+      if (!shareId) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid share identifier", new Error("Invalid share id"), req));
+      }
       logDocumentEvent({
         timestamp: new Date().toISOString(),
         event: "shared_start",
