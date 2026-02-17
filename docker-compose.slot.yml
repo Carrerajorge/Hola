@@ -235,10 +235,12 @@ services:
       - .env.production
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:?INFLUXDB_PASSWORD is required}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:?INFLUXDB_ORG is required}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:?INFLUXDB_BUCKET is required}
+      # Required when enabling the `monitoring` profile.
+      # Intentionally not using `:?` so the base blue/green deploy (no monitoring) does not fail at parse time.
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-}
       # Compatibility: accepts legacy INFLUX_TOKEN as fallback for INFLUXDB_ADMIN_TOKEN.
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN:-${INFLUX_TOKEN}}
     volumes:
