@@ -139,19 +139,47 @@ export function generateTOTP(secret: string, timestamp?: number): string {
 }
 
 /**
- * Verify TOTP code (with 1 period tolerance)
+ * TOTP replay protection: track recently used codes per user to prevent reuse.
+ * Codes expire after 2 TOTP periods (60s) to cover the full tolerance window.
  */
-export function verifyTOTP(secret: string, code: string): boolean {
+const USED_TOTP_CODES = new Map<string, number>();
+const TOTP_REPLAY_TTL_MS = 2 * TOTP_CONFIG.period * 1000;
+const TOTP_REPLAY_MAX_ENTRIES = 10_000;
+
+function pruneUsedTotpCodes(): void {
+  if (USED_TOTP_CODES.size <= TOTP_REPLAY_MAX_ENTRIES) return;
   const now = Date.now();
-  
+  for (const [key, expiry] of USED_TOTP_CODES.entries()) {
+    if (now > expiry) USED_TOTP_CODES.delete(key);
+  }
+}
+
+/**
+ * Verify TOTP code (with 1 period tolerance + replay protection)
+ */
+export function verifyTOTP(secret: string, code: string, userId?: string): boolean {
+  // Replay protection: reject recently used codes
+  if (userId) {
+    const replayKey = `${userId}:${code}`;
+    const expiry = USED_TOTP_CODES.get(replayKey);
+    if (expiry && Date.now() <= expiry) return false;
+  }
+
+  const now = Date.now();
+
   // Check current, previous, and next period
   for (const offset of [-1, 0, 1]) {
     const timestamp = now + offset * TOTP_CONFIG.period * 1000;
     if (generateTOTP(secret, timestamp) === code) {
+      // Mark code as used to prevent replay
+      if (userId) {
+        pruneUsedTotpCodes();
+        USED_TOTP_CODES.set(`${userId}:${code}`, Date.now() + TOTP_REPLAY_TTL_MS);
+      }
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -219,13 +247,13 @@ export async function verify2FASetup(userId: string, code: string): Promise<bool
   
   const secret = String((result.rows[0] as any).secret || "");
   
-  if (verifyTOTP(secret, code)) {
+  if (verifyTOTP(secret, code, userId)) {
     await db.execute(sql`
       UPDATE user_2fa SET is_enabled = true, verified_at = NOW() WHERE user_id = ${userId}
     `);
     return true;
   }
-  
+
   return false;
 }
 
@@ -233,14 +261,14 @@ export async function verify2FALogin(userId: string, code: string): Promise<bool
   const result = await db.execute(sql`
     SELECT secret, backup_codes FROM user_2fa WHERE user_id = ${userId} AND is_enabled = true
   `);
-  
+
   if (!result.rows?.length) return false;
-  
+
   const secret = String((result.rows[0] as any).secret || "");
   const backup_codes = (result.rows[0] as any).backup_codes;
-  
-  // Check TOTP first
-  if (verifyTOTP(secret, code)) {
+
+  // Check TOTP first (with replay protection)
+  if (verifyTOTP(secret, code, userId)) {
     return true;
   }
   

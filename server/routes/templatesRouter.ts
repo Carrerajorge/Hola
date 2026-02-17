@@ -45,29 +45,36 @@ templatesRouter.get("/", async (req, res) => {
   try {
     const userId = (req as any).user?.id;
     const { category, search, includePublic = "true" } = req.query;
-    
-    let query = `
-      SELECT * FROM prompt_templates 
-      WHERE (user_id = $1 ${includePublic === "true" ? "OR is_public = true" : ""})
-    `;
-    const params: any[] = [userId];
-    
-    if (category) {
-      params.push(category);
-      query += ` AND category = $${params.length}`;
+
+    // Input validation — prevent oversized parameters
+    const safeCategory = typeof category === "string" ? category.slice(0, 100) : undefined;
+    const safeSearch = typeof search === "string" ? search.slice(0, 200) : undefined;
+    const showPublic = includePublic === "true";
+
+    // SECURITY FIX: Use parameterized SQL instead of sql.raw() (SQL injection risk)
+    if (safeCategory && safeSearch) {
+      const result = showPublic
+        ? await db.execute(sql`SELECT * FROM prompt_templates WHERE (user_id = ${userId} OR is_public = true) AND category = ${safeCategory} AND (name ILIKE ${'%' + safeSearch + '%'} OR description ILIKE ${'%' + safeSearch + '%'}) ORDER BY use_count DESC, created_at DESC LIMIT 200`)
+        : await db.execute(sql`SELECT * FROM prompt_templates WHERE user_id = ${userId} AND category = ${safeCategory} AND (name ILIKE ${'%' + safeSearch + '%'} OR description ILIKE ${'%' + safeSearch + '%'}) ORDER BY use_count DESC, created_at DESC LIMIT 200`);
+      return res.json(result.rows || []);
+    } else if (safeCategory) {
+      const result = showPublic
+        ? await db.execute(sql`SELECT * FROM prompt_templates WHERE (user_id = ${userId} OR is_public = true) AND category = ${safeCategory} ORDER BY use_count DESC, created_at DESC LIMIT 200`)
+        : await db.execute(sql`SELECT * FROM prompt_templates WHERE user_id = ${userId} AND category = ${safeCategory} ORDER BY use_count DESC, created_at DESC LIMIT 200`);
+      return res.json(result.rows || []);
+    } else if (safeSearch) {
+      const result = showPublic
+        ? await db.execute(sql`SELECT * FROM prompt_templates WHERE (user_id = ${userId} OR is_public = true) AND (name ILIKE ${'%' + safeSearch + '%'} OR description ILIKE ${'%' + safeSearch + '%'}) ORDER BY use_count DESC, created_at DESC LIMIT 200`)
+        : await db.execute(sql`SELECT * FROM prompt_templates WHERE user_id = ${userId} AND (name ILIKE ${'%' + safeSearch + '%'} OR description ILIKE ${'%' + safeSearch + '%'}) ORDER BY use_count DESC, created_at DESC LIMIT 200`);
+      return res.json(result.rows || []);
+    } else {
+      const result = showPublic
+        ? await db.execute(sql`SELECT * FROM prompt_templates WHERE (user_id = ${userId} OR is_public = true) ORDER BY use_count DESC, created_at DESC LIMIT 200`)
+        : await db.execute(sql`SELECT * FROM prompt_templates WHERE user_id = ${userId} ORDER BY use_count DESC, created_at DESC LIMIT 200`);
+      return res.json(result.rows || []);
     }
-    
-    if (search) {
-      params.push(`%${search}%`);
-      query += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
-    }
-    
-    query += " ORDER BY use_count DESC, created_at DESC";
-    
-    const result = await db.execute(sql.raw(query));
-    res.json(result.rows || []);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: safeErrorMessage(error) });
   }
 });
 
@@ -194,10 +201,19 @@ templatesRouter.post("/:id/use", async (req, res) => {
     const template = result.rows[0];
     let content = template.content;
     
-    // Replace variables
-    Object.entries(variables).forEach(([key, value]) => {
-      content = content.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value as string);
-    });
+    // SECURITY FIX: Use split+join for literal replacement (user-controlled keys in regex = ReDoS risk)
+    if (variables && typeof variables === "object" && !Array.isArray(variables)) {
+      const entries = Object.entries(variables);
+      if (entries.length > 50) {
+        return res.status(400).json({ error: "Too many variables (max 50)" });
+      }
+      for (const [key, value] of entries) {
+        if (typeof key !== "string" || !/^\w{1,64}$/.test(key)) continue;
+        if (typeof value !== "string") continue;
+        const placeholder = `{{${key}}}`;
+        content = content.split(placeholder).join(value.slice(0, 10000));
+      }
+    }
     
     // Increment use count
     await db.execute(sql`

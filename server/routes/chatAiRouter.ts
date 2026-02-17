@@ -73,6 +73,47 @@ const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
 const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
 const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
 
+// ── PER-USER SSE CONNECTION LIMITER ────────────────────────────
+const MAX_SSE_CONNECTIONS_PER_USER = 5;
+const SSE_CONNECTION_TRACKER = new Map<string, Set<string>>();
+
+function acquireSseSlot(userId: string, requestId: string): boolean {
+  let connections = SSE_CONNECTION_TRACKER.get(userId);
+  if (!connections) {
+    connections = new Set();
+    SSE_CONNECTION_TRACKER.set(userId, connections);
+  }
+  if (connections.size >= MAX_SSE_CONNECTIONS_PER_USER) return false;
+  connections.add(requestId);
+  return true;
+}
+
+function releaseSseSlot(userId: string, requestId: string): void {
+  const connections = SSE_CONNECTION_TRACKER.get(userId);
+  if (connections) {
+    connections.delete(requestId);
+    if (connections.size === 0) SSE_CONNECTION_TRACKER.delete(userId);
+  }
+}
+
+/**
+ * Sanitize external web content before injecting into system prompt.
+ * Strips patterns that could be interpreted as LLM instructions/prompt injection.
+ */
+function sanitizeWebSearchContent(text: string, maxLen = 50_000): string {
+  if (!text) return "";
+  return text
+    .replace(/\b(?:ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?)/gi, "[filtered]")
+    .replace(/\b(?:you\s+are\s+now|act\s+as\s+if|pretend\s+(?:you|that)|system\s*:\s*)/gi, "[filtered]")
+    .replace(/\b(?:disregard|forget|override)\s+(?:all\s+)?(?:previous|above|prior|your)\s+(?:instructions?|rules?|guidelines?|prompt)/gi, "[filtered]")
+    .replace(/\b(?:new\s+instructions?|updated?\s+instructions?|real\s+instructions?):/gi, "[filtered]")
+    .replace(/\[(?:system|SYSTEM)\]/g, "[filtered]")
+    .replace(/<\/?(?:system|prompt|instruction|rules?|override)>/gi, "[filtered]")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\[\/\/\]:\s*#\s*\([\s\S]*?\)/g, "")
+    .slice(0, maxLen);
+}
+
 function sanitizeStreamIdentifier(raw: unknown, fallbackPrefix = "stream_req"): string {
   if (typeof raw === "string") {
     const trimmed = raw.trim();

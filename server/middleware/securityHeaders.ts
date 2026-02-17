@@ -36,7 +36,8 @@ const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   ],
   "style-src": [
     "'self'",
-    ...(!isProductionEnv ? ["'unsafe-inline'"] : []),
+    // Production: unsafe-inline needed for dynamic styles from UI libraries (shadcn/radix)
+    "'unsafe-inline'",
     "https://fonts.googleapis.com",
     "https://cdn.jsdelivr.net",
     "https://cdnjs.cloudflare.com",
@@ -51,6 +52,8 @@ const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "base-uri": ["'self'"],
   "form-action": ["'self'", "https://accounts.google.com"],
   "object-src": ["'none'"],
+  "worker-src": ["'self'", "blob:"],
+  "manifest-src": ["'self'"],
   "upgrade-insecure-requests": [],
 };
 

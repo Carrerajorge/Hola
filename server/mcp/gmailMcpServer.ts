@@ -194,6 +194,11 @@ const GMAIL_TOOL_MAX_RESULT_BYTES = 128_000;
 const GMAIL_TOOL_MAX_ERROR_MESSAGE_LEN = 1_024;
 const GMAIL_TOOL_MAX_RECIPIENTS = 50;
 const GMAIL_TOOL_IDEMPOTENCY_MAX_ACTIVE_KEYS = 1_000;
+const GMAIL_TOOL_IDEMPOTENCY_STATE_RANK: Record<GmailToolIdempotencyRecord['state'], number> = {
+  done: 0,
+  proposed: 1,
+  running: 2,
+};
 const GMAIL_TOOL_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 const GMAIL_TOOL_IDEMPOTENCY_KEY_MIN_LEN = 8;
 const GMAIL_TOOL_IDEMPOTENCY_KEY_MAX_LEN = 128;
@@ -795,7 +800,16 @@ function pruneExpiredIdempotencyEntries(): void {
     return;
   }
 
-  for (const cacheKey of gmailToolIdempotencyStore.keys()) {
+  const evictionOrder = [...gmailToolIdempotencyStore.entries()].sort((left, right) => {
+    const leftRank = GMAIL_TOOL_IDEMPOTENCY_STATE_RANK[left[1].state];
+    const rightRank = GMAIL_TOOL_IDEMPOTENCY_STATE_RANK[right[1].state];
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return left[1].startedAtMs - right[1].startedAtMs;
+  });
+
+  for (const [cacheKey] of evictionOrder) {
     gmailToolIdempotencyStore.delete(cacheKey);
     if (gmailToolIdempotencyStore.size <= GMAIL_TOOL_IDEMPOTENCY_MAX_ACTIVE_KEYS) {
       break;
@@ -939,7 +953,7 @@ function isTransientGmailToolError(error: unknown): boolean {
   return isTransientError(error);
 }
 
-function getToolRetrySeconds(message: string): number | null {
+function getToolRetrySeconds(message: string, toolName?: GmailToolName): number | null {
   if (isBackpressureError(message)) {
     return 2;
   }
@@ -950,6 +964,12 @@ function getToolRetrySeconds(message: string): number | null {
     return 1;
   }
   if (isGmailCircuitError(message)) {
+    if (toolName) {
+      const retryAfter = getGmailToolCircuitRetryAfterSeconds(toolName);
+      if (retryAfter !== null) {
+        return retryAfter;
+      }
+    }
     return Math.ceil(GMAIL_TOOL_CIRCUIT_RESET_MS / 1000);
   }
   return null;
@@ -991,21 +1011,39 @@ async function withToolStageTimeout<T>(
   stage: GmailToolStage
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
     const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       reject(createToolError("timeout", `${stage} stage timed out`));
     }, timeoutMs);
 
     try {
       Promise.resolve(operation())
         .then((result) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           clearTimeout(timeout);
           resolve(result);
         })
         .catch((error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           clearTimeout(timeout);
           reject(error);
         });
     } catch (error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
       clearTimeout(timeout);
       reject(error as Error);
     }
@@ -1305,7 +1343,8 @@ function resolveToolErrorCode(error: unknown, message: string): GmailToolErrorCo
 }
 
 function classifyToolError(
-  error: unknown
+  error: unknown,
+  toolName?: GmailToolName
 ): { status: number; body: { code: GmailToolErrorCode; error: string; retryAfter?: number } } {
   const message = extractToolErrorMessage(error, "Tool call failed");
   const code = resolveToolErrorCode(error, message);
@@ -1329,7 +1368,7 @@ function classifyToolError(
   if (code === "backpressure") {
     const retryAfterSeconds = isGmailToolError(error)
       ? error.retryAfterSeconds
-      : getToolRetrySeconds(message);
+      : getToolRetrySeconds(message, toolName);
     return {
       status: 429,
       body: {
@@ -1343,7 +1382,7 @@ function classifyToolError(
   if (code === "circuit_open") {
     const retryAfterSeconds = isGmailToolError(error)
       ? error.retryAfterSeconds
-      : getToolRetrySeconds(message);
+      : getToolRetrySeconds(message, toolName);
     return {
       status: 503,
       body: {
@@ -1535,7 +1574,7 @@ async function executeToolCall(
     logger.info("[MCP Gmail] Tool call completed", {
       correlationId,
       userId: sanitizeText(String(userId)),
-      tool: sanitizeTool,
+      tool: sanitizedTool,
       durationMs: Date.now() - start,
       status: "ok",
       idempotent: idempotencyKey !== null,
@@ -1573,7 +1612,7 @@ async function executeToolCall(
     logger.warn("[MCP Gmail] Tool call execution failed", {
       correlationId,
       userId: sanitizeText(String(userId)),
-      tool: sanitizeTool,
+      tool: sanitizedTool,
       durationMs: Date.now() - start,
       code,
       error: message,
@@ -1793,13 +1832,15 @@ export function createGmailMcpRouter(): Router {
           );
           logger.info('[MCP Gmail] Tool call', {
             userId: sanitizeText(String(userId)),
-            tool: parsed.tool,
+            tool: safeTool,
             correlationId,
           });
           res.json({ success: true, result });
-          } catch (error: unknown) {
+        } catch (error: unknown) {
+          const safeTool = sanitizeText((req.body as { tool?: string })?.tool || (req.body as { name?: string })?.name || 'gmail_unknown');
+          const normalizedTool = isKnownGmailToolName(safeTool) ? safeTool : undefined;
           const fallbackCarrier = error as { fallbackPayload?: Record<string, unknown> };
-          const classification = classifyToolError(error);
+          const classification = classifyToolError(error, normalizedTool);
           if (classification.body.retryAfter) {
             res.setHeader("Retry-After", String(classification.body.retryAfter));
           }
@@ -1807,7 +1848,7 @@ export function createGmailMcpRouter(): Router {
           const level = classification.status >= 500 ? "error" : "warn";
           logger[level]('[MCP Gmail] Tool call error', {
             userId: sanitizeText(String(userId)),
-            tool: (req.body?.tool || req.body?.name) as string | undefined,
+            tool: safeTool,
             error: classification.body.error,
             code: classification.body.code,
             correlationId,
@@ -1824,7 +1865,7 @@ export function createGmailMcpRouter(): Router {
           if (fallbackCode === 'timeout' || fallbackCode === 'circuit_open' || fallbackCode === 'internal') {
             responsePayload.fallback = fallbackCarrier.fallbackPayload ??
               buildToolFallbackPayload(
-                sanitizeText((req.body as { tool?: string })?.tool || 'gmail_unknown'),
+                safeTool,
                 fallbackCode,
                 classification.body.error,
                 'rest',
@@ -1939,6 +1980,8 @@ export function createGmailMcpRouter(): Router {
               throw createToolError("unsupported_method", `Unknown method: ${request.method}`);
           }
         } catch (error: unknown) {
+          const safeRawTool = sanitizeText((request.params as { tool?: string })?.tool || (request.params as { name?: string })?.name || "gmail_unknown");
+          const safeTool = request.method === 'tools/call' && isKnownGmailToolName(safeRawTool) ? safeRawTool : undefined;
           const message = extractToolErrorMessage(error, "Internal error");
           const code = resolveToolErrorCode(error, message);
           const safeMessage = normalizeErrorMessage(message);
@@ -1949,7 +1992,7 @@ export function createGmailMcpRouter(): Router {
 
           const retryAfter = isGmailToolError(error)
             ? error.retryAfterSeconds
-            : getToolRetrySeconds(message);
+            : getToolRetrySeconds(message, safeTool);
 
           if (code === "backpressure" || code === "circuit_open" || code === "timeout") {
             response.error.data = {
@@ -1964,7 +2007,7 @@ export function createGmailMcpRouter(): Router {
               ...(response.error.data || {}),
               fallback: fallbackCarrier.fallbackPayload ??
                 buildToolFallbackPayload(
-                  (request.params as { tool?: string })?.tool || 'gmail_unknown',
+                  safeRawTool,
                   code,
                   message,
                   'jsonrpc',

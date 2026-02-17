@@ -108,6 +108,13 @@ vi.mock("../../channels/whatsappCloud/whatsappPolicy", () => ({
 vi.mock("../../channels/messenger/messengerPolicy", () => ({ evaluateMessengerPolicy: vi.fn(() => ({ allowed: true })) }));
 vi.mock("../../channels/wechat/wechatPolicy", () => ({ evaluateWeChatPolicy: vi.fn(() => ({ allowed: true })) }));
 
+vi.mock("../../channels/channelPolicyEngine", () => ({
+  evaluateChannelPolicy: vi.fn(() => ({ ok: true, data: { allowed: true, code: "allowed", shouldRespond: true } })),
+  getConversationPolicy: vi.fn(() => ({ rateLimitPerMinute: 60, responder_enabled: true })),
+  getConversationWindowState: vi.fn(() => ({ withinWindow: true })),
+  parseChannelPairingCodeFromMessage: vi.fn(() => null),
+}));
+
 vi.mock("../../agent/unifiedChatHandler", () => ({
   createUnifiedRun: vi.fn(async () => ({})),
   executeUnifiedChat: vi.fn(async (_ctx: any, _payload: any, res: any) => {
@@ -122,6 +129,9 @@ vi.mock("../../integrations/whatsappWebAutoReply", () => ({
 }));
 
 import { processChannelIngestJob } from "../../channels/channelIngestService";
+import { evaluateChannelPolicy } from "../../channels/channelPolicyEngine";
+
+const evaluateChannelPolicyMocked = evaluateChannelPolicy as ReturnType<typeof vi.fn>;
 
 function makeWhatsAppPayload(sender = "51999999999", messageId = "wamid.1", body = "hola") {
   return {
@@ -158,6 +168,10 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
   });
 
   it("disabled responder => no auto reply", async () => {
+    evaluateChannelPolicyMocked.mockReturnValue({
+      ok: false, error: "responder_disabled",
+      data: { allowed: false, code: "responder_disabled", shouldRespond: false },
+    });
     findWhatsAppCloudAccountByPhoneNumberIdMock.mockResolvedValue({
       userId: "user-1",
       accessToken: "token",
@@ -175,6 +189,10 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
   });
 
   it("owner_only blocks non-owner sender", async () => {
+    evaluateChannelPolicyMocked.mockReturnValue({
+      ok: false, error: "blocked_sender",
+      data: { allowed: false, code: "blocked_sender", shouldRespond: false },
+    });
     findWhatsAppCloudAccountByPhoneNumberIdMock.mockResolvedValue({
       userId: "user-1",
       accessToken: "token",
@@ -208,6 +226,11 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       payload: makeWhatsAppPayload("51999999999", "wamid.allowed"),
       receivedAt: new Date().toISOString(),
     } as any);
+
+    // Debug: print logger calls to understand pipeline behavior
+    for (const c of loggerWarnMock.mock.calls) console.log("[WARN]", c[0], JSON.stringify(c[1] ?? {}));
+    for (const c of loggerErrorMock.mock.calls) console.log("[ERROR]", c[0], JSON.stringify(c[1] ?? {}));
+    for (const c of loggerInfoMock.mock.calls) console.log("[INFO]", c[0], JSON.stringify(c[1] ?? {}));
 
     expect(findWhatsAppCloudAccountByPhoneNumberIdMock).toHaveBeenCalled();
     expect(getOrCreateChannelConversationMock).toHaveBeenCalled();
