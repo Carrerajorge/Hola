@@ -4,6 +4,7 @@ import {
   checkIdempotencyKey,
   computePayloadHash,
 } from "../lib/idempotencyStore";
+import { createLogger } from "../lib/structuredLogger";
 
 export interface PareContext {
   requestId: string;
@@ -29,6 +30,7 @@ const HEADER_IDEMPOTENCY_KEY = "x-idempotency-key";
 const IDEMPOTENCY_KEY_REGEX = /^[a-zA-Z0-9._-]{6,140}$/;
 const MAX_HEADER_VALUE_LENGTH = 256;
 const MAX_PAYLOAD_HASH_BODY_BYTES = 128_000;
+const logger = createLogger("pare-request-contract");
 
 function sanitizeHeaderValue(value: string): string {
   return value.replace(/[\r\n]/g, "").trim().slice(0, MAX_HEADER_VALUE_LENGTH);
@@ -114,22 +116,20 @@ export function pareRequestContract(
       if (bodyByteLength <= MAX_PAYLOAD_HASH_BODY_BYTES) {
         payloadHash = computePayloadHash(req.body);
       } else {
-        console.warn(JSON.stringify({
-          level: "warn",
-          event: "IDEMPOTENCY_PAYLOAD_TOO_LARGE",
-          requestId,
-          idempotencyKey: obfuscateKey(idempotencyKey),
-          bodyByteLength,
-        }));
+  logger.warn("IDEMPOTENCY_PAYLOAD_TOO_LARGE", {
+    requestId,
+    event: "IDEMPOTENCY_PAYLOAD_TOO_LARGE",
+    idempotencyKey: obfuscateKey(idempotencyKey),
+    bodyByteLength,
+  });
       }
     } catch (error: unknown) {
-      console.error(JSON.stringify({
-        level: "error",
-        event: "IDEMPOTENCY_PAYLOAD_SERIALIZE_ERROR",
+      logger.error("IDEMPOTENCY_PAYLOAD_SERIALIZE_ERROR", {
         requestId,
+        event: "IDEMPOTENCY_PAYLOAD_SERIALIZE_ERROR",
         idempotencyKey: obfuscateKey(idempotencyKey),
         error: error instanceof Error ? error.message : String(error),
-      }));
+      });
     }
   }
   
@@ -148,10 +148,9 @@ export function pareRequestContract(
   
   res.setHeader("X-Request-Id", requestId);
   
-  console.log(JSON.stringify({
-    level: "info",
-    event: "PARE_REQUEST_RECEIVED",
+  logger.info("PARE_REQUEST_RECEIVED", {
     requestId,
+    event: "PARE_REQUEST_RECEIVED",
     idempotencyKey: obfuscateKey(idempotencyKey),
     isDataMode,
     attachmentsCount,
@@ -160,7 +159,7 @@ export function pareRequestContract(
     method: req.method,
     path: req.path,
     timestamp: new Date(startTime).toISOString(),
-  }));
+  });
   
   next();
 }
@@ -204,24 +203,22 @@ export async function pareIdempotencyGuard(
         return;
       
       case 'completed':
-        console.log(JSON.stringify({
-          level: "info",
-          event: "IDEMPOTENCY_REPLAY",
+        logger.info("IDEMPOTENCY_REPLAY", {
           requestId,
+          event: "IDEMPOTENCY_REPLAY",
           idempotencyKey: obfuscateKey(idempotencyKey),
           timestamp: new Date().toISOString()
-        }));
+        });
         res.status(200).json(result.cachedResponse);
         return;
       
       case 'processing':
-        console.log(JSON.stringify({
-          level: "warn",
-          event: "IDEMPOTENCY_IN_PROGRESS",
+        logger.warn("IDEMPOTENCY_IN_PROGRESS", {
           requestId,
+          event: "IDEMPOTENCY_IN_PROGRESS",
           idempotencyKey: obfuscateKey(idempotencyKey),
           timestamp: new Date().toISOString()
-        }));
+        });
         res.status(409).json({
           error: "IDEMPOTENCY_IN_PROGRESS",
           message: "Request with this idempotency key is currently being processed. Please retry later.",
@@ -247,14 +244,13 @@ export async function pareIdempotencyGuard(
         return;
     }
   } catch (error: any) {
-    console.error(JSON.stringify({
-      level: "error",
-      event: "IDEMPOTENCY_GUARD_ERROR",
+    logger.error("IDEMPOTENCY_GUARD_ERROR", {
       requestId,
+      event: "IDEMPOTENCY_GUARD_ERROR",
       idempotencyKey: idempotencyKey ? obfuscateKey(idempotencyKey) : null,
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString()
-    }));
+    });
     next();
   }
 }
