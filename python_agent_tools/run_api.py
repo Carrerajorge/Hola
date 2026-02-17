@@ -11,7 +11,7 @@ logger = structlog.get_logger(__name__)
 def get_production_config() -> dict:
     """Get production-optimized uvicorn configuration."""
     workers = int(os.environ.get("WORKERS", "1"))
-    host = os.environ.get("HOST", "0.0.0.0")
+    host = os.environ.get("HOST", os.environ.get("HOST_BIND_ALL", "127.0.0.1"))
     port = int(os.environ.get("PORT", "8001"))
     log_level = os.environ.get("LOG_LEVEL", "info").lower()
     
