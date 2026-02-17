@@ -683,17 +683,62 @@ router.get("/runs/:runId/status", async (req: Request, res: Response) => {
 
 
 
+const FANOUT_MAX_SHARDS = 10_000;
+const FANOUT_MAX_CONCURRENCY = 256;
+const FANOUT_MAX_TOTAL_EXECUTIONS = 20_000;
+const FANOUT_SHARD_TIMEOUT_MS = 120_000;
+const FANOUT_MAX_ACTIVE_RUNS = 8;
+
+type FanoutRunStatus = {
+  runId: string;
+  status: "running" | "completed" | "cancelled" | "failed";
+  objective: string;
+  shards: number;
+  concurrency: number;
+  completed: number;
+  failed: number;
+  startedAt: number;
+  finishedAt?: number;
+  durationMs?: number;
+  error?: string;
+};
+
+const fanoutRunState = new Map<string, FanoutRunStatus>();
+const fanoutAbortControllers = new Map<string, AbortController>();
+
 const FanoutPlanSchema = z.object({
   objective: z.string().min(3).max(2000),
-  shards: z.number().int().min(1).max(10000),
+  shards: z.number().int().min(1).max(FANOUT_MAX_SHARDS),
   shard_prompt_template: z.string().min(3).max(4000),
-  max_concurrency: z.number().int().min(1).max(500).optional(),
+  max_concurrency: z.number().int().min(1).max(FANOUT_MAX_CONCURRENCY).optional(),
   max_iterations_per_shard: z.number().int().min(1).max(5).optional(),
 });
 
 const FanoutExecuteSchema = FanoutPlanSchema.extend({
   execute: z.boolean().optional(),
 });
+
+function requireFanoutAuth(req: Request, res: Response): boolean {
+  const user = (req as any).user;
+  const isLocal = req.ip === "127.0.0.1" || req.ip === "::1";
+  if (!user && process.env.NODE_ENV === "production" && !isLocal) {
+    res.status(401).json({ error: "Authentication required for fanout execution" });
+    return false;
+  }
+  return true;
+}
+
+function validateFanoutBudget(shards: number, maxIterationsPerShard: number, res: Response): boolean {
+  const totalExecutions = shards * maxIterationsPerShard;
+  if (totalExecutions > FANOUT_MAX_TOTAL_EXECUTIONS) {
+    res.status(400).json({
+      error: `Fanout budget exceeded: shard_count * max_iterations_per_shard must be <= ${FANOUT_MAX_TOTAL_EXECUTIONS}`,
+      code: "FANOUT_BUDGET_EXCEEDED",
+    });
+    return false;
+  }
+  return true;
+}
 
 function renderShardPrompt(template: string, shardIndex: number, totalShards: number, objective: string): string {
   return template
@@ -719,15 +764,30 @@ async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency
   return results;
 }
 
+async function runShardWithTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error("shard_timeout")), timeoutMs);
+  });
+  try {
+    return await Promise.race([task, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 /**
  * POST /api/super/fanout/plan
- * Creates a high-scale sharding plan (up to 10k shards) without execution.
  */
 router.post('/super/fanout/plan', async (req: Request, res: Response) => {
   try {
+    if (!requireFanoutAuth(req, res)) return;
     const input = FanoutPlanSchema.parse(req.body);
     const desired = input.max_concurrency ?? 128;
-    const effectiveConcurrency = Math.max(1, Math.min(desired, 256));
+    const effectiveConcurrency = Math.max(1, Math.min(desired, FANOUT_MAX_CONCURRENCY));
+    const maxIterationsPerShard = input.max_iterations_per_shard ?? 1;
+
+    if (!validateFanoutBudget(input.shards, maxIterationsPerShard, res)) return;
 
     const samplePrompts: string[] = [];
     const sampleSize = Math.min(3, input.shards);
@@ -743,7 +803,8 @@ router.post('/super/fanout/plan', async (req: Request, res: Response) => {
       strategy: {
         execution: 'bounded-concurrency-fanout',
         effectiveConcurrency,
-        maxIterationsPerShard: input.max_iterations_per_shard ?? 1,
+        maxIterationsPerShard,
+        shardTimeoutMs: FANOUT_SHARD_TIMEOUT_MS,
         aggregation: 'collect-final-events-and-errors',
       },
       samplePrompts,
@@ -753,26 +814,63 @@ router.post('/super/fanout/plan', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/super/fanout/:runId/status', async (req: Request, res: Response) => {
+  const state = fanoutRunState.get(req.params.runId);
+  if (!state) return res.status(404).json({ error: 'Fanout run not found' });
+  return res.json(state);
+});
+
+router.post('/super/fanout/:runId/cancel', async (req: Request, res: Response) => {
+  if (!requireFanoutAuth(req, res)) return;
+  const controller = fanoutAbortControllers.get(req.params.runId);
+  if (!controller) return res.status(404).json({ error: 'Fanout run not found or already finished' });
+  controller.abort();
+  return res.json({ success: true, runId: req.params.runId, status: 'cancel_requested' });
+});
+
 /**
  * POST /api/super/fanout/execute
- * Executes many shard prompts with bounded concurrency.
- * Safety caps: concurrency <= 256, shard_count <= 10k.
  */
 router.post('/super/fanout/execute', async (req: Request, res: Response) => {
   try {
+    if (!requireFanoutAuth(req, res)) return;
     const input = FanoutExecuteSchema.parse(req.body);
     const desired = input.max_concurrency ?? 64;
-    const effectiveConcurrency = Math.max(1, Math.min(desired, 256));
+    const effectiveConcurrency = Math.max(1, Math.min(desired, FANOUT_MAX_CONCURRENCY));
     const maxIterationsPerShard = input.max_iterations_per_shard ?? 1;
 
+    if (!validateFanoutBudget(input.shards, maxIterationsPerShard, res)) return;
+    if (fanoutAbortControllers.size >= FANOUT_MAX_ACTIVE_RUNS) {
+      return res.status(429).json({ error: 'Too many active fanout runs', code: 'FANOUT_QUEUE_FULL' });
+    }
+
+    const runId = `fanout_run_${randomUUID()}`;
+    const runAbort = new AbortController();
+    fanoutAbortControllers.set(runId, runAbort);
+
     const startedAt = Date.now();
+    const state: FanoutRunStatus = {
+      runId,
+      status: 'running',
+      objective: input.objective,
+      shards: input.shards,
+      concurrency: effectiveConcurrency,
+      completed: 0,
+      failed: 0,
+      startedAt,
+    };
+    fanoutRunState.set(runId, state);
+
     let completed = 0;
     let failed = 0;
 
     const tasks = Array.from({ length: input.shards }, (_, idx) => async () => {
+      if (runAbort.signal.aborted) {
+        return { shard: idx + 1, runId, success: false, error: 'cancelled' };
+      }
+
       const shardNumber = idx + 1;
       const prompt = renderShardPrompt(input.shard_prompt_template, shardNumber, input.shards, input.objective);
-      const runId = `fanout_${randomUUID()}`;
       const sessionId = `fanout_s_${randomUUID()}`;
 
       const agent = createSuperAgent(sessionId, {
@@ -781,7 +879,7 @@ router.post('/super/fanout/execute', async (req: Request, res: Response) => {
         enforceContract: false,
       });
 
-      return new Promise<{ shard: number; runId: string; success: boolean; error?: string }>((resolve) => {
+      const shardPromise = new Promise<{ shard: number; runId: string; success: boolean; error?: string }>((resolve) => {
         let done = false;
 
         const finish = (result: { shard: number; runId: string; success: boolean; error?: string }) => {
@@ -789,6 +887,9 @@ router.post('/super/fanout/execute', async (req: Request, res: Response) => {
           done = true;
           if (result.success) completed += 1;
           else failed += 1;
+          state.completed = completed;
+          state.failed = failed;
+          fanoutRunState.set(runId, state);
           resolve(result);
         };
 
@@ -800,25 +901,42 @@ router.post('/super/fanout/execute', async (req: Request, res: Response) => {
           }
         });
 
-        agent.execute(prompt).then(() => {
+        agent.execute(prompt, runAbort.signal).then(() => {
           finish({ shard: shardNumber, runId, success: true });
         }).catch((err: any) => {
           finish({ shard: shardNumber, runId, success: false, error: err?.message || 'execution_failed' });
         });
       });
+
+      return runShardWithTimeout(shardPromise, FANOUT_SHARD_TIMEOUT_MS).catch((err: any) => ({
+        shard: shardNumber,
+        runId,
+        success: false,
+        error: err?.message || 'timeout',
+      }));
     });
 
     const results = await runWithConcurrency(tasks, effectiveConcurrency);
 
+    state.status = runAbort.signal.aborted ? 'cancelled' : 'completed';
+    state.finishedAt = Date.now();
+    state.durationMs = state.finishedAt - startedAt;
+    state.completed = completed;
+    state.failed = failed;
+    fanoutRunState.set(runId, state);
+    fanoutAbortControllers.delete(runId);
+
     return res.json({
       success: true,
+      runId,
       objective: input.objective,
       shards: input.shards,
       concurrency: effectiveConcurrency,
       maxIterationsPerShard,
       completed,
       failed,
-      durationMs: Date.now() - startedAt,
+      status: state.status,
+      durationMs: state.durationMs,
       successRate: input.shards > 0 ? Number(((completed / input.shards) * 100).toFixed(2)) : 0,
       failures: results.filter(r => !r.success).slice(0, 100),
     });
