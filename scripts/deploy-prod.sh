@@ -222,12 +222,18 @@ set -euo pipefail
 extract_env_value() {
   local file="$1"
   local key="$2"
-  local value
-  value="$(awk -F'=' -v key="$key" '$1==key { $0=substr($0, length(key)+2); gsub(/^[ \t]+|[ \t]+$/, \"\", $0); print; exit }' "$file" || true)"
-  if [ -z "$value" ]; then
+  local line
+  line="$(grep -m1 -E "^${key}=" "$file" 2>/dev/null || true)"
+  if [ -z "$line" ]; then
     return 1
   fi
-  echo "$value"
+  line="${line#*=}"
+  line="${line%$'\r'}"
+  line="${line%\"}"
+  line="${line#\"}"
+  line="${line%\'}"
+  line="${line#\'}"
+  echo "$line"
 }
 
 for cmd in git docker python3 curl awk; do
