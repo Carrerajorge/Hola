@@ -38,7 +38,8 @@
     "tool-runner:capabilities": "node --import tsx server/toolRunner/cli.ts --capabilities",
     "tool-runner:health": "node --import tsx server/toolRunner/cli.ts --healthcheck",
     "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts",
-    "quality:gate": "node --import tsx scripts/quality-gate.ts"
+    "quality:gate": "node --import tsx scripts/quality-gate.ts",
+    "verify:prod": "bash ./scripts/prod-rigorous-checks.sh"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",

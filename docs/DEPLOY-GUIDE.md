@@ -118,6 +118,9 @@ VPS_HOST=100.93.79.71 bash scripts/deploy-prod.sh
 
 # Option 4: Deploy a non-main branch (e.g. deploy-ready)
 VPS_HOST=100.93.79.71 DEPLOY_BRANCH=deploy-ready bash scripts/deploy-prod.sh
+
+# Option 5: Run independent rigorous production verification
+VPS_HOST=100.93.79.71 npm run verify:prod
 ```
 
 `scripts/deploy-prod.sh` runs:
@@ -126,6 +129,10 @@ VPS_HOST=100.93.79.71 DEPLOY_BRANCH=deploy-ready bash scripts/deploy-prod.sh
 - DB/Redis readiness checks
 - migration via `docker compose --profile ops run --rm migrate`
 - 17 rigorous post-deploy checks (HTTP/API/containers/DB schema)
+
+`npm run verify:prod` runs:
+- 12 public checks against `https://iliagpt.com`
+- 5 VPS runtime checks via SSH (container health/state + DB table presence)
 
 ---
 
