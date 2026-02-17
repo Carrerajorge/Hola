@@ -12,6 +12,7 @@ import {
   isWebhookTimestampFresh,
 } from "../channels/webhookSecurity";
 import express from "express";
+import { INGEST_RUN_ID_RE, MAX_INGEST_RUN_ID_LENGTH } from "../channels/types";
 
 const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
 const MAX_WEBHOOK_QUERY_BYTES = 2048;
@@ -24,7 +25,8 @@ const MAX_WEBHOOK_HEADER_VALUE_LENGTH = 1024;
 const MAX_WEBHOOK_PATH_LENGTH = 256;
 const MAX_WEBHOOK_CONTENT_TYPE_LENGTH = 128;
 const MAX_WEBHOOK_RUN_ID_LENGTH = 96;
-const WEBHOOK_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
+const EFFECTIVE_MAX_WEBHOOK_RUN_ID_LENGTH = Math.min(MAX_WEBHOOK_RUN_ID_LENGTH, MAX_INGEST_RUN_ID_LENGTH);
+const WEBHOOK_RUN_ID_RE = INGEST_RUN_ID_RE;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
 const WEBHOOK_REPLAY_TTL_MS = 10 * 60 * 1000;
 const WEBHOOK_REPLAY_MAX_ENTRIES = 2000;
@@ -87,7 +89,8 @@ function normalizeContentType(raw: unknown): string | null {
 function normalizeWebhookId(raw: unknown, maxLength = MAX_WEBHOOK_RUN_ID_LENGTH): string | null {
   if (typeof raw !== "string") return null;
   const normalized = raw.normalize("NFKC").replace(/\u0000/g, "").replace(/[\x00-\x1f\x7f]/g, "").trim();
-  if (normalized.length === 0 || normalized.length > maxLength) return null;
+  const safeMaxLength = Math.min(maxLength, EFFECTIVE_MAX_WEBHOOK_RUN_ID_LENGTH);
+  if (normalized.length === 0 || normalized.length > safeMaxLength) return null;
   if (!WEBHOOK_RUN_ID_RE.test(normalized)) return null;
   return normalized;
 }

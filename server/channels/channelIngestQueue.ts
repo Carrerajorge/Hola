@@ -4,7 +4,7 @@ import { Logger } from "../lib/logger";
 import { createQueue, QUEUE_NAMES } from "../lib/queueFactory";
 import { processChannelIngestJob } from "./channelIngestService";
 import type { ChannelIngestJob } from "./types";
-import { validateChannelIngestJob } from "./types";
+import { INGEST_RUN_ID_RE, MAX_INGEST_RUN_ID_LENGTH, validateChannelIngestJob } from "./types";
 
 const DEFAULT_MAX_INGEST_JOB_BYTES = 32 * 1024;
 const MAX_JOB_BYTES_FLOOR = 4 * 1024;
@@ -20,8 +20,6 @@ const INGEST_DEAD_LETTER_SAMPLE_LENGTH = 1200;
 const INGEST_QUEUE_BACKPRESSURE_LIMIT = 1_200;
 const INGEST_RECEIVED_AT_MAX_FUTURE_MS = 5 * 60 * 1000;
 const INGEST_RECEIVED_AT_MAX_PAST_MS = 7 * 24 * 60 * 60 * 1000;
-const INGEST_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
-const MAX_INGEST_RUN_ID_LENGTH = 128;
 const INPROCESS_MAX_CONCURRENCY = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_CONCURRENCY, 4, 1, 128);
 const INPROCESS_TASK_TIMEOUT_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_TIMEOUT_MS, 120_000, 2_000, 300_000);
 const INPROCESS_TASK_QUEUE_MAX = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_QUEUE_MAX, 400, 32, 20_000);
@@ -52,9 +50,14 @@ type InProcessTask = {
   job: ChannelIngestJob;
   jobId: string;
   runId: string;
+  runScopeKey: string;
   traceKey: string;
   submittedAt: number;
 };
+
+function buildRunScopeKey(channel: string, runId: string): string {
+  return `${channel}::${runId}`;
+}
 
 const INGEST_STATS = {
   submitted: 0,
@@ -296,19 +299,19 @@ function pruneInProcessState(nowMs = Date.now()): void {
   }
 }
 
-function reserveInprocessRun(runId: string): boolean {
+function reserveInprocessRun(runScopeKey: string): boolean {
   pruneInProcessState();
-  if (inProcessTaskReservations.has(runId) || inProcessDedupWindow.has(runId)) {
+  if (inProcessTaskReservations.has(runScopeKey) || inProcessDedupWindow.has(runScopeKey)) {
     return false;
   }
 
-  inProcessTaskReservations.add(runId);
-  inProcessDedupWindow.set(runId, Date.now());
+  inProcessTaskReservations.add(runScopeKey);
+  inProcessDedupWindow.set(runScopeKey, Date.now());
   return true;
 }
 
-function releaseInprocessRun(runId: string): void {
-  inProcessTaskReservations.delete(runId);
+function releaseInprocessRun(runScopeKey: string): void {
+  inProcessTaskReservations.delete(runScopeKey);
 }
 
 function isInProcessQueueBackpressured(): boolean {
@@ -373,7 +376,7 @@ function enqueueInProcessIngest(task: InProcessTask): "accepted" | "duplicate" |
     return "rejected";
   }
 
-  if (!reserveInprocessRun(task.runId)) {
+  if (!reserveInprocessRun(task.runScopeKey)) {
     return "duplicate";
   }
 
@@ -405,6 +408,7 @@ async function pumpInProcessQueue(): Promise<void> {
             Logger.debug("[Channels] in-process ingest completed", {
               channel: task.job.channel,
               runId: task.runId,
+              runScopeKey: task.runScopeKey,
               elapsedMs: Date.now() - task.submittedAt,
             });
             return;
@@ -415,6 +419,7 @@ async function pumpInProcessQueue(): Promise<void> {
             Logger.warn("[Channels] in-process ingest timed out", {
               channel: task.job.channel,
               runId: task.runId,
+              runScopeKey: task.runScopeKey,
               error: result.error,
             });
             addDeadLetter("inprocess_timeout", task.job, task.traceKey, task.jobId, task.runId, result.error);
@@ -425,6 +430,7 @@ async function pumpInProcessQueue(): Promise<void> {
           Logger.error("[Channels] in-process ingest failed", {
             channel: task.job.channel,
             runId: task.runId,
+            runScopeKey: task.runScopeKey,
             error: result.error,
           });
           addDeadLetter("inprocess_failed", task.job, task.traceKey, task.jobId, task.runId, result.error);
@@ -434,13 +440,14 @@ async function pumpInProcessQueue(): Promise<void> {
           Logger.error("[Channels] in-process ingest unexpected error", {
             channel: task.job.channel,
             runId: task.runId,
+            runScopeKey: task.runScopeKey,
             error: normalizeErrorMessage(unexpected),
           });
           addDeadLetter("inprocess_unexpected", task.job, task.traceKey, task.jobId, task.runId, unexpected);
         })
         .finally(() => {
           inProcessRunning -= 1;
-          releaseInprocessRun(task.runId);
+          releaseInprocessRun(task.runScopeKey);
           scheduleInProcessPump();
         });
     }
@@ -458,11 +465,13 @@ function submitInProcessFallback(
   traceKey: string,
   jobId: string,
   cause: string,
+  runScopeKey: string,
 ): void {
   const result = enqueueInProcessIngest({
     job: sanitizedJob,
     jobId,
     runId,
+    runScopeKey,
     traceKey,
     submittedAt: Date.now(),
   });
@@ -484,6 +493,7 @@ function submitInProcessFallback(
     INGEST_STATS.inprocessDuplicate += 1;
     Logger.info("[Channels] Duplicate in-process ingest ignored", {
       channel: sanitizedJob.channel,
+      runScopeKey,
       runId,
       jobId,
       cause: "dedupe_replay",
@@ -494,6 +504,7 @@ function submitInProcessFallback(
   INGEST_STATS.inprocessRejected += 1;
   Logger.error("[Channels] in-process ingest queue saturated, rejecting message", {
     channel: sanitizedJob.channel,
+    runScopeKey,
     runId,
     jobId,
     cause,
@@ -565,7 +576,14 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
   if (useQueue && channelIngestQueue) {
     if (await isQueueBackpressured()) {
       markQueueBackpressure("waiting/active/delayed over limit", sanitizedJob.channel, runId);
-      submitInProcessFallback(sanitizedJob, runId, traceKey, jobId, "queue_backpressured");
+      submitInProcessFallback(
+        sanitizedJob,
+        runId,
+        traceKey,
+        jobId,
+        "queue_backpressured",
+        buildRunScopeKey(sanitizedJob.channel, runId),
+      );
       return;
     }
 
@@ -598,7 +616,14 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
         return;
       }
 
-      submitInProcessFallback(sanitizedJob, runId, traceKey, jobId, message);
+      submitInProcessFallback(
+        sanitizedJob,
+        runId,
+        traceKey,
+        jobId,
+        message,
+        buildRunScopeKey(sanitizedJob.channel, runId),
+      );
       return;
     }
   }
@@ -610,7 +635,14 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
     });
   }
 
-  submitInProcessFallback(sanitizedJob, runId, traceKey, jobId, "queue_disabled_or_not_configured");
+  submitInProcessFallback(
+    sanitizedJob,
+    runId,
+    traceKey,
+    jobId,
+    "queue_disabled_or_not_configured",
+    buildRunScopeKey(sanitizedJob.channel, runId),
+  );
   return;
 }
 

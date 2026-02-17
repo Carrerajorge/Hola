@@ -2,8 +2,8 @@ import { z } from "zod";
 
 const MAX_RECEIVED_AT_LENGTH = 64;
 const MAX_CHANNEL_META_ID_LENGTH = 255;
-const MAX_INGEST_RUN_ID_LENGTH = 128;
-const INGEST_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
+export const MAX_INGEST_RUN_ID_LENGTH = 128;
+export const INGEST_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
 
 export type ExternalChannel = "telegram" | "whatsapp_cloud" | "messenger" | "wechat";
 

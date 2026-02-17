@@ -109,6 +109,7 @@ const MAX_CONVERSATION_QUEUES = 2_000;
 const EVENT_TRACE_ID_LENGTH = 24;
 const ORCHESTRATION_TIMEOUT_JITTER_MS = 10_000;
 const MAX_INBOUND_MEDIA_URL_LENGTH = 2_048;
+const MAX_INBOUND_MEDIA_HOST_LENGTH = 255;
 const MAX_INBOUND_ENVELOPE_TEXT_LENGTH = 8_000;
 const MAX_INBOUND_MESSAGE_TYPE_LENGTH = 24;
 const MAX_INBOUND_METADATA_KEYS = 140;
@@ -116,6 +117,17 @@ const MAX_INBOUND_METADATA_BYTES = 24_000;
 const INBOUND_TEXT_SANITIZE_RE = /<[^>]*>|[`*_~#>\[\]{}]/g;
 const INBOUND_JS_SCHEME_RE = /javascript:/gi;
 const POLICY_CONTROLLED_RESPONSE_LENGTH = 420;
+const LOCAL_HOST_SUFFIXES = [
+  "localhost",
+  "127.",
+  "::1",
+  "0.0.0.0",
+  "0:0:0:0:0:0:0:1",
+  "[::1]",
+  ".local",
+  "localhost.",
+  "169.254.",
+];
 
 type TimedPromise<T> = {
   clear: () => void;
@@ -235,6 +247,36 @@ function isInboundMediaUrlSafe(rawUrl: string): boolean {
     const parsed = new URL(normalized);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
     if (parsed.username || parsed.password) return false;
+    const normalizedHostname = parsed.hostname.toLowerCase();
+    if (!normalizedHostname || normalizedHostname.length > MAX_INBOUND_MEDIA_HOST_LENGTH) return false;
+    if (LOCAL_HOST_SUFFIXES.some((hostSuffix) => normalizedHostname === hostSuffix || normalizedHostname.endsWith(hostSuffix))) {
+      return false;
+    }
+
+    const ipv4Parts = normalizedHostname.split(".").map((part) => Number.parseInt(part, 10));
+    if (ipv4Parts.length === 4 && ipv4Parts.every((part) => Number.isFinite(part) && part >= 0 && part <= 255)) {
+      const [a, b] = ipv4Parts;
+      if (
+        a === 10
+        || a === 127
+        || a === 0
+        || (a === 169 && b === 254)
+        || (a === 172 && b >= 16 && b <= 31)
+        || (a === 192 && b === 168)
+      ) {
+        return false;
+      }
+    }
+
+    if (normalizedHostname.includes(":")) {
+      const bracketed = normalizedHostname.startsWith("[") && normalizedHostname.endsWith("]")
+        ? normalizedHostname.slice(1, -1)
+        : normalizedHostname;
+      if (bracketed === "::1" || bracketed.startsWith("fe80:")) {
+        return false;
+      }
+    }
+
     if (parsed.pathname.includes("..") || parsed.search.includes("..")) return false;
     const normalizedPath = `${parsed.pathname}${parsed.search || ""}`;
     if (normalizedPath.includes("..")) return false;
