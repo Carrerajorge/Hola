@@ -113,14 +113,19 @@ gh workflow run deploy.yml
 # Option 2: Trigger with skip CI
 gh workflow run deploy.yml -f skip_ci=true
 
-# Option 3: Direct SSH deploy
-ssh root@100.93.79.71 << 'EOF'
-cd /opt/hola
-git pull origin main
-docker compose -p iliagpt -f docker-compose.prod.yml build app worker
-docker compose -p iliagpt -f docker-compose.prod.yml up -d
-EOF
+# Option 3: Hardened direct deploy script (recommended for manual ops)
+VPS_HOST=100.93.79.71 bash scripts/deploy-prod.sh
+
+# Option 4: Deploy a non-main branch (e.g. deploy-ready)
+VPS_HOST=100.93.79.71 DEPLOY_BRANCH=deploy-ready bash scripts/deploy-prod.sh
 ```
+
+`scripts/deploy-prod.sh` runs:
+- compose validation
+- build of `app`, `worker`, `sandbox-runner`, `ocr`
+- DB/Redis readiness checks
+- migration via `docker compose --profile ops run --rm migrate`
+- 17 rigorous post-deploy checks (HTTP/API/containers/DB schema)
 
 ---
 
@@ -133,7 +138,8 @@ ssh root@100.93.79.71 'cd /opt/hola && docker compose -p iliagpt -f docker-compo
 
 ### Check health
 ```bash
-curl https://iliagpt.com/health
+curl https://iliagpt.com/api/health
+curl https://iliagpt.com/api/health/ready
 ```
 
 ### Restart services
