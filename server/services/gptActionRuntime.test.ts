@@ -74,6 +74,11 @@ describe("gptActionRuntime shared helpers", () => {
       expect(parseRetryAfterHeader("")).toBeUndefined();
       expect(parseRetryAfterHeader(undefined)).toBeUndefined();
     });
+
+    it("returns undefined for past HTTP-date values", () => {
+      const past = new Date(Date.now() - 30_000).toUTCString();
+      expect(parseRetryAfterHeader(past)).toBeUndefined();
+    });
   });
 
   describe("computeBackoff jitter behavior", () => {

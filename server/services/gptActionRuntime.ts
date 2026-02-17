@@ -28,6 +28,7 @@ const MAX_HEADERS = 50;
 const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_REQUEST_PAYLOAD_BYTES = 50000;
 const MAX_RESPONSE_PAYLOAD_BYTES = 50000;
+const MAX_FETCH_RESPONSE_BYTES = 256_000;
 const DEFAULT_CONVERSATION_RATE_WINDOW_MS = 60_000;
 const DEFAULT_RATE_BUFFER = 2;
 const DEFAULT_MAX_CONCURRENCY = 4;
@@ -35,6 +36,7 @@ const DEFAULT_FETCH_RETRY_LIMIT = 3;
 const MAX_RETRY_ATTEMPTS = 10;
 const CONCURRENCY_KEY_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
 const BACKOFF_JITTER_RATIO = 0.2;
+const MAX_SCHEMA_VALIDATION_DEPTH = 64;
 
 interface GptActionExecuteInput {
   action: GptAction;
@@ -404,8 +406,18 @@ function redactSensitiveFields(value: unknown, keys: Set<string>): unknown {
   return value;
 }
 
-function validateJsonSchema(schema: JsonSchemaLike | undefined, value: unknown, path: string[] = []): string[] {
+function validateJsonSchema(
+  schema: JsonSchemaLike | undefined,
+  value: unknown,
+  path: string[] = [],
+  depth = 0
+): string[] {
   const errors: string[] = [];
+
+  if (depth > MAX_SCHEMA_VALIDATION_DEPTH) {
+    errors.push("Schema validation depth exceeded");
+    return errors;
+  }
 
   if (!schema || typeof schema !== "object") {
     return errors;
@@ -458,7 +470,7 @@ function validateJsonSchema(schema: JsonSchemaLike | undefined, value: unknown, 
 
     if (schema.items) {
       value.forEach((item, index) => {
-        errors.push(...validateJsonSchema(schema.items as JsonSchemaLike, item, [...path, String(index)]));
+        errors.push(...validateJsonSchema(schema.items as JsonSchemaLike, item, [...path, String(index)], depth + 1));
       });
     }
     return errors;
@@ -482,7 +494,7 @@ function validateJsonSchema(schema: JsonSchemaLike | undefined, value: unknown, 
 
     for (const [propertyName, propertySchema] of Object.entries(properties)) {
       if (propertyName in record) {
-        errors.push(...validateJsonSchema(propertySchema, record[propertyName], [...path, propertyName]));
+        errors.push(...validateJsonSchema(propertySchema, record[propertyName], [...path, propertyName], depth + 1));
       }
     }
 
@@ -511,7 +523,7 @@ function validateJsonSchema(schema: JsonSchemaLike | undefined, value: unknown, 
   }
 
   if (schema.oneOf && Array.isArray(schema.oneOf)) {
-    const matched = schema.oneOf.some((candidate) => validateJsonSchema(candidate, value).length === 0);
+    const matched = schema.oneOf.some((candidate) => validateJsonSchema(candidate, value, path, depth + 1).length === 0);
     if (!matched) {
       errors.push(`No oneOf match at ${pathLabel}`);
     }
@@ -519,7 +531,7 @@ function validateJsonSchema(schema: JsonSchemaLike | undefined, value: unknown, 
   }
 
   if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    const matched = schema.anyOf.some((candidate) => validateJsonSchema(candidate, value).length === 0);
+    const matched = schema.anyOf.some((candidate) => validateJsonSchema(candidate, value, path, depth + 1).length === 0);
     if (!matched) {
       errors.push(`No anyOf match at ${pathLabel}`);
     }
@@ -1166,7 +1178,7 @@ export class GptActionRuntime {
       const durationMs = this.now() - started;
       clearTimeout(timeoutId);
 
-      const text = await response.text();
+      const text = await this.readResponseBodySafe(response, MAX_FETCH_RESPONSE_BYTES);
       const rawBody = this.safeParseResponseBody(text);
 
       if (!response.ok) {
@@ -1196,6 +1208,59 @@ export class GptActionRuntime {
       }
       throw this.makeNetworkError((error as Error).message || "Request failed", "fetch_error", true);
     }
+  }
+
+  private async readResponseBodySafe(response: Response, maxBytes: number): Promise<string> {
+    const declaredLength = response.headers.get("content-length");
+    if (declaredLength) {
+      const parsedLength = Number.parseInt(declaredLength, 10);
+      if (Number.isFinite(parsedLength) && parsedLength > maxBytes) {
+        throw this.makeNetworkError(
+          `Response body exceeds maximum allowed size: ${parsedLength} > ${maxBytes}`,
+          "response_too_large",
+          false
+        );
+      }
+    }
+
+    if (!response.body) {
+      return "";
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let total = 0;
+    const chunks: string[] = [];
+
+    let completed = false;
+    try {
+      while (true) {
+        const readResult = await reader.read();
+        if (readResult.done) {
+          completed = true;
+          break;
+        }
+
+        const chunk = decoder.decode(readResult.value, { stream: true });
+        total += chunk.length;
+        if (total > maxBytes) {
+          await reader.cancel();
+          throw this.makeNetworkError(
+            `Response body exceeds maximum allowed size: ${total} > ${maxBytes}`,
+            "response_too_large",
+            false
+          );
+        }
+        chunks.push(chunk);
+      }
+    } finally {
+      if (!completed) {
+        await reader.cancel().catch(() => undefined);
+      }
+    }
+
+    const tail = decoder.decode(undefined, { stream: false });
+    return chunks.join("") + tail;
   }
 
   private async checkIdempotency(
@@ -1572,14 +1637,15 @@ export function parseRetryAfterHeader(rawHeader: string | null | undefined): num
     return undefined;
   }
 
-  if (/^[+-]?\d+$/.test(trimmed)) {
+  if (/^\d+$/.test(trimmed)) {
     const seconds = Number.parseInt(trimmed, 10);
     return seconds > 0 ? Math.max(1, seconds) : undefined;
   }
 
   const parsedDate = Date.parse(trimmed);
   if (Number.isFinite(parsedDate)) {
-    return Math.max(1, Math.ceil((parsedDate - Date.now()) / 1000));
+    const delta = Math.ceil((parsedDate - Date.now()) / 1000);
+    return delta > 0 ? delta : undefined;
   }
 
   return undefined;
