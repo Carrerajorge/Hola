@@ -1,6 +1,6 @@
-import { Response, Router } from "express";
+import { Request, Response, Router } from "express";
 import fs from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   generateWordDocument,
@@ -74,6 +74,7 @@ const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_MAX_ENTRIES = 200;
 const IDEMPOTENCY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
+const CORRELATION_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
 
 const ALLOWED_LOCALES = new Set(["en", "es", "fr", "pt", "de"]);
 const PLAN_ALLOWED_COMMANDS = new Set([
@@ -117,6 +118,8 @@ const documentsLlmCircuitBreaker = getCircuitBreaker("documents.llmGateway", {
 });
 
 const logger = createLogger("documents-router");
+
+type CorrelatedRequest = Request & { correlationId?: string };
 
 type IdempotencyRecord = {
   requestFingerprint: string;
@@ -166,6 +169,27 @@ function readIdempotencyKey(value: string | undefined): string | null {
     return null;
   }
   return trimmed;
+}
+
+function readCorrelationId(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return randomUUID();
+  }
+
+  if (!CORRELATION_ID_RE.test(trimmed)) {
+    return randomUUID();
+  }
+
+  return trimmed;
+}
+
+function getCorrelationId(req: CorrelatedRequest): string {
+  return req.correlationId ?? randomUUID();
+}
+
+function enrichAuditDetails(details: Record<string, unknown>, requestId: string): Record<string, unknown> {
+  return { ...details, requestId };
 }
 
 function getIdempotencyCacheKey(prefix: string, idempotencyKey: string): string {
@@ -525,6 +549,19 @@ export function createDocumentsRouter() {
     next();
   });
 
+  router.use((req: CorrelatedRequest, res, next) => {
+    const incomingRequestId =
+      req.get("X-Request-Id") ??
+      req.get("x-request-id") ??
+      req.get("X-Correlation-Id") ??
+      req.get("X-Correlation-ID") ??
+      req.get("x-correlation-id") ??
+      req.get("trace-id");
+    req.correlationId = readCorrelationId(incomingRequestId);
+    res.setHeader("X-Request-Id", req.correlationId);
+    next();
+  });
+
   router.get("/tool-runner/capabilities", async (req, res) => {
     const command = typeof req.query.command === "string" ? req.query.command.toLowerCase() : undefined;
 
@@ -860,7 +897,9 @@ export function createDocumentsRouter() {
       }
       res.send(buffer);
     } catch (error: any) {
-      console.error("Document generation error:", error);
+      logger.error("Document generation error", {
+        error: sanitizeErrorMessage(error),
+      });
       logDocumentEvent({
         timestamp: new Date().toISOString(),
         event: "generate_failure",
@@ -885,7 +924,9 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
       res.send(buffer);
     } catch (error: any) {
-      console.error("Agent tools catalog generation error:", error);
+      logger.error("Agent tools catalog generation error", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json(safeErrorResponse("Failed to generate agent tools catalog", error));
     }
   });
@@ -906,7 +947,9 @@ export function createDocumentsRouter() {
 
       res.json(templates);
     } catch (error: any) {
-      console.error("Error fetching templates:", error);
+      logger.error("Error fetching templates", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json({ error: "Failed to fetch templates" });
     }
   });
@@ -923,7 +966,9 @@ export function createDocumentsRouter() {
       }
       res.json(template);
     } catch (error: any) {
-      console.error("Error fetching template:", error);
+      logger.error("Error fetching template", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json({ error: "Failed to fetch template" });
     }
   });
@@ -973,7 +1018,9 @@ export function createDocumentsRouter() {
           : undefined),
       });
     } catch (error: any) {
-      console.error("Document render error:", error);
+      logger.error("Document render error", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json(safeErrorResponse("Failed to render document", error));
     }
   });
@@ -1003,7 +1050,9 @@ export function createDocumentsRouter() {
         toolRunnerReport: document.generationReport,
       });
     } catch (error: any) {
-      console.error("Tool runner report error:", error);
+      logger.error("Tool runner report error", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json({ error: "Failed to fetch generation report" });
     }
   });
@@ -1025,7 +1074,9 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", document.buffer.length);
       res.send(document.buffer);
     } catch (error: any) {
-      console.error("Document download error:", error);
+      logger.error("Document download error", {
+        error: sanitizeErrorMessage(error),
+      });
       res.status(500).json({ error: "Failed to download document" });
     }
   });
@@ -1072,14 +1123,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Excel render error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "render_failure",
-        docType: "excel",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Excel render error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "render_failure",
+          docType: "excel",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to render Excel document", error));
     }
   });
@@ -1126,14 +1179,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Word render error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "render_failure",
-        docType: "word",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Word render error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "render_failure",
+          docType: "word",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to render Word document", error));
     }
   });
@@ -1220,14 +1275,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Excel generation error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "excel",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Excel generation error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "generate_failure",
+          docType: "excel",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to generate Excel document", error));
     }
   });
@@ -1314,14 +1371,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Word generation error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "word",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Word generation error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "generate_failure",
+          docType: "word",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to generate Word document", error));
     }
   });
@@ -1389,14 +1448,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("CV generation error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "cv",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("CV generation error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "generate_failure",
+          docType: "cv",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to generate CV document", error));
     }
   });
@@ -1464,14 +1525,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Report generation error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "report",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Report generation error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "generate_failure",
+          docType: "report",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to generate Report document", error));
     }
   });
@@ -1539,14 +1602,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Letter generation error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "letter",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("Letter generation error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "generate_failure",
+          docType: "letter",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to generate Letter document", error));
     }
   });
@@ -1594,14 +1659,16 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("CV render error:", error);
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "render_failure",
-        docType: "cv",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
+      logger.error("CV render error", {
+        error: sanitizeErrorMessage(error),
       });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "render_failure",
+          docType: "cv",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       res.status(500).json(safeErrorResponse("Failed to render CV document", error));
     }
   });
@@ -1615,17 +1682,20 @@ export function createDocumentsRouter() {
 
     try {
       const rawIdempotencyKey = req.get("Idempotency-Key");
-      const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
       const executeRequest = parseValidated(ExecuteCodeSchema, req.body, "/execute-code");
       if (!executeRequest) {
         return res.status(400).json({ error: "Invalid request body for /execute-code" });
       }
+      const codeFingerprint = buildIdempotencyFingerprint({ code: sanitizePlainText(executeRequest.code, { maxLen: MAX_EXECUTE_CODE_LENGTH, collapseWs: false }) });
+      const parsedIdempotencyKey = readIdempotencyKey(rawIdempotencyKey);
 
-      if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+      if (rawIdempotencyKey !== undefined && parsedIdempotencyKey === null) {
         return res.status(400).json({ error: "Invalid Idempotency-Key header" });
       }
+      const idempotencyKey = parsedIdempotencyKey || codeFingerprint;
+      const sanitizedCode = sanitizePlainText(executeRequest.code, { maxLen: MAX_EXECUTE_CODE_LENGTH, collapseWs: false });
+      const requestFingerprint = buildIdempotencyFingerprint({ code: sanitizedCode });
 
-      const requestFingerprint = buildIdempotencyFingerprint({ code: executeRequest.code });
       if (idempotencyKey) {
         const replay = getIdempotencyReplay(
           getIdempotencyCacheKey("/execute-code", idempotencyKey),
@@ -1639,7 +1709,7 @@ export function createDocumentsRouter() {
         }
       }
 
-      const code = sanitizePlainText(executeRequest.code, { maxLen: MAX_EXECUTE_CODE_LENGTH, collapseWs: false });
+      const code = sanitizedCode;
 
       const acquired = await docConcurrencyLimiter.acquire();
       if (!acquired) {
@@ -1648,7 +1718,7 @@ export function createDocumentsRouter() {
 
       logDocumentEvent({
         timestamp: new Date().toISOString(),
-        event: "generate_start",
+        event: "execute_code_start",
         docType: "docx-code",
         details: { codeLength: code.length },
       });
@@ -1671,7 +1741,7 @@ export function createDocumentsRouter() {
 
       logDocumentEvent({
         timestamp: new Date().toISOString(),
-        event: "generate_success",
+        event: "execute_code_success",
         docType: "docx-code",
         durationMs: Date.now() - startTime,
         details: { bufferSize: buffer.length },
@@ -1697,13 +1767,13 @@ export function createDocumentsRouter() {
       logger.error("Code execution error", {
         error: sanitizeErrorMessage(error),
       });
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "generate_failure",
-        docType: "docx-code",
-        durationMs: Date.now() - startTime,
-        details: { error: error.message },
-      });
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "execute_code_failure",
+          docType: "docx-code",
+          durationMs: Date.now() - startTime,
+          details: { error: sanitizeErrorMessage(error) },
+        });
       const response = safeErrorResponse("Failed to execute document code", error);
       if (!IS_PRODUCTION) {
         (response as any).hint = "Check your code syntax and ensure createDocument() function is defined";

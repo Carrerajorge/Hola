@@ -136,6 +136,16 @@ function validateToolArgs(toolName: GmailToolName, args: Record<string, unknown>
   return gmailToolSchemas[toolName].parse(args);
 }
 
+function extractToolErrorMessage(error: unknown, fallback: string): string {
+  const rawMessage = typeof error?.message === "string" ? error.message : fallback;
+  const sanitized = sanitizeText(rawMessage);
+  return sanitized.length > 0 ? sanitized : sanitizeText(fallback);
+}
+
+function isToolCallInputError(message: string): boolean {
+  return message.includes("tool or name is required") || message.includes("Unknown tool");
+}
+
 const MCP_TOOLS: McpTool[] = [
   {
     name: 'gmail_search',
@@ -332,23 +342,24 @@ export function createGmailMcpRouter(): Router {
       });
       res.json({ success: true, result });
     } catch (error: any) {
-      const message = typeof error?.message === "string" ? error.message : "Tool call failed";
-      const isInputError = message.includes("Unknown tool") || message.includes("Unknown tool:");
+      const message = extractToolErrorMessage(error, "Tool call failed");
+      const isInputError = isToolCallInputError(message);
       const status = isInputError ? 400 : 500;
+      const responseError = status >= 500 ? "Tool call failed" : message;
 
       if (status >= 500) {
         logger.error('[MCP Gmail] Tool call error', {
           userId: sanitizeText(String(userId)),
-          error: sanitizeText(message),
+          error: message,
         });
       } else {
         logger.warn('[MCP Gmail] Tool call validation error', {
           userId: sanitizeText(String(userId)),
-          error: sanitizeText(message),
+          error: message,
         });
       }
 
-      res.status(status).json({ error: message });
+      res.status(status).json({ error: responseError });
     }
   });
 
@@ -407,12 +418,23 @@ export function createGmailMcpRouter(): Router {
           throw new Error(`Unknown method: ${request.method}`);
       }
     } catch (error: any) {
-      const message = typeof error?.message === "string" ? error.message : "Internal error";
-      if (message === "Invalid params" || message.includes("tool")) {
+      const rawMessage = extractToolErrorMessage(error, "Internal error");
+      const isToolInputError =
+        isToolCallInputError(rawMessage) ||
+        rawMessage === "Invalid params" ||
+        rawMessage.includes("Invalid input") ||
+        rawMessage.includes("tool");
+      const isUnknownMethod = rawMessage.startsWith("Unknown method:");
+      const isAuthError = rawMessage === "Unauthorized" || rawMessage === "Gmail not connected";
+      const isInternalError = !isToolInputError && !isUnknownMethod && !isAuthError;
+
+      const message = isInternalError ? "Internal error" : rawMessage;
+
+      if (isToolInputError) {
         response.error = { code: -32602, message };
-      } else if (message === "Unknown method: tools/call" || message === "Unknown method: tools/list" || message.startsWith("Unknown method")) {
+      } else if (isUnknownMethod) {
         response.error = { code: -32601, message };
-      } else if (message === "Unauthorized" || message === "Gmail not connected") {
+      } else if (isAuthError) {
         response.error = { code: -32000, message };
       } else {
         response.error = { code: -32603, message };
@@ -421,7 +443,7 @@ export function createGmailMcpRouter(): Router {
       logger.error('[MCP Gmail] JSON-RPC error', {
         userId: sanitizeText(String(userId ?? "")),
         method: request.method,
-        error: sanitizeText(message),
+        error: rawMessage,
       });
     }
 
