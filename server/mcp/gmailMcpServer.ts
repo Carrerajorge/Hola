@@ -981,7 +981,7 @@ export function createGmailMcpRouter(): Router {
     }
 
     if (isToolCallPayloadTooLarge(req)) {
-      res.setHeader("Retry-After", String(Math.ceil((GMAIL_TOOL_MAX_PAYLOAD_BYTES / 1024)));
+      res.setHeader("Retry-After", String(Math.ceil(GMAIL_TOOL_MAX_PAYLOAD_BYTES / 1024));
       res.status(413).json({ error: 'Request payload too large' });
       return;
     }
