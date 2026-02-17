@@ -626,24 +626,76 @@ function sanitizeRequestBodyPayload(input: unknown): unknown {
 
 function parseActionTemplateJson(raw: string): unknown {
   const marker = "__iliagpt_forbidden_template_key__";
-  if (/"(?:__proto__|constructor|prototype)"\s*:/.test(raw)) {
+  if (hasForbiddenTemplateObjectKeyLiteral(raw)) {
     throw toFetchError("Forbidden object key in body template", "validation_error", false);
   }
 
   try {
-    return JSON.parse(raw, (key, value) => {
+    const parsed = JSON.parse(raw, (key, value) => {
       if (key && FORBIDDEN_STRUCTURE_KEYS.has(key.toLowerCase())) {
         throw new Error(marker);
       }
       return value;
     });
+
+    if (containsForbiddenTemplateObjectKey(parsed)) {
+      throw toFetchError("Forbidden object key in body template", "validation_error", false);
+    }
+
+    return parsed;
   } catch (error) {
     if (error instanceof Error && error.message === marker) {
       throw toFetchError("Forbidden object key in body template", "validation_error", false);
     }
 
+    if (error instanceof Error && (error as { code?: string }).code === "validation_error") {
+      throw error;
+    }
+
     return raw;
   }
+}
+
+function hasForbiddenTemplateObjectKeyLiteral(raw: string): boolean {
+  if (!raw.includes("__proto__") && !raw.includes("prototype") && !raw.includes("constructor")) {
+    return false;
+  }
+
+  const keyPattern = /(^|[,{]\s*)\"((?:\\.|[^"\\])+)\"\s*:/g;
+  let match: RegExpExecArray | null;
+  while ((match = keyPattern.exec(raw)) !== null) {
+    const quotedKey = match[1];
+    let decodedKey: string;
+    try {
+      decodedKey = JSON.parse(`"${quotedKey}"`);
+    } catch {
+      continue;
+    }
+    if (FORBIDDEN_STRUCTURE_KEYS.has(decodedKey.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsForbiddenTemplateObjectKey(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsForbiddenTemplateObjectKey(entry));
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [key, nested] of entries) {
+    if (FORBIDDEN_STRUCTURE_KEYS.has(key.toLowerCase())) {
+      return true;
+    }
+    if (containsForbiddenTemplateObjectKey(nested)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isAllowedResponseMimeType(value: string | null | undefined): boolean {

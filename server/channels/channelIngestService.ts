@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
@@ -75,6 +75,9 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_ID_LENGTH = 256;
 const MAX_REQUEST_ID_LENGTH = 120;
 const MAX_WORKSPACE_ID_LENGTH = 200;
+const MAX_ENVELOPES_PER_JOB = 12;
+const MAX_RATE_BUCKET_ENTRIES = 8_000;
+const MAX_MESSAGE_ID_ENTRIES = 120_000;
 const DEFAULT_MEDIA_LABEL = {
   image: "[Imagen recibida]",
   audio: "[Audio recibido]",
@@ -109,6 +112,16 @@ function pruneRateBuckets(ttlMs = RATE_LIMIT_WINDOW_MS): void {
   for (const [key, value] of conversationRateBuckets.entries()) {
     if (now - value.startedAt > ttlMs) conversationRateBuckets.delete(key);
   }
+
+  if (conversationRateBuckets.size > MAX_RATE_BUCKET_ENTRIES) {
+    const excess = conversationRateBuckets.size - MAX_RATE_BUCKET_ENTRIES;
+    let removed = 0;
+    for (const key of conversationRateBuckets.keys()) {
+      conversationRateBuckets.delete(key);
+      removed += 1;
+      if (removed >= excess) break;
+    }
+  }
 }
 
 function serializeConversationKey(conversationKey: ConversationKey): string {
@@ -142,9 +155,61 @@ function toCleanText(value: unknown): string {
   return value.trim();
 }
 
+function sanitizeReceivedAt(value: unknown): string {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return nowIso();
+
+  const parsed = Date.parse(candidate);
+  if (!Number.isFinite(parsed)) return nowIso();
+  return new Date(parsed).toISOString();
+}
+
 function normalizeTextPayload(value: string): string {
   const trimmed = toCleanText(value);
   return trimmed.length > 0 ? trimmed : "";
+}
+
+function sanitizeMessageType(value: MessageEnvelope["messageType"] | unknown): MessageEnvelope["messageType"] {
+  if (value === "text" || value === "image" || value === "audio" || value === "document" || value === "unsupported") {
+    return value;
+  }
+
+  return "unsupported";
+}
+
+function buildConversationScopedRequestId(conversationKey: string, providerMessageId: string): string {
+  const canonical = `${conversationKey}|${providerMessageId}`;
+  const safeCanonical = sanitizeRequestIdentifier(canonical);
+  if (safeCanonical.length <= MAX_REQUEST_ID_LENGTH) {
+    return safeCanonical;
+  }
+
+  const digest = createHash("sha256").update(canonical).digest("hex");
+  return sanitizeRequestIdentifier(`${providerMessageId.slice(0, 24)}_${digest}`).slice(0, MAX_REQUEST_ID_LENGTH);
+}
+
+function buildDeterministicFallbackProviderMessageId(seedParts: unknown[]): string {
+  const seed = seedParts
+    .map((part) => normalizeIdentifier(part, MAX_ID_LENGTH))
+    .filter(Boolean)
+    .join("|");
+
+  if (!seed) {
+    return randomUUID();
+  }
+
+  const compact = seed
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[^A-Za-z0-9._:-]+/g, "")
+    .toLowerCase()
+    .slice(0, MAX_ID_LENGTH - 3);
+
+  if (!compact) {
+    return randomUUID();
+  }
+
+  return `fb_${compact}`.slice(0, MAX_ID_LENGTH);
 }
 
 function buildConversationWorkspaceId(account: ChannelAccount): string {
@@ -189,6 +254,16 @@ function pruneMessageIdLedger(ttlMs = 5 * 60 * 1000): void {
   const now = Date.now();
   for (const [id, seenAt] of seenProviderMessageIdsByConversation.entries()) {
     if (now - seenAt > ttlMs) seenProviderMessageIdsByConversation.delete(id);
+  }
+
+  if (seenProviderMessageIdsByConversation.size > MAX_MESSAGE_ID_ENTRIES) {
+    const excess = seenProviderMessageIdsByConversation.size - MAX_MESSAGE_ID_ENTRIES;
+    let removed = 0;
+    for (const id of seenProviderMessageIdsByConversation.keys()) {
+      seenProviderMessageIdsByConversation.delete(id);
+      removed += 1;
+      if (removed >= excess) break;
+    }
   }
 }
 
@@ -575,27 +650,28 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
   const messageId = safeMessageId;
   const conversationKey = serializeConversationKey(safeEnvelope.conversationKey);
+  const scopedRequestId = buildConversationScopedRequestId(conversationKey, messageId);
 
   pruneMessageIdLedger();
   pruneRateBuckets();
 
   if (!isAllowedToQueue(conversationKey, messageId)) {
-    const existing = await storage.findMessageByRequestId(messageId);
+    const existing = await storage.findMessageByRequestId(scopedRequestId);
     if (existing) {
       Logger.info("[Channels] Duplicate inbound message ignored", {
         conversation: safeEnvelope.conversationKey,
-        messageId,
+        messageId: scopedRequestId,
         channel: jobChannel,
       });
       return;
     }
   }
 
-  const existingMessage = await storage.findMessageByRequestId(messageId);
+  const existingMessage = await storage.findMessageByRequestId(scopedRequestId);
   if (existingMessage) {
     Logger.info("[Channels] Duplicate inbound message ignored", {
       conversation: safeEnvelope.conversationKey,
-      messageId,
+      messageId: scopedRequestId,
       channel: jobChannel,
     });
     return;
@@ -624,25 +700,25 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         account,
         conversation,
         runtimeConfig,
-      }, ackText, "", sanitizeRequestIdentifier(messageId));
+      }, ackText, "", sanitizeRequestIdentifier(scopedRequestId));
       return;
     }
 
-      await runOutboundDecision({
-        ...context,
-        jobChannel,
-        envelope: safeEnvelope,
-        account,
-        conversation,
-        runtimeConfig,
-      }, "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.", "", sanitizeRequestIdentifier(messageId));
+    await runOutboundDecision({
+      ...context,
+      jobChannel,
+      envelope: safeEnvelope,
+      account,
+      conversation,
+      runtimeConfig,
+    }, "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.", "", sanitizeRequestIdentifier(scopedRequestId));
     return;
   }
 
   const policyConfig = getConversationPolicy(conversation);
   const rateControl = isAllowedByRateLimit(serializeConversationKey(safeEnvelope.conversationKey), policyConfig.rateLimitPerMinute);
 
-  const policyContext = {
+      const policyContext = {
     conversation,
     envelope: safeEnvelope,
     runtimeConfig,
@@ -659,7 +735,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     const shouldRespond = policy.shouldRespond !== false;
     Logger.warn("[Channels] inbound message blocked by policy", {
       conversation: safeEnvelope.conversationKey,
-      messageId,
+      messageId: scopedRequestId,
       policyCode: policy.code,
       channel: jobChannel,
       shouldRespond,
@@ -679,7 +755,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       },
       policy.replyText,
       "",
-      sanitizeRequestIdentifier(messageId),
+      sanitizeRequestIdentifier(scopedRequestId),
     );
     return;
   }
@@ -689,7 +765,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     role: "user",
     content: buildIncomingTextForHistory(safeEnvelope),
     status: "done",
-    requestId: messageId,
+    requestId: scopedRequestId,
     attachments: buildMessageAttachments(safeEnvelope),
     metadata: {
       runSource: "channel_ingest",
@@ -704,22 +780,22 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   } as any;
 
   const userMessage = await storage.createChatMessage(userMessagePayload);
-  const run = await createRunForMessage(conversation.chatId, messageId, userMessage.id);
+  const run = await createRunForMessage(conversation.chatId, scopedRequestId, userMessage.id);
   if (!run) {
     Logger.error("[Channels] could not create chat run", {
-      messageId,
+      messageId: scopedRequestId,
       conversation: safeEnvelope.conversationKey,
       channel: jobChannel,
     });
     return;
   }
 
-  const claimedRun = await storage.claimPendingRun(conversation.chatId, messageId);
+  const claimedRun = await storage.claimPendingRun(conversation.chatId, scopedRequestId);
   if (!claimedRun) {
-    const current = await storage.getChatRunByClientRequestId(conversation.chatId, messageId);
+    const current = await storage.getChatRunByClientRequestId(conversation.chatId, scopedRequestId);
     if (current && (current.status === "processing" || current.status === "done")) {
       Logger.info("[Channels] run already claimed or done, skipping", {
-        messageId,
+        messageId: scopedRequestId,
         runId: current?.id,
         status: current?.status,
       });
@@ -803,7 +879,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       status: "done",
       metadata: {
         runId,
-        requestId: messageId,
+        requestId: scopedRequestId,
         sourceChannel: jobChannel,
         conversationKey: safeEnvelope.conversationKey,
       },
@@ -818,7 +894,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       safeEnvelope,
       {
         text: output,
-        requestId: messageId,
+        requestId: scopedRequestId,
         runId,
         conversationKey: safeEnvelope.conversationKey,
         senderId: safeEnvelope.threadId,
@@ -845,7 +921,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         status: "failed",
         metadata: {
           runId,
-          requestId: messageId,
+          requestId: scopedRequestId,
           error: reason,
           sourceChannel: jobChannel,
         },
@@ -867,7 +943,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         safeEnvelope,
         {
           text: fallback,
-          requestId: messageId,
+          requestId: scopedRequestId,
           runId,
           conversationKey: safeEnvelope.conversationKey,
           senderId: safeEnvelope.threadId,
@@ -882,13 +958,13 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       });
     }
 
-      Logger.error("[Channels] failed to process inbound message", {
-        messageId,
-        runId,
-        conversation: safeEnvelope.conversationKey,
-        channel: jobChannel,
-        error: reason,
-      });
+    Logger.error("[Channels] failed to process inbound message", {
+      messageId: scopedRequestId,
+      runId,
+      conversation: safeEnvelope.conversationKey,
+      channel: jobChannel,
+      error: reason,
+    });
   } finally {
     inFlightRunsByConversation.delete(conversationKey);
     await touchChannelConversationHeartbeat(conversation.id, { lastInboundAt: safeEnvelope.receivedAt || nowIso() }).catch(() => null);
@@ -902,37 +978,68 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     return;
   }
 
-  for (const rawEnvelope of envelopes) {
+  if (envelopes.length > MAX_ENVELOPES_PER_JOB) {
+    Logger.warn("[Channels] too many inbound envelopes in one webhook payload, truncating", {
+      channel: job.channel,
+      envelopeCount: envelopes.length,
+      maxEnvelopesPerJob: MAX_ENVELOPES_PER_JOB,
+    });
+    envelopes.length = MAX_ENVELOPES_PER_JOB;
+  }
+
+  for (const [envelopeIndex, rawEnvelope] of envelopes.entries()) {
     const safeChannelKey = normalizeIdentifier(rawEnvelope.channelKey, MAX_ID_LENGTH);
     const safeThreadId = normalizeIdentifier(rawEnvelope.threadId, MAX_ID_LENGTH);
-    if (!safeChannelKey || !safeThreadId) {
+    const safeSenderId = normalizeIdentifier(rawEnvelope.senderId, MAX_ID_LENGTH);
+    const safeProviderMessageId =
+      normalizeIdentifier(rawEnvelope.providerMessageId, MAX_ID_LENGTH)
+      || buildDeterministicFallbackProviderMessageId([
+        job.channel,
+        rawEnvelope.channelKey,
+        rawEnvelope.threadId,
+        rawEnvelope.senderId,
+        rawEnvelope.receivedAt,
+        envelopeIndex,
+      ]);
+
+    if (!safeChannelKey || !safeThreadId || !safeSenderId) {
       Logger.warn("[Channels] inbound envelope has invalid identifiers", {
         channel: job.channel,
         threadId: rawEnvelope.threadId,
         channelKey: rawEnvelope.channelKey,
+        senderId: rawEnvelope.senderId,
       });
       continue;
     }
 
-    if (rawEnvelope.channelKey !== safeChannelKey) {
-      rawEnvelope.channelKey = safeChannelKey;
-    }
-    if (rawEnvelope.threadId !== safeThreadId) {
-      rawEnvelope.threadId = safeThreadId;
-    }
-    rawEnvelope.conversationKey = `${safeChannelKey}|${safeThreadId}`;
+    const normalizedEnvelope: MessageEnvelope = {
+      ...rawEnvelope,
+      providerMessageId: safeProviderMessageId,
+      channelKey: safeChannelKey,
+      threadId: safeThreadId,
+      senderId: safeSenderId,
+      receivedAt: sanitizeReceivedAt(rawEnvelope.receivedAt),
+      messageType: sanitizeMessageType(rawEnvelope.messageType),
+      conversationKey: {
+        ...rawEnvelope.conversationKey,
+        channel: rawEnvelope.channel,
+        workspaceId: normalizeIdentifier(rawEnvelope.conversationKey?.workspaceId, MAX_WORKSPACE_ID_LENGTH) || "workspace:unknown",
+        channelAccountId: safeChannelKey,
+        threadId: safeThreadId,
+      },
+    };
 
-    const account = await resolveChannelAccount(job.channel, rawEnvelope);
+    const account = await resolveChannelAccount(job.channel, normalizedEnvelope);
     if (!account) {
       Logger.warn(`[Channels] account not found`, {
         channel: job.channel,
-        threadId: rawEnvelope.threadId,
-        channelKey: rawEnvelope.channelKey,
+        threadId: normalizedEnvelope.threadId,
+        channelKey: normalizedEnvelope.channelKey,
       });
       continue;
     }
 
-    let envelope = withConversationDefaults(account, rawEnvelope);
+    let envelope = withConversationDefaults(account, normalizedEnvelope);
     const workspaceId = buildConversationWorkspaceId(account);
     envelope = withConversationKeyDefaults(envelope, workspaceId, envelope.channelKey, envelope.threadId);
 

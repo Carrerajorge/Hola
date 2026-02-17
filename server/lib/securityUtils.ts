@@ -133,11 +133,12 @@ export function isInternalIP(ip: string | undefined): boolean {
   const normalized = ip.trim().toLowerCase();
   if (!normalized) return false;
 
-  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") {
+  const candidate = normalized.replace(/^\[(.+)\]$/, "$1");
+
+  if (candidate === "localhost" || candidate === "::1" || candidate === "0:0:0:0:0:0:0:1") {
     return true;
   }
 
-  const candidate = normalized.replace(/^\[(.+)\]$/, "$1");
   const version = net.isIP(candidate);
   if (version === 4) {
     const octets = candidate.split(".").map((part) => Number.parseInt(part, 10));
@@ -154,12 +155,45 @@ export function isInternalIP(ip: string | undefined): boolean {
   }
 
   if (version === 6) {
-    if (candidate.includes("::ffff:")) {
-      const mappedCandidate = candidate.split("::ffff:").pop() || "";
-      if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(mappedCandidate)) {
-        return isInternalIP(mappedCandidate);
+    const mapped = (() => {
+      const mappedPrefixes = ["::ffff:", "0:0:0:0:0:ffff:"];
+      const hasMappedPrefix = mappedPrefixes.find((prefix) => candidate.startsWith(prefix));
+      if (!hasMappedPrefix) {
+        return null;
       }
+
+      const mappedCandidate = candidate.slice(hasMappedPrefix.length);
+      if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(mappedCandidate)) {
+        return mappedCandidate;
+      }
+
+      const mappedParts = mappedCandidate.split(":");
+      if (
+        (mappedParts.length === 1 || mappedParts.length === 2)
+        && mappedParts.every((part) => /^[0-9a-f]{1,4}$/i.test(part))
+      ) {
+        const normalizedParts = mappedParts.map((part) => part.padStart(4, "0"));
+        const hex = normalizedParts.join("");
+        if (hex.length === 8) {
+          const first = Number.parseInt(hex.slice(0, 2), 16);
+          const second = Number.parseInt(hex.slice(2, 4), 16);
+          const third = Number.parseInt(hex.slice(4, 6), 16);
+          const fourth = Number.parseInt(hex.slice(6, 8), 16);
+          if (
+            [first, second, third, fourth].every((part) => Number.isFinite(part))
+          ) {
+            return `${first}.${second}.${third}.${fourth}`;
+          }
+        }
+      }
+
+      return null;
+    })();
+
+    if (mapped) {
+      return isInternalIP(mapped);
     }
+
     if (candidate.startsWith("fc") || candidate.startsWith("fd") || candidate.startsWith("fe8") || candidate.startsWith("fe9") ||
         candidate.startsWith("fea") || candidate.startsWith("feb") || candidate.startsWith("fec") || candidate.startsWith("fed") ||
         candidate.startsWith("fee") || candidate.startsWith("fef")) {

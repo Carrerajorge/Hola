@@ -378,19 +378,28 @@ export async function executeDocxCode(code: string): Promise<Buffer> {
             },
         });
 
-        // Step 3: Wrap code in an async IIFE and execute within the VM
-        const wrappedCode = `
+        // Step 3: Execute code in the VM context.
+        // To avoid code injection via template literal interpolation (CodeQL: code-injection),
+        // we compile the user code as a separate vm.Script (no string interpolation) and
+        // then run a thin wrapper that invokes createDocument().
+        const userScript = new vm.Script(code, {
+            filename: 'user-document-code.js',
+        });
+        userScript.runInContext(context, {
+            timeout: EXECUTION_TIMEOUT_MS,
+            displayErrors: true,
+        });
+
+        const wrapperCode = `
             (async () => {
-                ${code}
                 if (typeof createDocument !== 'function') {
                     throw new Error('createDocument function is not defined');
                 }
                 return await createDocument();
             })();
         `;
-
-        const script = new vm.Script(wrappedCode, {
-            filename: 'user-document-code.js',
+        const script = new vm.Script(wrapperCode, {
+            filename: 'user-document-wrapper.js',
         });
 
         // Step 4: Execute with timeout

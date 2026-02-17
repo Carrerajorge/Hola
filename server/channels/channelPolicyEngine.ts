@@ -40,10 +40,13 @@ const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
   wechat: 24 * 60 * 60 * 1000,
   telegram: 0,
 };
+const MAX_RATE_LIMIT_PER_MINUTE = 120;
+const MAX_IDENTITY_LIST_SIZE = 64;
 
 export function parseChannelPairingCodeFromMessage(text: string): string | null {
   if (!text || typeof text !== "string") return null;
   const normalized = text.trim();
+  if (normalized.length > 256) return null;
   if (!normalized) return null;
 
   const directStart = /^\/(?:start|code)\s+([A-Z0-9]{6,})$/i.exec(normalized);
@@ -72,6 +75,14 @@ function parseDateMs(value: unknown): number {
 
 function toStringSet(values: unknown): Set<string> {
   if (!Array.isArray(values)) return new Set<string>();
+  if (values.length > MAX_IDENTITY_LIST_SIZE) {
+    return new Set(
+      values
+        .slice(0, MAX_IDENTITY_LIST_SIZE)
+        .map((value) => String(value ?? "").trim())
+        .filter((value) => value.length > 0),
+    );
+  }
   return new Set(
     values
       .map((value) => String(value ?? "").trim())
@@ -231,7 +242,9 @@ export function getConversationPolicy(conversation: ChannelConversation): {
       policy.rate_limit_per_minute ??
       policy.rate_limit,
   );
-  const rateLimitPerMinute = Number.isFinite(rate) && rate > 0 ? Math.floor(rate) : 6;
+  const rateLimitPerMinute = Number.isFinite(rate) && rate > 0
+    ? Math.min(Math.floor(rate), MAX_RATE_LIMIT_PER_MINUTE)
+    : 6;
 
   return {
     autoResponderEnabled,

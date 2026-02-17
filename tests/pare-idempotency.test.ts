@@ -63,6 +63,16 @@ describeIntegration("PARE Phase 2 Idempotency System", () => {
   });
 
   describe("checkIdempotencyKey", () => {
+    it("should reject invalid idempotency keys", async () => {
+      const payloadHash = computePayloadHash({ test: true });
+      await expect(checkIdempotencyKey("bad key", payloadHash)).rejects.toThrow("Invalid idempotency key");
+    });
+
+    it("should reject malformed payload hashes", async () => {
+      const key = generateTestKey();
+      await expect(checkIdempotencyKey(key, "not-a-hex")).rejects.toThrow("Invalid idempotency payload hash");
+    });
+
     it("should return 'new' for a fresh idempotency key", async () => {
       const key = generateTestKey();
       const payloadHash = computePayloadHash({ test: true });
@@ -157,7 +167,7 @@ describeIntegration("PARE Phase 2 Idempotency System", () => {
       
       expect(record).toBeDefined();
       expect(record?.status).toBe("failed");
-      expect((record?.responseJson as any)?.error).toBe(errorMessage);
+      expect((record?.responseJson as any)?.error).toContain(errorMessage);
     });
   });
 

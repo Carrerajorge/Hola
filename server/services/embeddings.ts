@@ -75,6 +75,10 @@ function generateFallbackEmbedding(text: string): number[] {
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
+    // Guard against type confusion via parameter tampering (CodeQL: type-confusion)
+    if (typeof text !== "string") {
+      throw new TypeError("getEmbedding: text must be a string");
+    }
     // 1. Truncate to avoid 400 Bad Request (Token limit)
     // Improvement #7: Chunking/Truncation
     const safeText = text.length > MAX_TOKEN_CHARS ? text.slice(0, MAX_TOKEN_CHARS) : text;

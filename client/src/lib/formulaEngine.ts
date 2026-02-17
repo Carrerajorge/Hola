@@ -21,6 +21,69 @@ export function isExcelError(value: string): boolean {
   return Object.values(ExcelErrors).includes(value as ExcelError);
 }
 
+/**
+ * Safe arithmetic expression evaluator — recursive descent parser.
+ * Only supports: numbers, +, -, *, /, parentheses, unary minus.
+ * Returns null if the expression is invalid.
+ * Replaces Function()/eval() to prevent code injection (CodeQL: code-injection).
+ */
+function safeEvalArithmetic(expr: string): number | null {
+  const tokens = expr.match(/(\d+\.?\d*|\.\d+|[+\-*/()])/g);
+  if (!tokens) return null;
+  let pos = 0;
+
+  function peek(): string | undefined { return tokens![pos]; }
+  function consume(): string { return tokens![pos++]; }
+
+  function parseExpr(): number {
+    let left = parseTerm();
+    while (peek() === "+" || peek() === "-") {
+      const op = consume();
+      const right = parseTerm();
+      left = op === "+" ? left + right : left - right;
+    }
+    return left;
+  }
+
+  function parseTerm(): number {
+    let left = parseFactor();
+    while (peek() === "*" || peek() === "/") {
+      const op = consume();
+      const right = parseFactor();
+      left = op === "*" ? left * right : left / right;
+    }
+    return left;
+  }
+
+  function parseFactor(): number {
+    if (peek() === "-") {
+      consume();
+      return -parseFactor();
+    }
+    if (peek() === "+") {
+      consume();
+      return parseFactor();
+    }
+    if (peek() === "(") {
+      consume();
+      const val = parseExpr();
+      if (peek() === ")") consume();
+      return val;
+    }
+    const token = consume();
+    if (token === undefined) return NaN;
+    return parseFloat(token);
+  }
+
+  try {
+    const result = parseExpr();
+    if (pos < tokens.length) return null; // leftover tokens = invalid
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 export class FormulaEngine {
   private grid: SparseGrid;
   private sheetResolver: SheetResolver | null = null;
@@ -961,9 +1024,10 @@ export class FormulaEngine {
             }
           }
         }
-        // Use Function() with strict mode - expression is already sanitized to only numbers and math operators
-        const result = Function(`"use strict"; return (${safeExpr})`)();
-        if (!isFinite(result)) return ExcelErrors.DIV_ZERO;
+        // Evaluate arithmetic expression safely without Function()/eval() (CodeQL: code-injection).
+        // The expression is already sanitized to [0-9+\-*/.() ] — parse it directly.
+        const result = safeEvalArithmetic(safeExpr);
+        if (result === null || !isFinite(result)) return ExcelErrors.DIV_ZERO;
         return result;
       }
     } catch (e) {

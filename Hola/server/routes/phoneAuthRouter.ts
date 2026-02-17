@@ -98,7 +98,9 @@ phoneAuthRouter.post("/send-code", async (req, res) => {
     // Integrate with SMS provider (Twilio)
     if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
       try {
-        const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const twilioModule = await import('twilio');
+        const twilioClient = (twilioModule.default || twilioModule) as any;
+        const twilio = twilioClient(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await twilio.messages.create({
           body: `Tu código de verificación de ILIAGPT es: ${otp}`,
           from: process.env.TWILIO_PHONE_NUMBER,

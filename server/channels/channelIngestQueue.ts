@@ -7,8 +7,21 @@ import type { ChannelIngestJob } from "./types";
 import { validateChannelIngestJob } from "./types";
 
 const DEFAULT_MAX_INGEST_JOB_BYTES = 32 * 1024;
-const MAX_INGEST_JOB_BYTES = Number(process.env.MAX_CHANNEL_INGEST_JOB_BYTES || DEFAULT_MAX_INGEST_JOB_BYTES);
+const MAX_JOB_BYTES_FLOOR = 4 * 1024;
+const MAX_JOB_BYTES_CEILING = 256 * 1024;
 const HASH_PAYLOAD_MAX_BYTES = 64 * 1024;
+
+function parseIngestMaxBytes(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw || "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  if (parsed < MAX_JOB_BYTES_FLOOR) return MAX_JOB_BYTES_FLOOR;
+  if (parsed > MAX_JOB_BYTES_CEILING) return MAX_JOB_BYTES_CEILING;
+  return parsed;
+}
+
+const MAX_INGEST_JOB_BYTES = parseIngestMaxBytes(process.env.MAX_CHANNEL_INGEST_JOB_BYTES, DEFAULT_MAX_INGEST_JOB_BYTES);
 
 export const channelIngestQueue = createQueue<ChannelIngestJob>(QUEUE_NAMES.CHANNEL_INGEST);
 
@@ -102,6 +115,22 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
 
   if (useQueue && channelIngestQueue) {
     const jobId = hashJobForIdempotency(sanitizedJob);
+    const fallbackToInprocess = async (cause: string): Promise<void> => {
+      Logger.warn("[Channels] Falling back to in-process ingest", {
+        channel: sanitizedJob.channel,
+        cause,
+        jobId,
+      });
+
+      setImmediate(() => {
+        processChannelIngestJob(sanitizedJob).catch((error) => {
+          Logger.error("[Channels] In-process ingest fallback failed", {
+            channel: sanitizedJob.channel,
+            error: String((error as Error)?.message || error),
+          });
+        });
+      });
+    };
 
     try {
       await channelIngestQueue.add(
@@ -127,8 +156,8 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
         });
         return;
       }
-      Logger.error("[Channels] Failed to enqueue channel ingest", { err: message, channel: sanitizedJob.channel });
-      throw err;
+      await fallbackToInprocess(message);
+      return;
     }
     return;
   }

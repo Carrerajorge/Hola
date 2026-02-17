@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import { randomBytes } from "crypto";
 
 /**
  * Securely retrieves the user ID from a request.
@@ -79,8 +80,9 @@ export function getOrCreateSecureUserId(req: Request): string {
     return userId;
   }
   
-  // Last resort fallback for edge cases where session isn't available
-  return `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  // Last resort fallback for edge cases where session isn't available.
+  // Use crypto.randomBytes instead of Math.random for unpredictable IDs (CodeQL: insecure-randomness).
+  return `anon_${randomBytes(16).toString("hex")}`;
 }
 
 /**

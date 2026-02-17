@@ -395,10 +395,34 @@ export class WorkflowEngine extends EventEmitter {
       }
 
       case "http": {
-        const response = await fetch(params.url, {
-          method: params.method || "GET",
+        // Validate URL to prevent SSRF (CodeQL: server-side-request-forgery)
+        const rawUrl = typeof params.url === "string" ? params.url : "";
+        const parsedUrl = new URL(rawUrl);
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+          throw new Error("Only HTTP/HTTPS URLs are allowed");
+        }
+        const blockedHosts = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"];
+        const hostname = parsedUrl.hostname.toLowerCase();
+        if (
+          blockedHosts.includes(hostname) ||
+          hostname.endsWith(".local") ||
+          hostname.endsWith(".internal") ||
+          /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname)
+        ) {
+          throw new Error("Requests to internal/private addresses are blocked");
+        }
+
+        const allowedMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+        const method = (typeof params.method === "string" ? params.method : "GET").toUpperCase();
+        if (!allowedMethods.includes(method)) {
+          throw new Error(`HTTP method not allowed: ${method}`);
+        }
+
+        const response = await fetch(parsedUrl.href, {
+          method,
           headers: params.headers || { "Content-Type": "application/json" },
           body: params.body ? JSON.stringify(params.body) : undefined,
+          redirect: "manual",
         });
         const data = await response.json().catch(() => response.text());
         return { status: response.status, data };

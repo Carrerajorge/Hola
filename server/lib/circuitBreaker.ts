@@ -601,6 +601,12 @@ export interface ServiceCallResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+  errorCode?: string;
+  statusCode?: number;
+  responseBody?: unknown;
+  responseContentType?: string | null;
+  retryAfter?: number;
+  retryable?: boolean;
   latencyMs: number;
   fromFallback?: boolean;
   circuitState: CircuitState;
@@ -801,6 +807,12 @@ export class ServiceCircuitBreaker<T = any> {
       return {
         success: false,
         error: error.message,
+        errorCode: error.code,
+        statusCode: error.statusCode,
+        responseBody: error.responseBody,
+        responseContentType: error.responseContentType,
+        retryAfter: error.retryAfter,
+        retryable: error.retryable,
         latencyMs,
         circuitState: this.breaker.getState(),
         retryCount: retryCount > 0 ? retryCount : undefined,

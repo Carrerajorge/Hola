@@ -113,7 +113,7 @@ export const channelIngestJobSchema = z.discriminatedUnion("channel", [
   whatsappIngestJobSchema,
   messengerIngestJobSchema,
   wechatIngestJobSchema,
-]).strict();
+]);
 
 export type ChannelIngestJobValidationError = {
   path: string;

@@ -326,8 +326,14 @@ function validateCommandArgs(args?: unknown): string[] {
   });
 }
 
+function shellEscapeArg(arg: string): string {
+  // Single-quote the argument, escaping any embedded single quotes
+  return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
 function buildCommandLine(command: string, args: string[]): string {
-  return args.length > 0 ? `${command} ${args.join(" ")}` : command;
+  if (args.length === 0) return command;
+  return `${command} ${args.map(shellEscapeArg).join(" ")}`;
 }
 
 function validateScriptArgs(args?: unknown): string[] {
@@ -604,6 +610,10 @@ export class TerminalController extends EventEmitter {
 
       const env = resolveCommandEnvironment(session.env, request.env);
       const cwd = request.cwd || session.cwd;
+      // Always use spawn with explicit args array and shell: false to prevent
+      // command injection (CodeQL: uncontrolled-command-line).
+      // Only fall back to shell -c when the command itself contains spaces
+      // (e.g. a path with spaces), and in that case args are shell-escaped.
       const canDirectSpawn =
         command.length > 0 &&
         !/\s/.test(command);
@@ -616,11 +626,12 @@ export class TerminalController extends EventEmitter {
             stdio: ["pipe", "pipe", "pipe"],
             shell: false,
           })
-        : spawn(shell, ["-c", fullCommand], {
+        : spawn(shell, ["-c", buildCommandLine(command, args)], {
             cwd,
             env,
             timeout,
             stdio: ["pipe", "pipe", "pipe"],
+            shell: false,
           });
 
       let stdout = "";
@@ -734,9 +745,12 @@ export class TerminalController extends EventEmitter {
             }
         });
 
-        // Send command
+        // Send command — use shell-escaped args to prevent PTY injection
+        // (CodeQL: code-injection via PTY write).
+        // Strip ANSI escape sequences from the command to prevent terminal escape injection.
         const fullCommand = buildCommandLine(command, args);
-        ptyProc.write(`${fullCommand}\r`);
+        const sanitizedCommand = fullCommand.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+        ptyProc.write(`${sanitizedCommand}\r`);
         
         // If not a long-running interactive session, we might want to exit after command
         // For now, we assume simple execution in PTY
@@ -905,6 +919,23 @@ export class TerminalController extends EventEmitter {
       return { success: false, error: "Path is outside session working directory" };
     }
 
+    // Resolve symlinks to prevent TOCTOU bypass (CodeQL: uncontrolled-data-in-path).
+    // For operations on existing paths, verify the real (symlink-resolved) path is still inside base.
+    if (op.type !== "write" && op.type !== "mkdir") {
+      try {
+        const realBase = await fs.realpath(session.cwd);
+        const realTarget = await fs.realpath(resolvedPath);
+        if (realTarget !== realBase && !realTarget.startsWith(realBase + path.sep)) {
+          return { success: false, error: "Path escapes session directory via symlink" };
+        }
+      } catch {
+        // Path doesn't exist yet — acceptable for write/mkdir but not for read/delete/etc.
+        if (op.type === "read" || op.type === "delete" || op.type === "copy" || op.type === "move" || op.type === "stat" || op.type === "chmod") {
+          return { success: false, error: "Path does not exist" };
+        }
+      }
+    }
+
     try {
       switch (op.type) {
         case "read": {
@@ -918,7 +949,12 @@ export class TerminalController extends EventEmitter {
 
         case "write": {
           const content = validateTextPayload(op.content, MAX_FILE_OPERATION_BYTES, "content");
-          await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+          const parentDir = path.dirname(resolvedPath);
+          // Verify parent directory is still inside base before creating (CodeQL: path-traversal)
+          if (!isPathInsideBase(session.cwd, parentDir)) {
+            return { success: false, error: "Parent directory is outside session working directory" };
+          }
+          await fs.mkdir(parentDir, { recursive: true });
           await fs.writeFile(resolvedPath, content);
           return { success: true };
         }
