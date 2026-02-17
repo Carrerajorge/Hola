@@ -267,5 +267,116 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("execution_error");
       expect(result.error?.message).toContain("status 400");
     });
+
+    it("retries transient 5xx response and exhausts at configured retry limit", async () => {
+      let calls = 0;
+      const runtime = new GptActionRuntime({
+        random: () => 0,
+        fetch: async () => {
+          calls += 1;
+          return new Response(
+            JSON.stringify({ message: "service unavailable" }),
+            {
+              status: 503,
+              headers: { "content-type": "application/json" },
+            }
+          );
+        },
+      });
+
+      const action = {
+        id: "action-4",
+        name: "action-test-4",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+        maxRetries: 1,
+      });
+
+      expect(calls).toBe(2);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("timeout");
+      expect(result.error?.code).toBe("execution_retryable");
+      expect(result.error?.message).toContain("status 503");
+      expect(result.error?.retryable).toBe(true);
+    });
+
+    it("uses default retry budget when maxRetries is omitted", async () => {
+      let calls = 0;
+      const runtime = new GptActionRuntime({
+        random: () => 0,
+        fetch: async () => {
+          calls += 1;
+          return new Response(JSON.stringify({ message: "temporary outage" }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+
+      const action = {
+        id: "action-5",
+        name: "action-test-5",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(calls).toBe(4);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("timeout");
+      expect(result.error?.code).toBe("execution_retryable");
+      expect(result.error?.message).toContain("status 503");
+      expect(result.error?.retryable).toBe(true);
+    });
+
+    it("treats invalid negative retry configuration as zero retries", async () => {
+      let calls = 0;
+      const runtime = new GptActionRuntime({
+        random: () => 0,
+        fetch: async () => {
+          calls += 1;
+          return new Response(JSON.stringify({ message: "service unavailable" }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+
+      const action = {
+        id: "action-6",
+        name: "action-test-6",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+        maxRetries: -1 as any,
+      });
+
+      expect(calls).toBe(1);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("execution_retryable");
+      expect(result.error?.retryable).toBe(true);
+    });
   });
 });

@@ -841,8 +841,15 @@ function applyAuthHeaders(
   return output;
 }
 
-function clampRetryLimit(actionRateLimit: unknown, maxRetries: number): number {
-  if (typeof actionRateLimit === "number" && Number.isInteger(actionRateLimit) && actionRateLimit >= 0) {
+function clampRetryLimit(actionRateLimit: unknown, maxRetries = DEFAULT_FETCH_RETRY_LIMIT): number {
+  const parsedFallback =
+    typeof maxRetries === "number" && Number.isFinite(maxRetries)
+      ? Math.floor(maxRetries)
+      : DEFAULT_FETCH_RETRY_LIMIT;
+
+  const safeFallback = Math.max(0, Math.min(parsedFallback, MAX_RETRY_ATTEMPTS));
+
+  if (typeof actionRateLimit === "number" && Number.isInteger(actionRateLimit)) {
     return Math.max(0, Math.min(actionRateLimit, MAX_RETRY_ATTEMPTS));
   }
 
@@ -853,7 +860,7 @@ function clampRetryLimit(actionRateLimit: unknown, maxRetries: number): number {
     }
   }
 
-  return maxRetries;
+  return safeFallback;
 }
 
 function buildExecutionErrorPayload(error: unknown): { code: string; message: string; retryable: boolean; retryAfter?: number } {
