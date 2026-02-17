@@ -378,5 +378,114 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("execution_retryable");
       expect(result.error?.retryable).toBe(true);
     });
+
+    it("rejects unsupported HTTP methods before execution", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const action = {
+        id: "action-7",
+        name: "action-test-7",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "TRACE",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Unsupported HTTP method");
+    });
+
+    it("rejects unsafe endpoint schemes", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-8",
+        name: "action-test-8",
+        endpoint: "ftp://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("security_blocked");
+    });
+
+    it("rejects local and loopback endpoints", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-9",
+        name: "action-test-9",
+        endpoint: "https://127.0.0.1:8443/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("security_blocked");
+    });
+
+    it("rejects invalid header configuration before outbound execution", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const action = {
+        id: "action-10",
+        name: "action-test-10",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        headers: Object.fromEntries(Array.from({ length: 60 }, (_, index) => [`x-test-${index}`, "1"])),
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Too many request headers");
+    });
   });
 });

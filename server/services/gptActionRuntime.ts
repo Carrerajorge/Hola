@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { domainToASCII } from "node:url";
 import { isInternalIP, sanitizeSensitiveData } from "../lib/securityUtils";
 import {
   checkIdempotencyKey,
@@ -30,6 +31,7 @@ const MAX_REQUEST_PAYLOAD_BYTES = 50000;
 const MAX_RESPONSE_PAYLOAD_BYTES = 50000;
 const MAX_REQUEST_BODY_BYTES = 80_000;
 const MAX_FETCH_RESPONSE_BYTES = 256_000;
+const MAX_ENDPOINT_LENGTH = 2_048;
 const DEFAULT_CONVERSATION_RATE_WINDOW_MS = 60_000;
 const DEFAULT_RATE_BUFFER = 2;
 const DEFAULT_MAX_CONCURRENCY = 4;
@@ -41,6 +43,7 @@ const MAX_SCHEMA_VALIDATION_DEPTH = 64;
 const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
 const MAX_HEADER_VALUE_BYTES = 2_048;
 const MAX_SAFE_HEADER_NAME_BYTES = 80;
+const ALLOWED_HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 const FORBIDDEN_HEADER_NAMES = new Set([
   "host",
   "connection",
@@ -298,7 +301,24 @@ function sanitizeHeaderName(name: string): string {
 
 function sanitizeHeaderValue(value: string | number | boolean): string {
   const flattened = String(value).replace(/[\r\n]+/g, " ");
-  return flattened.slice(0, MAX_HEADER_VALUE_BYTES).normalize("NFKC");
+  const normalized = flattened.normalize("NFKC").trim();
+  if (Buffer.byteLength(normalized, "utf8") <= MAX_HEADER_VALUE_BYTES) {
+    return normalized;
+  }
+  return normalized.slice(0, MAX_HEADER_VALUE_BYTES);
+}
+
+function normalizeHttpMethod(method: unknown): string {
+  if (typeof method !== "string" || !method.trim()) {
+    return "GET";
+  }
+
+  const normalized = method.trim().toUpperCase();
+  if (!ALLOWED_HTTP_METHODS.has(normalized)) {
+    throw toFetchError(`Unsupported HTTP method: ${normalized}`, "validation_error", false);
+  }
+
+  return normalized;
 }
 
 function safeStringify(value: unknown): string {
@@ -687,8 +707,11 @@ function normalizeEndpoint(endpoint: string): string {
   if (!trimmed) {
     throw toFetchError("endpoint is required", "validation_error", false);
   }
-  if (trimmed.length > 2048) {
+  if (trimmed.length > MAX_ENDPOINT_LENGTH) {
     throw toFetchError("endpoint too long", "validation_error", false);
+  }
+  if (trimmed.includes("\u0000")) {
+    throw toFetchError("Invalid endpoint characters", "validation_error", false);
   }
 
   let parsed: URL;
@@ -698,15 +721,34 @@ function normalizeEndpoint(endpoint: string): string {
     throw toFetchError("Invalid endpoint URL", "validation_error", false);
   }
 
+  if (parsed.username || parsed.password) {
+    throw toFetchError("Endpoint credentials are not allowed", "security_blocked", false);
+  }
+
   if (!/^https?:$/.test(parsed.protocol)) {
     throw toFetchError("Only http/https endpoints are allowed", "security_blocked", false);
   }
 
-  if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+  let canonicalHost: string;
+  try {
+    canonicalHost = domainToASCII(parsed.hostname);
+  } catch {
+    throw toFetchError("Invalid endpoint hostname", "validation_error", false);
+  }
+
+  if (!canonicalHost) {
+    throw toFetchError("Invalid endpoint hostname", "validation_error", false);
+  }
+
+  if (canonicalHost.length > 255) {
+    throw toFetchError("Endpoint hostname is invalid", "validation_error", false);
+  }
+
+  if (canonicalHost === "localhost" || canonicalHost === "127.0.0.1") {
     throw toFetchError("Localhost access is denied", "security_blocked", false);
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = canonicalHost.toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.startsWith("::1") || hostname.startsWith("127.")) {
     throw toFetchError("Internal host access is denied", "security_blocked", false);
   }
@@ -756,22 +798,39 @@ function normalizeEndpointHeaders(actionHeaders: unknown, requestHeaders: Record
   const output: Record<string, string> = {};
 
   const sanitized: Record<string, string> = {
-    "Content-Type": "application/json",
+    "content-type": "application/json",
   };
 
   const source = {
-    ...(typeof actionHeaders === "object" && actionHeaders !== null ? actionHeaders as Record<string, unknown> : {}),
+    ...(typeof actionHeaders === "object" && actionHeaders !== null && !Array.isArray(actionHeaders)
+      ? actionHeaders as Record<string, unknown>
+      : {}),
     ...requestHeaders,
   };
 
+  if (Object.keys(source).length > MAX_HEADERS) {
+    throw toFetchError("Too many request headers configured", "validation_error", false);
+  }
+
+  let validHeaderCount = 1;
   for (const [name, rawValue] of Object.entries(source)) {
+    if (typeof rawValue !== "string" && typeof rawValue !== "number" && typeof rawValue !== "boolean") {
+      throw toFetchError(`Unsupported header value type for ${name}`, "validation_error", false);
+    }
     if (typeof rawValue === "undefined") continue;
 
     const safeName = sanitizeHeaderName(name);
-    if (!safeName || output[safeName]) continue;
+    if (!safeName) {
+      throw toFetchError(`Unsupported header name: ${name}`, "validation_error", false);
+    }
+    if (output[safeName]) continue;
     const safeValue = sanitizeHeaderValue(rawValue);
     sanitized[safeName] = safeValue;
-    if (Object.keys(sanitized).length > MAX_HEADERS) break;
+    output[safeName] = safeValue;
+    validHeaderCount += 1;
+    if (validHeaderCount > MAX_HEADERS) {
+      throw toFetchError("Too many request headers configured", "validation_error", false);
+    }
   }
 
   return sanitized;
@@ -1056,7 +1115,7 @@ export class GptActionRuntime {
         }
       }
 
-      const method = action.httpMethod || "GET";
+      const method = normalizeHttpMethod(action.httpMethod);
       const contextForTemplate: ParsedTemplateContext = {
         input: payload.request,
         action,
@@ -1289,6 +1348,10 @@ export class GptActionRuntime {
     let response: Response;
 
     try {
+      if (!ALLOWED_HTTP_METHODS.has(method)) {
+        throw this.makeNetworkError(`Unsupported HTTP method: ${method}`, "validation_error", false);
+      }
+
       const responseInit: RequestInit = {
         method,
         headers,
