@@ -14,6 +14,8 @@ const INGEST_QUEUE_ATTEMPTS = 4;
 const INGEST_QUEUE_BACKOFF_MS = 750;
 const INGEST_QUEUE_MAX_ATTEMPTS = 8;
 const INGEST_QUEUE_MAX_BACKOFF_MS = 20_000;
+const INGEST_QUEUE_FAILURE_THRESHOLD = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_FAILURE_THRESHOLD, 4, 1, 20);
+const INGEST_QUEUE_CIRCUIT_OPEN_MS = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_CIRCUIT_OPEN_MS, 45_000, 5_000, 10 * 60_000);
 const INGEST_DEAD_LETTER_TTL_MS = 12 * 60 * 60 * 1000;
 const INGEST_DEAD_LETTER_MAX_ENTRIES = 2_000;
 const INGEST_DEAD_LETTER_SAMPLE_LENGTH = 1200;
@@ -83,6 +85,9 @@ const INGEST_STATS = {
   queueAccepted: 0,
   queueDuplicate: 0,
   queueRejected: 0,
+  queueCircuitOpen: 0,
+  queueCircuitRecovered: 0,
+  queueFailure: 0,
   queueBackpressured: 0,
   queueFallback: 0,
   inprocessQueued: 0,
@@ -98,9 +103,12 @@ const INGEST_DEAD_LETTERS: IngestDeadLetterEntry[] = [];
 const inProcessQueue: Array<InProcessTask> = [];
 const inProcessDedupWindow = new Map<string, number>();
 const inProcessTaskReservations = new Map<string, number>();
+const queueFailureRecoveryWindow = new Map<string, { attempts: number; lastAttemptAt: number }>();
 
 let inProcessRunning = 0;
 let inProcessPumpScheduled = false;
+let queueCircuitOpenUntil = 0;
+let queueFailureSequence = 0;
 
 export const channelIngestQueue = createQueue<ChannelIngestJob>(QUEUE_NAMES.CHANNEL_INGEST);
 
@@ -188,6 +196,67 @@ function pruneDeadLetters(nowMs = Date.now()): void {
   const excess = INGEST_DEAD_LETTERS.length - INGEST_DEAD_LETTER_MAX_ENTRIES;
   if (excess > 0) {
     INGEST_DEAD_LETTERS.splice(0, excess);
+  }
+}
+
+function isQueueCircuitOpen(nowMs = Date.now()): boolean {
+  if (!queueCircuitOpenUntil || nowMs >= queueCircuitOpenUntil) {
+    if (queueCircuitOpenUntil) {
+      queueFailureRecoveryWindow.clear();
+      queueCircuitOpenUntil = 0;
+      queueFailureSequence = 0;
+    }
+    return false;
+  }
+  return true;
+}
+
+function markQueueSuccess(): void {
+  if (queueFailureRecoveryWindow.size === 0 && queueCircuitOpenUntil === 0) {
+    return;
+  }
+
+  queueFailureRecoveryWindow.clear();
+  queueFailureSequence = 0;
+  if (queueCircuitOpenUntil) {
+    queueCircuitOpenUntil = 0;
+    INGEST_STATS.queueCircuitRecovered += 1;
+    Logger.info("[Channels] ingest queue circuit recovered");
+  }
+}
+
+function markQueueFailure(error: unknown): void {
+  const now = Date.now();
+  const sequenceKey = "global";
+  const state = queueFailureRecoveryWindow.get(sequenceKey) || { attempts: 0, lastAttemptAt: now };
+  const elapsedSinceLast = now - state.lastAttemptAt;
+  const decayWindowMs = INGEST_QUEUE_CIRCUIT_OPEN_MS;
+  const recovery = elapsedSinceLast > decayWindowMs ? 0 : state.attempts;
+  const nextAttempts = recovery + 1;
+
+  queueFailureRecoveryWindow.set(sequenceKey, {
+    attempts: nextAttempts,
+    lastAttemptAt: now,
+  });
+  queueFailureSequence += 1;
+  INGEST_STATS.queueFailure += 1;
+
+  if (nextAttempts >= INGEST_QUEUE_FAILURE_THRESHOLD) {
+    queueCircuitOpenUntil = now + INGEST_QUEUE_CIRCUIT_OPEN_MS;
+    INGEST_STATS.queueCircuitOpen += 1;
+    Logger.error("[Channels] ingest queue circuit opened", {
+      failures: nextAttempts,
+      sequence: queueFailureSequence,
+      threshold: INGEST_QUEUE_FAILURE_THRESHOLD,
+      reopenAt: new Date(queueCircuitOpenUntil).toISOString(),
+      error: normalizeErrorMessage(error),
+    });
+  } else {
+    Logger.warn("[Channels] ingest queue operation failed", {
+      failures: nextAttempts,
+      threshold: INGEST_QUEUE_FAILURE_THRESHOLD,
+      error: normalizeErrorMessage(error),
+    });
   }
 }
 
@@ -371,6 +440,11 @@ function markQueueBackpressure(cause: string, channel: string, runId: string): v
 }
 
 async function isQueueBackpressured(): Promise<boolean> {
+  if (isQueueCircuitOpen()) {
+    Logger.warn("[Channels] queue circuit open, forcing fallback path");
+    return true;
+  }
+
   if (!channelIngestQueue) return false;
 
   try {
@@ -620,6 +694,17 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
   const runId = resolveRunId(sanitizedJob, jobId);
   const traceKey = `${sanitizedJob.channel}:${runId}`;
   const runScopeKey = buildRunScopeKey(sanitizedJob.channel, runId, jobId);
+  if (useQueue && isQueueCircuitOpen()) {
+    submitInProcessFallback(
+      sanitizedJob,
+      runId,
+      traceKey,
+      jobId,
+      "queue_circuit_open",
+      runScopeKey,
+    );
+    return;
+  }
 
   if (useQueue && channelIngestQueue) {
     if (await isQueueBackpressured()) {
@@ -650,11 +735,13 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
         }),
       );
       INGEST_STATS.queueAccepted += 1;
+      markQueueSuccess();
       return;
     } catch (err) {
       const message = normalizeErrorMessage(err);
       INGEST_STATS.queueRejected += 1;
-        addDeadLetter("queue_add_failed", sanitizedJob, traceKey, jobId, runId, message);
+      addDeadLetter("queue_add_failed", sanitizedJob, traceKey, jobId, runId, message);
+      markQueueFailure(message);
 
       if (/already exists|duplicate/i.test(message)) {
         Logger.warn("[Channels] Duplicate ingest event ignored (queue dedupe)", {
@@ -698,7 +785,17 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
 }
 
 export function getChannelIngestQueueStats() {
-  return { ...INGEST_STATS, deadLetterSize: INGEST_DEAD_LETTERS.length, inProcessQueueDepth: inProcessQueue.length };
+  const now = Date.now();
+  const queueCircuit = {
+    open: isQueueCircuitOpen(now),
+    openUntilIso: queueCircuitOpenUntil > now ? new Date(queueCircuitOpenUntil).toISOString() : null,
+  };
+  return {
+    ...INGEST_STATS,
+    deadLetterSize: INGEST_DEAD_LETTERS.length,
+    inProcessQueueDepth: inProcessQueue.length,
+    queueCircuit,
+  };
 }
 
 export function getChannelIngestDeadLetters(): IngestDeadLetterEntry[] {
