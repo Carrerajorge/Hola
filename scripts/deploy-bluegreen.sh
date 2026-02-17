@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.3.0"
+readonly SCRIPT_VERSION="3.1.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -37,250 +37,10 @@ readonly MIGRATION_TIMEOUT=120
 readonly PULL_TIMEOUT=300
 readonly MIN_DISK_MB=2048
 readonly MIN_DISK_INODES_K=100
-readonly STATE_FILE_MAX_BYTES=65536
 
 # ── Validate inputs ────────────────────────────────────────
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required (e.g. sha-abc12345)}"
 APP_VERSION="${APP_VERSION:?APP_VERSION is required (e.g. abc12345)}"
-
-trim() {
-  local value="$1"
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  echo "${value}"
-}
-
-validate_not_weak_default() {
-  local name="$1"
-  local value="$2"
-  local lowered
-  lowered="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
-
-  case "${lowered}" in
-    *changeme*|*change_me*|*default*|*test*|*dev*|*example*|*password*|*secret*|*placeholder*|*todo*)
-      loge "Weak/default ${name} detected; update in .env.production."
-      return 1
-      ;;
-  esac
-  return 0
-}
-
-validate_secret() {
-  local name="$1"
-  local value="$2"
-  local min_len="$3"
-  local trimmed
-  trimmed="$(trim "${value}")"
-
-  if [ -z "${trimmed}" ]; then
-    loge "${name} is missing in .env.production"
-    return 1
-  fi
-  if [ "${#trimmed}" -lt "${min_len}" ]; then
-    loge "${name} is too short for production use (min: ${min_len})"
-    return 1
-  fi
-  if printf '%s' "${trimmed}" | grep -Eq '[[:space:]]'; then
-    loge "${name} must not contain whitespace."
-    return 1
-  fi
-  if ! validate_not_weak_default "${name}" "${trimmed}"; then
-    return 1
-  fi
-  echo "${trimmed}"
-}
-
-load_env_value() {
-  local key="$1"
-  local file="$2"
-  local line
-  local value=""
-
-  line="$(grep -m1 -E "^${key}=" "${file}" 2>/dev/null || true)"
-  if [ -n "${line}" ]; then
-    value="${line#*=}"
-    value="${value%$'\r'}"
-    value="${value%\"}"
-    value="${value#\"}"
-    value="${value%\'}"
-    value="${value#\'}"
-    echo "${value}"
-    return 0
-  fi
-
-  echo ""
-}
-
-validate_image_inputs() {
-  local tag="$1"
-  local version="$2"
-
-  if [[ ! "${tag}" =~ ^sha-[0-9a-f]{8}$ ]]; then
-    loge "Invalid IMAGE_TAG format: ${tag}"
-    return 1
-  fi
-  if [[ ! "${version}" =~ ^[0-9a-f]{8}$ ]]; then
-    loge "Invalid APP_VERSION format: ${version}"
-    return 1
-  fi
-  if [ "sha-${version}" != "${tag}" ]; then
-    loge "IMAGE_TAG/APP_VERSION mismatch: tag ${tag} != sha-${version}"
-    return 1
-  fi
-}
-
-validate_state_file_schema() {
-  local file="$1"
-  python3 - "$file" "${STATE_FILE_MAX_BYTES}" <<'PY'
-import json
-import os
-import re
-import sys
-import time
-
-path = sys.argv[1]
-max_bytes = int(sys.argv[2])
-
-try:
-    st = os.stat(path)
-except FileNotFoundError:
-    print(f"state file not found: {path}", file=sys.stderr)
-    sys.exit(1)
-
-if st.st_size <= 2 or st.st_size > max_bytes:
-    print(f"invalid state file size: {st.st_size}", file=sys.stderr)
-    sys.exit(1)
-
-if st.st_mtime > time.time() + 60:
-    print("state file mtime is in the future", file=sys.stderr)
-    sys.exit(1)
-
-try:
-    with open(path, "r", encoding="utf-8") as fh:
-        state = json.load(fh)
-except Exception as exc:
-    print(f"invalid state file JSON: {exc}", file=sys.stderr)
-    sys.exit(1)
-
-required = ("active_slot", "active_port", "image_tag", "app_version", "deployed_at")
-missing = [k for k in required if k not in state]
-if missing:
-    print(f"state file missing keys: {','.join(missing)}", file=sys.stderr)
-    sys.exit(1)
-
-slot = str(state.get("active_slot"))
-if slot not in ("blue", "green"):
-    print(f"invalid active_slot: {slot}", file=sys.stderr)
-    sys.exit(1)
-
-try:
-    active_port = int(state.get("active_port"))
-except Exception:
-    print("active_port is not a valid integer", file=sys.stderr)
-    sys.exit(1)
-
-expected_port = 5000 if slot == "blue" else 5001
-if active_port != expected_port:
-    print(
-        f"active_slot/active_port mismatch: slot={slot} port={active_port} expected={expected_port}",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-image_tag = str(state.get("image_tag"))
-app_version = str(state.get("app_version"))
-if re.fullmatch(r"sha-[0-9a-f]{8}", image_tag) is None:
-    print(f"invalid image_tag format: {image_tag}", file=sys.stderr)
-    sys.exit(1)
-if re.fullmatch(r"[0-9a-f]{8}", app_version) is None:
-    print(f"invalid app_version format: {app_version}", file=sys.stderr)
-    sys.exit(1)
-if image_tag != f"sha-{app_version}":
-    print(
-        f"image_tag/app_version mismatch: image_tag={image_tag} app_version={app_version}",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-previous_slot = state.get("previous_slot")
-if previous_slot is not None:
-    previous_slot = str(previous_slot)
-    if previous_slot not in ("blue", "green", "none", "unknown"):
-        print(f"invalid previous_slot: {previous_slot}", file=sys.stderr)
-        sys.exit(1)
-    if previous_slot in ("blue", "green") and previous_slot == slot:
-        print("previous_slot must differ from active_slot", file=sys.stderr)
-        sys.exit(1)
-
-previous_port = state.get("previous_port")
-if previous_port is not None:
-    try:
-        previous_port = int(previous_port)
-    except Exception:
-        print("previous_port is not a valid integer", file=sys.stderr)
-        sys.exit(1)
-    if previous_port not in (5000, 5001):
-        print(f"invalid previous_port: {previous_port}", file=sys.stderr)
-        sys.exit(1)
-    if previous_slot in ("blue", "green"):
-        expected_previous_port = 5000 if previous_slot == "blue" else 5001
-        if previous_port != expected_previous_port:
-            print(
-                "previous_slot/previous_port mismatch: "
-                f"slot={previous_slot} port={previous_port} expected={expected_previous_port}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-previous_image = state.get("previous_image")
-if previous_image not in (None, "none", "unknown"):
-    previous_image = str(previous_image)
-    if re.fullmatch(r"sha-[0-9a-f]{8}", previous_image) is None:
-        print(f"invalid previous_image format: {previous_image}", file=sys.stderr)
-        sys.exit(1)
-
-signature = state.get("state_signature")
-if signature is not None and re.fullmatch(r"[0-9a-f]{64}", str(signature)) is None:
-    print("invalid state_signature format", file=sys.stderr)
-    sys.exit(1)
-PY
-}
-
-verify_state_signature_if_present() {
-  local file="$1"
-  local hmac_key="$2"
-  python3 - "$file" "$hmac_key" <<'PY'
-import hashlib
-import hmac
-import json
-import sys
-
-path = sys.argv[1]
-hmac_key = sys.argv[2]
-
-with open(path, "r", encoding="utf-8") as fh:
-    state = json.load(fh)
-
-signature = state.get("state_signature")
-if not signature:
-    # Backward compatibility for unsigned state files.
-    sys.exit(0)
-
-if not hmac_key:
-    print(
-        "state_signature exists but DEPLOY_STATE_HMAC_KEY is missing; refusing to proceed",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-payload = {k: v for k, v in state.items() if k != "state_signature"}
-canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-expected = hmac.new(hmac_key.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
-if not hmac.compare_digest(str(signature), expected):
-    print("state_signature verification failed", file=sys.stderr)
-    sys.exit(1)
-PY
-}
 
 # ── Timing ──────────────────────────────────────────────────
 DEPLOY_START_EPOCH="$(date +%s)"
@@ -296,55 +56,6 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 logok(){ echo "[$(date '+%H:%M:%S')]   ✓ $*"; }
 logw() { echo "[$(date '+%H:%M:%S')]   ⚠ $*"; }
 loge() { echo "[$(date '+%H:%M:%S')]   ✗ $*" >&2; }
-
-validate_image_inputs "${IMAGE_TAG}" "${APP_VERSION}" || exit 1
-
-extract_manifest_digest() {
-  local image_ref="$1"
-  local digest
-
-  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); m=d.get("manifests") or []; print((m[0].get("digest") if m else (d.get("digest") or d.get("config", {} ).get("digest", "")))')"
-  if [ "${digest}" = "None" ] || [ -z "${digest}" ]; then
-    echo ""
-  else
-    echo "${digest}"
-  fi
-}
-
-validate_image_digests() {
-  local expected_app="$1"
-  local expected_sandbox="$2"
-
-  if [ -n "${expected_app}" ]; then
-    local actual_app
-    actual_app="$(extract_manifest_digest "${REGISTRY}/iliagpt-app:${IMAGE_TAG}")"
-    if [ -z "${actual_app}" ]; then
-      loge "Unable to read digest for image ${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
-      return 1
-    fi
-    if [ "${actual_app}" != "${expected_app}" ]; then
-      loge "App image digest mismatch: expected ${expected_app} got ${actual_app}"
-      return 1
-    fi
-    logok "App digest pinned: ${actual_app}"
-  fi
-
-  if [ -n "${expected_sandbox}" ]; then
-    local actual_sandbox
-    actual_sandbox="$(extract_manifest_digest "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}")"
-    if [ -z "${actual_sandbox}" ]; then
-      loge "Unable to read digest for image ${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
-      return 1
-    fi
-    if [ "${actual_sandbox}" != "${expected_sandbox}" ]; then
-      loge "Sandbox image digest mismatch: expected ${expected_sandbox} got ${actual_sandbox}"
-      return 1
-    fi
-    logok "Sandbox digest pinned: ${actual_sandbox}"
-  fi
-
-  return 0
-}
 
 # ── Deploy lock (prevent concurrent deploys) ───────────────
 acquire_lock() {
@@ -486,49 +197,26 @@ logok ".env.production present"
 echo ""
 
 # ── Load secrets for compose variable expansion ────────────
-SANDBOX_RUNNER_TOKEN="$(load_env_value "SANDBOX_RUNNER_TOKEN" ".env.production" || true)"
-if ! SANDBOX_RUNNER_TOKEN="$(validate_secret "SANDBOX_RUNNER_TOKEN" "${SANDBOX_RUNNER_TOKEN}" 48)"; then
-  exit 1
-fi
-export SANDBOX_RUNNER_TOKEN
+export SANDBOX_RUNNER_TOKEN="$(grep '^SANDBOX_RUNNER_TOKEN=' .env.production | head -n1 | cut -d= -f2- || true)"
+export REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env.production | head -n1 | cut -d= -f2- || true)"
 
-REDIS_PASSWORD="$(load_env_value "REDIS_PASSWORD" ".env.production" || true)"
-if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"; then
-  exit 1
-fi
-export REDIS_PASSWORD
-
-DEPLOY_STATE_HMAC_KEY="$(load_env_value "DEPLOY_STATE_HMAC_KEY" ".env.production" || true)"
-if [ -n "${DEPLOY_STATE_HMAC_KEY}" ]; then
-  if ! DEPLOY_STATE_HMAC_KEY="$(validate_secret "DEPLOY_STATE_HMAC_KEY" "${DEPLOY_STATE_HMAC_KEY}" 32)"; then
-    exit 1
-  fi
-  export DEPLOY_STATE_HMAC_KEY
-  logok "DEPLOY_STATE_HMAC_KEY loaded (state signature enabled)"
-else
-  logw "DEPLOY_STATE_HMAC_KEY missing; state signature disabled (compatibility mode)"
-fi
-
-if [ "${IMAGE_TAG}" != "${BUILD_IMAGE_TAG:-${IMAGE_TAG}}" ]; then
-  logw "Deploy tag does not match provided build artifact tag (${BUILD_IMAGE_TAG:-unknown}); skipping digest pinning."
-else
-  if ! validate_image_digests "${EXPECTED_APP_DIGEST:-}" "${EXPECTED_SANDBOX_DIGEST:-}"; then
-    exit 1
+if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
+  log "SANDBOX_RUNNER_TOKEN missing; generating..."
+  export SANDBOX_RUNNER_TOKEN="$(openssl rand -hex 32)"
+  if grep -q '^SANDBOX_RUNNER_TOKEN=' .env.production; then
+    sed -i "s/^SANDBOX_RUNNER_TOKEN=.*/SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}/" .env.production
+  else
+    echo "SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}" >> .env.production
   fi
 fi
 
-logok "Secrets loaded from .env.production"
+if [ -z "${REDIS_PASSWORD:-}" ]; then
+  logw "REDIS_PASSWORD not set in .env.production — using default (unsafe for production!)"
+  export REDIS_PASSWORD="redis_secure_password_change_me"
+fi
 
 # ── Determine active/inactive slot ─────────────────────────
 if [ -f "${STATE_FILE}" ]; then
-  if ! validate_state_file_schema "${STATE_FILE}"; then
-    loge "Deploy state schema validation failed."
-    exit 1
-  fi
-  if ! verify_state_signature_if_present "${STATE_FILE}" "${DEPLOY_STATE_HMAC_KEY:-}"; then
-    loge "Deploy state signature validation failed."
-    exit 1
-  fi
   ACTIVE_SLOT="$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['active_slot'])" 2>/dev/null || echo "blue")"
 else
   ACTIVE_SLOT="blue"
@@ -577,44 +265,6 @@ slot() {
     SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
     REDIS_PASSWORD="${REDIS_PASSWORD}" \
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
-}
-
-free_target_port_if_safe() {
-  local target_port="$1"
-  local occupied
-  occupied="$(docker ps --filter "publish=${target_port}" --format '{{.Names}}' || true)"
-
-  if [ -z "${occupied}" ]; then
-    return 0
-  fi
-
-  logw "Port ${target_port} already occupied by: ${occupied//$'\n'/, }"
-
-  while IFS= read -r cname; do
-    [ -z "${cname}" ] && continue
-
-    # Safe auto-cleanup for known legacy stack that collides with blue/green port.
-    if [[ "${cname}" =~ ^iliagpt-(app|worker|sandbox-runner)-1$ ]]; then
-      logw "Stopping legacy container ${cname} to free port ${target_port}..."
-      docker rm -f "${cname}" >/dev/null 2>&1 || true
-      continue
-    fi
-
-    # If target port is unexpectedly held by active-slot app, abort instead of risking downtime.
-    if [[ "${cname}" =~ ^hola-${ACTIVE_SLOT}-app$ ]]; then
-      loge "Safety abort: active slot container ${cname} is holding target port ${target_port}."
-      loge "State/port mapping is inconsistent; manual intervention required."
-      exit 1
-    fi
-  done <<< "${occupied}"
-
-  if docker ps --filter "publish=${target_port}" --format '{{.Names}}' | grep -q .; then
-    loge "Port ${target_port} is still occupied after safe cleanup."
-    docker ps --filter "publish=${target_port}" --format '  - {{.Names}} :: {{.Ports}}' || true
-    exit 1
-  fi
-
-  logok "Port ${target_port} is free for slot startup."
 }
 
 # Rebuild legacy upstream files if the installed Nginx config still references
@@ -750,9 +400,6 @@ if [ -n "${STALE_APP}" ]; then
   logw "Found stale ${NEW_SLOT} containers — removing before deploy."
   slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
 fi
-
-# Ensure target slot port is truly free (handles legacy non-slot containers).
-free_target_port_if_safe "${NEW_PORT}"
 
 # ── Step 6: Start new slot ─────────────────────────────────
 log "[6/15] Starting ${NEW_SLOT} slot on port ${NEW_PORT}..."
@@ -1028,12 +675,7 @@ PREV_IMAGE="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load
 PREV_VERSION="$([ -f "${STATE_FILE}" ] && python3 -c "import json; print(json.load(open('${STATE_FILE}')).get('app_version','unknown'))" 2>/dev/null || echo "unknown")"
 
 python3 -c "
-import datetime
-import hashlib
-import hmac
-import json
-import os
-
+import json, datetime
 state = {
     'active_slot': '${NEW_SLOT}',
     'active_port': ${NEW_PORT},
@@ -1041,28 +683,14 @@ state = {
     'app_version': '${APP_VERSION}',
     'deployed_at': datetime.datetime.utcnow().isoformat() + 'Z',
     'previous_slot': '${ACTIVE_SLOT}',
-    'previous_port': ${OLD_PORT},
     'previous_image': '${PREV_IMAGE}',
     'previous_version': '${PREV_VERSION}',
     'app_image_digest': '${APP_DIGEST}',
     'deploy_script_version': '${SCRIPT_VERSION}',
-    'deploy_duration_sec': $(( $(date +%s) - DEPLOY_START_EPOCH )),
-    'state_format_version': 2,
-    'state_signature_alg': 'hmac-sha256'
+    'deploy_duration_sec': $(( $(date +%s) - DEPLOY_START_EPOCH ))
 }
-
-state_key = os.environ.get('DEPLOY_STATE_HMAC_KEY', '')
-if state_key:
-    canonical = json.dumps(state, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    state['state_signature'] = hmac.new(
-        state_key.encode('utf-8'),
-        canonical,
-        hashlib.sha256
-    ).hexdigest()
-
 with open('${STATE_FILE}', 'w') as f:
     json.dump(state, f, indent=2)
-os.chmod('${STATE_FILE}', 0o600)
 print(json.dumps(state, indent=2))
 "
 
