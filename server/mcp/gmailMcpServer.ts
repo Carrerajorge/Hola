@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { gmail_v1 } from 'googleapis';
+import { z } from 'zod';
 import { storage } from '../storage';
 import {
   GMAIL_SCOPES,
@@ -12,6 +13,10 @@ import {
 } from '../integrations/gmailApi';
 import type { GmailOAuthToken } from '@shared/schema';
 import { getUserId } from '../types/express';
+import { aiLimiter } from '../middleware/rateLimiter';
+import { sanitizeSearchQuery, sanitizePlainText } from '../lib/textSanitizers';
+import { createLogger } from '../utils/logger';
+import { sanitizeText } from '../lib/pythonToolsClient';
 
 interface McpTool {
   name: string;
@@ -25,16 +30,110 @@ interface McpTool {
 
 interface McpRequest {
   jsonrpc: string;
-  id: string | number;
+  id?: string | number | null;
   method: string;
   params?: Record<string, unknown>;
 }
 
 interface McpResponse {
   jsonrpc: string;
-  id: string | number;
+  id: string | number | null;
   result?: unknown;
   error?: { code: number; message: string };
+}
+
+type GmailToolName = 'gmail_search' | 'gmail_fetch' | 'gmail_send' | 'gmail_mark_read' | 'gmail_labels';
+
+const logger = createLogger("gmail-mcp");
+
+const mcpRequestSchema = z.object({
+  jsonrpc: z.literal("2.0").or(z.string().transform(() => "2.0" as const)),
+  id: z.union([z.string().min(1), z.number().int(), z.null()]).optional(),
+  method: z.enum(["tools/list", "tools/call"]),
+  params: z.record(z.unknown()).optional(),
+});
+
+const toolCallSchema = z.object({
+  tool: z.string().trim().min(1).max(48).optional(),
+  name: z.string().trim().min(1).max(48).optional(),
+  arguments: z.record(z.unknown()).optional().default({}),
+}).strict()
+  .refine((value) => Boolean(value.tool || value.name), {
+    message: "tool or name is required",
+  })
+  .transform((value) => ({
+    tool: value.tool || value.name!,
+    arguments: value.arguments || {},
+  }));
+
+const gmailSearchSchema = z.object({
+  query: z.string().trim().min(1).max(500),
+  maxResults: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+const gmailFetchSchema = z.object({
+  threadId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+});
+
+const gmailSendSchema = z.object({
+  to: z.string().trim().min(1).max(500),
+  subject: z.string().trim().min(1).max(200),
+  body: z.string().trim().min(1).max(30_000),
+  threadId: z.string().trim().max(128).optional(),
+});
+
+const gmailMarkReadSchema = z.object({
+  messageId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+});
+
+const gmailLabelsSchema = z.object({}).strict();
+
+const gmailToolSchemas: Record<GmailToolName, z.ZodTypeAny> = {
+  gmail_search: gmailSearchSchema,
+  gmail_fetch: gmailFetchSchema,
+  gmail_send: gmailSendSchema,
+  gmail_mark_read: gmailMarkReadSchema,
+  gmail_labels: gmailLabelsSchema,
+};
+
+const EMAIL_SAFE_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function sanitizeMcpText(value: string, maxLen: number): string {
+  return sanitizePlainText(value, { maxLen, collapseWs: true }).slice(0, maxLen);
+}
+
+function normalizeQuery(raw: string): string {
+  return sanitizeSearchQuery(raw, 500);
+}
+
+function validateEmail(raw: string): string {
+  const sanitized = sanitizeMcpText(raw, 254);
+  if (!EMAIL_SAFE_REGEX.test(sanitized)) {
+    throw new Error(`Invalid email address`);
+  }
+  return sanitized;
+}
+
+function parseEmailList(raw: string): string[] {
+  const addresses = raw
+    .split(/[;,]/)
+    .map((value) => sanitizeMcpText(value, 254))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (addresses.length === 0) {
+    throw new Error('Recipient list is empty');
+  }
+
+  for (const address of addresses) {
+    validateEmail(address);
+  }
+
+  return addresses;
+}
+
+function validateToolArgs(toolName: GmailToolName, args: Record<string, unknown>): unknown {
+  return gmailToolSchemas[toolName].parse(args);
 }
 
 const MCP_TOOLS: McpTool[] = [
@@ -101,28 +200,42 @@ async function handleToolCall(
   args: Record<string, unknown>,
   gmail: gmail_v1.Gmail
 ): Promise<unknown> {
+  if (!Object.prototype.hasOwnProperty.call(gmailToolSchemas, toolName)) {
+    throw new Error(`Unknown tool: ${toolName}`);
+  }
+
+  const validatedTool = toolName as GmailToolName;
+  const sanitizedArgs = validateToolArgs(validatedTool, args);
+
   switch (toolName) {
     case 'gmail_search': {
-      const query = String(args.query || '');
-      const maxResults = args.maxResults ? Number(args.maxResults) : undefined;
-      return gmailSearch(gmail, { query, maxResults });
+      const { query, maxResults } = sanitizedArgs as z.infer<typeof gmailSearchSchema>;
+      const safeQuery = normalizeQuery(query);
+      return gmailSearch(gmail, { query: safeQuery, maxResults });
     }
 
     case 'gmail_fetch': {
-      const threadId = String(args.threadId);
+      const { threadId } = sanitizedArgs as z.infer<typeof gmailFetchSchema>;
       return gmailFetchThread(gmail, { threadId });
     }
 
     case 'gmail_send': {
-      const to = String(args.to);
-      const subject = String(args.subject);
-      const body = String(args.body);
-      const threadId = args.threadId ? String(args.threadId) : undefined;
-      return gmailSend(gmail, { to, subject, body, threadId });
+      const {
+        to,
+        subject,
+        body,
+        threadId,
+      } = sanitizedArgs as z.infer<typeof gmailSendSchema>;
+
+      const safeThreadId = threadId && sanitizeMcpText(threadId, 128);
+      const recipients = parseEmailList(to).join(", ");
+      const safeSubject = sanitizeMcpText(subject, 200);
+      const safeBody = sanitizeMcpText(body, 30_000);
+      return gmailSend(gmail, { to: recipients, subject: safeSubject, body: safeBody, threadId: safeThreadId });
     }
 
     case 'gmail_mark_read': {
-      const messageId = String(args.messageId);
+      const { messageId } = sanitizedArgs as z.infer<typeof gmailMarkReadSchema>;
       return gmailMarkRead(gmail, { messageId });
     }
 
@@ -167,6 +280,11 @@ export function createGmailMcpRouter(): Router {
       return;
     }
 
+    logger.info('MCP Gmail SSE session started', {
+      userId: sanitizeText(String(userId)),
+      correlationId: sanitizeText((req.headers['x-request-id'] as string) || (req.headers['x-correlation-id'] as string) || ''),
+    });
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -189,9 +307,9 @@ export function createGmailMcpRouter(): Router {
     });
   });
 
-  router.post('/tools/call', async (req: Request, res: Response) => {
+  router.post('/tools/call', aiLimiter, async (req: Request, res: Response) => {
     const userId = resolveAuthenticatedUserId(req);
-    
+
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
@@ -204,18 +322,37 @@ export function createGmailMcpRouter(): Router {
     }
 
     try {
+      const parsedBody = toolCallSchema.parse(req.body);
       const gmail = await getGmailClient(token);
-      const { tool, arguments: args } = req.body;
-      
-      const result = await handleToolCall(tool, args || {}, gmail);
+      const result = await handleToolCall(parsedBody.tool, parsedBody.arguments || {}, gmail);
+
+      logger.info('MCP Gmail tool call', {
+        userId: sanitizeText(String(userId)),
+        tool: parsedBody.tool,
+      });
       res.json({ success: true, result });
     } catch (error: any) {
-      console.error('[MCP Gmail] Tool call error:', error);
-      res.status(500).json({ error: error.message });
+      const message = typeof error?.message === "string" ? error.message : "Tool call failed";
+      const isInputError = message.includes("Unknown tool") || message.includes("Unknown tool:");
+      const status = isInputError ? 400 : 500;
+
+      if (status >= 500) {
+        logger.error('[MCP Gmail] Tool call error', {
+          userId: sanitizeText(String(userId)),
+          error: sanitizeText(message),
+        });
+      } else {
+        logger.warn('[MCP Gmail] Tool call validation error', {
+          userId: sanitizeText(String(userId)),
+          error: sanitizeText(message),
+        });
+      }
+
+      res.status(status).json({ error: message });
     }
   });
 
-  router.get('/tools', (req: Request, res: Response) => {
+  router.get('/tools', aiLimiter, (req: Request, res: Response) => {
     const userId = resolveAuthenticatedUserId(req);
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -224,23 +361,34 @@ export function createGmailMcpRouter(): Router {
     res.json({ tools: MCP_TOOLS });
   });
 
-  router.post('/jsonrpc', async (req: Request, res: Response) => {
+  router.post('/jsonrpc', aiLimiter, async (req: Request, res: Response) => {
     const userId = resolveAuthenticatedUserId(req);
-    const request = req.body as McpRequest;
+    const parsed = mcpRequestSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32600, message: "Invalid JSON-RPC request" },
+      });
+      return;
+    }
+
+    const request = parsed.data as McpRequest;
     
     const response: McpResponse = {
       jsonrpc: '2.0',
-      id: request.id
+      id: request.id ?? null,
     };
 
     try {
       if (!userId) {
-        throw new Error('Unauthorized');
+        throw new Error("Unauthorized");
       }
 
       const token = await storage.getGmailOAuthToken(userId);
       if (!token) {
-        throw new Error('Gmail not connected');
+        throw new Error("Gmail not connected");
       }
 
       switch (request.method) {
@@ -249,9 +397,9 @@ export function createGmailMcpRouter(): Router {
           break;
 
         case 'tools/call': {
+          const params = toolCallSchema.parse(request.params || {});
           const gmail = await getGmailClient(token);
-          const { name, arguments: args } = request.params as { name: string; arguments: Record<string, unknown> };
-          response.result = await handleToolCall(name, args || {}, gmail);
+          response.result = await handleToolCall(params.tool, params.arguments || {}, gmail);
           break;
         }
 
@@ -259,7 +407,22 @@ export function createGmailMcpRouter(): Router {
           throw new Error(`Unknown method: ${request.method}`);
       }
     } catch (error: any) {
-      response.error = { code: -32000, message: error.message };
+      const message = typeof error?.message === "string" ? error.message : "Internal error";
+      if (message === "Invalid params" || message.includes("tool")) {
+        response.error = { code: -32602, message };
+      } else if (message === "Unknown method: tools/call" || message === "Unknown method: tools/list" || message.startsWith("Unknown method")) {
+        response.error = { code: -32601, message };
+      } else if (message === "Unauthorized" || message === "Gmail not connected") {
+        response.error = { code: -32000, message };
+      } else {
+        response.error = { code: -32603, message };
+      }
+
+      logger.error('[MCP Gmail] JSON-RPC error', {
+        userId: sanitizeText(String(userId ?? "")),
+        method: request.method,
+        error: sanitizeText(message),
+      });
     }
 
     res.json(response);

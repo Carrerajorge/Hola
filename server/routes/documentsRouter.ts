@@ -1,5 +1,6 @@
 import { Response, Router } from "express";
 import fs from "node:fs/promises";
+import { z } from "zod";
 import {
   generateWordDocument,
   generateExcelDocument,
@@ -30,16 +31,12 @@ import { aiLimiter } from "../middleware/rateLimiter";
 import {
   sanitizeFilename,
   safeContentDisposition,
-  validatePrompt,
   validateBufferSize,
   validatePptSlides,
-  validatePdfBuffer,
   sharedDocumentStore,
   logDocumentEvent,
-  pdfConcurrencyLimiter,
   docConcurrencyLimiter,
   MAX_DOC_BODY_SIZE,
-  MAX_HTML_CONTENT_SIZE,
   applyDocumentSecurityHeaders,
   sanitizeErrorMessage,
 } from "../services/documentSecurity";
@@ -53,6 +50,10 @@ import {
 } from "../toolRunner/toolRegistry";
 import { TOOL_RUNNER_ERROR_CODES, buildToolRunnerErrorMessage } from "../toolRunner/errorContract";
 import { ToolAssetRef, ToolRunnerReport } from "../toolRunner/types";
+import { getCircuitBreaker } from "../utils/circuitBreaker";
+import { withRetryAndTimeout } from "../utils/retry";
+import { createLogger } from "../utils/logger";
+import { sanitizePlainText } from "../lib/textSanitizers";
 
 // Maximum request body size for document endpoints (1MB)
 const DOC_BODY_LIMIT = "1mb";
@@ -62,6 +63,112 @@ const MAX_EXECUTE_CODE_LENGTH = 50 * 1024;
 const MAX_DOC_TITLE_LENGTH = 500;
 const MAX_DOCUMENT_ID_LENGTH = 128;
 const SAFE_DOCUMENT_ID = /^[a-zA-Z0-9._-]{1,128}$/;
+const MAX_PROMPT_LENGTH = 16_000;
+const MAX_GENERATION_TIMEOUT_MS = 30_000;
+const MAX_LLM_TIMEOUT_MS = 12_000;
+const MAX_LLM_JSON_BYTES = 50_000;
+const MAX_PLAN_COMMANDS = 500;
+const MAX_TRANSLATED_CODE_BYTES = 200_000;
+
+const ALLOWED_LOCALES = new Set(["en", "es", "fr", "pt", "de"]);
+const PLAN_ALLOWED_COMMANDS = new Set([
+  "bold",
+  "italic",
+  "underline",
+  "strikethrough",
+  "heading1",
+  "heading2",
+  "heading3",
+  "paragraph",
+  "bulletList",
+  "orderedList",
+  "alignLeft",
+  "alignCenter",
+  "alignRight",
+  "alignJustify",
+  "insertLink",
+  "insertImage",
+  "insertTable",
+  "blockquote",
+  "codeBlock",
+  "insertHorizontalRule",
+  "setTextColor",
+  "setHighlight",
+  "insertText",
+  "replaceSelection",
+  "clearFormatting",
+]);
+const PLAN_LANG_NAMES: Record<string, string> = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  pt: "Portuguese",
+  de: "German",
+};
+const documentsLlmCircuitBreaker = getCircuitBreaker("documents.llmGateway", {
+  failureThreshold: 5,
+  resetTimeout: 30_000,
+  halfOpenMaxCalls: 2,
+});
+
+const logger = createLogger("documents-router");
+
+const GenerateDocumentRequestSchema = z.object({
+  type: z.enum(["word", "excel", "ppt"]),
+  title: z.string().trim().min(1).max(MAX_DOC_TITLE_LENGTH),
+  content: z.string().min(1).max(MAX_DOC_BODY_SIZE),
+  locale: z.string().trim().max(20).optional(),
+  designTokens: z.record(z.unknown()).optional(),
+  theme: z.record(z.unknown()).optional(),
+  assets: z.array(z.record(z.unknown())).max(32).optional(),
+  options: z.record(z.unknown()).optional(),
+}).passthrough();
+
+const PromptGenerationSchema = z.object({
+  prompt: z.string().trim().min(3).max(MAX_PROMPT_LENGTH),
+  returnMetadata: z.boolean().optional(),
+});
+
+const PlanRequestSchema = z.object({
+  prompt: z.string().trim().min(3).max(MAX_PROMPT_LENGTH),
+  selectedText: z.string().trim().max(10_000).optional(),
+  documentContent: z.string().trim().max(50_000).optional(),
+});
+
+const ExecuteCodeSchema = z.object({
+  code: z.string().min(1).max(MAX_EXECUTE_CODE_LENGTH),
+});
+
+const GrammarCheckSchema = z.object({
+  code: z.string().min(1).max(MAX_DOC_BODY_SIZE),
+});
+
+const TranslateRequestSchema = z.object({
+  code: z.string().min(1).max(MAX_DOC_BODY_SIZE),
+  targetLang: z.enum(["en", "es", "fr", "pt", "de"]).default("en"),
+});
+
+const PlanCommandSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  payload: z.record(z.unknown()).optional(),
+  description: z.string().trim().max(400).optional(),
+});
+
+const PlanResponseSchema = z.object({
+  intent: z.string().trim().max(1000),
+  commands: z.array(PlanCommandSchema).max(MAX_PLAN_COMMANDS),
+  error: z.string().trim().max(500).optional(),
+});
+
+const GrammarCheckItemSchema = z.object({
+  text: z.string().trim().max(2000),
+  suggestion: z.string().trim().max(2000),
+  type: z.string().trim().max(200).optional(),
+});
+
+const GrammarCheckResponseSchema = z.object({
+  errors: z.array(GrammarCheckItemSchema).max(200),
+});
 
 /** Whether to expose detailed error messages in API responses */
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -77,48 +184,60 @@ function safeErrorResponse(publicMessage: string, error: unknown): { error: stri
   return { error: publicMessage, details: sanitizeErrorMessage(error) };
 }
 
+function normalizeLocale(value: unknown): string {
+  if (typeof value !== "string") {
+    return "es";
+  }
+  const normalized = value.trim().toLowerCase();
+  return ALLOWED_LOCALES.has(normalized) ? normalized : "es";
+}
+
+function parseValidated<T extends z.ZodTypeAny>(
+  schema: T,
+  payload: unknown,
+  context: string
+): z.infer<T> | null {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    logger.warn("Invalid request body", {
+      context,
+      issues: parsed.error.issues.slice(0, 5).map((issue) => issue.message),
+    });
+    return null;
+  }
+  return parsed.data;
+}
+
+function parseLlmJson(raw: string): unknown {
+  const sanitized = raw.replace(/```json\n?/g, "").replace(/\n?```/g, "").trim();
+  if (sanitized.length > MAX_LLM_JSON_BYTES) {
+    throw new Error("LLM response exceeds safe size");
+  }
+  return JSON.parse(sanitized);
+}
+
+async function runLlmChat(
+  messages: Parameters<typeof llmGateway.chat>[0],
+  options: Parameters<typeof llmGateway.chat>[1]
+): Promise<Awaited<ReturnType<typeof llmGateway.chat>>> {
+  return withRetryAndTimeout(
+    () =>
+      documentsLlmCircuitBreaker.execute(() => llmGateway.chat(messages, options)),
+    {
+      maxRetries: 2,
+      baseDelay: 350,
+      maxDelay: 1_500,
+    },
+    MAX_LLM_TIMEOUT_MS
+  );
+}
+
 function normalizeObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
 
   return value as Record<string, unknown>;
-}
-
-type TextFieldValidationOptions = {
-  field: string;
-  maxLength: number;
-  required?: boolean;
-  trim?: boolean;
-};
-
-function readTextField(value: unknown, options: TextFieldValidationOptions): {
-  value?: string;
-  error?: string;
-} {
-  if (value === undefined || value === null) {
-    if (options.required) {
-      return { error: `${options.field} is required` };
-    }
-    return {};
-  }
-
-  if (typeof value !== "string") {
-    return { error: `${options.field} must be a string` };
-  }
-
-  const sanitized = value.normalize("NFKC").replace(/\0/g, "");
-  const candidate = options.trim ? sanitized.trim() : sanitized;
-
-  if (options.required && candidate.length === 0) {
-    return { error: `${options.field} cannot be empty` };
-  }
-
-  if (candidate.length > options.maxLength) {
-    return { error: `${options.field} exceeds maximum length of ${options.maxLength}` };
-  }
-
-  return { value: candidate };
 }
 
 function isSafeDocumentId(value: unknown): value is string {
@@ -304,46 +423,30 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const type = typeof req.body?.type === "string" ? req.body.type.trim().toLowerCase() : "";
-      const safeTitleResult = readTextField(req.body?.title, {
-        field: "title",
-        maxLength: MAX_DOC_TITLE_LENGTH,
-        required: true,
-        trim: true,
-      });
-      const safeContentResult = readTextField(req.body?.content, {
-        field: "content",
-        maxLength: MAX_DOC_BODY_SIZE,
-        required: true,
-      });
-
-      if (!type) {
-        return res.status(400).json({ error: "type, title, and content are required" });
+      const parsedBody = parseValidated(GenerateDocumentRequestSchema, req.body, "generate");
+      if (!parsedBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate" });
       }
 
-      if (safeTitleResult.error) {
-        return res.status(400).json({ error: safeTitleResult.error });
-      }
-
-      if (safeContentResult.error) {
-        return res.status(400).json({ error: safeContentResult.error });
-      }
-
-      const safeTitle = safeTitleResult.value!;
-      const safeContent = safeContentResult.value!;
-
-      // Validate type
-      if (!["word", "excel", "ppt"].includes(type)) {
-        return res.status(400).json({ error: "Invalid document type. Use 'word', 'excel', or 'ppt'" });
-      }
-      const runnerLocale = typeof req.body?.locale === "string" && req.body.locale.length > 0 ? req.body.locale : "es";
+      const type = parsedBody.type;
+      const safeTitle = sanitizePlainText(parsedBody.title, { maxLen: MAX_DOC_TITLE_LENGTH, collapseWs: true });
+      const safeContent = sanitizePlainText(parsedBody.content, { maxLen: MAX_DOC_BODY_SIZE, collapseWs: false });
+      const runnerLocale = normalizeLocale(parsedBody.locale);
       const useToolRunner = process.env.DISABLE_TOOL_RUNNER !== "true";
-      const designTokens = normalizeObject(req.body?.designTokens);
-      const theme = normalizeTheme(req.body?.theme);
-      const assets = normalizeAssets(req.body?.assets);
-      const runnerOptions = normalizeObject(req.body?.options);
+      const designTokens = normalizeObject(parsedBody.designTokens);
+      const theme = normalizeTheme(parsedBody.theme);
+      const assets = normalizeAssets(parsedBody.assets);
+      const runnerOptions = normalizeObject(parsedBody.options);
       const runnerDocumentType = type === "word" ? "docx" : type === "excel" ? "xlsx" : "pptx";
       let toolRunnerReport: ToolRunnerReport | undefined;
+
+      if (!safeTitle.trim()) {
+        return res.status(400).json({ error: "title cannot be empty" });
+      }
+
+      if (!safeContent.trim()) {
+        return res.status(400).json({ error: "content cannot be empty" });
+      }
 
       // Acquire concurrency slot
       const acquired = await docConcurrencyLimiter.acquire();
@@ -869,12 +972,15 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const { prompt, returnMetadata } = req.body;
+      const promptBody = parseValidated(PromptGenerationSchema, req.body, "/generate/excel");
+      if (!promptBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate/excel" });
+      }
 
-      // Validate prompt
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const { prompt, returnMetadata } = promptBody;
+      const sanitizedPrompt = sanitizePlainText(prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
 
       // Acquire concurrency slot
@@ -888,12 +994,12 @@ export function createDocumentsRouter() {
         timestamp: new Date().toISOString(),
         event: "generate_start",
         docType: "excel",
-        details: { promptLength: promptCheck.sanitizedPrompt!.length },
+        details: { promptLength: sanitizedPrompt.length },
       });
 
       let result;
       try {
-        result = await generateExcelFromPrompt(promptCheck.sanitizedPrompt!);
+        result = await withRetryAndTimeout(() => generateExcelFromPrompt(sanitizedPrompt), { maxRetries: 1 }, MAX_GENERATION_TIMEOUT_MS);
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -960,12 +1066,15 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const { prompt, returnMetadata } = req.body;
+      const promptBody = parseValidated(PromptGenerationSchema, req.body, "/generate/word");
+      if (!promptBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate/word" });
+      }
 
-      // Validate prompt
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const { prompt, returnMetadata } = promptBody;
+      const sanitizedPrompt = sanitizePlainText(prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
 
       // Acquire concurrency slot
@@ -979,12 +1088,12 @@ export function createDocumentsRouter() {
         timestamp: new Date().toISOString(),
         event: "generate_start",
         docType: "word",
-        details: { promptLength: promptCheck.sanitizedPrompt!.length },
+        details: { promptLength: sanitizedPrompt.length },
       });
 
       let result;
       try {
-        result = await generateWordFromPrompt(promptCheck.sanitizedPrompt!);
+        result = await withRetryAndTimeout(() => generateWordFromPrompt(sanitizedPrompt), { maxRetries: 1 }, MAX_GENERATION_TIMEOUT_MS);
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -1051,12 +1160,14 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const { prompt } = req.body;
+      const promptBody = parseValidated(PromptGenerationSchema, req.body, "/generate/cv");
+      if (!promptBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate/cv" });
+      }
 
-      // Validate prompt
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const sanitizedPrompt = sanitizePlainText(promptBody.prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
 
       const acquired = await docConcurrencyLimiter.acquire();
@@ -1069,7 +1180,7 @@ export function createDocumentsRouter() {
 
       let result;
       try {
-        result = await generateCvFromPrompt(promptCheck.sanitizedPrompt!);
+        result = await withRetryAndTimeout(() => generateCvFromPrompt(sanitizedPrompt), { maxRetries: 1 }, MAX_GENERATION_TIMEOUT_MS);
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -1124,11 +1235,14 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const { prompt } = req.body;
+      const promptBody = parseValidated(PromptGenerationSchema, req.body, "/generate/report");
+      if (!promptBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate/report" });
+      }
 
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const sanitizedPrompt = sanitizePlainText(promptBody.prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
 
       const acquired = await docConcurrencyLimiter.acquire();
@@ -1141,7 +1255,7 @@ export function createDocumentsRouter() {
 
       let result;
       try {
-        result = await generateReportFromPrompt(promptCheck.sanitizedPrompt!);
+        result = await withRetryAndTimeout(() => generateReportFromPrompt(sanitizedPrompt), { maxRetries: 1 }, MAX_GENERATION_TIMEOUT_MS);
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -1196,11 +1310,14 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const { prompt } = req.body;
+      const promptBody = parseValidated(PromptGenerationSchema, req.body, "/generate/letter");
+      if (!promptBody) {
+        return res.status(400).json({ error: "Invalid request body for /generate/letter" });
+      }
 
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const sanitizedPrompt = sanitizePlainText(promptBody.prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
 
       const acquired = await docConcurrencyLimiter.acquire();
@@ -1213,7 +1330,7 @@ export function createDocumentsRouter() {
 
       let result;
       try {
-        result = await generateLetterFromPrompt(promptCheck.sanitizedPrompt!);
+        result = await withRetryAndTimeout(() => generateLetterFromPrompt(sanitizedPrompt), { maxRetries: 1 }, MAX_GENERATION_TIMEOUT_MS);
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -1323,17 +1440,12 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
-      const codeResult = readTextField(req.body?.code, {
-        field: "code",
-        maxLength: MAX_EXECUTE_CODE_LENGTH,
-        required: true,
-      });
-
-      if (codeResult.error) {
-        return res.status(400).json({ error: codeResult.error });
+      const executeRequest = parseValidated(ExecuteCodeSchema, req.body, "/execute-code");
+      if (!executeRequest) {
+        return res.status(400).json({ error: "Invalid request body for /execute-code" });
       }
 
-      const code = codeResult.value!;
+      const code = sanitizePlainText(executeRequest.code, { maxLen: MAX_EXECUTE_CODE_LENGTH, collapseWs: false });
 
       const acquired = await docConcurrencyLimiter.acquire();
       if (!acquired) {
@@ -1349,7 +1461,11 @@ export function createDocumentsRouter() {
 
       let buffer: Buffer;
       try {
-        buffer = await executeDocxCode(code);
+        buffer = await withRetryAndTimeout(
+          () => executeDocxCode(code),
+          { maxRetries: 1 },
+          MAX_GENERATION_TIMEOUT_MS
+        );
       } finally {
         docConcurrencyLimiter.release();
       }
@@ -1373,7 +1489,9 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (error: any) {
-      console.error("Code execution error:", error);
+      logger.error("Code execution error", {
+        error: sanitizeErrorMessage(error),
+      });
       logDocumentEvent({
         timestamp: new Date().toISOString(),
         event: "generate_failure",
@@ -1393,87 +1511,103 @@ export function createDocumentsRouter() {
   // DOCUMENT PLAN (LLM-DRIVEN)
   // ============================================
 
-  router.post("/plan", async (req, res) => {
+  router.post("/plan", aiLimiter, async (req, res) => {
+    const startTime = Date.now();
+
     try {
-      const { prompt, selectedText, documentContent } = req.body;
-
-      // Validate prompt
-      const promptCheck = validatePrompt(prompt);
-      if (!promptCheck.valid) {
-        return res.status(400).json({ error: promptCheck.error });
+      const request = parseValidated(PlanRequestSchema, req.body, "/plan");
+      if (!request) {
+        return res.status(400).json({ error: "Invalid request body for /plan" });
       }
 
-      // Validate optional fields
-      if (selectedText && (typeof selectedText !== "string" || selectedText.length > 10000)) {
-        return res.status(400).json({ error: "selectedText must be a string with max 10000 characters" });
+      const sanitizedPrompt = sanitizePlainText(request.prompt, { maxLen: MAX_PROMPT_LENGTH, collapseWs: true });
+      const sanitizedSelectedText = request.selectedText
+        ? sanitizePlainText(request.selectedText, { maxLen: 10_000, collapseWs: true })
+        : "";
+      const sanitizedDocumentContent = request.documentContent
+        ? sanitizePlainText(request.documentContent, { maxLen: 50_000, collapseWs: true })
+        : "";
+
+      if (!sanitizedPrompt.trim()) {
+        return res.status(400).json({ error: "prompt cannot be empty" });
       }
-      if (documentContent && (typeof documentContent !== "string" || documentContent.length > 50000)) {
-        return res.status(400).json({ error: "documentContent must be a string with max 50000 characters" });
-      }
 
-      const systemPrompt = `You are a document editing assistant. Given a user's instruction, generate a plan of document editing commands.
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "plan_start",
+        details: {
+          promptLength: sanitizedPrompt.length,
+          hasSelectedText: sanitizedSelectedText.length > 0,
+          hasDocumentContent: sanitizedDocumentContent.length > 0,
+        },
+      });
 
-Available commands:
-- bold: Toggle bold formatting
-- italic: Toggle italic formatting
-- underline: Toggle underline formatting
-- strikethrough: Toggle strikethrough
-- heading1, heading2, heading3: Set heading level
-- paragraph: Set as paragraph
-- bulletList: Toggle bullet list
-- orderedList: Toggle numbered list
-- alignLeft, alignCenter, alignRight, alignJustify: Text alignment
-- insertLink: Insert link (payload: {url: string})
-- insertImage: Insert image (payload: {src: string})
-- insertTable: Insert table (payload: {rows: number, cols: number})
-- blockquote: Toggle blockquote
-- codeBlock: Toggle code block
-- insertHorizontalRule: Insert horizontal line
-- setTextColor: Set text color (payload: {color: string})
-- setHighlight: Highlight text (payload: {color: string})
-- insertText: Insert text (payload: {text: string})
-- replaceSelection: Replace selected text (payload: {content: string})
-- clearFormatting: Remove all formatting
-
-Respond with a JSON object containing:
-{
-  "intent": "brief description of what user wants",
-  "commands": [
-    {"name": "commandName", "payload": {...}, "description": "what this step does"}
-  ]
-}
-
-Only respond with valid JSON, no markdown code blocks.`;
-
-      const userMessage = `User instruction: ${promptCheck.sanitizedPrompt}
-${selectedText ? `\nSelected text: "${selectedText.substring(0, 2000)}"` : ''}
-${documentContent ? `\nDocument context (first 500 chars): "${documentContent.substring(0, 500)}"` : ''}
+      const userMessage = `User instruction: ${sanitizedPrompt}
+${sanitizedSelectedText ? `\nSelected text: "${sanitizedSelectedText.substring(0, 2000)}"` : ""}
+${sanitizedDocumentContent ? `\nDocument context (first 500 chars): "${sanitizedDocumentContent.substring(0, 500)}"` : ""}
 
 Generate the command plan:`;
 
-      const result = await llmGateway.chat([
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
+      const result = await runLlmChat([
+        {
+          role: "system",
+          content:
+            "You are a document editing assistant. Given a user's instruction, generate a plan of document editing commands.\n\n" +
+            "Available commands: bold, italic, underline, strikethrough, heading1, heading2, heading3, paragraph, bulletList, orderedList, " +
+            "alignLeft, alignCenter, alignRight, alignJustify, insertLink, insertImage, insertTable, blockquote, codeBlock, insertHorizontalRule, " +
+            "setTextColor, setHighlight, insertText, replaceSelection, clearFormatting.\n\n" +
+            "Respond with strict JSON only: {\"intent\": \"...\", \"commands\": [{\"name\": \"commandName\", \"payload\": {...}, \"description\": \"...\"}]}.",
+        },
+        {
+          role: "user",
+          content: userMessage,
+        },
       ], {
         temperature: 0.3,
         maxTokens: 1024,
       });
 
-      let plan;
+      let response: z.infer<typeof PlanResponseSchema>;
       try {
-        const jsonStr = result.content.replace(/```json\n?|\n?```/g, '').trim();
-        plan = JSON.parse(jsonStr);
-      } catch {
-        plan = {
-          intent: promptCheck.sanitizedPrompt,
+        const parsedPlan = parseLlmJson(result.content);
+        const parsed = PlanResponseSchema.parse(parsedPlan);
+        const filteredCommands = parsed.commands
+          .filter((command) => PLAN_ALLOWED_COMMANDS.has(command.name))
+          .slice(0, MAX_PLAN_COMMANDS);
+
+        response = {
+          ...parsed,
+          intent: sanitizePlainText(parsed.intent, { maxLen: 1000, collapseWs: true }) || "document edit plan",
+          commands: filteredCommands,
+        };
+      } catch (error) {
+        response = {
+          intent: sanitizedPrompt.slice(0, 140),
           commands: [],
-          error: "Failed to parse AI response"
+          error: "Failed to parse AI response",
         };
       }
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "plan_success",
+        details: {
+          durationMs: Date.now() - startTime,
+          commandCount: response.commands.length,
+          parseError: Boolean(response.error),
+        },
+      });
 
-      res.json(plan);
+      res.json(response);
     } catch (error: any) {
-      console.error("Document plan error:", error);
+      logger.error("Document plan error", {
+        error: sanitizeErrorMessage(error),
+      });
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "plan_failure",
+        durationMs: Date.now() - startTime,
+        details: { error: sanitizeErrorMessage(error) },
+      });
       res.status(500).json(safeErrorResponse("Failed to generate document plan", error));
     }
   });
@@ -1510,90 +1644,153 @@ Generate the command plan:`;
   });
 
   // Grammar check using LLM
-  router.post("/grammar-check", async (req, res) => {
+  router.post("/grammar-check", aiLimiter, async (req, res) => {
+    const startTime = Date.now();
+
     try {
-      const { code } = req.body;
-
-      if (!code || typeof code !== "string") {
-        return res.status(400).json({ error: "Code is required" });
+      const request = parseValidated(GrammarCheckSchema, req.body, "/grammar-check");
+      if (!request) {
+        return res.status(400).json({ error: "Invalid request body for /grammar-check" });
       }
 
-      if (code.length > MAX_DOC_BODY_SIZE) {
-        return res.status(400).json({ error: `Code exceeds maximum size of ${MAX_DOC_BODY_SIZE / 1024}KB` });
-      }
-
+      const code = sanitizePlainText(request.code, { maxLen: MAX_DOC_BODY_SIZE, collapseWs: false });
       const textMatches = code.match(/text:\s*["'`]([^"'`]+)["'`]/g) || [];
-      const texts = textMatches.map((m: string) => m.replace(/text:\s*["'`]|["'`]$/g, ''));
+      const texts = textMatches
+        .map((m: string) => sanitizePlainText(m.replace(/text:\s*["'`]|["'`]$/g, ""), { maxLen: 2000, collapseWs: true }))
+        .filter((text): text is string => Boolean(text));
 
       if (texts.length === 0) {
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "grammar_check_success",
+          details: { durationMs: Date.now() - startTime, matches: 0 },
+        });
         return res.json({ errors: [] });
       }
 
-      const result = await llmGateway.chat([
+      const result = await runLlmChat([
         {
           role: "system",
-          content: "Eres un corrector gramatical. Analiza el texto y devuelve errores en formato JSON array. Cada error debe tener: {text, suggestion, type}. Solo responde con JSON válido."
+          content: "You are a grammar assistant. Return strict JSON only: {\"errors\": [{\"text\": \"...\", \"suggestion\": \"...\", \"type\": \"...\"}]}.",
         },
         {
           role: "user",
-          content: `Revisa estos textos y encuentra errores gramaticales u ortográficos:\n${texts.join('\n')}`
+          content: `Review these texts for grammar and spelling issues:\n${texts.join("\n")}`,
         }
       ], { temperature: 0.1, maxTokens: 500 });
 
       let errors: string[] = [];
       try {
-        const parsed = JSON.parse(result.content.replace(/```json\n?|\n?```/g, ''));
-        errors = parsed.map((e: any) => `${e.text} → ${e.suggestion}`);
+        const parsed = parseLlmJson(result.content);
+        const parsedPayload = GrammarCheckResponseSchema.safeParse(parsed);
+        const rawItems = parsedPayload.success
+          ? parsedPayload.data.errors
+          : Array.isArray(parsed)
+            ? parsed
+            : [];
+        const validItems = rawItems
+          .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+          .slice(0, 200);
+
+        errors = validItems
+          .map((entry) => {
+            const text = sanitizePlainText(entry.text, { maxLen: 1000, collapseWs: true });
+            const suggestion = sanitizePlainText(entry.suggestion, { maxLen: 1000, collapseWs: true });
+            const type = entry.type ? sanitizePlainText(entry.type, { maxLen: 120, collapseWs: true }) : undefined;
+
+            if (!text || !suggestion) {
+              return null;
+            }
+
+            return `${text} → ${suggestion}${type ? ` (${type})` : ""}`;
+          })
+          .filter((item): item is string => Boolean(item));
       } catch {
         errors = [];
       }
 
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "grammar_check_success",
+        details: {
+          durationMs: Date.now() - startTime,
+          inputLength: code.length,
+          errors: errors.length,
+        },
+      });
       res.json({ errors });
     } catch (error: any) {
+      logger.error("Grammar check failed", {
+        error: sanitizeErrorMessage(error),
+      });
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "grammar_check_failure",
+        details: { durationMs: Date.now() - startTime, error: sanitizeErrorMessage(error) },
+      });
       res.status(500).json(safeErrorResponse("Grammar check failed", error));
     }
   });
 
   // Translate document code
-  router.post("/translate", async (req, res) => {
+  router.post("/translate", aiLimiter, async (req, res) => {
+    const startTime = Date.now();
+
     try {
-      const { code, targetLang = "en" } = req.body;
-
-      if (!code || typeof code !== "string") {
-        return res.status(400).json({ error: "Code is required" });
+      const request = parseValidated(TranslateRequestSchema, req.body, "/translate");
+      if (!request) {
+        return res.status(400).json({ error: "Invalid request body for /translate" });
       }
 
-      if (code.length > MAX_DOC_BODY_SIZE) {
-        return res.status(400).json({ error: `Code exceeds maximum size of ${MAX_DOC_BODY_SIZE / 1024}KB` });
-      }
+      const code = sanitizePlainText(request.code, { maxLen: MAX_DOC_BODY_SIZE, collapseWs: false });
+      const targetLang = request.targetLang;
 
-      // Validate target language
-      const validLangs = ["en", "es", "fr", "pt", "de"];
-      if (typeof targetLang !== "string" || !validLangs.includes(targetLang)) {
-        return res.status(400).json({ error: `Invalid target language. Use one of: ${validLangs.join(", ")}` });
-      }
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "translate_start",
+        details: {
+          inputLength: code.length,
+          targetLang,
+        },
+      });
 
-      const langNames: Record<string, string> = {
-        en: "English",
-        es: "Spanish",
-        fr: "French",
-        pt: "Portuguese",
-        de: "German"
-      };
-
-      const result = await llmGateway.chat([
+      const result = await runLlmChat([
         {
           role: "system",
-          content: `You are a document translator. Translate all text content in the docx code to ${langNames[targetLang] || targetLang}. Keep the code structure identical, only translate the text strings inside TextRun, Paragraph, etc. Return only the translated code.`
+          content:
+            `You are a document translator. Translate all text content in the docx code to ${
+              PLAN_LANG_NAMES[targetLang] || targetLang
+            }. Keep the code structure identical, only translate text in code strings. Return only the translated code.`,
         },
         {
           role: "user",
-          content: code
+          content: code,
         }
       ], { temperature: 0.2, maxTokens: 4000 });
 
-      res.json({ translatedCode: result.content });
+      const translatedCode = String(result.content || "").replace(/\0/g, "");
+      if (translatedCode.length > MAX_TRANSLATED_CODE_BYTES) {
+        return res.status(413).json({ error: "Translated output exceeds size limits" });
+      }
+
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "translate_success",
+        details: {
+          durationMs: Date.now() - startTime,
+          outputLength: translatedCode.length,
+        },
+      });
+      res.json({ translatedCode });
     } catch (error: any) {
+      logger.error("Translate failed", {
+        error: sanitizeErrorMessage(error),
+      });
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "translate_failure",
+        details: { durationMs: Date.now() - startTime, error: sanitizeErrorMessage(error) },
+      });
       res.status(500).json(safeErrorResponse("Translation failed", error));
     }
   });
