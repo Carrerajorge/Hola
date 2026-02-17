@@ -205,11 +205,13 @@ export const idempotency = (req: Request, res: Response, next: NextFunction) => 
     let capturedBody: unknown;
     let capturedType: CachedResponseType = 'empty';
     let bodyCaptureEnabled = true;
+    let bodyExceededCacheLimit = false;
 
     const captureBody = (body: unknown, responseType: CachedResponseType): void => {
         if (!bodyCaptureEnabled) return;
         if (!canCacheBody(body)) {
             bodyCaptureEnabled = false;
+            bodyExceededCacheLimit = true;
             return;
         }
         capturedBody = body;
@@ -233,6 +235,11 @@ export const idempotency = (req: Request, res: Response, next: NextFunction) => 
 
     res.on('finish', () => {
         if (res.statusCode >= 500) {
+            idempotencyStore.delete(scopedKey);
+            return;
+        }
+        if (bodyExceededCacheLimit) {
+            // Avoid replaying a truncated/empty response when payload exceeded cache budget.
             idempotencyStore.delete(scopedKey);
             return;
         }
