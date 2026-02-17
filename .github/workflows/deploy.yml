@@ -19,6 +19,7 @@ permissions:
   actions: read
   contents: read
   packages: write
+  security-events: write   # Required by ci.yml (CodeQL / Trivy SARIF uploads)
 
 env:
   VPS_HOST: 69.62.98.126
