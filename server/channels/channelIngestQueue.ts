@@ -10,6 +10,8 @@ const DEFAULT_MAX_INGEST_JOB_BYTES = 32 * 1024;
 const MAX_JOB_BYTES_FLOOR = 4 * 1024;
 const MAX_JOB_BYTES_CEILING = 256 * 1024;
 const HASH_PAYLOAD_MAX_BYTES = 64 * 1024;
+const INGEST_IDEMPOTENCY_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_IDEMPOTENCY_TTL_MS, 12 * 60 * 1000, 5_000, 6 * 60 * 60_000);
+const MAX_INGEST_IDEMPOTENCY_ENTRIES = parsePositiveInt(process.env.CHANNEL_INGEST_IDEMPOTENCY_MAX_ENTRIES, 60_000, 1_000, 500_000);
 const INGEST_QUEUE_ATTEMPTS = 4;
 const INGEST_QUEUE_BACKOFF_MS = 750;
 const INGEST_QUEUE_MAX_ATTEMPTS = 8;
@@ -97,10 +99,12 @@ const INGEST_STATS = {
   inprocessTimeout: 0,
   inprocessFailed: 0,
   deadLettered: 0,
+  idempotencyDuplicate: 0,
 };
 
 const INGEST_DEAD_LETTERS: IngestDeadLetterEntry[] = [];
 const inProcessQueue: Array<InProcessTask> = [];
+const ingestIdempotencyLedger = new Map<string, number>();
 const inProcessDedupWindow = new Map<string, number>();
 const inProcessTaskReservations = new Map<string, number>();
 const queueFailureRecoveryWindow = new Map<string, { attempts: number; lastAttemptAt: number }>();
@@ -385,6 +389,39 @@ function hashJobForIdempotency(job: ChannelIngestJob): string {
 
 function resolveRunId(job: ChannelIngestJob, jobId: string): string {
   return normalizeRunId((job as { runId?: unknown }).runId) || `run_${jobId.slice(0, 52)}`;
+}
+
+function pruneIngestIdempotency(nowMs = Date.now()): void {
+  for (const [scopeKey, seenAt] of ingestIdempotencyLedger.entries()) {
+    if (nowMs - seenAt > INGEST_IDEMPOTENCY_TTL_MS) {
+      ingestIdempotencyLedger.delete(scopeKey);
+    }
+  }
+
+  if (ingestIdempotencyLedger.size <= MAX_INGEST_IDEMPOTENCY_ENTRIES) {
+    return;
+  }
+
+  const excess = ingestIdempotencyLedger.size - MAX_INGEST_IDEMPOTENCY_ENTRIES;
+  let removed = 0;
+  for (const key of ingestIdempotencyLedger.keys()) {
+    ingestIdempotencyLedger.delete(key);
+    removed += 1;
+    if (removed >= excess) break;
+  }
+}
+
+function acquireIngestIdempotency(runScopeKey: string): boolean {
+  const now = Date.now();
+  pruneIngestIdempotency(now);
+
+  const previous = ingestIdempotencyLedger.get(runScopeKey);
+  if (previous && now - previous < INGEST_IDEMPOTENCY_TTL_MS) {
+    return false;
+  }
+
+  ingestIdempotencyLedger.set(runScopeKey, now);
+  return true;
 }
 
 function pruneInProcessState(nowMs = Date.now()): void {
@@ -694,6 +731,18 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
   const runId = resolveRunId(sanitizedJob, jobId);
   const traceKey = `${sanitizedJob.channel}:${runId}`;
   const runScopeKey = buildRunScopeKey(sanitizedJob.channel, runId, jobId);
+
+  if (!acquireIngestIdempotency(runScopeKey)) {
+    INGEST_STATS.idempotencyDuplicate += 1;
+    Logger.info("[Channels] duplicate ingest submission ignored (idempotency)", {
+      channel: sanitizedJob.channel,
+      runId,
+      runScopeKey,
+      traceKey,
+    });
+    return;
+  }
+
   if (useQueue && isQueueCircuitOpen()) {
     submitInProcessFallback(
       sanitizedJob,
@@ -794,6 +843,7 @@ export function getChannelIngestQueueStats() {
     ...INGEST_STATS,
     deadLetterSize: INGEST_DEAD_LETTERS.length,
     inProcessQueueDepth: inProcessQueue.length,
+    ingestIdempotencyWindowSize: ingestIdempotencyLedger.size,
     queueCircuit,
   };
 }
