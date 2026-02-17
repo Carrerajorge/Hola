@@ -18,6 +18,7 @@ const {
   loggerInfoMock,
   loggerWarnMock,
   loggerErrorMock,
+  streamChatMock,
 } = vi.hoisted(() => ({
   createChatMessageMock: vi.fn(),
   findMessageByRequestIdMock: vi.fn(),
@@ -36,6 +37,7 @@ const {
   loggerInfoMock: vi.fn(),
   loggerWarnMock: vi.fn(),
   loggerErrorMock: vi.fn(),
+  streamChatMock: vi.fn(),
 }));
 
 vi.mock("../../storage", () => ({
@@ -94,6 +96,12 @@ vi.mock("../../lib/logger", () => ({
   },
 }));
 
+vi.mock("../../lib/llmGateway", () => ({
+  llmGateway: {
+    streamChat: streamChatMock,
+  },
+}));
+
 vi.mock("../../channels/whatsappCloud/whatsappPolicy", () => ({
   evaluateWhatsAppPolicy: vi.fn(() => ({ allowed: true, category: "general" })),
 }));
@@ -132,6 +140,9 @@ function makeWhatsAppPayload(sender = "51999999999", messageId = "wamid.1", body
 describe("channel ingest runtime controls (whatsapp cloud)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    streamChatMock.mockImplementation(async function* () {
+      yield { content: "Respuesta de prueba desde test", sequenceId: 1 };
+    });
     getAssistantByUserMessageQuery.mockResolvedValue([]);
     findMessageByRequestIdMock.mockResolvedValue(undefined);
     createChatRunMock.mockResolvedValue({ id: "run-1" });

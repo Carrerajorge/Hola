@@ -32,7 +32,11 @@ import { parseWeChatXml, wechatSendDocument, wechatSendText } from "./wechat/wec
 import { sendWhatsAppCloudDocument, sendWhatsAppCloudText } from "./whatsappCloud/whatsappCloudApi";
 import { messengerSendDocument, messengerSendText } from "./messenger/messengerApi";
 import { telegramSendDocument, telegramSendMessage } from "./telegram/telegramApi";
-import { buildResponseStyleSystemPrompt, resolveRuntimeConfig } from "./runtimeConfig";
+import {
+  buildResponseStyleSystemPrompt,
+  parseRuntimeConfig,
+  resolveRuntimeConfig,
+} from "./runtimeConfig";
 import type { MessageRecord } from "../../shared/schema/chat";
 import { Logger } from "../lib/logger";
 import { llmGateway } from "../lib/llmGateway";
@@ -270,10 +274,31 @@ function mergeRuntimeConfig(
   accountMetadata: Record<string, unknown> | null | undefined,
   conversationMetadata: Record<string, unknown> | null | undefined,
 ) {
-  return {
-    ...resolveRuntimeConfig(accountMetadata ?? null),
-    ...resolveRuntimeConfig(conversationMetadata ?? null),
-  };
+  const accountRuntime = parseRuntimeConfig((accountMetadata as Record<string, unknown> | null)?.runtime || accountMetadata || {});
+  const conversationRuntime = parseRuntimeConfig(
+    (conversationMetadata as Record<string, unknown> | null)?.runtime || conversationMetadata || {},
+  );
+
+  return resolveRuntimeConfig({
+    ...accountRuntime,
+    ...conversationRuntime,
+  });
+}
+
+function getExplicitRuntimeMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const parsed = parseRuntimeConfig((metadata as Record<string, unknown> | null)?.runtime || metadata || {});
+
+  const runtime: Record<string, unknown> = {};
+
+  if (parsed.responder_enabled !== undefined) runtime.responder_enabled = parsed.responder_enabled;
+  if (parsed.owner_only !== undefined) runtime.owner_only = parsed.owner_only;
+  if (parsed.owner_external_ids !== undefined) runtime.owner_external_ids = parsed.owner_external_ids;
+  if (parsed.response_style !== undefined) runtime.response_style = parsed.response_style;
+  if (parsed.custom_prompt !== undefined) runtime.custom_prompt = parsed.custom_prompt;
+  if (parsed.allowlist !== undefined) runtime.allowlist = parsed.allowlist;
+  if (parsed.rate_limit_per_minute !== undefined) runtime.rate_limit_per_minute = parsed.rate_limit_per_minute;
+
+  return runtime;
 }
 
 function asAttachmentFromEnvelope(envelope: MessageEnvelope): { name?: string; contentType?: string; url?: string } | null {
@@ -850,14 +875,7 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
       externalConversationId: envelope.threadId,
       title: `Canal ${envelope.channel}: ${envelope.threadId}`,
       metadata: {
-        runtime: {
-          ...(resolveRuntimeConfig(account.metadata).responder_enabled !== undefined
-            ? { responder_enabled: resolveRuntimeConfig(account.metadata).responder_enabled }
-            : {}),
-          ...(resolveRuntimeConfig(account.metadata).owner_only !== undefined
-            ? { owner_only: resolveRuntimeConfig(account.metadata).owner_only }
-            : {}),
-        },
+        runtime: getExplicitRuntimeMetadata(account.metadata),
         createdVia: "inbound",
         channelAccountId: envelope.channelKey,
       },
