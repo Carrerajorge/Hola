@@ -1,22 +1,14 @@
 import { useState, useCallback } from "react";
 import type { UppyFile } from "@uppy/core";
 import { apiFetch } from "@/lib/apiClient";
-
-interface UploadMetadata {
-  name: string;
-  size: number;
-  contentType: string;
-}
-
-interface UploadResponse {
-  uploadURL: string;
-  objectPath: string;
-  metadata: UploadMetadata;
-}
+import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import type { UploadResponse } from "@shared/uploadContracts";
 
 interface UseUploadOptions {
   onSuccess?: (response: UploadResponse) => void;
   onError?: (error: Error) => void;
+  conversationId?: string;
+  uploadIdPrefix?: string;
 }
 
 /**
@@ -31,7 +23,7 @@ interface UseUploadOptions {
  * function FileUploader() {
  *   const { uploadFile, isUploading, error } = useUpload({
  *     onSuccess: (response) => {
- *       console.log("Uploaded to:", response.objectPath);
+ *       console.log("Uploaded to:", response.storagePath);
  *     },
  *   });
  *
@@ -56,6 +48,40 @@ export function useUpload(options: UseUploadOptions = {}) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [progress, setProgress] = useState(0);
+  const uploadIdPrefix = (options.uploadIdPrefix || "upload").trim() || "upload";
+
+  const retryAsync = useCallback(
+    async <T>(operation: () => Promise<T>, maxRetries = 2, baseDelayMs = 250): Promise<T> => {
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          return await operation();
+        } catch (error: unknown) {
+          lastError = error instanceof Error ? error : new Error("Upload request failed");
+          const nonRetryable = /(invalid|unsupported|too large|missing|conflicting|csrf|forbidden|unauthorized)/i
+            .test(lastError.message);
+          if (nonRetryable) {
+            throw lastError;
+          }
+          if (attempt < maxRetries) {
+            const jitter = Math.floor(Math.random() * 120);
+            const delay = baseDelayMs * Math.pow(2, attempt) + jitter;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+        }
+      }
+      throw lastError || new Error("Upload request failed");
+    },
+    []
+  );
+
+  const buildUploadId = useCallback(
+    (fileName: string): string => {
+      const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 24) || "file";
+      return `${uploadIdPrefix}-${safeName}-${Date.now()}`;
+    },
+    [uploadIdPrefix]
+  );
 
   /**
    * Request a presigned URL from the backend.
@@ -63,15 +89,21 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const requestUploadUrl = useCallback(
     async (file: File): Promise<UploadResponse> => {
-      const response = await apiFetch("/api/uploads/request-url", {
+      const uploadId = buildUploadId(file.name);
+      await ensureCsrfToken();
+      const response = await apiFetch("/api/objects/upload", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Upload-Id": uploadId,
+          ...(options.conversationId ? { "X-Conversation-Id": options.conversationId } : {}),
         },
         body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
+          uploadId,
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });
 
@@ -82,7 +114,7 @@ export function useUpload(options: UseUploadOptions = {}) {
 
       return response.json();
     },
-    []
+    [buildUploadId, options.conversationId]
   );
 
   /**
@@ -90,17 +122,12 @@ export function useUpload(options: UseUploadOptions = {}) {
    */
   const uploadToPresignedUrl = useCallback(
     async (file: File, uploadURL: string): Promise<void> => {
-      const response = await fetch(uploadURL, {
-        method: "PUT",
-        body: file,
-        headers: {
-          "Content-Type": file.type || "application/octet-stream",
-        },
+      await uploadBlobWithProgress(uploadURL, file, (percent) => {
+        setProgress(Math.max(30, percent));
+      }, {
+        timeoutMs: 120000,
+        skipContentType: true,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to upload file to storage");
-      }
     },
     []
   );
@@ -118,13 +145,17 @@ export function useUpload(options: UseUploadOptions = {}) {
       setProgress(0);
 
       try {
+        if (!file || !file.name || file.size <= 0) {
+          throw new Error("Invalid file selected for upload");
+        }
+
         // Step 1: Request presigned URL (send metadata as JSON)
         setProgress(10);
-        const uploadResponse = await requestUploadUrl(file);
+        const uploadResponse = await retryAsync(() => requestUploadUrl(file), 2, 300);
 
         // Step 2: Upload file directly to presigned URL
         setProgress(30);
-        await uploadToPresignedUrl(file, uploadResponse.uploadURL);
+        await retryAsync(() => uploadToPresignedUrl(file, uploadResponse.uploadURL), 2, 350);
 
         setProgress(100);
         options.onSuccess?.(uploadResponse);
@@ -138,7 +169,7 @@ export function useUpload(options: UseUploadOptions = {}) {
         setIsUploading(false);
       }
     },
-    [requestUploadUrl, uploadToPresignedUrl, options]
+    [requestUploadUrl, retryAsync, uploadToPresignedUrl, options]
   );
 
   /**
@@ -163,15 +194,21 @@ export function useUpload(options: UseUploadOptions = {}) {
       headers?: Record<string, string>;
     }> => {
       // Use the actual file properties to request a per-file presigned URL
-      const response = await apiFetch("/api/uploads/request-url", {
+      const uploadId = buildUploadId(file.name);
+      await ensureCsrfToken();
+      const response = await apiFetch("/api/objects/upload", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Upload-Id": uploadId,
+          ...(options.conversationId ? { "X-Conversation-Id": options.conversationId } : {}),
         },
         body: JSON.stringify({
-          name: file.name,
-          size: file.size,
-          contentType: file.type || "application/octet-stream",
+          uploadId,
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });
 
@@ -183,10 +220,10 @@ export function useUpload(options: UseUploadOptions = {}) {
       return {
         method: "PUT",
         url: data.uploadURL,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
+        headers: {},
       };
     },
-    []
+    [buildUploadId, options.conversationId]
   );
 
   return {

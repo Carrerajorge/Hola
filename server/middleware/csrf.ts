@@ -69,7 +69,12 @@ function isCrossSiteRequest(req: Request): boolean {
   return false;
 }
 
-function issueCsrfCookie(req: Request, res: Response, isReplitDeployment: boolean, isProduction: boolean) {
+export function issueCsrfCookie(
+  req: Request,
+  res: Response,
+  isReplitDeployment: boolean,
+  isProduction: boolean
+) {
   const token = crypto.randomBytes(CSRF_TOKEN_BYTES).toString("base64url");
 
   const crossSite = isCrossSiteRequest(req);
@@ -86,6 +91,12 @@ function issueCsrfCookie(req: Request, res: Response, isReplitDeployment: boolea
 
   return token;
 }
+
+export function isCsrfToken(value: unknown): value is string {
+  return typeof value === "string" && CSRF_TOKEN_PATTERN.test(value);
+}
+
+export { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN };
 
 /**
  * Generates a CSRF token and sets it as a cookie readable by the client.

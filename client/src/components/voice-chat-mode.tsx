@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
+import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
 
 const VOICE_UPLOAD_ALLOWED_TYPES = new Set([
   "text/plain",
@@ -284,10 +285,27 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     if (!files || files.length === 0) return;
 
     setInputMode("uploading");
+    setError(null);
     const file = files[0];
     const normalizedFile = normalizeFileForUpload(file);
     const normalizedType = (normalizedFile.type || "").trim().toLowerCase();
     const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    const retryUpload = async (fn: () => Promise<void>, maxRetries = 3): Promise<void> => {
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          await fn();
+          return;
+        } catch (err: unknown) {
+          lastError = err instanceof Error ? err : new Error("Error al subir el archivo");
+          if (attempt < maxRetries) {
+            const jitter = Math.floor(Math.random() * 120);
+            await new Promise((resolve) => setTimeout(resolve, 500 * Math.pow(2, attempt) + jitter));
+          }
+        }
+      }
+      throw lastError || new Error("Error al subir el archivo");
+    };
 
     // Validate file
     const maxSize = 50 * 1024 * 1024; // 50MB
@@ -304,6 +322,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
     try {
       // Get signed upload URL from server
+      await ensureCsrfToken();
       const uploadRes = await apiFetch("/api/objects/upload", {
         method: "POST",
         headers: {
@@ -320,16 +339,15 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       const { uploadURL, storagePath } = await uploadRes.json();
 
       // Upload file directly to storage
-      const putRes = await fetch(uploadURL, {
-        method: "PUT",
-        body: normalizedFile,
-      });
-
-      if (!putRes.ok) {
-        throw new Error("Error al subir el archivo al almacenamiento");
-      }
+      await retryUpload(() =>
+        uploadBlobWithProgress(uploadURL, normalizedFile, undefined, {
+          timeoutMs: 120000,
+          skipContentType: true,
+        })
+      );
 
       // Register file in database
+      await ensureCsrfToken();
       const registerRes = await apiFetch("/api/files", {
         method: "POST",
         headers: {

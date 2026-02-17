@@ -2,6 +2,41 @@ import { Router, Request } from "express";
 import { storage } from "../storage";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
+const IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
+const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+const MAX_ERROR_MESSAGE_BYTES = 1024;
+
+function sanitizeTextForRoute(value: string, maxBytes: number): string {
+  const normalized = value.normalize("NFKC").replace(CONTROL_CHAR_RE, "").trim();
+  if (Buffer.byteLength(normalized, "utf8") <= maxBytes) {
+    return normalized;
+  }
+  return normalized.slice(0, maxBytes);
+}
+
+function normalizeIdentifier(rawId: unknown): string | null {
+  if (typeof rawId !== "string") {
+    return null;
+  }
+  const normalized = rawId.normalize("NFKC").trim().replace(CONTROL_CHAR_RE, "");
+  if (!IDENTIFIER_RE.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function sanitizeErrorForRoute(message: string | undefined): string {
+  return sanitizeTextForRoute(message || "Unexpected API error", MAX_ERROR_MESSAGE_BYTES);
+}
+
+function parseHeaderRequestId(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return first ? parseHeaderRequestId(first) : null;
+  }
+  return normalizeIdentifier(value);
+}
+
 async function canEditGpt(req: Request, gptId: string): Promise<{ allowed: boolean; gpt: any | null; error?: string }> {
   const gpt = await storage.getGpt(gptId);
   if (!gpt) {
@@ -432,10 +467,26 @@ export function createGptRouter() {
 
   router.post("/gpts/:id/actions/:actionId/use", async (req, res) => {
     try {
-      await storage.incrementGptActionUsage(req.params.actionId);
-      res.json({ success: true });
+      const normalizedGptId = normalizeIdentifier(req.params.id);
+      const normalizedActionId = normalizeIdentifier(req.params.actionId);
+      if (!normalizedGptId || !normalizedActionId) {
+        return res.status(400).json({ error: "Invalid resource identifier" });
+      }
+
+      const action = await storage.getGptActionByIdAndGpt(normalizedActionId, normalizedGptId);
+      if (!action) {
+        return res.status(404).json({ error: "Action not found" });
+      }
+
+      await storage.incrementGptActionUsage(normalizedActionId);
+
+      const requestId = parseHeaderRequestId(req.headers["x-request-id"]) || "unknown";
+      res.setHeader("X-Request-Id", requestId);
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      res.json({ success: true, gptId: normalizedGptId, actionId: normalizedActionId });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeErrorForRoute(error?.message) });
     }
   });
 

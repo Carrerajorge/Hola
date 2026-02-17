@@ -6,7 +6,7 @@ import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { AiStepsRail } from "@/components/ai-steps-rail";
 import { WorkspaceProvider, useWorkspace } from "@/contexts/workspace-context";
-import { useChats, Message } from "@/hooks/use-chats";
+import { useChats, Message, resolveRealChatId } from "@/hooks/use-chats";
 import { useChatFolders } from "@/hooks/use-chat-folders";
 import { useAuth } from "@/hooks/use-auth";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -69,8 +69,23 @@ function WorkspaceContent() {
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
 
-  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
-  const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
+  type WorkspaceAiState = "idle" | "thinking" | "responding" | "agent_working";
+  type WorkspaceAiStep = { step: string; status: "pending" | "active" | "done" };
+  type WorkspaceConversationUiState = {
+    aiState: WorkspaceAiState;
+    aiProcessSteps: WorkspaceAiStep[];
+    pendingRequestId: string | null;
+    streamBuffer: string;
+  };
+
+  const createWorkspaceConversationUiState = (): WorkspaceConversationUiState => ({
+    aiState: "idle",
+    aiProcessSteps: [],
+    pendingRequestId: null,
+    streamBuffer: "",
+  });
+
+  const [conversationUiStateMap, setConversationUiStateMap] = useState<Record<string, WorkspaceConversationUiState>>({});
   
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
@@ -78,6 +93,80 @@ function WorkspaceContent() {
   const { clearBadge } = useStreamingStore();
 
   const pendingChatIdRef = useRef<string | null>(null);
+
+  const ensureConversationUiState = useCallback((conversationId: string | null | undefined) => {
+    if (!conversationId) return;
+    setConversationUiStateMap((prev) => {
+      if (prev[conversationId]) return prev;
+      return { ...prev, [conversationId]: createWorkspaceConversationUiState() };
+    });
+  }, []);
+
+  const moveConversationUiState = useCallback((fromConversationId?: string | null, toConversationId?: string | null) => {
+    if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const sourceState = prev[fromConversationId];
+      if (!sourceState) return prev;
+      const { [fromConversationId]: _, ...rest } = prev;
+      if (rest[toConversationId]) return rest;
+      return { ...rest, [toConversationId]: sourceState };
+    });
+  }, []);
+
+  const activeConversationId = useMemo(() => {
+    if (activeChat?.id) return activeChat.id;
+    if (pendingChatIdRef.current) return pendingChatIdRef.current;
+    if (isNewChatMode && newChatStableKey) return newChatStableKey;
+    return null;
+  }, [activeChat?.id, isNewChatMode, newChatStableKey]);
+
+  useEffect(() => {
+    ensureConversationUiState(activeConversationId);
+  }, [activeConversationId, ensureConversationUiState]);
+
+  const activeConversationState = activeConversationId
+    ? conversationUiStateMap[activeConversationId]
+    : undefined;
+
+  const aiState: WorkspaceAiState = activeConversationState?.aiState || "idle";
+  const aiProcessSteps: WorkspaceAiStep[] = activeConversationState?.aiProcessSteps || [];
+
+  const setAiState = useCallback((nextState: WorkspaceAiState | ((prev: WorkspaceAiState) => WorkspaceAiState)) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      const resolvedState = typeof nextState === "function"
+        ? (nextState as (prev: WorkspaceAiState) => WorkspaceAiState)(current.aiState)
+        : nextState;
+      return {
+        ...prev,
+        [targetConversationId]: {
+          ...current,
+          aiState: resolvedState,
+          aiProcessSteps: resolvedState === "idle" ? [] : current.aiProcessSteps,
+        },
+      };
+    });
+  }, [activeConversationId, newChatStableKey]);
+
+  const setAiProcessSteps = useCallback((nextSteps: WorkspaceAiStep[] | ((prev: WorkspaceAiStep[]) => WorkspaceAiStep[])) => {
+    const targetConversationId = activeConversationId || pendingChatIdRef.current || newChatStableKey;
+    if (!targetConversationId) return;
+    setConversationUiStateMap((prev) => {
+      const current = prev[targetConversationId] || createWorkspaceConversationUiState();
+      const resolvedSteps = typeof nextSteps === "function"
+        ? (nextSteps as (prev: WorkspaceAiStep[]) => WorkspaceAiStep[])(current.aiProcessSteps)
+        : nextSteps;
+      return {
+        ...prev,
+        [targetConversationId]: {
+          ...current,
+          aiProcessSteps: resolvedSteps,
+        },
+      };
+    });
+  }, [activeConversationId, newChatStableKey]);
 
   const [panelSizes, setPanelSizes] = useState<StoredPanelSizes>(() => {
     try {
@@ -145,11 +234,7 @@ function WorkspaceContent() {
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI
-    setAiProcessSteps([]);
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
+  }, [handleClearPendingCount, setActiveChatId]);
 
   const handleNewChat = () => {
     // Keep processing state for background chats - don't clear processingChatIds
@@ -158,21 +243,25 @@ function WorkspaceContent() {
     setActiveChatId(null);
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
+    ensureConversationUiState(newKey);
     pendingChatIdRef.current = null;
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI
-    setAiProcessSteps([]);
   };
 
   const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
+    moveConversationUiState(newChatStableKey, pendingId);
+    ensureConversationUiState(pendingId);
     pendingChatIdRef.current = pendingId;
     setNewChatStableKey((prev) => prev || stableKey);
     setIsNewChatMode(false);
     // IMPORTANT: return the promise so ChatInterface can await it and continue the flow
-    return await addMessage(pendingId, message);
-  }, [createChat, addMessage]);
+    const result = await addMessage(pendingId, message);
+    const realId = result?.run?.chatId || (result ? resolveRealChatId(pendingId) : null);
+    if (realId && !realId.startsWith("pending-")) {
+      moveConversationUiState(pendingId, realId);
+    }
+    return result;
+  }, [addMessage, createChat, ensureConversationUiState, moveConversationUiState, newChatStableKey]);
 
   const handleSendMessage = useCallback(async (message: Message) => {
     const targetChatId = activeChat?.id || pendingChatIdRef.current;
@@ -181,12 +270,6 @@ function WorkspaceContent() {
     }
     return await handleSendNewChatMessage(message);
   }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
-
-  const chatInterfaceKey = useMemo(() => {
-    if (newChatStableKey) return newChatStableKey;
-    if (activeChat) return activeChat.stableKey;
-    return "default-chat";
-  }, [activeChat?.stableKey, newChatStableKey]);
 
   const currentMessages = useMemo(() => {
     if (activeChat?.messages) return activeChat.messages;
@@ -294,13 +377,13 @@ function WorkspaceContent() {
 
           <div className="flex-1 flex flex-col">
             <ChatInterface
-              key={chatInterfaceKey}
               messages={displayMessages}
               setMessages={setDisplayMessages}
               onSendMessage={handleSendMessage}
               chatId={activeChat?.id || pendingChatIdRef.current}
               aiState={aiState}
               setAiState={setAiState}
+              aiStateChatId={aiState === "idle" ? null : activeConversationId}
               aiProcessSteps={aiProcessSteps}
               setAiProcessSteps={setAiProcessSteps}
             />
@@ -367,13 +450,13 @@ function WorkspaceContent() {
               >
                 <div className="relative h-full">
                   <ChatInterface
-                    key={chatInterfaceKey}
                     messages={displayMessages}
                     setMessages={setDisplayMessages}
                     onSendMessage={handleSendMessage}
                     chatId={activeChat?.id || pendingChatIdRef.current}
                     aiState={aiState}
                     setAiState={setAiState}
+                    aiStateChatId={aiState === "idle" ? null : activeConversationId}
                     aiProcessSteps={aiProcessSteps}
                     setAiProcessSteps={setAiProcessSteps}
                   />

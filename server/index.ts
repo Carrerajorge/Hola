@@ -19,6 +19,7 @@ import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
 import { setupSecurity } from "./middleware/security";
 import { requestBoundaryGuard } from "./middleware/requestBoundary";
+import { correlationIdMiddleware } from "./middleware/correlationId";
 
 import { authLimiter, billingLimiter, globalLimiter } from "./middleware/rateLimiter";
 
@@ -51,6 +52,7 @@ declare module "http" {
 }
 
 // Request logger middleware with correlation context - must go first
+app.use(correlationIdMiddleware);
 app.use(requestLoggerMiddleware);
 
 // Canonical URL redirect (www -> non-www) - must be before CORS and sessions

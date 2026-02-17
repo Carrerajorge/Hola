@@ -28,6 +28,9 @@ export interface ProductionRequest {
     message: string;
     userId: string;
     chatId: string;
+    conversationId?: string | null;
+    requestId?: string;
+    assistantMessageId?: string | null;
     intentResult: IntentResult;
     locale?: string;
 }
@@ -281,13 +284,24 @@ export async function handleProductionRequest(
     req: ProductionRequest,
     res: Response
 ): Promise<ProductionHandlerResult> {
-    const { message, userId, chatId, intentResult, locale } = req;
+    const { message, userId, chatId, conversationId, requestId, assistantMessageId, intentResult, locale } = req;
 
     console.log(`[ProductionHandler] Starting production for intent: ${intentResult.intent}`);
     console.log(`[ProductionHandler] Topic: ${intentResult.slots.topic || message}`);
 
     const runId = uuidv4();
+    const streamConversationId = conversationId || chatId;
+    const streamRequestId = requestId || runId;
     const deliverables = getDeliverables(intentResult, message);
+
+    const emit = (event: string, data: Record<string, unknown>): void => {
+        writeSse(res, event, {
+            conversationId: streamConversationId,
+            requestId: streamRequestId,
+            ...(assistantMessageId ? { assistantMessageId } : {}),
+            ...data,
+        });
+    };
 
     console.log(`[ProductionHandler] Deliverables: ${deliverables.join(', ')}`);
 
@@ -304,7 +318,7 @@ export async function handleProductionRequest(
     }
 
     // Emit production start
-    writeSse(res, 'production_start', {
+    emit('production_start', {
         runId,
         intent: intentResult.intent,
         topic: intentResult.slots.topic || message,
@@ -317,7 +331,7 @@ export async function handleProductionRequest(
         // ACADEMIC ARTICLES EXPORT (fast path)
         // ============================================================================
         if (isAcademicArticlesExportRequest(message)) {
-            writeSse(res, 'production_event', {
+            emit('production_event', {
                 type: 'stage_start',
                 stage: 'research',
                 progress: 0,
@@ -327,7 +341,7 @@ export async function handleProductionRequest(
 
             const exportResult = await exportAcademicArticlesFromPrompt(message);
 
-            writeSse(res, 'production_event', {
+            emit('production_event', {
                 type: 'stage_complete',
                 stage: 'research',
                 progress: 100,
@@ -373,7 +387,7 @@ export async function handleProductionRequest(
                     size: artifact.size,
                 });
 
-                writeSse(res, 'artifact', {
+                emit('artifact', {
                     type: artifact.type,
                     filename: artifact.filename,
                     downloadUrl: stored.downloadUrl,
@@ -437,7 +451,7 @@ export async function handleProductionRequest(
                 notesBlock,
             ].join('\n');
 
-            writeSse(res, 'production_complete', {
+            emit('production_complete', {
                 runId,
                 success: true,
                 artifactsCount: artifacts.length,
@@ -446,16 +460,14 @@ export async function handleProductionRequest(
             });
 
             // Send summary as regular chat content for display
-            writeSse(res, 'chunk', {
+            emit('chunk', {
                 content: summary,
                 sequenceId: 1,
-                requestId: runId,
                 runId,
             });
 
-            writeSse(res, 'done', {
+            emit('done', {
                 sequenceId: 2,
-                requestId: runId,
                 runId,
                 timestamp: Date.now(),
             });
@@ -479,7 +491,7 @@ export async function handleProductionRequest(
             chatId,
             (event: ProductionEvent) => {
                 // Emit pipeline events as SSE
-                writeSse(res, 'production_event', {
+                emit('production_event', {
                     type: event.type,
                     stage: event.stage,
                     progress: event.progress,
@@ -512,7 +524,7 @@ export async function handleProductionRequest(
             });
 
             // Emit artifact event
-            writeSse(res, 'artifact', {
+            emit('artifact', {
                 type: artifact.type,
                 filename: artifact.filename,
                 downloadUrl: stored.downloadUrl,
@@ -522,7 +534,7 @@ export async function handleProductionRequest(
         }
 
         // Emit completion
-        writeSse(res, 'production_complete', {
+        emit('production_complete', {
             runId,
             success: true,
             artifactsCount: result.artifacts.length,
@@ -532,16 +544,14 @@ export async function handleProductionRequest(
         });
 
         // Send summary as regular chat content for display
-        writeSse(res, 'chunk', {
+        emit('chunk', {
             content: formatProductionSummary(result, intentResult, artifactsWithUrls),
             sequenceId: 1,
-            requestId: runId,
             runId,
         });
 
-        writeSse(res, 'done', {
+        emit('done', {
             sequenceId: 2,
-            requestId: runId,
             runId,
             timestamp: Date.now(),
         });
@@ -562,23 +572,21 @@ export async function handleProductionRequest(
                 ? 'Tu solicitud no requiere producción documental. Si necesitas un archivo, especifica el formato (Word/PDF/Excel/PPT) o selecciona la herramienta correspondiente.'
                 : rawMessage;
 
-        writeSse(res, 'production_error', {
+        emit('production_error', {
             runId,
             error: userMessage,
             timestamp: Date.now(),
         });
 
         // Send error as chat content
-        writeSse(res, 'chunk', {
+        emit('chunk', {
             content: `❌ **Error en la producción documental**\n\n${userMessage}\n\nPor favor, intenta de nuevo o reformula tu solicitud.`,
             sequenceId: 1,
-            requestId: runId,
             runId,
         });
 
-        writeSse(res, 'done', {
+        emit('done', {
             sequenceId: 2,
-            requestId: runId,
             runId,
             timestamp: Date.now(),
         });

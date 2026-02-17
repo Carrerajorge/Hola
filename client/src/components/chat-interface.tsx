@@ -5,6 +5,7 @@ import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
 import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { getFileUploader } from "@/lib/fileUploader";
+import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
 import {
@@ -1504,7 +1505,12 @@ export function ChatInterface({
     streamingContentRef,
     setAiState,
     setAiProcessSteps,
+    getActiveConversationId: () => latestChatIdRef.current,
   });
+
+  useEffect(() => {
+    streamChat.synchronizeConversation(chatId || null);
+  }, [chatId, streamChat.synchronizeConversation]);
 
   // Request a refresh of the AI-generated title after streaming completes.
   // The server generates the title asynchronously, so we delay the fetch.
@@ -2867,11 +2873,29 @@ export function ChatInterface({
             } catch (err: any) {
               lastError = err;
               if (attempt < maxRetries) {
-                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                const jitter = Math.floor(Math.random() * 180);
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
               }
             }
           }
           throw lastError || new Error("Request failed after retries");
+        };
+
+        const retryUpload = async (fn: () => Promise<void>, maxRetries = 3): Promise<void> => {
+          let lastError: Error | null = null;
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+              await fn();
+              return;
+            } catch (err: any) {
+              lastError = err instanceof Error ? err : new Error("Upload failed");
+              if (attempt < maxRetries) {
+                const jitter = Math.floor(Math.random() * 180);
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt) + jitter));
+              }
+            }
+          }
+          throw lastError || new Error("Upload failed after retries");
         };
 
         try {
@@ -2897,6 +2921,7 @@ export function ChatInterface({
             }
           };
 
+          await ensureCsrfToken();
           const urlRes = await retryFetch(() => apiFetch("/api/objects/upload", {
             method: "POST",
             headers: uploadHeaders,
@@ -2912,11 +2937,10 @@ export function ChatInterface({
           const { uploadURL, storagePath } = urlData || {};
           if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
-          const uploadRes = await retryFetch(() => fetch(uploadURL, {
-            method: "PUT",
-            body: file,
+          await retryUpload(() => uploadBlobWithProgress(uploadURL, file, undefined, {
+            timeoutMs: 120000,
+            skipContentType: true,
           }));
-          if (!uploadRes.ok) throw new Error(`Upload failed with status ${uploadRes.status}`);
 
           let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
 
@@ -2925,6 +2949,7 @@ export function ChatInterface({
               const formData = new FormData();
               formData.append('file', file);
 
+              await ensureCsrfToken();
               const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
                 method: 'POST',
                 headers: multipartHeaders,
@@ -2968,6 +2993,7 @@ export function ChatInterface({
           }
 
           if (isImage) {
+            await ensureCsrfToken();
             const registerRes = await apiFetch("/api/files", {
               method: "POST",
               headers: uploadHeaders,
@@ -2996,6 +3022,7 @@ export function ChatInterface({
               prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
             );
 
+            await ensureCsrfToken();
             const registerRes = await apiFetch("/api/files", {
               method: "POST",
               headers: uploadHeaders,

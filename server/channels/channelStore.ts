@@ -22,6 +22,8 @@ const MAX_METADATA_ARRAY_ITEMS = 128;
 const MAX_METADATA_DEPTH = 8;
 const SAFE_OWNER_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
 const SAFE_METADATA_KEY_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const SAFE_PAIRING_CODE_RE = /^[A-Z0-9]{6,12}$/;
+const ALLOWED_PAIRING_CHANNELS = new Set(["telegram", "whatsapp_cloud", "messenger", "wechat"]);
 
 function isUniqueViolation(err: unknown): boolean {
   const code = (err as any)?.code;
@@ -126,20 +128,53 @@ function sanitizeMetadataPatch(input: unknown): Record<string, unknown> {
   return isRecord(sanitized) ? sanitized : {};
 }
 
+function normalizePairingChannel(value: unknown): string {
+  const normalized = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 32);
+  if (!normalized) return "";
+  if (!ALLOWED_PAIRING_CHANNELS.has(normalized)) return "";
+  return normalized;
+}
+
+function normalizePairingCode(value: unknown): string {
+  const normalized = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .toUpperCase()
+    .slice(0, 12);
+  if (!normalized || !SAFE_PAIRING_CODE_RE.test(normalized)) return "";
+  return normalized;
+}
+
 export async function createChannelPairingCode(input: {
   userId: string;
   channel: string;
   ttlMinutes?: number;
 }): Promise<{ code: string; expiresAt: Date }> {
-  const ttlMinutes = input.ttlMinutes ?? 15;
+  const safeUserId = normalizeOwnerIdentityValue(input.userId);
+  const safeChannel = normalizePairingChannel(input.channel);
+  if (!safeUserId || !safeChannel) {
+    throw new Error("Invalid pairing code request");
+  }
+
+  const ttlMinutes = Number.isFinite(input.ttlMinutes)
+    ? Math.min(Math.max(Math.floor(input.ttlMinutes as number), 1), 60)
+    : 15;
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = makePairingCode();
     try {
       await db.insert(channelPairingCodes).values({
-        userId: input.userId,
-        channel: input.channel,
+        userId: safeUserId,
+        channel: safeChannel,
         code,
         expiresAt,
       });
@@ -157,17 +192,22 @@ export async function consumeChannelPairingCode(input: {
   code: string;
   consumedByExternalId: string;
 }): Promise<{ userId: string } | null> {
+  const safeChannel = normalizePairingChannel(input.channel);
+  const safeCode = normalizePairingCode(input.code);
+  const safeConsumedByExternalId = normalizeOwnerIdentityValue(input.consumedByExternalId);
+  if (!safeChannel || !safeCode || !safeConsumedByExternalId) return null;
+
   const now = new Date();
   const [row] = await db
     .update(channelPairingCodes)
     .set({
       consumedAt: now,
-      consumedByExternalId: input.consumedByExternalId,
+      consumedByExternalId: safeConsumedByExternalId,
     })
     .where(
       and(
-        eq(channelPairingCodes.channel, input.channel),
-        eq(channelPairingCodes.code, input.code),
+        eq(channelPairingCodes.channel, safeChannel),
+        eq(channelPairingCodes.code, safeCode),
         isNull(channelPairingCodes.consumedAt),
         gt(channelPairingCodes.expiresAt, now),
       ),

@@ -14,6 +14,15 @@ function resolveSafeUrl(url: string): string {
   return target.toString();
 }
 
+function generateRequestId(): string {
+  const now = Date.now().toString(36);
+  const random = Math.random().toString(36).slice(2, 10);
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `req_${now}_${crypto.randomUUID()}`;
+  }
+  return `req_${now}_${random}`;
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const safeUrl = resolveSafeUrl(url);
   const anonUserId = getStoredAnonUserId();
@@ -32,6 +41,14 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
 
   if (csrfToken) {
     headers.set("X-CSRF-Token", csrfToken);
+  }
+  const existingRequestId = headers.get("X-Request-Id") || headers.get("x-request-id");
+  const requestId = existingRequestId || generateRequestId();
+  if (!existingRequestId) {
+    headers.set("X-Request-Id", requestId);
+  }
+  if (!headers.has("X-Correlation-Id") && !headers.has("x-correlation-id")) {
+    headers.set("X-Correlation-Id", requestId);
   }
 
   return fetch(safeUrl, {

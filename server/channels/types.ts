@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const MAX_RECEIVED_AT_LENGTH = 64;
 const MAX_CHANNEL_META_ID_LENGTH = 255;
+const MAX_INGEST_INPUT_BYTES = 256 * 1024;
+const MAX_INGEST_ROOT_KEYS = 80;
 export const MAX_INGEST_RUN_ID_LENGTH = 128;
 export const INGEST_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
 
@@ -137,7 +139,36 @@ export type ChannelIngestJobValidationResult =
   | { ok: true; data: ChannelIngestJob }
   | { ok: false; errors: ChannelIngestJobValidationError[] };
 
+function failValidation(path: string, message: string, code: string): ChannelIngestJobValidationResult {
+  return {
+    ok: false,
+    errors: [{ path, message, code }],
+  };
+}
+
+function estimateInputBytes(input: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(input), "utf8");
+  } catch {
+    return MAX_INGEST_INPUT_BYTES + 1;
+  }
+}
+
 export function validateChannelIngestJob(input: unknown): ChannelIngestJobValidationResult {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return failValidation("", "Invalid payload", "invalid_type");
+  }
+
+  const rootKeys = Object.keys(input as Record<string, unknown>);
+  if (rootKeys.length > MAX_INGEST_ROOT_KEYS) {
+    return failValidation("", "Payload contains too many root keys", "too_many_keys");
+  }
+
+  const estimatedBytes = estimateInputBytes(input);
+  if (estimatedBytes > MAX_INGEST_INPUT_BYTES) {
+    return failValidation("", "Payload too large", "payload_too_large");
+  }
+
   const result = channelIngestJobSchema.safeParse(input);
   if (result.success) {
     return { ok: true, data: result.data };

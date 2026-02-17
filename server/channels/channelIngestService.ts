@@ -91,6 +91,10 @@ const MAX_WORKSPACE_ID_LENGTH = 200;
 const MAX_ENVELOPES_PER_JOB = 12;
 const MAX_RATE_BUCKET_ENTRIES = 8_000;
 const MAX_MESSAGE_ID_ENTRIES = 120_000;
+const INBOUND_MESSAGE_ID_TTL_MS = 15 * 60 * 1000;
+const DEDUPE_LOOKUP_TIMEOUT_MS = 2_000;
+const STORAGE_OPERATION_TIMEOUT_MS = 8_000;
+const IN_FLIGHT_RUN_MAX_AGE_MS = 20 * 60 * 1000;
 const CONVERSATION_QUEUE_TIMEOUT_MS = 180_000;
 const SAFE_ID_RE = /^[A-Za-z0-9._:\-]+$/;
 const SAFE_REQUEST_ID_RE = /^[A-Za-z0-9._:\-]+$/;
@@ -117,6 +121,9 @@ const MAX_INBOUND_METADATA_BYTES = 24_000;
 const INBOUND_TEXT_SANITIZE_RE = /<[^>]*>|[`*_~#>\[\]{}]/g;
 const INBOUND_JS_SCHEME_RE = /javascript:/gi;
 const POLICY_CONTROLLED_RESPONSE_LENGTH = 420;
+const MAX_DEDUPE_KEY_PART_LENGTH = 128;
+const MAX_DEDUPE_MESSAGE_ID_LENGTH = MAX_ID_LENGTH;
+const MAX_DEDUPE_CONVERSATION_KEY_LENGTH = 512;
 const LOCAL_HOST_SUFFIXES = [
   "localhost",
   "127.",
@@ -139,6 +146,31 @@ const conversationQueues = new Map<string, Promise<void>>();
 const seenProviderMessageIdsByConversation = new Map<string, number>();
 const conversationRateBuckets = new Map<string, { startedAt: number; count: number }>();
 const outboundCircuitState = new Map<ExternalChannel, { failures: number; openedUntil?: number; lastFailureAt: number }>();
+
+const ENFORCED_INBOUND_MESSAGE_ID_TTL_MS = parsePositiveInt(
+  process.env.CHANNEL_INBOUND_MESSAGE_ID_TTL_MS,
+  INBOUND_MESSAGE_ID_TTL_MS,
+  60_000,
+  60 * 60_000,
+);
+const ENFORCED_DEDUPE_LOOKUP_TIMEOUT_MS = parsePositiveInt(
+  process.env.CHANNEL_DEDUPE_LOOKUP_TIMEOUT_MS,
+  DEDUPE_LOOKUP_TIMEOUT_MS,
+  250,
+  20_000,
+);
+const ENFORCED_STORAGE_OPERATION_TIMEOUT_MS = parsePositiveInt(
+  process.env.CHANNEL_STORAGE_OPERATION_TIMEOUT_MS,
+  STORAGE_OPERATION_TIMEOUT_MS,
+  500,
+  60_000,
+);
+const ENFORCED_IN_FLIGHT_RUN_MAX_AGE_MS = parsePositiveInt(
+  process.env.CHANNEL_IN_FLIGHT_RUN_MAX_AGE_MS,
+  IN_FLIGHT_RUN_MAX_AGE_MS,
+  60_000,
+  6 * 60 * 60 * 1000,
+);
 
 function isOutboundCircuitOpen(channel: ExternalChannel): boolean {
   const state = outboundCircuitState.get(channel);
@@ -232,6 +264,19 @@ function isUniqueViolation(err: unknown): boolean {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(raw || "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < min) return min;
+  if (parsed > max) return max;
+  return parsed;
+}
+
+function isTimeoutLikeError(error: unknown): boolean {
+  const message = String((error as Error)?.message || error || "").toLowerCase();
+  return message.includes("timeout");
 }
 
 type InboundEnvelopeValidationResult =
@@ -368,6 +413,19 @@ function createTimeoutTask<T>(timeoutMs: number, reason: string): TimedPromise<T
   };
 }
 
+async function withTimeoutGuard<T>(
+  operationName: string,
+  timeoutMs: number,
+  task: () => Promise<T>,
+): Promise<T> {
+  const timeout = createTimeoutTask<T>(timeoutMs, `${operationName}_timeout`);
+  try {
+    return await Promise.race([task(), timeout.promise]);
+  } finally {
+    timeout.clear();
+  }
+}
+
 function normalizeIdentifier(value: unknown, maxLength = MAX_ID_LENGTH): string | null {
   if (value === null || value === undefined) return null;
   const normalized = String(value)
@@ -417,8 +475,21 @@ function sanitizeMessageType(value: MessageEnvelope["messageType"] | unknown): M
   return "unsupported";
 }
 
-function buildConversationScopedRequestId(conversationKey: string, providerMessageId: string): string {
-  const canonical = `${conversationKey}|${providerMessageId}`;
+function buildConversationScopedRequestId(
+  conversationKey: string,
+  providerMessageId: string,
+  senderId?: string,
+): string {
+  const safeSenderId = senderId
+    ? senderId
+      .normalize("NFKC")
+      .replace(/\u0000/g, "")
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+      .replace(/\|/g, "_")
+      .trim()
+      .slice(0, MAX_DEDUPE_KEY_PART_LENGTH)
+    : "";
+  const canonical = `${conversationKey}|${safeSenderId || "sender:unknown"}|${providerMessageId}`;
   const safeCanonical = sanitizeRequestIdentifier(canonical);
   if (safeCanonical && safeCanonical.length <= MAX_REQUEST_ID_LENGTH) {
     return safeCanonical;
@@ -457,12 +528,29 @@ function envelopeFromRaw(raw: ChannelIngestJob, channel: ExternalChannel): Messa
   return normalizeTelegramMessages((raw as any).update);
 }
 
-function buildMessageDedupeKey(conversationKey: string, providerMessageId: string): string {
-  return `${conversationKey}|${providerMessageId}`;
+function buildMessageDedupeInput(value: string, maxLength: number): string {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+    .replace(/\|/g, "_")
+    .trim()
+    .slice(0, maxLength);
 }
 
-function isAllowedToQueue(conversationKey: string, providerMessageId: string): boolean {
-  const dedupeKey = buildMessageDedupeKey(conversationKey, providerMessageId);
+function buildMessageDedupeKey(conversationKey: string, providerMessageId: string, senderId = "unknown"): string {
+  const safeConversationKey = buildMessageDedupeInput(conversationKey, MAX_DEDUPE_CONVERSATION_KEY_LENGTH);
+  const safeProviderMessageId = buildMessageDedupeInput(providerMessageId, MAX_DEDUPE_MESSAGE_ID_LENGTH);
+  const safeSenderId = buildMessageDedupeInput(senderId, MAX_DEDUPE_KEY_PART_LENGTH);
+
+  const normalizedConversationKey = safeConversationKey.length > 0 ? safeConversationKey : "conversation:unknown";
+  const normalizedMessageId = safeProviderMessageId.length > 0 ? safeProviderMessageId : "message:unknown";
+  const normalizedSenderId = safeSenderId.length > 0 ? safeSenderId : "sender:unknown";
+  return `${normalizedConversationKey}|${normalizedSenderId}|${normalizedMessageId}`;
+}
+
+function isAllowedToQueue(conversationKey: string, providerMessageId: string, senderId: string): boolean {
+  const dedupeKey = buildMessageDedupeKey(conversationKey, providerMessageId, senderId);
   const lastSeen = seenProviderMessageIdsByConversation.get(dedupeKey) || 0;
   if (!lastSeen) {
     seenProviderMessageIdsByConversation.set(dedupeKey, Date.now());
@@ -471,7 +559,7 @@ function isAllowedToQueue(conversationKey: string, providerMessageId: string): b
   return false;
 }
 
-function pruneMessageIdLedger(ttlMs = 5 * 60 * 1000): void {
+function pruneMessageIdLedger(ttlMs = ENFORCED_INBOUND_MESSAGE_ID_TTL_MS): void {
   const now = Date.now();
   for (const [id, seenAt] of seenProviderMessageIdsByConversation.entries()) {
     if (now - seenAt > ttlMs) seenProviderMessageIdsByConversation.delete(id);
@@ -637,6 +725,25 @@ function registerInFlightRun(
   conversationKey: string,
   state: InFlightRunState,
 ): void {
+  const now = Date.now();
+  for (const [key, entry] of inFlightRunsByConversation.entries()) {
+    if (now - entry.startedAt <= ENFORCED_IN_FLIGHT_RUN_MAX_AGE_MS) continue;
+    try {
+      entry.runAbort.abort("Stale run evicted");
+    } catch {
+      // best effort
+    }
+    inFlightRunsByConversation.delete(key);
+    Logger.warn("[Channels] evicted stale in-flight run", {
+      conversation: key,
+      runId: entry.runId,
+      requestId: entry.requestId,
+      channel: entry.channel,
+      traceId: entry.traceId,
+      startedAt: entry.startedAt,
+      maxAgeMs: ENFORCED_IN_FLIGHT_RUN_MAX_AGE_MS,
+    });
+  }
   inFlightRunsByConversation.set(conversationKey, state);
 }
 
@@ -649,7 +756,8 @@ function unregisterInFlightRun(conversationKey: string, state: Pick<InFlightRunS
   }
 }
 
-function enforceSafeLimit(value: string, limit: number): string {
+function enforceSafeLimit(value: string | undefined | null, limit: number): string {
+  if (value == null) return "";
   if (!Number.isFinite(limit) || limit <= 0) return value;
   return value.slice(0, limit);
 }
@@ -856,18 +964,26 @@ async function createRunForMessage(
   userMessageId: string,
 ) {
   try {
-    return await storage.createChatRun({
-      chatId,
-      clientRequestId: requestId,
-      userMessageId,
-      status: "pending",
-    });
+    return await withTimeoutGuard(
+      "channel_create_chat_run",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.createChatRun({
+        chatId,
+        clientRequestId: requestId,
+        userMessageId,
+        status: "pending",
+      }),
+    );
   } catch (error) {
-    if (!isUniqueViolation(error)) {
+    if (!isUniqueViolation(error) && !isTimeoutLikeError(error)) {
       throw error;
     }
 
-    const fallback = await storage.getChatRunByClientRequestId(chatId, requestId);
+    const fallback = await withTimeoutGuard(
+      "channel_get_chat_run_by_request_id",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.getChatRunByClientRequestId(chatId, requestId),
+    );
     if (fallback) return fallback;
     throw error;
   }
@@ -1099,7 +1215,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
   const messageId = safeMessageId;
   const conversationKey = serializeConversationKey(safeEnvelope.conversationKey);
-  const scopedRequestId = buildConversationScopedRequestId(conversationKey, messageId);
+  const scopedRequestId = buildConversationScopedRequestId(conversationKey, messageId, safeSenderId);
   if (runAbort.signal.aborted) {
     Logger.warn("[Channels] inbound message skipped due to pre-aborted run", {
       conversation: envelope.conversationKey,
@@ -1118,13 +1234,20 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   }
   const safePolicyScopedRequestId = safeScopedRequestId.slice(0, MAX_REQUEST_ID_LENGTH);
   const eventTraceId = buildEventTraceId(conversationKey, messageId, safeScopedRequestId);
+  Logger.debug("[Channels] inbound message accepted for processing", {
+    runId: safeScopedRequestId,
+    conversation: safeEnvelope.conversationKey,
+    channel: jobChannel,
+    providerMessageId: messageId,
+    traceId: eventTraceId,
+  });
   pruneMessageIdLedger();
   pruneRateBuckets();
 
-  const dedupeKey = buildMessageDedupeKey(conversationKey, messageId);
+  const dedupeKey = buildMessageDedupeKey(conversationKey, messageId, safeSenderId);
   const isQueueAllowed = context.skipQueueDuplicateCheck
     ? true
-    : isAllowedToQueue(conversationKey, messageId);
+    : isAllowedToQueue(conversationKey, messageId, safeSenderId);
 
   if (context.skipQueueDuplicateCheck && !seenProviderMessageIdsByConversation.has(dedupeKey)) {
     seenProviderMessageIdsByConversation.set(dedupeKey, Date.now());
@@ -1135,9 +1258,27 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     });
   }
 
-  const existingMessage = await storage.findMessageByRequestId(safeScopedRequestId);
+  let existingMessage: Awaited<ReturnType<typeof storage.findMessageByRequestId>> | null = null;
+  try {
+    existingMessage = await withTimeoutGuard(
+      "channel_dedupe_lookup",
+      ENFORCED_DEDUPE_LOOKUP_TIMEOUT_MS,
+      async () => await storage.findMessageByRequestId(safeScopedRequestId),
+    );
+  } catch (error) {
+    Logger.warn("[Channels] persistent dedupe lookup failed, continuing with in-memory guard", {
+      runId: safeScopedRequestId,
+      conversation: safeEnvelope.conversationKey,
+      messageId: safeScopedRequestId,
+      channel: jobChannel,
+      traceId: eventTraceId,
+      timeoutMs: ENFORCED_DEDUPE_LOOKUP_TIMEOUT_MS,
+      reason: String((error as Error)?.message || error),
+    });
+  }
   if (!isQueueAllowed) {
     Logger.info("[Channels] Duplicate inbound message ignored", {
+      runId: safeScopedRequestId,
       conversation: safeEnvelope.conversationKey,
       messageId: safeScopedRequestId,
       channel: jobChannel,
@@ -1149,6 +1290,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
   if (existingMessage) {
     Logger.info("[Channels] Duplicate inbound message ignored", {
+      runId: safeScopedRequestId,
       conversation: safeEnvelope.conversationKey,
       messageId: safeScopedRequestId,
       channel: jobChannel,
@@ -1245,6 +1387,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     const shouldRespond = policy.shouldRespond !== false;
 
     Logger.warn("[Channels] inbound message blocked by policy", {
+      runId: safeScopedRequestId,
       conversation: safeEnvelope.conversationKey,
       messageId: safeScopedRequestId,
       policyCode: policy.code,
@@ -1305,13 +1448,45 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       receivedAt: safeEnvelope.receivedAt,
       messageType: safeEnvelope.messageType,
       eventTraceId,
+      ingestRunId: safeScopedRequestId,
       policyCode: policy.code,
       policyTraceId: policy.policyTraceId,
       sourceMetadata: asAttachmentFromEnvelope(safeEnvelope),
     },
   } as any;
 
-  const userMessage = await storage.createChatMessage(userMessagePayload);
+  let userMessage: Awaited<ReturnType<typeof storage.createChatMessage>> | null = null;
+  try {
+    userMessage = await withTimeoutGuard(
+      "channel_create_user_message",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.createChatMessage(userMessagePayload),
+    );
+  } catch (error) {
+    if (!isTimeoutLikeError(error)) {
+      throw error;
+    }
+
+    const recovered = await withTimeoutGuard(
+      "channel_recover_user_message",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.findMessageByRequestId(safeScopedRequestId),
+    );
+    if (recovered) {
+      userMessage = recovered;
+      Logger.warn("[Channels] user message recovered after create timeout", {
+        conversation: safeEnvelope.conversationKey,
+        messageId: safeScopedRequestId,
+        channel: jobChannel,
+        traceId: eventTraceId,
+      });
+    } else {
+      throw error;
+    }
+  }
+  if (!userMessage) {
+    throw new Error("Could not persist or recover inbound user message");
+  }
   const run = await createRunForMessage(conversation.chatId, safeScopedRequestId, userMessage.id);
   if (!run) {
     Logger.error("[Channels] could not create chat run", {
@@ -1322,9 +1497,17 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     return;
   }
 
-  const claimedRun = await storage.claimPendingRun(conversation.chatId, safeScopedRequestId);
+  const claimedRun = await withTimeoutGuard(
+    "channel_claim_pending_run",
+    ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+    async () => await storage.claimPendingRun(conversation.chatId, safeScopedRequestId),
+  );
   if (!claimedRun) {
-    const current = await storage.getChatRunByClientRequestId(conversation.chatId, safeScopedRequestId);
+    const current = await withTimeoutGuard(
+      "channel_get_current_run_status",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.getChatRunByClientRequestId(conversation.chatId, safeScopedRequestId),
+    );
     if (current && (current.status === "processing" || current.status === "done")) {
       Logger.info("[Channels] run already claimed or done, skipping", {
         messageId: safeScopedRequestId,
@@ -1363,21 +1546,29 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   try {
     const userPromptText = buildIncomingTextForHistory(safeEnvelope);
     const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, safeEnvelope.channel);
-    const historicalMessages = (await storage.getChatMessages(conversation.chatId, { orderBy: "asc", limit: MAX_STREAM_CONTEXT }))
+    const historicalMessages = (await withTimeoutGuard(
+      "channel_load_chat_history",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.getChatMessages(conversation.chatId, { orderBy: "asc", limit: MAX_STREAM_CONTEXT }),
+    ))
       .slice(-RUN_QUEUE_MAX_HISTORY)
       .filter((msg) => msg.role === "user" || msg.role === "assistant");
 
     const llmMessages = mapToLlmMessages(historicalMessages, userPromptText, stylePrompt);
 
-    const assistantPlaceholder = await storage.createChatMessage({
-      chatId: conversation.chatId,
-      role: "assistant",
-      content: "",
-      status: "pending",
-      runId: safeRunId,
-      userMessageId: userMessage.id,
-      requestId: `${safeRunId}:assistant`,
-    });
+    const assistantPlaceholder = await withTimeoutGuard(
+      "channel_create_assistant_placeholder",
+      ENFORCED_STORAGE_OPERATION_TIMEOUT_MS,
+      async () => await storage.createChatMessage({
+        chatId: conversation.chatId,
+        role: "assistant",
+        content: "",
+        status: "pending",
+        runId: safeRunId,
+        userMessageId: userMessage.id,
+        requestId: `${safeRunId}:assistant`,
+      }),
+    );
     assistantMessageId = assistantPlaceholder.id;
     await storage.updateChatRunAssistantMessage(safeRunId, assistantMessageId);
 
@@ -1580,7 +1771,17 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     const safeThreadId = normalizeIdentifier(rawEnvelope.threadId, MAX_ID_LENGTH);
     const safeSenderId = normalizeIdentifier(rawEnvelope.senderId, MAX_ID_LENGTH);
     const safeProviderMessageId = normalizeIdentifier(rawEnvelope.providerMessageId, MAX_ID_LENGTH);
+    const rawWorkspaceId = rawEnvelope.conversationKey?.workspaceId;
     const safeWorkspaceId = normalizeIdentifier(rawEnvelope.conversationKey?.workspaceId, MAX_WORKSPACE_ID_LENGTH) || "workspace:unknown";
+    if (rawWorkspaceId && rawWorkspaceId !== "workspace:unknown" && safeWorkspaceId === "workspace:unknown") {
+      Logger.warn("[Channels] inbound envelope missing/invalid workspaceId, will be derived from account", {
+        channel: job.channel,
+        reason: "missing_workspace_id",
+        threadId: rawEnvelope.threadId,
+        channelKey: rawEnvelope.channelKey,
+        providerMessageId: rawEnvelope.providerMessageId,
+      });
+    }
 
     if (!safeChannelKey || !safeThreadId || !safeSenderId || !safeProviderMessageId) {
       Logger.error("[Channels] inbound envelope rejected due to missing mandatory identifiers", {
@@ -1660,7 +1861,10 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     });
 
     const queueKey = serializeConversationKey(envelope.conversationKey);
-    if (!isAllowedToQueue(queueKey, envelope.providerMessageId)) {
+    if (seenProviderMessageIdsByConversation.size > MAX_MESSAGE_ID_ENTRIES * 0.8) {
+      pruneMessageIdLedger();
+    }
+    if (!isAllowedToQueue(queueKey, envelope.providerMessageId, envelope.senderId)) {
       Logger.info("[Channels] Duplicate inbound envelope ignored", {
         conversation: envelope.conversationKey,
         messageId: envelope.providerMessageId,

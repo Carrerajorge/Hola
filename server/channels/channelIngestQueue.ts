@@ -18,12 +18,15 @@ const INGEST_DEAD_LETTER_TTL_MS = 12 * 60 * 60 * 1000;
 const INGEST_DEAD_LETTER_MAX_ENTRIES = 2_000;
 const INGEST_DEAD_LETTER_SAMPLE_LENGTH = 1200;
 const INGEST_QUEUE_BACKPRESSURE_LIMIT = 1_200;
+const INGEST_QUEUE_OPERATION_TIMEOUT_MS = parsePositiveInt(process.env.CHANNEL_INGEST_QUEUE_OPERATION_TIMEOUT_MS, 4_000, 250, 30_000);
 const INGEST_RECEIVED_AT_MAX_FUTURE_MS = 5 * 60 * 1000;
 const INGEST_RECEIVED_AT_MAX_PAST_MS = 7 * 24 * 60 * 60 * 1000;
 const INPROCESS_MAX_CONCURRENCY = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_CONCURRENCY, 4, 1, 128);
 const INPROCESS_TASK_TIMEOUT_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_TIMEOUT_MS, 120_000, 2_000, 300_000);
 const INPROCESS_TASK_QUEUE_MAX = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_QUEUE_MAX, 400, 32, 20_000);
 const INPROCESS_DEDUPE_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_DEDUPE_TTL_MS, 10 * 60 * 1000, 1_000, 30 * 60 * 1000);
+const INPROCESS_RESERVATION_TTL_MS = parsePositiveInt(process.env.CHANNEL_INGEST_INPROCESS_RESERVATION_TTL_MS, 8 * 60_000, 30_000, 45 * 60_000);
+const RUN_SCOPE_KEY_HASH_LEN = 20;
 
 const MAX_INGEST_INPROCESS_RUNS = 10_000;
 
@@ -55,8 +58,24 @@ type InProcessTask = {
   submittedAt: number;
 };
 
-function buildRunScopeKey(channel: string, runId: string): string {
-  return `${channel}::${runId}`;
+function normalizeRunScopeInput(raw: unknown): string {
+  return String(raw || "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, "")
+    .replace(/[^A-Za-z0-9._:\-]/g, "_")
+    .slice(0, 128);
+}
+
+function buildRunScopeKey(channel: string, runId: string, payloadFingerprint = ""): string {
+  const normalizedChannel = normalizeRunScopeInput(channel);
+  const normalizedRunId = normalizeRunScopeInput(runId);
+  const normalizedFingerprint = normalizeRunScopeInput(payloadFingerprint)
+    .replace(/[^a-fA-F0-9]/g, "")
+    .toLowerCase()
+    .slice(0, RUN_SCOPE_KEY_HASH_LEN);
+
+  return `${normalizedChannel}::${normalizedRunId}::${normalizedFingerprint || "nofp"}`;
 }
 
 const INGEST_STATS = {
@@ -78,7 +97,7 @@ const INGEST_STATS = {
 const INGEST_DEAD_LETTERS: IngestDeadLetterEntry[] = [];
 const inProcessQueue: Array<InProcessTask> = [];
 const inProcessDedupWindow = new Map<string, number>();
-const inProcessTaskReservations = new Set<string>();
+const inProcessTaskReservations = new Map<string, number>();
 
 let inProcessRunning = 0;
 let inProcessPumpScheduled = false;
@@ -212,6 +231,24 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+async function withQueueTimeout<T>(operationName: string, task: () => Promise<T>): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`${operationName}_timeout`));
+    }, INGEST_QUEUE_OPERATION_TIMEOUT_MS);
+
+    task()
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
 function shouldUseQueue(): boolean {
   if (env.CHANNEL_INGEST_MODE === "queue") return true;
   if (env.CHANNEL_INGEST_MODE === "inprocess") return false;
@@ -288,6 +325,12 @@ function pruneInProcessState(nowMs = Date.now()): void {
     }
   }
 
+  for (const [runId, startedAt] of inProcessTaskReservations.entries()) {
+    if (nowMs - startedAt > INPROCESS_RESERVATION_TTL_MS) {
+      inProcessTaskReservations.delete(runId);
+    }
+  }
+
   if (inProcessDedupWindow.size <= MAX_INGEST_INPROCESS_RUNS) {
     return;
   }
@@ -305,7 +348,7 @@ function reserveInprocessRun(runScopeKey: string): boolean {
     return false;
   }
 
-  inProcessTaskReservations.add(runScopeKey);
+  inProcessTaskReservations.set(runScopeKey, Date.now());
   inProcessDedupWindow.set(runScopeKey, Date.now());
   return true;
 }
@@ -331,17 +374,21 @@ async function isQueueBackpressured(): Promise<boolean> {
   if (!channelIngestQueue) return false;
 
   try {
-    const [waiting, active, delayed] = await Promise.all([
-      channelIngestQueue.getWaitingCount(),
-      channelIngestQueue.getActiveCount(),
-      channelIngestQueue.getDelayedCount(),
-    ]);
+    const [waiting, active, delayed] = await withQueueTimeout(
+      "ingest_queue_pressure_probe",
+      async () => await Promise.all([
+        channelIngestQueue.getWaitingCount(),
+        channelIngestQueue.getActiveCount(),
+        channelIngestQueue.getDelayedCount(),
+      ]),
+    );
 
     const total = waiting + active + delayed;
     return total >= INGEST_QUEUE_BACKPRESSURE_LIMIT;
   } catch (error) {
     Logger.warn("[Channels] queue pressure check failed; processing in-process", {
       reason: normalizeErrorMessage(error),
+      queueTimeoutMs: INGEST_QUEUE_OPERATION_TIMEOUT_MS,
     });
     return false;
   }
@@ -572,6 +619,7 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
   const jobId = hashJobForIdempotency(sanitizedJob);
   const runId = resolveRunId(sanitizedJob, jobId);
   const traceKey = `${sanitizedJob.channel}:${runId}`;
+  const runScopeKey = buildRunScopeKey(sanitizedJob.channel, runId, jobId);
 
   if (useQueue && channelIngestQueue) {
     if (await isQueueBackpressured()) {
@@ -582,28 +630,31 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
         traceKey,
         jobId,
         "queue_backpressured",
-        buildRunScopeKey(sanitizedJob.channel, runId),
+        runScopeKey,
       );
       return;
     }
 
     try {
-      await channelIngestQueue.add("ingest", sanitizedJob, {
-        jobId,
-        attempts: INGEST_QUEUE_ATTEMPTS_SAFE,
-        backoff: {
-          type: "exponential",
-          delay: INGEST_QUEUE_BACKOFF_SAFE,
-        },
-        removeOnComplete: { age: 24 * 3600, count: 1000 },
-        removeOnFail: { age: 7 * 24 * 3600 },
-      });
+      await withQueueTimeout(
+        "ingest_queue_add",
+        async () => await channelIngestQueue.add("ingest", sanitizedJob, {
+          jobId,
+          attempts: INGEST_QUEUE_ATTEMPTS_SAFE,
+          backoff: {
+            type: "exponential",
+            delay: INGEST_QUEUE_BACKOFF_SAFE,
+          },
+          removeOnComplete: { age: 24 * 3600, count: 1000 },
+          removeOnFail: { age: 7 * 24 * 3600 },
+        }),
+      );
       INGEST_STATS.queueAccepted += 1;
       return;
     } catch (err) {
       const message = normalizeErrorMessage(err);
       INGEST_STATS.queueRejected += 1;
-      addDeadLetter("queue_add_failed", sanitizedJob, traceKey, jobId, runId, message);
+        addDeadLetter("queue_add_failed", sanitizedJob, traceKey, jobId, runId, message);
 
       if (/already exists|duplicate/i.test(message)) {
         Logger.warn("[Channels] Duplicate ingest event ignored (queue dedupe)", {
@@ -622,7 +673,7 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
         traceKey,
         jobId,
         message,
-        buildRunScopeKey(sanitizedJob.channel, runId),
+        runScopeKey,
       );
       return;
     }
@@ -641,7 +692,7 @@ export async function submitChannelIngest(job: unknown): Promise<void> {
     traceKey,
     jobId,
     "queue_disabled_or_not_configured",
-    buildRunScopeKey(sanitizedJob.channel, runId),
+    runScopeKey,
   );
   return;
 }

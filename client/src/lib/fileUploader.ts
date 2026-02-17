@@ -1,5 +1,7 @@
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
 import { apiFetch } from "@/lib/apiClient";
+import { ensureCsrfToken, uploadBlobWithProgress } from "@/lib/uploadTransport";
+import type { FileStatusResponse } from "@shared/uploadContracts";
 
 export interface ValidationResult {
   type: 'validation_result';
@@ -70,7 +72,8 @@ async function retryWithBackoff<T>(
         throw error;
       }
       if (attempt < maxRetries) {
-        const delay = baseDelay * Math.pow(2, attempt);
+        const jitter = Math.floor(Math.random() * 200);
+        const delay = baseDelay * Math.pow(2, attempt) + jitter;
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -85,6 +88,7 @@ export class ChunkedFileUploader {
   private wsReconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private wsListeners: Map<string, (status: any) => void> = new Map();
+  private statusPollTimers: Map<string, number> = new Map();
   private abortController: AbortController | null = null;
   private wsAuthFailed = false;
 
@@ -106,7 +110,9 @@ export class ChunkedFileUploader {
   private async fetchConfig(): Promise<FileConfig> {
     if (this.config) return this.config;
 
-    const response = await apiFetch('/api/files/config');
+    const response = await apiFetch('/api/files/config', {
+      ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
+    });
     if (!response.ok) {
       throw new Error('Failed to fetch file upload configuration');
     }
@@ -295,9 +301,11 @@ export class ChunkedFileUploader {
           if (options.conversationId) {
             headers["X-Conversation-Id"] = options.conversationId;
           }
+          await ensureCsrfToken();
           const res = await apiFetch(endpoint, {
             method: 'POST',
             headers,
+            ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
             body: JSON.stringify({
               name: normalizedFile.name,
               type: normalizedFile.type,
@@ -356,9 +364,11 @@ export class ChunkedFileUploader {
 
     // Get upload URL with retry
     const { uploadURL, storagePath } = await retryWithBackoff(async () => {
+      await ensureCsrfToken();
       const response = await apiFetch('/api/objects/upload', {
         method: 'POST',
         headers,
+        ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
         body: JSON.stringify({
           ...(options.uploadId ? { uploadId: options.uploadId } : {}),
           ...(options.conversationId ? { conversationId: options.conversationId } : {}),
@@ -376,7 +386,10 @@ export class ChunkedFileUploader {
 
     // Upload file with retry
     await retryWithBackoff(
-      () => this.uploadWithProgress(uploadURL, file, onProgress),
+      () => uploadBlobWithProgress(uploadURL, file, onProgress, {
+        timeoutMs: 90_000,
+        skipContentType: true,
+      }),
       MAX_RETRIES,
       RETRY_BASE_DELAY_MS,
       this.abortController?.signal,
@@ -403,9 +416,11 @@ export class ChunkedFileUploader {
     }
 
     const createResponse = await retryWithBackoff(async () => {
+      await ensureCsrfToken();
       const res = await apiFetch('/api/objects/multipart/create', {
         method: 'POST',
         headers,
+        ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
         body: JSON.stringify({
           fileName: file.name,
           mimeType: file.type,
@@ -432,9 +447,11 @@ export class ChunkedFileUploader {
       const chunk = file.slice(start, end);
 
       await retryWithBackoff(async () => {
+        await ensureCsrfToken();
         const signResponse = await apiFetch('/api/objects/multipart/sign-part', {
           method: 'POST',
           headers,
+          ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
           body: JSON.stringify({
             uploadId: session.uploadId,
             partNumber,
@@ -448,7 +465,10 @@ export class ChunkedFileUploader {
 
         const { signedUrl } = await signResponse.json();
 
-        await this.uploadWithProgress(signedUrl, chunk, () => {});
+        await uploadBlobWithProgress(signedUrl, chunk, () => {}, {
+          timeoutMs: 90_000,
+          skipContentType: true,
+        });
       }, MAX_RETRIES, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
       uploadedParts.push({ partNumber });
@@ -464,9 +484,11 @@ export class ChunkedFileUploader {
     }
 
     const result = await retryWithBackoff(async () => {
+      await ensureCsrfToken();
       const completeResponse = await apiFetch('/api/objects/multipart/complete', {
         method: 'POST',
         headers,
+        ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
         body: JSON.stringify({
           uploadId: session.uploadId,
           parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
@@ -488,40 +510,10 @@ export class ChunkedFileUploader {
     data: Blob,
     onProgress: (percent: number) => void
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) {
-          const percent = Math.round((e.loaded / e.total) * 100);
-          onProgress(percent);
-        }
-      });
-
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          reject(new Error(`Upload failed with status ${xhr.status}`));
-        }
-      });
-
-      xhr.addEventListener('error', () => {
-        reject(new Error('Network error during upload'));
-      });
-
-      xhr.addEventListener('abort', () => {
-        reject(new Error('Upload cancelled'));
-      });
-
-      xhr.open('PUT', url);
-      xhr.send(data);
-
-      if (this.abortController) {
-        this.abortController.signal.addEventListener('abort', () => {
-          xhr.abort();
-        });
-      }
+    return uploadBlobWithProgress(url, data, onProgress, {
+      timeoutMs: 90_000,
+      skipContentType: true,
+      ...(this.abortController?.signal ? { signal: this.abortController.signal } : {}),
     });
   }
 
@@ -531,6 +523,9 @@ export class ChunkedFileUploader {
   ): () => void {
     this.wsListeners.set(fileId, onStatus);
     this.ensureWebSocketConnection();
+    if (this.wsAuthFailed) {
+      this.startStatusPolling(fileId);
+    }
 
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'subscribe', fileId }));
@@ -538,10 +533,58 @@ export class ChunkedFileUploader {
 
     return () => {
       this.wsListeners.delete(fileId);
+      this.stopStatusPolling(fileId);
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'unsubscribe', fileId }));
       }
     };
+  }
+
+  private startStatusPolling(fileId: string): void {
+    if (this.statusPollTimers.has(fileId)) return;
+
+    const pollOnce = async (): Promise<void> => {
+      try {
+        await ensureCsrfToken();
+        const response = await apiFetch(`/api/files/${encodeURIComponent(fileId)}/status`, {
+          method: "GET",
+        });
+        if (!response.ok) return;
+
+        const status = await response.json() as FileStatusResponse;
+        const listener = this.wsListeners.get(fileId);
+        if (listener) {
+          listener({
+            type: "file_status",
+            fileId,
+            state: status.status,
+            processingProgress: Number(status.processingProgress || 0),
+            uploadProgress: 100,
+            ...(status.processingError ? { error: status.processingError } : {}),
+          });
+        }
+
+        if (status.status === "ready" || status.status === "failed" || status.status === "error") {
+          this.stopStatusPolling(fileId);
+        }
+      } catch {
+        // Keep polling on transient errors; unsubscribe/terminal state stops the loop.
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void pollOnce();
+    }, 2000);
+    this.statusPollTimers.set(fileId, timer);
+    void pollOnce();
+  }
+
+  private stopStatusPolling(fileId: string): void {
+    const timer = this.statusPollTimers.get(fileId);
+    if (typeof timer === "number") {
+      window.clearInterval(timer);
+      this.statusPollTimers.delete(fileId);
+    }
   }
 
   private ensureWebSocketConnection(): void {
@@ -555,6 +598,7 @@ export class ChunkedFileUploader {
 
     this.ws.onopen = () => {
       this.wsReconnectAttempts = 0;
+      Array.from(this.statusPollTimers.keys()).forEach((fileId) => this.stopStatusPolling(fileId));
       this.wsListeners.forEach((_, fileId) => {
         this.ws?.send(JSON.stringify({ type: 'subscribe', fileId }));
       });
@@ -566,7 +610,10 @@ export class ChunkedFileUploader {
         if (data.type === 'auth_error') {
           this.wsAuthFailed = true;
           // Notify listeners so callers can fall back (e.g., to polling) instead of hanging.
-          this.wsListeners.forEach((listener) => listener(data));
+          this.wsListeners.forEach((listener, fileId) => {
+            listener(data);
+            this.startStatusPolling(fileId);
+          });
           this.ws?.close();
           return;
         }
@@ -590,6 +637,7 @@ export class ChunkedFileUploader {
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
+      this.wsListeners.forEach((_, fileId) => this.startStatusPolling(fileId));
     };
   }
 
@@ -602,6 +650,8 @@ export class ChunkedFileUploader {
     this.worker = null;
     this.ws?.close();
     this.ws = null;
+    this.statusPollTimers.forEach((timer) => window.clearInterval(timer));
+    this.statusPollTimers.clear();
     this.wsListeners.clear();
     this.abortController?.abort();
   }

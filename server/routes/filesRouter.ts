@@ -343,6 +343,41 @@ function getConversationId(req: Request, bodyConversationId?: unknown): string |
   return null;
 }
 
+export function validateHeaderBodyIdConsistency(
+  req: Request,
+  bodyUploadId?: unknown,
+  bodyConversationId?: unknown
+): { ok: true } | { ok: false; status: 400 | 409; error: string } {
+  const rawHeaderUploadId = extractHeader(req, HEADER_UPLOAD_ID);
+  const rawHeaderConversationId = extractHeader(req, HEADER_CONVERSATION_ID);
+  const headerUploadId = sanitizeUploadId(rawHeaderUploadId);
+  const headerConversationId = sanitizeConversationId(rawHeaderConversationId);
+  const bodyUploadIdSanitized = typeof bodyUploadId === "string" ? sanitizeUploadId(bodyUploadId) : null;
+  const bodyConversationIdSanitized = typeof bodyConversationId === "string" ? sanitizeConversationId(bodyConversationId) : null;
+
+  if (typeof rawHeaderUploadId === "string" && rawHeaderUploadId.trim().length > 0 && !headerUploadId) {
+    return { ok: false, status: 400, error: "Invalid uploadId format" };
+  }
+  if (typeof bodyUploadId === "string" && !bodyUploadIdSanitized) {
+    return { ok: false, status: 400, error: "Invalid uploadId format" };
+  }
+  if (headerUploadId && bodyUploadIdSanitized && headerUploadId !== bodyUploadIdSanitized) {
+    return { ok: false, status: 409, error: "Conflicting uploadId between header and body" };
+  }
+
+  if (typeof rawHeaderConversationId === "string" && rawHeaderConversationId.trim().length > 0 && !headerConversationId) {
+    return { ok: false, status: 400, error: "Invalid conversationId format" };
+  }
+  if (typeof bodyConversationId === "string" && !bodyConversationIdSanitized) {
+    return { ok: false, status: 400, error: "Invalid conversationId format" };
+  }
+  if (headerConversationId && bodyConversationIdSanitized && headerConversationId !== bodyConversationIdSanitized) {
+    return { ok: false, status: 409, error: "Conflicting conversationId between header and body" };
+  }
+
+  return { ok: true };
+}
+
 function sanitizeStoragePath(rawStoragePath: string | undefined): string | null {
   if (!rawStoragePath || typeof rawStoragePath !== "string") return null;
 
@@ -377,6 +412,14 @@ function buildCompletionFingerprint(parts: { partNumber: number }[]): string {
 
 function buildUploadCacheKey(userId: string, uploadId: string, conversationId: string | null): string {
   return `${userId}|${conversationId || "__no_conversation__"}|${uploadId}`;
+}
+
+function canAccessFileForActor(fileUserId: string | null | undefined, actorId: string): boolean {
+  if (!fileUserId) {
+    // Backward compatibility for legacy rows created before user scoping.
+    return true;
+  }
+  return fileUserId === actorId;
 }
 
 function removeUploadIdempotencyEntries(uploadId: string): void {
@@ -597,6 +640,95 @@ function inferMimeTypeFromFileName(fileName: string): string | null {
   };
 
   return map[ext] || null;
+}
+
+type UploadIntentMetadataValidation =
+  | {
+    ok: true;
+    hasMetadata: false;
+    fileName: "";
+    mimeType: "";
+    fileSize: 0;
+  }
+  | {
+    ok: true;
+    hasMetadata: true;
+    fileName: string;
+    mimeType: string;
+    fileSize: number;
+  }
+  | {
+    ok: false;
+    status: 400 | 413 | 415;
+    error: string;
+  };
+
+export function validateUploadIntentMetadata(input: {
+  fileName?: unknown;
+  mimeType?: unknown;
+  fileSize?: unknown;
+}): UploadIntentMetadataValidation {
+  const hasMetadata =
+    typeof input.fileName !== "undefined" ||
+    typeof input.mimeType !== "undefined" ||
+    typeof input.fileSize !== "undefined";
+
+  if (!hasMetadata) {
+    return {
+      ok: true,
+      hasMetadata: false,
+      fileName: "",
+      mimeType: "",
+      fileSize: 0,
+    };
+  }
+
+  const fileName = typeof input.fileName === "string"
+    ? sanitizeFilename(input.fileName.trim().normalize("NFKC"))
+    : "";
+  const mimeType = typeof input.mimeType === "string"
+    ? (stripContentType(input.mimeType) || input.mimeType.trim().toLowerCase())
+    : "";
+  const fileSize = Number(input.fileSize);
+
+  if (!fileName || !mimeType || !Number.isFinite(fileSize) || fileSize <= 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Missing or invalid file metadata: fileName, mimeType, fileSize",
+    };
+  }
+  if (!ALLOWED_MIME_TYPES.includes(mimeType as any)) {
+    return {
+      ok: false,
+      status: 415,
+      error: "Unsupported file type",
+    };
+  }
+  if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
+    return {
+      ok: false,
+      status: 413,
+      error: `File too large. Maximum size is ${LIMITS.MAX_FILE_SIZE_MB}MB`,
+    };
+  }
+
+  const inferredMimeType = inferMimeTypeFromFileName(fileName);
+  if (inferredMimeType && inferredMimeType !== mimeType) {
+    return {
+      ok: false,
+      status: 400,
+      error: "File extension does not match mimeType",
+    };
+  }
+
+  return {
+    ok: true,
+    hasMetadata: true,
+    fileName,
+    mimeType,
+    fileSize,
+  };
 }
 
 function ensureExtensionForMimeType(fileName: string, mimeType: string): string {
@@ -897,33 +1029,111 @@ export function createFilesRouter() {
   const objectStorageService = new ObjectStorageService();
   const uploadsDir = path.resolve(process.cwd(), "uploads");
 
+  router.use((req, res, next) => {
+    const requestId = String((req as any).requestId || req.correlationId || res.locals?.traceId || "").trim();
+    if (requestId) {
+      res.setHeader("X-Request-Id", requestId);
+    }
+    next();
+  });
+
   router.get("/api/files", async (req, res) => {
     try {
+      const actorId = getUploadActorId(req);
       const files = await storage.getFiles();
-      res.json(files);
+      res.json(files.filter((file) => canAccessFileForActor(file.userId, actorId)));
     } catch (error: any) {
       console.error("Error getting files:", error);
       res.status(500).json({ error: "Failed to get files" });
     }
   });
 
+  router.get("/api/objects/security-contract", (req, res) => {
+    const authHeader = req.headers.authorization;
+    const hasBearerAuth = typeof authHeader === "string" && /^Bearer\s+\S+$/i.test(authHeader.trim());
+    const hasApiKeyAuth = Boolean((req as any).apiKey);
+    const authMode = hasBearerAuth || hasApiKeyAuth ? "bearer-token" : "cookie-session";
+    const requiresCsrf = authMode === "cookie-session";
+    const requestId = String((req as any).requestId || req.correlationId || res.locals?.traceId || "").trim();
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.json({
+      requestId: requestId || undefined,
+      issuedAt: new Date().toISOString(),
+      authMode,
+      csrf: {
+        required: requiresCsrf,
+        tokenEndpoint: requiresCsrf ? "/api/csrf/token" : undefined,
+        cookieName: requiresCsrf ? "XSRF-TOKEN" : undefined,
+        headerNames: ["X-CSRF-Token", "X-CSRFToken"],
+        credentials: requiresCsrf ? "include" : "omit",
+        rotateOnDemand: requiresCsrf,
+      },
+      cors: {
+        requiresCredentials: true,
+        originValidation: "strict",
+        refererValidation: "strict",
+      },
+      upload: {
+        endpoint: "/api/objects/upload",
+        directUploadContentTypePolicy: "do-not-set-manually-for-multipart-or-presigned-put",
+        maxFileSizeBytes: LIMITS.MAX_FILE_SIZE_BYTES,
+        allowedMimeTypes: [...ALLOWED_MIME_TYPES],
+      },
+      idempotency: {
+        uploadIdHeader: "X-Upload-Id",
+        conversationIdHeader: "X-Conversation-Id",
+      },
+    });
+  });
+
   router.post("/api/objects/upload", async (req, res) => {
+    let actorId = "";
+    let uploadId: string | null = null;
+    let conversationId: string | null = null;
+    let hasFileMetadata = false;
+    let fileName = "";
+    let safeMimeType = "";
+    let fileSize = 0;
+
     try {
       if (!enforceUploadRateLimit(req, res)) {
         return;
       }
 
-      const actorId = getUploadActorId(req);
+      actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
-      const uploadId = getUploadId(req, rawUploadId);
-      const conversationId = getConversationId(req, rawConversationId);
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, rawConversationId);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
+      uploadId = getUploadId(req, rawUploadId);
+      conversationId = getConversationId(req, rawConversationId);
+      const metadataValidation = validateUploadIntentMetadata({
+        fileName: req.body?.fileName,
+        mimeType: req.body?.mimeType,
+        fileSize: req.body?.fileSize,
+      });
+      if (!metadataValidation.ok) {
+        return res.status(metadataValidation.status).json({ error: metadataValidation.error });
+      }
+      hasFileMetadata = metadataValidation.hasMetadata;
+      fileName = metadataValidation.fileName;
+      safeMimeType = metadataValidation.mimeType;
+      fileSize = metadataValidation.fileSize;
 
       if (typeof rawUploadId === "string" && !uploadId) {
         return res.status(400).json({ error: "Invalid uploadId format" });
       }
       if (typeof rawConversationId === "string" && !conversationId) {
         return res.status(400).json({ error: "Invalid conversationId format" });
+      }
+      if (uploadId) {
+        res.setHeader("X-Upload-Id", uploadId);
+      }
+      if (conversationId) {
+        res.setHeader("X-Conversation-Id", conversationId);
       }
 
       if (uploadId) {
@@ -932,6 +1142,8 @@ export function createFilesRouter() {
           route: "/api/objects/upload",
           uploadId,
           conversationId,
+          hasFileMetadata,
+          ...(hasFileMetadata ? { fileName, mimeType: safeMimeType, fileSize } : {}),
         });
         const existingRegistration = fileRegistrationCache.get(idempotencyKey);
         if (existingRegistration) {
@@ -993,6 +1205,8 @@ export function createFilesRouter() {
             localFallback: true,
             uploadId,
             conversationId,
+            hasFileMetadata,
+            ...(hasFileMetadata ? { fileName, mimeType: safeMimeType, fileSize } : {}),
           });
           if (existingRegistration) {
             if (existingRegistration.fingerprint !== fingerprint) {
@@ -1040,6 +1254,10 @@ export function createFilesRouter() {
       const fileSize = Number(rawFileSize);
       const totalChunks = Number(rawTotalChunks);
       const actorId = getUploadActorId(req);
+      const idConsistency = validateHeaderBodyIdConsistency(req, req.body?.uploadId, req.body?.conversationId);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
       const conversationId = getConversationId(req, req.body?.conversationId);
       const requestedUploadId = getUploadId(req, req.body?.uploadId);
       if (typeof req.body?.uploadId === "string" && !requestedUploadId) {
@@ -1070,6 +1288,10 @@ export function createFilesRouter() {
       }
 
       const uploadId = requestedUploadId || `multipart_${crypto.randomUUID()}`;
+      res.setHeader("X-Upload-Id", uploadId);
+      if (conversationId) {
+        res.setHeader("X-Conversation-Id", conversationId);
+      }
 
       let privateObjectDir: string;
       let isLocalFallback = false;
@@ -1134,20 +1356,25 @@ export function createFilesRouter() {
       }
 
       const { uploadId: rawUploadId, partNumber } = req.body;
-      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, undefined);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
+      const uploadId = getUploadId(req, rawUploadId);
       const actorId = getUploadActorId(req);
       const partNumberValue = Number(partNumber);
 
       if (!uploadId || !Number.isInteger(partNumberValue)) {
         return res.status(400).json({ error: "Missing required fields: uploadId, partNumber" });
       }
-      if (typeof rawUploadId === "string" && !uploadId) {
-        return res.status(400).json({ error: "Invalid uploadId format" });
-      }
 
       const session = multipartSessions.get(uploadId);
       if (!session) {
         return res.status(404).json({ error: "Upload session not found" });
+      }
+      res.setHeader("X-Upload-Id", uploadId);
+      if (session.conversationId) {
+        res.setHeader("X-Conversation-Id", session.conversationId);
       }
       if (session.userId !== actorId) {
         return res.status(403).json({ error: "Upload session does not belong to current actor" });
@@ -1196,13 +1423,14 @@ export function createFilesRouter() {
         parts?: unknown;
         conversationId?: unknown;
       };
-      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
-
-      if (!rawUploadId || typeof rawUploadId !== "string" || !rawParts || !Array.isArray(rawParts)) {
-        return res.status(400).json({ error: "Missing required fields: uploadId, parts" });
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, rawConversationId);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
       }
-      if (!uploadId) {
-        return res.status(400).json({ error: "Invalid uploadId format" });
+      const uploadId = getUploadId(req, rawUploadId);
+
+      if (!uploadId || !rawParts || !Array.isArray(rawParts)) {
+        return res.status(400).json({ error: "Missing required fields: uploadId, parts" });
       }
 
       const normalizedParts = rawParts
@@ -1227,12 +1455,26 @@ export function createFilesRouter() {
       if (!session) {
         return res.status(404).json({ error: "Upload session not found" });
       }
+      res.setHeader("X-Upload-Id", uploadId);
+      if (sessionConversationId || session.conversationId) {
+        res.setHeader("X-Conversation-Id", String(sessionConversationId || session.conversationId));
+      }
       if (session.userId !== actorId) {
         return res.status(403).json({ error: "Upload session does not belong to current actor" });
       }
 
       if (parts.some((partNumber) => partNumber > session.totalChunks)) {
         return res.status(400).json({ error: "Invalid or missing part list" });
+      }
+      if (parts.length !== session.totalChunks) {
+        return res.status(400).json({
+          error: `Incomplete part list. Expected ${session.totalChunks} parts, received ${parts.length}`,
+        });
+      }
+      const missingPart = Array.from({ length: session.totalChunks }, (_, index) => index + 1)
+        .find((partNumber, index) => parts[index] !== partNumber);
+      if (typeof missingPart === "number") {
+        return res.status(400).json({ error: `Missing multipart chunk: ${missingPart}` });
       }
 
       const completionKey = buildUploadCacheKey(
@@ -1439,12 +1681,17 @@ export function createFilesRouter() {
       }
 
       const { uploadId: rawUploadId } = req.body;
-      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, undefined);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
+      const uploadId = getUploadId(req, rawUploadId);
       const actorId = getUploadActorId(req);
 
       if (!rawUploadId || !uploadId) {
         return res.status(400).json({ error: "Missing required field: uploadId" });
       }
+      res.setHeader("X-Upload-Id", uploadId);
 
       const session = multipartSessions.get(uploadId);
       if (!session) {
@@ -1682,6 +1929,10 @@ export function createFilesRouter() {
       const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, rawConversationId);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
       const uploadId = getUploadId(req, rawUploadId);
       const conversationId = getConversationId(req, rawConversationId);
 
@@ -1690,6 +1941,12 @@ export function createFilesRouter() {
       }
       if (typeof rawConversationId === "string" && !conversationId) {
         return res.status(400).json({ error: "Invalid conversationId format" });
+      }
+      if (uploadId) {
+        res.setHeader("X-Upload-Id", uploadId);
+      }
+      if (conversationId) {
+        res.setHeader("X-Conversation-Id", conversationId);
       }
       // Legacy endpoint (images only). Keep for backwards-compat, but validate strictly.
       const rawName = req.body?.name;
@@ -1797,6 +2054,10 @@ export function createFilesRouter() {
       const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
+      const idConsistency = validateHeaderBodyIdConsistency(req, rawUploadId, rawConversationId);
+      if (!idConsistency.ok) {
+        return res.status(idConsistency.status).json({ error: idConsistency.error });
+      }
       const uploadId = getUploadId(req, rawUploadId);
       const conversationId = getConversationId(req, rawConversationId);
 
@@ -1805,6 +2066,12 @@ export function createFilesRouter() {
       }
       if (typeof rawConversationId === "string" && !conversationId) {
         return res.status(400).json({ error: "Invalid conversationId format" });
+      }
+      if (uploadId) {
+        res.setHeader("X-Upload-Id", uploadId);
+      }
+      if (conversationId) {
+        res.setHeader("X-Conversation-Id", conversationId);
       }
       const rawName = req.body?.name;
       const rawType = req.body?.type;
@@ -1915,6 +2182,14 @@ export function createFilesRouter() {
 
   router.delete("/api/files/:id", async (req, res) => {
     try {
+      const actorId = getUploadActorId(req);
+      const file = await storage.getFile(req.params.id);
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      if (!canAccessFileForActor(file.userId, actorId)) {
+        return res.status(403).json({ error: "File does not belong to current actor" });
+      }
       await storage.deleteFile(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -1923,11 +2198,39 @@ export function createFilesRouter() {
     }
   });
 
-  router.get("/api/files/:id/content", async (req, res) => {
+  router.get("/api/files/:id/status", async (req, res) => {
     try {
+      const actorId = getUploadActorId(req);
       const file = await storage.getFile(req.params.id);
       if (!file) {
         return res.status(404).json({ error: "File not found" });
+      }
+      if (!canAccessFileForActor(file.userId, actorId)) {
+        return res.status(403).json({ error: "File does not belong to current actor" });
+      }
+      return res.json({
+        fileId: file.id,
+        name: file.name,
+        status: file.status,
+        processingProgress: file.processingProgress ?? 0,
+        processingError: file.processingError ?? null,
+        completedAt: file.completedAt ? new Date(file.completedAt).toISOString() : null,
+      });
+    } catch (error: any) {
+      console.error("Error getting file status:", error);
+      return res.status(500).json({ error: "Failed to get file status" });
+    }
+  });
+
+  router.get("/api/files/:id/content", async (req, res) => {
+    try {
+      const actorId = getUploadActorId(req);
+      const file = await storage.getFile(req.params.id);
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      if (!canAccessFileForActor(file.userId, actorId)) {
+        return res.status(403).json({ error: "File does not belong to current actor" });
       }
       if (file.status !== "ready") {
         return res.status(202).json({ status: file.status, content: null });

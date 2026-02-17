@@ -137,6 +137,7 @@ import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
 import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
+import { CSRF_COOKIE_NAME, CSRF_TOKEN_PATTERN, issueCsrfCookie } from "./middleware/csrf";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -523,6 +524,26 @@ export async function registerRoutes(
       email: null,
       isAnonymous: true
     });
+  });
+
+  app.get("/api/csrf/token", (req: Request, res: Response) => {
+    const wantRotate = String(req.query.rotate || req.query.force || "").toLowerCase() === "1"
+      || String(req.query.refresh || "").toLowerCase() === "1"
+      || String(req.query.rotate || req.query.force || "").toLowerCase() === "true";
+
+    const isReplitDeployment = !!process.env.REPL_SLUG;
+    const isProduction = process.env.NODE_ENV === "production" || isReplitDeployment;
+    const existing = req.cookies?.[CSRF_COOKIE_NAME];
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+
+    if (!wantRotate && existing && CSRF_TOKEN_PATTERN.test(existing)) {
+      return res.json({ ok: true, csrfToken: existing, rotated: false });
+    }
+
+    const token = issueCsrfCookie(req, res, isReplitDeployment, isProduction);
+    return res.json({ ok: true, csrfToken: token, rotated: true });
   });
 
   const artifactsDir = path.join(process.cwd(), "artifacts");

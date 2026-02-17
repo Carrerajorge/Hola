@@ -32,11 +32,20 @@ export function requestLoggerMiddleware(
   res: Response,
   next: NextFunction
 ): void {
-  const traceId = nanoid(16);
+  const upstreamRequestId = typeof (req as any).requestId === "string"
+    ? (req as any).requestId
+    : undefined;
+  const traceId = upstreamRequestId && upstreamRequestId.trim().length > 0
+    ? upstreamRequestId.trim()
+    : nanoid(16);
   const startTime = Date.now();
 
   res.setHeader("X-Trace-Id", traceId);
+  res.setHeader("X-Request-Id", traceId);
   res.locals.traceId = traceId;
+  if (!res.locals.requestId) {
+    res.locals.requestId = traceId;
+  }
 
   const context: CorrelationContext = {
     traceId,

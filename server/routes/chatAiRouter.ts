@@ -202,7 +202,28 @@ function writeSse(res: Response, event: string, data: object): boolean {
     const r = res as any;
     if (r.writableEnded || r.destroyed) return false;
 
-    const payload = clampSsePayload(data);
+    const streamMeta = r?.locals?.streamMeta;
+    const assistantMessageId =
+      streamMeta?.assistantMessageId ||
+      (typeof streamMeta?.getAssistantMessageId === "function"
+        ? streamMeta.getAssistantMessageId()
+        : undefined);
+
+    const enrichedPayload: Record<string, unknown> = {
+      ...(data as Record<string, unknown>),
+    };
+
+    if (!enrichedPayload.conversationId && streamMeta?.conversationId) {
+      enrichedPayload.conversationId = streamMeta.conversationId;
+    }
+    if (!enrichedPayload.requestId && streamMeta?.requestId) {
+      enrichedPayload.requestId = streamMeta.requestId;
+    }
+    if (!enrichedPayload.assistantMessageId && assistantMessageId) {
+      enrichedPayload.assistantMessageId = assistantMessageId;
+    }
+
+    const payload = clampSsePayload(enrichedPayload);
     let serialized: string;
     try {
       serialized = JSON.stringify(payload);
@@ -223,6 +244,13 @@ function writeSse(res: Response, event: string, data: object): boolean {
       (res as unknown as { flush: Function }).flush();
     } else if (res.socket && typeof res.socket.write === 'function') {
       res.socket.write('');
+    }
+    if (typeof streamMeta?.onWrite === "function") {
+      try {
+        streamMeta.onWrite();
+      } catch (observerError) {
+        console.warn("[SSE] streamMeta.onWrite failed:", observerError);
+      }
     }
     return true;
   } catch (err) {
@@ -911,6 +939,58 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 let heartbeatInterval: NodeJS.Timeout | null = null;
 let isConnectionClosed = false;
 let claimedRun: any = null;
+let assistantMessageId: string | null = null;
+let streamHardTimeout: NodeJS.Timeout | null = null;
+let streamIdleTimeout: NodeJS.Timeout | null = null;
+
+const STREAM_HARD_TIMEOUT_MS = 180_000;
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+const clearStreamTimeouts = (): void => {
+  if (streamHardTimeout) {
+    clearTimeout(streamHardTimeout);
+    streamHardTimeout = null;
+  }
+  if (streamIdleTimeout) {
+    clearTimeout(streamIdleTimeout);
+    streamIdleTimeout = null;
+  }
+};
+
+const endStreamByTimeout = (code: string, message: string): void => {
+  if (isConnectionClosed) return;
+  isConnectionClosed = true;
+  clearStreamTimeouts();
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+  const streamMeta = (res as any)?.locals?.streamMeta;
+  if (streamMeta) {
+    streamMeta.onWrite = undefined;
+  }
+  writeSse(res, "error", {
+    code,
+    error: message,
+    timeout: true,
+    timestamp: Date.now(),
+  });
+  if (!(res as any).writableEnded) {
+    res.end();
+  }
+};
+
+const resetIdleTimeout = (): void => {
+  if (isConnectionClosed) return;
+  if (streamIdleTimeout) {
+    clearTimeout(streamIdleTimeout);
+  }
+  streamIdleTimeout = setTimeout(() => {
+    endStreamByTimeout(
+      "stream_inactivity_timeout",
+      `Stream closed after ${STREAM_IDLE_TIMEOUT_MS}ms without SSE activity`
+    );
+  }, STREAM_IDLE_TIMEOUT_MS);
+};
 
 const skipRunStreamDedup = new Map<string, { requestId: string; startedAt: number }>();
 const SKIPRUN_STREAM_DEDUP_TTL_MS = 20_000;
@@ -956,6 +1036,32 @@ const cleanSkipRunStreamDedup = (): void => {
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+      const streamConversationId = sanitizeStreamIdentifier(
+        typeof conversationId === "string" && conversationId.trim().length > 0
+          ? conversationId
+          : (typeof chatId === "string" && chatId.trim().length > 0
+            ? chatId
+            : `chat_${requestId}`),
+        "chat_stream"
+      );
+
+      (res as any).locals = (res as any).locals || {};
+      (res as any).locals.streamMeta = {
+        conversationId: streamConversationId,
+        requestId,
+        getAssistantMessageId: () => assistantMessageId,
+        onWrite: () => resetIdleTimeout(),
+      };
+
+      if (!streamHardTimeout) {
+        streamHardTimeout = setTimeout(() => {
+          endStreamByTimeout(
+            "stream_hard_timeout",
+            `Stream exceeded maximum duration of ${STREAM_HARD_TIMEOUT_MS}ms`
+          );
+        }, STREAM_HARD_TIMEOUT_MS);
+      }
+      resetIdleTimeout();
 
       const parsedSkillScopes = normalizeStreamSkillScopes(skillScopes);
 
@@ -1234,6 +1340,7 @@ const cleanSkipRunStreamDedup = (): void => {
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }
+          clearStreamTimeouts();
           console.log("[SSE] Connection closed (early handler)", { requestId });
         });
       }
@@ -1290,7 +1397,7 @@ const cleanSkipRunStreamDedup = (): void => {
         try {
           const executeSkillPromise = getSkillPlatformService().executeFromMessage({
             requestId,
-            conversationId,
+            conversationId: streamConversationId,
             runId: effectiveSkillRunId,
             userId: effectiveUserId,
             userMessage: normalizedUserQuery,
@@ -1451,7 +1558,7 @@ const cleanSkipRunStreamDedup = (): void => {
           ];
 
           const quick = await llmGateway.chat(llmMessages as any, {
-            userId: effectiveUserId || conversationId || "anonymous",
+          userId: effectiveUserId || streamConversationId || "anonymous",
             requestId,
             model: model || DEFAULT_MODEL,
             provider,
@@ -1636,7 +1743,7 @@ const cleanSkipRunStreamDedup = (): void => {
       }
 
       // CONTEXT FIX: Augment client messages with server-side history
-      const effectiveChatId = chatId || conversationId;
+      const effectiveChatId = chatId || conversationId || streamConversationId;
       const messages = await conversationMemoryManager.augmentWithHistory(
         effectiveChatId,
         clientMessages,
@@ -1699,7 +1806,7 @@ const cleanSkipRunStreamDedup = (): void => {
       // If no session from session_id, try to create/get one via gptId
       if (!gptSessionContract && gptId) {
         try {
-          const effectiveChatIdForSession = chatId || conversationId;
+          const effectiveChatIdForSession = chatId || conversationId || streamConversationId;
           if (isValidConversationIdForStream(effectiveChatIdForSession)) {
             gptSessionContract = await getOrCreateSession(effectiveChatIdForSession, gptId);
             console.log(`[Stream] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
@@ -1739,13 +1846,16 @@ const cleanSkipRunStreamDedup = (): void => {
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
-              const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+              const effectiveChatId = chatId || conversationId || streamConversationId;
 
               await handleProductionRequest(
                 {
                   message: userMessageText,
                   userId: userId,
                   chatId: effectiveChatId,
+                  conversationId: streamConversationId,
+                  requestId,
+                  assistantMessageId,
                   intentResult,
                   locale: intentResult.language_detected || 'es',
                 },
@@ -1825,7 +1935,7 @@ const cleanSkipRunStreamDedup = (): void => {
 
       let unifiedContext: UnifiedChatContext | null = null;
       try {
-        const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+        const effectiveChatId = chatId || conversationId || streamConversationId;
         unifiedContext = await createUnifiedRun({
           messages: messages as Array<{ role: string; content: string }>,
           chatId: effectiveChatId,
@@ -1914,7 +2024,7 @@ const cleanSkipRunStreamDedup = (): void => {
 
         // Pass userMessageText to detect if user wants to search for articles first
         if (featureFlags.canvasEnabled && isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
-          const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+          const effectiveChatId = chatId || conversationId || streamConversationId;
 
           console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
@@ -1924,6 +2034,9 @@ const cleanSkipRunStreamDedup = (): void => {
                 message: userMessageText,
                 userId: userId,
                 chatId: effectiveChatId,
+                conversationId: streamConversationId,
+                requestId,
+                assistantMessageId,
                 intentResult,
                 locale: intentResult.language_detected || 'es',
               },
@@ -1949,6 +2062,7 @@ const cleanSkipRunStreamDedup = (): void => {
           if (heartbeatInterval) {
             clearInterval(heartbeatInterval);
           }
+          clearStreamTimeouts();
           console.log(`[SSE] Connection closed (late handler): ${requestId}`);
         });
       }
@@ -2041,7 +2155,7 @@ const cleanSkipRunStreamDedup = (): void => {
               const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
               console.error(`[Stream] ${errorMsg}`);
 
-              res.write(`event: error\ndata: ${JSON.stringify({
+              writeSse(res, "error", {
                 type: 'coverage_failure',
                 message: 'No se pudieron procesar todos los archivos solicitados',
                 details: {
@@ -2051,9 +2165,10 @@ const cleanSkipRunStreamDedup = (): void => {
                 },
                 requestId,
                 timestamp: Date.now()
-              })}\n\n`);
+              });
 
               clearInterval(heartbeatInterval);
+              clearStreamTimeouts();
               return res.end();
             }
 
@@ -2067,15 +2182,16 @@ const cleanSkipRunStreamDedup = (): void => {
         } catch (batchError: any) {
           console.error("[Stream] Batch processing error:", batchError);
 
-          res.write(`event: error\ndata: ${JSON.stringify({
+          writeSse(res, "error", {
             type: 'batch_processing_error',
             message: 'Error al procesar los archivos adjuntos',
             details: batchError.message,
             requestId,
             timestamp: Date.now()
-          })}\n\n`);
+          });
 
           clearInterval(heartbeatInterval);
+          clearStreamTimeouts();
           return res.end();
         }
       }
@@ -2354,7 +2470,7 @@ ${attachmentContext}`;
       };
 
       // Ensure chat exists so we can persist messages (critical for memory)
-      const effectiveChatIdForPersistence = chatId || conversationId || `chat_${Date.now()}`;
+      const effectiveChatIdForPersistence = chatId || conversationId || streamConversationId;
       const ensureChatStageStart = performance.now();
       try {
         const existingChat = await storage.getChat(effectiveChatIdForPersistence);
@@ -2544,7 +2660,6 @@ ${attachmentContext}`;
       }
 
       // Create an assistant message placeholder at the start (so we can stream-update and persist)
-      let assistantMessageId: string | null = null;
       const assistantPlaceholderStageStart = performance.now();
       try {
         const assistantMessage = await storage.createChatMessage({
@@ -2677,7 +2792,7 @@ ${attachmentContext}`;
 
           const agentResponse = await executeAgentLoop(agentMessages, res, {
             runId: effectiveRunId,
-            userId: userId || conversationId || "anonymous",
+            userId: userId || streamConversationId || "anonymous",
             chatId: effectiveChatIdForPersistence,
             requestSpec: unifiedContext.requestSpec,
             maxIterations: 10
@@ -2727,7 +2842,7 @@ ${attachmentContext}`;
       const streamGenerator = llmGateway.streamChat(
         modelMessages,
         {
-          userId: userId || conversationId || "anonymous",
+          userId: userId || streamConversationId || "anonymous",
           requestId,
           model: effectiveModel,
           provider: effectiveProvider,
@@ -2909,7 +3024,7 @@ ${attachmentContext}`;
         await auditLog(req, {
           action: "chat_stream",
           resource: "chats",
-          resourceId: conversationId || undefined,
+          resourceId: streamConversationId || undefined,
           details: {
             messageCount: messages.length,
             requestId,
@@ -2955,6 +3070,7 @@ ${attachmentContext}`;
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
       }
+      clearStreamTimeouts();
       if (!timingReported) {
         reportTimings(isConnectionClosed ? "connection_closed" : "ended");
       }

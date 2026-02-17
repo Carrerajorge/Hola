@@ -73,6 +73,7 @@ const MAX_POLICY_ID_TEXT_LENGTH = 160;
 const MAX_PAIRING_CODE_LENGTH = 16;
 const MAX_OWNER_SET_SIZE = 128;
 const SAFE_CHANNEL_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const SAFE_WORKSPACE_ID_RE = /^workspace:[A-Za-z0-9._:@+\-]+$/;
 const MAX_POLICY_MESSAGE_LENGTH = 320;
 
 function enforcePolicyText(value: unknown, fallback: string): string {
@@ -406,6 +407,51 @@ export function evaluateChannelPolicy(
         replyText: normalizePayloadErrorMessage(),
         policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
         requiresOwnerHandshake: true,
+        shouldRespond: false,
+      },
+    };
+  }
+
+  if (context.envelope.conversationKey.threadId !== context.envelope.threadId) {
+    return {
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
+        requiresOwnerHandshake: false,
+        shouldRespond: false,
+      },
+    };
+  }
+
+  if (context.envelope.conversationKey.channelAccountId !== context.envelope.channelKey) {
+    return {
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
+        requiresOwnerHandshake: false,
+        shouldRespond: false,
+      },
+    };
+  }
+
+  if (!SAFE_WORKSPACE_ID_RE.test(context.envelope.conversationKey.workspaceId)) {
+    return {
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
+        requiresOwnerHandshake: false,
         shouldRespond: false,
       },
     };

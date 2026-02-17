@@ -14,6 +14,8 @@ import { conversationsRouter } from "./conversations";
 import { agentRouter } from "./agent";
 import { excelRouter } from "./excel";
 import { financeRouter } from "./finance";
+import { crossReferenceRouter } from "./crossReference";
+import { globalSearchRouter } from "./globalSearch";
 import { setupBullBoard } from "../../lib/bullBoard";
 
 export const adminRouter = Router();
@@ -40,16 +42,18 @@ adminRouter.use("/conversations", conversationsRouter);
 adminRouter.use("/agent", agentRouter);
 adminRouter.use("/excel", excelRouter);
 adminRouter.use("/finance", financeRouter);
+adminRouter.use("/cross-ref", crossReferenceRouter);
+adminRouter.use("/search", globalSearchRouter);
 adminRouter.use("/queues", setupBullBoard());
 
 // Database status root endpoint for convenience
 adminRouter.get("/db-status", (req, res) => {
-    res.redirect("/api/admin/database/status");
+  res.redirect("/api/admin/database/status");
 });
 
 // Seed status root endpoint (for backwards compatibility if needed)
 adminRouter.get("/seed-status", (req, res) => {
-    res.json({ seeded: true, message: "Use /api/admin/settings/seed to re-seed" });
+  res.json({ seeded: true, message: "Use /api/admin/settings/seed to re-seed" });
 });
 
 export const createAdminRouter = () => adminRouter;
