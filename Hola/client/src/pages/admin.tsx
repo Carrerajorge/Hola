@@ -377,6 +377,7 @@ function DashboardSection() {
 }
 
 function UsersSection() {
+  const { navigateTo } = useAdminNavigation();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState<any>(null);
@@ -718,6 +719,29 @@ function UsersSection() {
                 <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewingUser.tags?.length ? viewingUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
                 <div className="col-span-2"><span className="text-muted-foreground">Internal Notes:</span> <p className="mt-1 text-xs">{viewingUser.internalNotes || "-"}</p></div>
               </div>
+              {/* Cross-section links for this user */}
+              <Separator />
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Related Sections</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-1 text-xs" onClick={() => { setViewingUser(null); navigateTo("payments", { userId: viewingUser.id, userEmail: viewingUser.email }); }}>
+                    <CreditCard className="h-3.5 w-3.5" />
+                    <span>Payments</span>
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-1 text-xs" onClick={() => { setViewingUser(null); navigateTo("conversations", { userId: viewingUser.id }); }}>
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    <span>Conversations</span>
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-1 text-xs" onClick={() => { setViewingUser(null); navigateTo("invoices", { userId: viewingUser.id }); }}>
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>Invoices</span>
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-auto py-2 flex-col gap-1 text-xs" onClick={() => { setViewingUser(null); navigateTo("security", { userId: viewingUser.id }); }}>
+                    <Shield className="h-3.5 w-3.5" />
+                    <span>Security Events</span>
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>
@@ -817,6 +841,7 @@ function formatDuration(start: Date | string | null, end: Date | string | null):
 }
 
 function ConversationsSection() {
+  const { navigateTo } = useAdminNavigation();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<string>("createdAt");
@@ -1278,10 +1303,12 @@ function ConversationsSection() {
                     </td>
                     <td className="p-3">
                       <span
-                        className="text-xs truncate max-w-[150px] block hover:text-primary transition-colors cursor-pointer"
-                        title={conv.user?.email}
+                        className="text-xs truncate max-w-[150px] block hover:text-primary hover:underline transition-colors cursor-pointer"
+                        title={`View user: ${conv.user?.email}`}
+                        onClick={(e) => { e.stopPropagation(); if (conv.user?.id) navigateTo("users", { userId: conv.user.id }); }}
                       >
                         {conv.user?.email || "Anonymous"}
+                        {conv.user?.id && <ExternalLink className="inline h-2.5 w-2.5 ml-1 opacity-50" />}
                       </span>
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">{formatRelativeTime(conv.createdAt)}</td>
@@ -2275,6 +2302,7 @@ function AIModelsSection() {
 }
 
 function PaymentsSection() {
+  const { navigateTo } = useAdminNavigation();
   const queryClient = useQueryClient();
   const [view, setView] = useState<"all" | "unmatched">("all");
   const [page, setPage] = useState(1);
@@ -2983,8 +3011,10 @@ function PaymentsSection() {
               }}
             >
               <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
-              <div className="min-w-0">
-                <p className="truncate">{payment.userEmail || payment.userName || payment.userId || "N/A"}</p>
+              <div className="min-w-0" onClick={(e) => { e.stopPropagation(); if (payment.userId) navigateTo("users", { userId: payment.userId }); }} title={payment.userId ? "View user" : undefined}>
+                <p className={cn("truncate", payment.userId && "hover:text-primary hover:underline cursor-pointer")}>{payment.userEmail || payment.userName || payment.userId || "N/A"}
+                  {payment.userId && <ExternalLink className="inline h-2.5 w-2.5 ml-1 opacity-50" />}
+                </p>
                 {payment.userId && (
                   <p className="text-xs text-muted-foreground font-mono truncate">{String(payment.userId).slice(0, 16)}</p>
                 )}
@@ -3060,8 +3090,8 @@ function PaymentsSection() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="rounded-lg border p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Usuario</p>
+                <div className={cn("rounded-lg border p-3", paymentDetails?.payment?.userId && "cursor-pointer hover:border-primary/50 transition-colors group")} onClick={() => { if (paymentDetails?.payment?.userId) { setDetailsPaymentId(null); navigateTo("users", { userId: paymentDetails.payment.userId }); } }}>
+                  <p className="text-xs text-muted-foreground mb-1">Usuario {paymentDetails?.payment?.userId && <ExternalLink className="inline h-2.5 w-2.5 ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity" />}</p>
                   <p className="text-sm">
                     {paymentDetails?.payment?.userEmail || paymentDetails?.payment?.userName || paymentDetails?.payment?.userId || "Sin usuario"}
                   </p>
@@ -3196,6 +3226,7 @@ function PaymentsSection() {
 }
 
 function InvoicesSection() {
+  const { navigateTo } = useAdminNavigation();
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
@@ -3287,7 +3318,10 @@ function InvoicesSection() {
           invoices.map((invoice: any) => (
             <div key={invoice.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
               <span className="font-mono text-xs">{invoice.invoiceNumber}</span>
-              <span>{invoice.userId || "N/A"}</span>
+              <span className={cn(invoice.userId && "text-primary hover:underline cursor-pointer")} onClick={() => { if (invoice.userId) navigateTo("users", { userId: invoice.userId }); }} title={invoice.userId ? "View user" : undefined}>
+                {invoice.userId || "N/A"}
+                {invoice.userId && <ExternalLink className="inline h-2.5 w-2.5 ml-1 opacity-50" />}
+              </span>
               <span className="font-medium">€{invoice.amount}</span>
               <span className="text-muted-foreground">
                 {invoice.createdAt ? format(new Date(invoice.createdAt), "dd MMM yyyy") : "-"}
@@ -3719,6 +3753,7 @@ const APPLIED_TO_OPTIONS = [
 ];
 
 function SecuritySection() {
+  const { navigateTo } = useAdminNavigation();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("overview");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -4221,7 +4256,13 @@ function SecuritySection() {
                       <div>
                         <span className="font-medium text-sm">{log.action}</span>
                         <span className="text-muted-foreground text-sm"> - {log.resource}</span>
-                        <div className="text-xs text-muted-foreground">{getActorLabel(log)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {log.userId && !String(log.userId).startsWith("anon_") ? (
+                            <span className="hover:text-primary hover:underline cursor-pointer" onClick={() => navigateTo("users", { userId: log.userId })}>
+                              {getActorLabel(log)} <ExternalLink className="inline h-2 w-2 opacity-50" />
+                            </span>
+                          ) : getActorLabel(log)}
+                        </div>
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -4490,7 +4531,13 @@ function SecuritySection() {
                       <td className="p-3 text-sm">
                         {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
                       </td>
-                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">{getActorLabel(log)}</td>
+                      <td className="p-3 text-sm text-muted-foreground max-w-[220px] truncate">
+                        {log.userId && !String(log.userId).startsWith("anon_") ? (
+                          <span className="hover:text-primary hover:underline cursor-pointer" onClick={() => navigateTo("users", { userId: log.userId })} title="View user">
+                            {getActorLabel(log)} <ExternalLink className="inline h-2 w-2 opacity-50" />
+                          </span>
+                        ) : getActorLabel(log)}
+                      </td>
                       <td className="p-3 font-medium text-sm">{log.action}</td>
                       <td className="p-3 text-sm">{log.resource || "-"}</td>
                       <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>

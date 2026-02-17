@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { createGptActionRuntime, normalizeGptActionRequestPayload } from "../services/gptActionRuntime";
 import { gptActionCreateSchema, gptActionUpdateSchema, gptActionUseSchema } from "@shared/schema/gpt";
+import { safeErrorMessage } from "../lib/safeError";
 
 const DEFAULT_GPT_MODEL = "grok-4-1-fast-non-reasoning";
 const DEFAULT_GPT_KNOWLEDGE_SOURCES: Array<Record<string, any>> = [];
@@ -365,7 +366,7 @@ export function createGptRouter() {
       const categories = await storage.getGptCategories();
       res.json(categories);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -384,7 +385,7 @@ export function createGptRouter() {
       });
       res.json(category);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -394,7 +395,7 @@ export function createGptRouter() {
       const myGpts = await storage.getGpts({ creatorId: currentUserId });
       res.json(Array.isArray(myGpts) ? myGpts : []);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -414,7 +415,7 @@ export function createGptRouter() {
 
       res.json(accessibleGpts);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -438,7 +439,7 @@ export function createGptRouter() {
 
       res.json(gptList);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -448,7 +449,7 @@ export function createGptRouter() {
       const gptList = await storage.getPopularGpts(limit);
       res.json(gptList);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -534,7 +535,7 @@ export function createGptRouter() {
       };
       res.json(response);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -550,7 +551,7 @@ export function createGptRouter() {
       }
       res.json(gpt);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -621,7 +622,7 @@ export function createGptRouter() {
 
       res.json(updatedGpt);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -635,7 +636,7 @@ export function createGptRouter() {
       await storage.deleteGpt(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -644,7 +645,7 @@ export function createGptRouter() {
       await storage.incrementGptUsage(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -653,7 +654,7 @@ export function createGptRouter() {
       const versions = await storage.getGptVersions(req.params.id);
       res.json(versions);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -711,7 +712,7 @@ export function createGptRouter() {
 
       res.json(version);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -791,7 +792,7 @@ export function createGptRouter() {
         gpt: updatedGpt
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -801,7 +802,7 @@ export function createGptRouter() {
       const knowledge = await storage.getGptKnowledge(req.params.id);
       res.json(knowledge);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -832,7 +833,7 @@ export function createGptRouter() {
       });
       res.json(knowledge);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -850,7 +851,7 @@ export function createGptRouter() {
       }
       res.json(knowledge);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -864,7 +865,7 @@ export function createGptRouter() {
       await storage.deleteGptKnowledge(req.params.knowledgeId);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -874,7 +875,7 @@ export function createGptRouter() {
       const actions = await storage.getGptActions(req.params.id);
       res.json(actions);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -900,7 +901,7 @@ export function createGptRouter() {
       const action = await storage.createGptAction(validation.data);
       res.json(action);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -931,7 +932,7 @@ export function createGptRouter() {
       res.json(updatedAction);
       return;
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -950,7 +951,7 @@ export function createGptRouter() {
       await storage.deleteGptAction(req.params.actionId);
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
@@ -1111,7 +1112,7 @@ export function createGptRouter() {
         relatedGpts
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: safeErrorMessage(error) });
     }
   });
 
