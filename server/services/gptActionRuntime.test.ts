@@ -154,4 +154,64 @@ describe("gptActionRuntime shared helpers", () => {
       });
     });
   });
+
+  describe("request/response hardening", () => {
+    it("rejects oversized request bodies before fetching", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const action = {
+        id: "action-1",
+        name: "action-test",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "POST",
+        bodyTemplate: JSON.stringify({ payload: "x".repeat(90_000) }),
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error?.message || "").toContain("exceeds");
+    });
+
+    it("rejects structured schema responses with unsupported content-type", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          return new Response("ok", { status: 200, headers: { "content-type": "image/png" } });
+        },
+      });
+
+      const action = {
+        id: "action-2",
+        name: "action-test-2",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        responseSchema: { type: "object", properties: { value: { type: "string" } } },
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("content-type");
+    });
+  });
 });

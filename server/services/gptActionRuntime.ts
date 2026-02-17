@@ -28,6 +28,7 @@ const MAX_HEADERS = 50;
 const DEFAULT_RETRY_DELAY_MS = 500;
 const MAX_REQUEST_PAYLOAD_BYTES = 50000;
 const MAX_RESPONSE_PAYLOAD_BYTES = 50000;
+const MAX_REQUEST_BODY_BYTES = 80_000;
 const MAX_FETCH_RESPONSE_BYTES = 256_000;
 const DEFAULT_CONVERSATION_RATE_WINDOW_MS = 60_000;
 const DEFAULT_RATE_BUFFER = 2;
@@ -877,7 +878,7 @@ export class GptActionRuntime {
     this.limiter = new ConversationActionLimiter(
       DEFAULT_MAX_CONCURRENCY,
       8_000,
-      this.now
+      () => this.now()
     );
     this.rateLimiter = new ActionRateLimiter(DEFAULT_CONVERSATION_RATE_WINDOW_MS);
   }
@@ -1247,7 +1248,14 @@ export class GptActionRuntime {
 
       if (method !== "GET" && method !== "HEAD") {
         if (body !== undefined) {
-          const content = typeof body === "string" ? body : JSON.stringify(body);
+          const content = typeof body === "string" ? body : safeStringify(body);
+          if (content.length > MAX_REQUEST_BODY_BYTES) {
+            throw this.makeNetworkError(
+              `Request body exceeds maximum allowed size: ${content.length} > ${MAX_REQUEST_BODY_BYTES}`,
+              "request_too_large",
+              false
+            );
+          }
           responseInit.body = content;
           responseInit.headers = {
             ...responseInit.headers,
@@ -1541,6 +1549,23 @@ export class GptActionRuntime {
     } catch {
       // Best-effort audit: never fail operation on log errors.
     }
+  }
+
+  private async recordFailureLog(
+    action: GptAction,
+    payload: GptActionExecuteInput,
+    result: GptActionExecutionPayload,
+    requestId?: string | null
+  ): Promise<void> {
+    await this.storeToolCallLog(
+      payload,
+      action,
+      false,
+      result.statusCode,
+      result.latencyMs,
+      result.error?.message || "Action execution failed",
+      new Error(requestId || result.error?.message || "Action execution failed")
+    );
   }
 
   private async completeIdempotencyIfEnabled(
