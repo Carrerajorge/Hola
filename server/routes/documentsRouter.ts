@@ -2582,7 +2582,7 @@ Generate the command plan:`;
         } = {
           shareId,
           shareUrl,
-          expiresIn: `${Math.max(1, Math.round(SHARE_TTL_MS / (60 * 60 * 1000))} hours`,
+          expiresIn: `${Math.max(1, Math.round(SHARE_TTL_MS / (60 * 60 * 1000)))} hours`,
           contentType: normalizedContentType,
         };
 
