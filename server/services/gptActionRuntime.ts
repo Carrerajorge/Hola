@@ -34,6 +34,7 @@ const DEFAULT_MAX_CONCURRENCY = 4;
 const DEFAULT_FETCH_RETRY_LIMIT = 3;
 const MAX_RETRY_ATTEMPTS = 10;
 const CONCURRENCY_KEY_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
+const BACKOFF_JITTER_RATIO = 0.2;
 
 interface GptActionExecuteInput {
   action: GptAction;
@@ -1167,8 +1168,7 @@ export class GptActionRuntime {
 
       if (!response.ok) {
         const shouldRetry = response.status >= 500 || response.status === 429 || response.status === 408;
-        const retryAfter = response.headers.get("retry-after");
-        const parsedRetryAfter = retryAfter ? Math.max(1, Number.parseInt(retryAfter, 10) || 1) : undefined;
+        const parsedRetryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
         throw this.makeNetworkError(
           `Execution failed with status ${response.status}`,
           shouldRetry ? "execution_retryable" : "execution_not_retryable",
@@ -1514,7 +1514,9 @@ export class GptActionRuntime {
 
   private computeBackoff(attempt: number): number {
     const base = DEFAULT_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-    return Math.min(8_000, base);
+    const capped = Math.min(8_000, base);
+    const jitter = capped * BACKOFF_JITTER_RATIO * (Math.random() - 0.5) * 2;
+    return Math.max(DEFAULT_RETRY_DELAY_MS, Math.floor(capped + jitter));
   }
 
   private mapCircuitState(state: string): number {
@@ -1554,6 +1556,29 @@ function normalizeRequestInput(input: unknown): Record<string, unknown> {
     return input as Record<string, unknown>;
   }
   return {};
+}
+
+export function parseRetryAfterHeader(rawHeader: string | null | undefined): number | undefined {
+  if (!rawHeader) {
+    return undefined;
+  }
+
+  const trimmed = rawHeader.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^[+-]?\d+$/.test(trimmed)) {
+    const seconds = Number.parseInt(trimmed, 10);
+    return seconds > 0 ? Math.max(1, seconds) : undefined;
+  }
+
+  const parsedDate = Date.parse(trimmed);
+  if (Number.isFinite(parsedDate)) {
+    return Math.max(1, Math.ceil((parsedDate - Date.now()) / 1000));
+  }
+
+  return undefined;
 }
 
 export function normalizeGptActionRequestPayload(rawInput: Record<string, unknown>): Record<string, unknown> {
