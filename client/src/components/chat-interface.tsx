@@ -377,10 +377,10 @@ export function ChatInterface({
   onCloseSidebar,
   activeGpt,
   aiState,
-  setAiState,
+  setAiState: setAiStateProp,
   aiStateChatId,
   aiProcessSteps,
-  setAiProcessSteps,
+  setAiProcessSteps: setAiProcessStepsProp,
   chatId,
   chatTitle,
   onOpenApps,
@@ -418,6 +418,31 @@ export function ChatInterface({
   docGenerationState: docGenerationStateProp,
   setDocGenerationState: setDocGenerationStateProp,
 }: ChatInterfaceProps) {
+  // ─── Chat-scoped setAiState wrapper ───
+  // When the user switches to a different chat, this component remounts with a new key.
+  // However, the OLD component's async SSE loop still holds a stale reference to the
+  // parent's setAiState. This wrapper captures the chatId at mount time and ignores
+  // state changes from stale closures after the component unmounts.
+  const mountedChatIdRef = useRef(chatId);
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    mountedChatIdRef.current = chatId;
+    unmountedRef.current = false;
+    return () => { unmountedRef.current = true; };
+  }, [chatId]);
+
+  // Replace setAiState and setAiProcessSteps with guarded versions that prevent cross-chat pollution.
+  // After unmount (user switched chats), calls from stale SSE loops are silently dropped.
+  const setAiState = useCallback((newState: AiState | ((prev: AiState) => AiState)) => {
+    if (unmountedRef.current) return; // Component unmounted — drop stale update
+    setAiStateProp(newState);
+  }, [setAiStateProp]) as React.Dispatch<React.SetStateAction<AiState>>;
+
+  const setAiProcessSteps = useCallback((newSteps: any) => {
+    if (unmountedRef.current) return; // Component unmounted — drop stale update
+    setAiProcessStepsProp(newSteps);
+  }, [setAiProcessStepsProp]) as React.Dispatch<React.SetStateAction<any[]>>;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
   const {
@@ -1783,7 +1808,7 @@ export function ChatInterface({
   // The streaming will complete and update the correct chat via onSendMessage
 
   const agent = useAgent();
-  const browserSession = useBrowserSession();
+  const browserSession = useBrowserSession(chatId);
 
   useEffect(() => {
     if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
@@ -2437,11 +2462,11 @@ export function ChatInterface({
         } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
           // Browser automation starting — open the virtual computer panel
           setAiState("agent_working");
-          globalStartSseSession(data.args?.goal || "Automatización web");
+          globalStartSseSession(data.args?.goal || "Automatización web", chatId);
           setIsBrowserOpen(true);
         } else if (eventType === "browser_step") {
           // Real-time browser step with screenshot — update the virtual computer
-          globalUpdateFromSseStep(data);
+          globalUpdateFromSseStep(data, chatId);
           setAiState("agent_working");
           if (!isBrowserOpen) setIsBrowserOpen(true);
         } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -2456,7 +2481,7 @@ export function ChatInterface({
               screenshot: "",
               url: "",
               title: "",
-            });
+            }, chatId);
           }
         }
       },
@@ -3534,10 +3559,10 @@ export function ChatInterface({
         onEvent: (eventType, data) => {
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web");
+            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
+            globalUpdateFromSseStep(data, effectiveChatIdForStream);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           }
@@ -3668,10 +3693,10 @@ export function ChatInterface({
           // Handle browser automation events from agent loop
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web");
+            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
+            globalUpdateFromSseStep(data, effectiveChatIdForStream);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -3685,7 +3710,7 @@ export function ChatInterface({
                 screenshot: "",
                 url: "",
                 title: "",
-              });
+              }, effectiveChatIdForStream);
             }
           }
         },
@@ -5447,14 +5472,14 @@ IMPORTANTE:
                 if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
                   setAiState("agent_working");
                   setIsBrowserOpen(true);
-                  globalStartSseSession(data?.args?.goal || "Automatización web");
+                  globalStartSseSession(data?.args?.goal || "Automatización web", effectiveStreamChatId);
                   return;
                 }
 
                 if (eventType === "browser_step") {
                   setAiState("agent_working");
                   if (!isBrowserOpen) setIsBrowserOpen(true);
-                  globalUpdateFromSseStep(data);
+                  globalUpdateFromSseStep(data, effectiveStreamChatId);
                   return;
                 }
 
@@ -5469,7 +5494,7 @@ IMPORTANTE:
                       screenshot: "",
                       url: "",
                       title: "",
-                    });
+                    }, effectiveStreamChatId);
                   }
                   return;
                 }

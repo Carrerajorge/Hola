@@ -359,10 +359,10 @@ export function ChatInterface({
   onCloseSidebar,
   activeGpt,
   aiState,
-  setAiState,
+  setAiState: setAiStateProp,
   aiStateChatId,
   aiProcessSteps,
-  setAiProcessSteps,
+  setAiProcessSteps: setAiProcessStepsProp,
   chatId,
   chatTitle,
   onOpenApps,
@@ -400,6 +400,31 @@ export function ChatInterface({
   docGenerationState: docGenerationStateProp,
   setDocGenerationState: setDocGenerationStateProp,
 }: ChatInterfaceProps) {
+  // ─── Chat-scoped setAiState wrapper ───
+  // When the user switches to a different chat, this component remounts with a new key.
+  // However, the OLD component's async SSE loop still holds a stale reference to the
+  // parent's setAiState. This wrapper captures the chatId at mount time and ignores
+  // state changes from stale closures after the component unmounts.
+  const mountedChatIdRef = useRef(chatId);
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    mountedChatIdRef.current = chatId;
+    unmountedRef.current = false;
+    return () => { unmountedRef.current = true; };
+  }, [chatId]);
+
+  // Replace setAiState and setAiProcessSteps with guarded versions that prevent cross-chat pollution.
+  // After unmount (user switched chats), calls from stale SSE loops are silently dropped.
+  const setAiState = useCallback((newState: AiState | ((prev: AiState) => AiState)) => {
+    if (unmountedRef.current) return; // Component unmounted — drop stale update
+    setAiStateProp(newState);
+  }, [setAiStateProp]) as React.Dispatch<React.SetStateAction<AiState>>;
+
+  const setAiProcessSteps = useCallback((newSteps: any) => {
+    if (unmountedRef.current) return; // Component unmounted — drop stale update
+    setAiProcessStepsProp(newSteps);
+  }, [setAiProcessStepsProp]) as React.Dispatch<React.SetStateAction<any[]>>;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
   const {
@@ -1527,7 +1552,7 @@ export function ChatInterface({
   // The streaming will complete and update the correct chat via onSendMessage
 
   const agent = useAgent();
-  const browserSession = useBrowserSession();
+  const browserSession = useBrowserSession(chatId);
 
   useEffect(() => {
     if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
@@ -2049,11 +2074,11 @@ export function ChatInterface({
         } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
           // Browser automation starting — open the virtual computer panel
           setAiState("agent_working");
-          globalStartSseSession(data.args?.goal || "Automatización web");
+          globalStartSseSession(data.args?.goal || "Automatización web", chatId);
           setIsBrowserOpen(true);
         } else if (eventType === "browser_step") {
           // Real-time browser step with screenshot — update the virtual computer
-          globalUpdateFromSseStep(data);
+          globalUpdateFromSseStep(data, chatId);
           setAiState("agent_working");
           if (!isBrowserOpen) setIsBrowserOpen(true);
         } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -2068,7 +2093,7 @@ export function ChatInterface({
               screenshot: "",
               url: "",
               title: "",
-            });
+            }, chatId);
           }
         }
       },
@@ -3027,10 +3052,10 @@ export function ChatInterface({
         onEvent: (eventType, data) => {
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web");
+            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
+            globalUpdateFromSseStep(data, effectiveChatIdForStream);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           }
@@ -3174,10 +3199,10 @@ export function ChatInterface({
           // Handle browser automation events from agent loop
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web");
+            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data);
+            globalUpdateFromSseStep(data, effectiveChatIdForStream);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -3191,7 +3216,7 @@ export function ChatInterface({
                 screenshot: "",
                 url: "",
                 title: "",
-              });
+              }, effectiveChatIdForStream);
             }
           }
         },
@@ -5064,22 +5089,22 @@ IMPORTANTE:
                   }
 
                   // Handle browser automation events (tool_start, browser_step, tool_result)
-                  // IMPORTANT: Use global functions (not browserSession.xxx) because
-                  // this async loop may outlive the component mount (ChatInterface remounts
-                  // when a new chat is created). Global functions update a singleton store
+                  // IMPORTANT: Use global functions with chatId to scope updates to the correct chat.
+                  // This async loop may outlive the component mount (ChatInterface remounts
+                  // when a new chat is created). Global functions update a per-chat store
                   // that survives remounts.
                   if (currentEventType === 'tool_start' && data.toolName === 'browse_and_act') {
-                    console.log('[SSE] 🌐 Browser automation starting:', data.args?.goal);
+                    console.log('[SSE] 🌐 Browser automation starting:', data.args?.goal, 'chatId:', effectiveStreamChatId);
                     setAiState("agent_working");
-                    globalStartSseSession(data.args?.goal || "Automatización web");
+                    globalStartSseSession(data.args?.goal || "Automatización web", effectiveStreamChatId);
                     setIsBrowserOpen(true);
                     currentEventType = "chunk";
                     continue;
                   }
 
                   if (currentEventType === 'browser_step') {
-                    console.log('[SSE] 🖥️ Browser step:', data.stepNumber, data.action, data.url);
-                    globalUpdateFromSseStep(data);
+                    console.log('[SSE] 🖥️ Browser step:', data.stepNumber, data.action, data.url, 'chatId:', effectiveStreamChatId);
+                    globalUpdateFromSseStep(data, effectiveStreamChatId);
                     setAiState("agent_working");
                     if (!isBrowserOpen) setIsBrowserOpen(true);
                     currentEventType = "chunk";
@@ -5087,7 +5112,7 @@ IMPORTANTE:
                   }
 
                   if (currentEventType === 'tool_result' && data.toolName === 'browse_and_act') {
-                    console.log('[SSE] ✅ Browser automation completed:', data.result?.success);
+                    console.log('[SSE] ✅ Browser automation completed:', data.result?.success, 'chatId:', effectiveStreamChatId);
                     if (data.result?.success) {
                       globalUpdateFromSseStep({
                         stepNumber: data.result.stepsCount || 0,
@@ -5098,7 +5123,7 @@ IMPORTANTE:
                         screenshot: "",
                         url: "",
                         title: "",
-                      });
+                      }, effectiveStreamChatId);
                     }
                     currentEventType = "chunk";
                     continue;
