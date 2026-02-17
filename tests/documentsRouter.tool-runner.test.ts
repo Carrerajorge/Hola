@@ -398,4 +398,90 @@ describe("documents router tool-runner integration", () => {
       process.env.DISABLE_TOOL_RUNNER = prev;
     }
   });
+
+  it("rejects documents generation with invalid title type", async () => {
+    const response = await appClient.post("/api/documents/generate").send({
+      type: "word",
+      title: 123,
+      content: "Texto",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid request body for /generate");
+  });
+
+  it("rejects documents generation with title over maximum length", async () => {
+    const response = await appClient.post("/api/documents/generate").send({
+      type: "word",
+      title: "a".repeat(501),
+      content: "Texto",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid request body for /generate");
+  });
+
+  it("rejects documents generation with empty title after trimming", async () => {
+    const response = await appClient.post("/api/documents/generate").send({
+      type: "word",
+      title: "   ",
+      content: "Texto",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid request body for /generate");
+  });
+
+  it("rejects documents generation with content above maximum payload limit", async () => {
+    const tooLarge = "x".repeat(1024 * 1024 + 1);
+
+    const response = await appClient.post("/api/documents/generate").send({
+      type: "word",
+      title: "Límite",
+      content: tooLarge,
+    });
+
+    expect(response.status).toBe(413);
+  });
+
+  it("rejects unsafe template report identifiers", async () => {
+    const response = await appClient.get("/api/documents/reports/bad%20id");
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid report id");
+  });
+
+  it("rejects unsafe generated document identifiers", async () => {
+    const response = await appClient.get("/api/documents/bad%20id");
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid document id");
+  });
+
+  it("rejects unsafe template identifiers", async () => {
+    const response = await appClient.get("/api/documents/templates/bad%20id");
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe("Invalid template id");
+  });
+
+  it("rejects code execution when code is not a string", async () => {
+    const response = await appClient.post("/api/documents/execute-code").send({
+      code: 123,
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("Debes iniciar sesión");
+  });
+
+  it("rejects oversized code before execution", async () => {
+    const response = await appClient
+      .post("/api/documents/execute-code")
+      .send({
+        code: "x".repeat(50 * 1024 + 1),
+      });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("Debes iniciar sesión");
+  });
 });
