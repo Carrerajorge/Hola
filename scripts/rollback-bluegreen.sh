@@ -260,11 +260,17 @@ log "  Health response: ${ROLLBACK_HEALTH}"
 echo ""
 log "[4/7] Swapping Nginx upstream to ${PREVIOUS_SLOT}..."
 
-if [ ! -f "${NGINX_CONF_DIR}/iliagpt-upstream-${PREVIOUS_SLOT}.conf" ]; then
-  loge "Missing ${NGINX_CONF_DIR}/iliagpt-upstream-${PREVIOUS_SLOT}.conf"
-  loge "Run scripts/vps-bootstrap-bluegreen.sh first."
-  cp "${STATE_FILE_BAK}" "${STATE_FILE}" 2>/dev/null || true
-  exit 1
+PREVIOUS_UPSTREAM_FILE="${NGINX_CONF_DIR}/iliagpt-upstream-${PREVIOUS_SLOT}.conf"
+if [ -f "${PREVIOUS_UPSTREAM_FILE}" ]; then
+  log "  Previous slot upstream file exists: ${PREVIOUS_UPSTREAM_FILE}"
+else
+  logw "Missing ${PREVIOUS_UPSTREAM_FILE}; recreating for compatibility."
+  if [ "${PREVIOUS_SLOT}" = "blue" ]; then
+    PREVIOUS_UPSTREAM_PORT=5000
+  else
+    PREVIOUS_UPSTREAM_PORT=5001
+  fi
+  printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${PREVIOUS_UPSTREAM_PORT}" > "${PREVIOUS_UPSTREAM_FILE}"
 fi
 
 PREV_UPSTREAM="$(readlink -f "${NGINX_CONF_DIR}/iliagpt-upstream.conf" 2>/dev/null || echo "unknown")"

@@ -14,7 +14,7 @@ IFS=$'\n\t'
 #    bash scripts/vps-bootstrap-bluegreen.sh --force
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.0.1"
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
@@ -84,9 +84,11 @@ log "[1/6] Creating Nginx upstream config..."
 UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
 
 # Remove legacy per-slot files that cause "duplicate upstream" errors
-for legacy in "${NGINX_CONF_DIR}/iliagpt-upstream-blue.conf" "${NGINX_CONF_DIR}/iliagpt-upstream-green.conf"; do
-  if [ -f "${legacy}" ]; then
-    logw "Removing legacy per-slot file: ${legacy}"
+# Keep only the canonical /etc/nginx/conf.d/iliagpt-upstream.conf.
+for legacy in "${NGINX_CONF_DIR}/iliagpt-upstream-"*.conf; do
+  [ "${legacy}" = "${NGINX_CONF_DIR}/iliagpt-upstream-*.conf" ] && continue
+  if [ -f "${legacy}" ] || [ -L "${legacy}" ]; then
+    logw "Removing legacy upstream file: ${legacy}"
     rm -f "${legacy}"
   fi
 done

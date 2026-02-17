@@ -267,6 +267,35 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+# Rebuild legacy upstream files if the installed Nginx config still references
+# them, and keep their content aligned with expected ports.
+legacy_upstream_referenced() {
+  local slot="$1"
+  grep -Rqs -- "iliagpt-upstream-${slot}.conf" \
+    /etc/nginx/nginx.conf \
+    /etc/nginx/conf.d \
+    /etc/nginx/sites-available \
+    /etc/nginx/sites-enabled \
+    /etc/nginx/modules-enabled 2>/dev/null
+}
+
+ensure_legacy_upstream_file() {
+  local slot="$1"
+  local port="$2"
+  local legacy_file="${NGINX_CONF_DIR}/iliagpt-upstream-${slot}.conf"
+
+  if [ ! -L "${legacy_file}" ] && [ -f "${legacy_file}" ]; then
+    return 0
+  fi
+
+  # Replace dangling symlink or missing file only when Nginx actually references it.
+  if legacy_upstream_referenced "${slot}"; then
+    rm -f "${legacy_file}" 2>/dev/null || true
+    printf 'upstream iliagpt {\n    server 127.0.0.1:%s;\n    keepalive 32;\n    keepalive_timeout 60s;\n    keepalive_requests 1000;\n}\n' "${port}" > "${legacy_file}"
+    logw "Ensured legacy upstream file exists: ${legacy_file} (port ${port})"
+  fi
+}
+
 # ── Step 1: Pull images from GHCR (with timeout + digest verification) ──
 log "[1/14] Pulling images from GHCR (timeout: ${PULL_TIMEOUT}s)..."
 IMAGES=(
@@ -482,14 +511,34 @@ echo ""
 NGINX_SITE_CONF="/etc/nginx/sites-enabled/iliagpt.conf"
 NGINX_SITE_SRC="${DEPLOY_PATH}/nginx.conf"
 if [ -f "${NGINX_SITE_SRC}" ]; then
+  # Remove legacy/legacy-conflicting site configs to avoid duplicate listen directives.
+  if [ -d "/etc/nginx/sites-enabled" ]; then
+    for legacy_site in /etc/nginx/sites-enabled/*; do
+      [ -e "${legacy_site}" ] || continue
+      legacy_name="$(basename "${legacy_site}")"
+
+      # Known legacy/default files can define overlapping 443 listeners (default(-ssl), old names, etc).
+      if [ "${legacy_site}" != "${NGINX_SITE_CONF}" ] && [ -f "${legacy_site}" ]; then
+        case "${legacy_name}" in
+          iliagpt*|default|default-ssl|000-default|000-default-ssl)
+            rm -f "${legacy_site}"
+            logw "Removed legacy site config: ${legacy_site}"
+            continue
+            ;;
+        esac
+
+        # If any other enabled file defines IPv6 HTTPS 443 listener, remove it to prevent duplicates.
+        if grep -qE "^[[:space:]]*listen[[:space:]]+\\[::\\]:443" "${legacy_site}" 2>/dev/null; then
+          rm -f "${legacy_site}"
+          logw "Removed conflicting IPv6 HTTPS site config: ${legacy_site}"
+        fi
+      fi
+    done
+  fi
+
   if ! diff -q "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}" > /dev/null 2>&1; then
     log "  Installing updated nginx.conf → ${NGINX_SITE_CONF}"
     cp "${NGINX_SITE_SRC}" "${NGINX_SITE_CONF}"
-    # Also remove legacy default site if it conflicts
-    if [ -f "/etc/nginx/sites-enabled/default" ]; then
-      rm -f "/etc/nginx/sites-enabled/default"
-      logw "Removed /etc/nginx/sites-enabled/default (conflicts with iliagpt.conf)"
-    fi
   fi
 fi
 
@@ -498,14 +547,9 @@ log "[10/15] Swapping Nginx upstream to ${NEW_SLOT} (port ${NEW_PORT})..."
 
 UPSTREAM_CONF="${NGINX_CONF_DIR}/iliagpt-upstream.conf"
 
-# Remove legacy per-slot conf files that cause "duplicate upstream" errors
-# (old bootstrap created both iliagpt-upstream-blue.conf and iliagpt-upstream-green.conf)
-for legacy in "${NGINX_CONF_DIR}/iliagpt-upstream-blue.conf" "${NGINX_CONF_DIR}/iliagpt-upstream-green.conf"; do
-  if [ -f "${legacy}" ]; then
-    logw "Removing legacy upstream conf: ${legacy}"
-    rm -f "${legacy}"
-  fi
-done
+# Refresh compatibility slot files only if the host Nginx still points to them.
+ensure_legacy_upstream_file "blue" 5000
+ensure_legacy_upstream_file "green" 5001
 
 # Remove symlink if present (migrate to direct file)
 if [ -L "${UPSTREAM_CONF}" ]; then
