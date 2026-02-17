@@ -740,13 +740,19 @@ function clampRetryLimit(actionRateLimit: unknown, maxRetries: number): number {
   return maxRetries;
 }
 
-function buildExecutionErrorPayload(error: unknown): { code: string; message: string; retryable: boolean } {
+function buildExecutionErrorPayload(error: unknown): { code: string; message: string; retryable: boolean; retryAfter?: number } {
   const typed = error as { code?: string; message?: string; retryable?: boolean; retryAfter?: number };
   const code = typed.code || "execution_error";
+  const retryAfterCandidate = typed.retryAfter;
+  const retryAfter =
+    typeof retryAfterCandidate === "number" && Number.isFinite(retryAfterCandidate)
+      ? Math.max(1, Math.ceil(retryAfterCandidate))
+      : undefined;
   return {
     code,
     message: typed.message || "Execution failed",
     retryable: typed.retryable ?? false,
+    retryAfter,
   };
 }
 
@@ -825,6 +831,8 @@ export class GptActionRuntime {
         err.message,
         err.code,
         err.retryable,
+        normalizedIdempotencyKey,
+        err.retryAfter
       );
       if (normalizedIdempotencyKey) {
         await this.failIdempotency(normalizedIdempotencyKey, fallback.error?.message || err.message);
@@ -1078,7 +1086,8 @@ export class GptActionRuntime {
             details.message,
             details.code,
             details.retryable,
-            idempotencyKey
+            idempotencyKey,
+            details.retryAfter
           );
           await this.storeToolCallLog(payload, action, false, undefined, failure.latencyMs, details.message, error);
           await this.failIdempotencyIfEnabled(idempotencyKey, failure, details.message);
@@ -1107,7 +1116,8 @@ export class GptActionRuntime {
       lastError?.message || "Action execution failed",
       lastError?.code || "execution_error",
       false,
-      idempotencyKey
+      idempotencyKey,
+      lastError?.retryAfter
     );
 
     await this.failIdempotencyIfEnabled(idempotencyKey, fallback, fallback.error?.message || "Action execution failed");
@@ -1467,7 +1477,8 @@ export class GptActionRuntime {
     errorMessage: string,
     errorCode: string,
     retryable: boolean,
-    idempotencyKey: string | null
+    idempotencyKey: string | null,
+    retryAfter?: number
   ): GptActionExecutionPayload {
     const result: GptActionExecutionPayload = {
       success: false,
@@ -1486,6 +1497,7 @@ export class GptActionRuntime {
         code: errorCode,
         message: errorMessage,
         retryable,
+        retryAfter,
       },
     };
 
@@ -1547,10 +1559,10 @@ function normalizeRequestInput(input: unknown): Record<string, unknown> {
 export function normalizeGptActionRequestPayload(rawInput: Record<string, unknown>): Record<string, unknown> {
   const request = rawInput.request;
   const fallback = rawInput.input;
-  const normalized = {
-    ...(normalizeRequestInput(request)),
-    ...(request === undefined && normalizeRequestInput(fallback) && {}),
-  } as Record<string, unknown>;
+  const normalized =
+    request !== undefined
+      ? normalizeRequestInput(request)
+      : normalizeRequestInput(fallback);
 
   return truncatePayload(normalized, MAX_REQUEST_PAYLOAD_BYTES) as Record<string, unknown>;
 }
