@@ -146,6 +146,14 @@ function buildRegistrationFingerprint(name: string, type: string, size: number, 
   return `${name}::${type}::${size}::${storagePath}`;
 }
 
+function buildRequestFingerprint(parts: unknown): string {
+  try {
+    return JSON.stringify(parts);
+  } catch {
+    return String(parts);
+  }
+}
+
 function buildCompletionFingerprint(parts: { partNumber: number }[]): string {
   const normalized = parts.map((part) => part.partNumber).sort((a, b) => a - b);
   return normalized.join(",");
@@ -153,6 +161,19 @@ function buildCompletionFingerprint(parts: { partNumber: number }[]): string {
 
 function buildUploadCacheKey(userId: string, uploadId: string, conversationId: string | null): string {
   return `${userId}|${conversationId || "__no_conversation__"}|${uploadId}`;
+}
+
+function removeUploadIdempotencyEntries(uploadId: string): void {
+  for (const key of fileRegistrationCache.keys()) {
+    if (key.endsWith(`|${uploadId}`)) {
+      fileRegistrationCache.delete(key);
+    }
+  }
+  for (const key of multipartCompletionCache.keys()) {
+    if (key.endsWith(`|${uploadId}`)) {
+      multipartCompletionCache.delete(key);
+    }
+  }
 }
 
 function cleanupIdempotencyCaches() {
@@ -672,8 +693,57 @@ export function createFilesRouter() {
 
   router.post("/api/objects/upload", async (req, res) => {
     try {
-      const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath();
-      res.json({ uploadURL, storagePath });
+      const userId = getOrCreateSecureUserId(req);
+      const rawUploadId = req.body?.uploadId;
+      const rawConversationId = req.body?.conversationId;
+      const uploadId = getUploadId(req, rawUploadId);
+      const conversationId = getConversationId(req, rawConversationId);
+
+      if (typeof rawUploadId === "string" && !uploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
+      }
+      if (typeof rawConversationId === "string" && !conversationId) {
+        return res.status(400).json({ error: "Invalid conversationId format" });
+      }
+
+      if (uploadId) {
+        const idempotencyKey = buildUploadCacheKey(userId, uploadId, conversationId);
+        const fingerprint = buildRequestFingerprint({
+          route: "/api/objects/upload",
+          uploadId,
+          conversationId,
+        });
+        const existingRegistration = fileRegistrationCache.get(idempotencyKey);
+        if (existingRegistration) {
+          if (existingRegistration.fingerprint !== fingerprint) {
+            return res.status(409).json({ error: "Upload id reused with conflicting request" });
+          }
+          return res.json(existingRegistration.response);
+        }
+
+        try {
+          const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId);
+          const response = { uploadURL, storagePath, uploadId };
+          fileRegistrationCache.set(idempotencyKey, {
+            createdAt: Date.now(),
+            fingerprint,
+            response: {
+              uploadURL,
+              storagePath,
+              uploadId,
+            },
+            uploadId,
+            conversationId,
+            userId,
+          });
+          return res.json(response);
+        } catch (objectStorageError: unknown) {
+          console.warn("[FilesRouter] Error generating upload URL for idempotent request; using local fallback", objectStorageError);
+        }
+      }
+
+      const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath(uploadId || undefined);
+      res.json({ uploadURL, storagePath, ...(uploadId ? { uploadId } : {}) });
     } catch (error: any) {
       // Fallback to local storage for development
       console.log("[FilesRouter] Replit object storage unavailable, using local fallback");
@@ -687,12 +757,43 @@ export function createFilesRouter() {
           fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
         }
 
-        const objectId = crypto.randomUUID();
+        const objectId = uploadId || crypto.randomUUID();
         const storagePath = `/objects/uploads/${objectId}`;
-        // Return local upload endpoint URL
-        const uploadURL = `/api/local-upload/${objectId}`;
+        const fallbackResponse: { uploadURL: string; storagePath: string; uploadId?: string; localFallback: true } = {
+          uploadURL: `/api/local-upload/${objectId}`,
+          storagePath,
+          localFallback: true,
+        };
+        if (uploadId) {
+          const cacheKey = buildUploadCacheKey(userId, uploadId, conversationId);
+          const existingRegistration = fileRegistrationCache.get(cacheKey);
+          const fingerprint = buildRequestFingerprint({
+            route: "/api/objects/upload",
+            localFallback: true,
+            uploadId,
+            conversationId,
+          });
+          if (existingRegistration) {
+            if (existingRegistration.fingerprint !== fingerprint) {
+              return res.status(409).json({ error: "Upload id reused with conflicting request" });
+            }
+            return res.json(existingRegistration.response);
+          }
 
-        res.json({ uploadURL, storagePath, localFallback: true });
+          fileRegistrationCache.set(cacheKey, {
+            createdAt: Date.now(),
+            fingerprint,
+            response: { uploadURL: fallbackResponse.uploadURL, storagePath },
+            uploadId,
+            conversationId,
+            userId,
+          });
+        }
+
+        if (uploadId) {
+          fallbackResponse.uploadId = uploadId;
+        }
+        return res.json(fallbackResponse);
       } catch (localError: any) {
         console.error("Error with local fallback:", localError);
         res.status(500).json({ error: "Failed to get upload URL" });
@@ -716,6 +817,12 @@ export function createFilesRouter() {
       const userId = getOrCreateSecureUserId(req);
       const conversationId = getConversationId(req, req.body?.conversationId);
       const requestedUploadId = getUploadId(req, req.body?.uploadId);
+      if (typeof req.body?.uploadId === "string" && !requestedUploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
+      }
+      if (typeof req.body?.conversationId === "string" && !conversationId) {
+        return res.status(400).json({ error: "Invalid conversationId format" });
+      }
 
       if (!fileName || !safeMimeType || !Number.isFinite(fileSize) || !Number.isInteger(totalChunks)) {
         return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
@@ -796,10 +903,170 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/sign-part", async (req, res) => {
     try {
-      const { uploadId, partNumber } = req.body;
+      const { uploadId: rawUploadId, partNumber } = req.body;
+      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
 
       if (!uploadId || partNumber === undefined) {
         return res.status(400).json({ error: "Missing required fields: uploadId, partNumber" });
+      }
+      if (typeof rawUploadId === "string" && !uploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
+      }
+
+      const session = multipartSessions.get(uploadId);
+      if (!session) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+
+      if (partNumber < 1 || partNumber > session.totalChunks) {
+        return res.status(400).json({ error: `Invalid part number. Must be between 1 and ${session.totalChunks}` });
+      }
+
+      // Local fallback: return a local upload URL for each part
+      if (session.bucketName === "__local__") {
+        const signedUrl = `/api/local-upload/${uploadId}_part_${partNumber}`;
+        return res.json({ signedUrl });
+      }
+
+      const partPath = `${session.basePath}_part_${partNumber}`;
+      const { bucketName, objectName } = parseObjectPath(partPath);
+
+      const signedUrl = await signObjectURLForMultipart({
+        bucketName,
+        objectName,
+        method: "PUT",
+        ttlSec: 900,
+      });
+
+      res.json({ signedUrl });
+    } catch (error: any) {
+      console.error("Error signing multipart part:", error);
+      res.status(500).json({ error: "Failed to get signed URL for part" });
+    }
+  });
+          : crypto.randomUUID();
+        const storagePath = `/objects/uploads/${objectId}`;
+        // Return local upload endpoint URL
+        const uploadURL = `/api/local-upload/${objectId}`;
+
+        res.json({ uploadURL, storagePath, localFallback: true });
+      } catch (localError: any) {
+        console.error("Error with local fallback:", localError);
+        res.status(500).json({ error: "Failed to get upload URL" });
+      }
+    }
+  });
+
+  router.post("/api/objects/multipart/create", async (req, res) => {
+    try {
+      const { fileName: rawFileName, mimeType, fileSize: rawFileSize, totalChunks: rawTotalChunks } = req.body as {
+        fileName?: unknown;
+        mimeType?: unknown;
+        fileSize?: unknown;
+        totalChunks?: unknown;
+      };
+
+      const fileName = sanitizeFilename(typeof rawFileName === "string" ? rawFileName : "");
+      const safeMimeType = typeof mimeType === "string" ? stripContentType(mimeType) || mimeType : "";
+      const fileSize = Number(rawFileSize);
+      const totalChunks = Number(rawTotalChunks);
+      const userId = getOrCreateSecureUserId(req);
+      const conversationId = getConversationId(req, req.body?.conversationId);
+      const requestedUploadId = getUploadId(req, req.body?.uploadId);
+      if (typeof req.body?.uploadId === "string" && !requestedUploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
+      }
+      if (typeof req.body?.conversationId === "string" && !conversationId) {
+        return res.status(400).json({ error: "Invalid conversationId format" });
+      }
+
+      if (!fileName || !safeMimeType || !Number.isFinite(fileSize) || !Number.isInteger(totalChunks)) {
+        return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
+      }
+      if (fileSize <= 0 || totalChunks <= 0) {
+        return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(safeMimeType as any)) {
+        return res.status(400).json({ error: `Unsupported file type: ${safeMimeType}` });
+      }
+
+      if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
+        return res.status(400).json({ error: `File size exceeds maximum limit of ${LIMITS.MAX_FILE_SIZE_MB}MB` });
+      }
+
+      // Security: limit concurrent sessions to prevent memory exhaustion
+      if (multipartSessions.size >= MAX_MULTIPART_SESSIONS) {
+        return res.status(429).json({ error: "Too many concurrent upload sessions. Please try again later." });
+      }
+
+      const uploadId = requestedUploadId || `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+      let privateObjectDir: string;
+      let isLocalFallback = false;
+      try {
+        privateObjectDir = objectStorageService.getPrivateObjectDir();
+      } catch {
+        // Local fallback when object storage is unavailable
+        isLocalFallback = true;
+        privateObjectDir = "/local";
+        console.log("[FilesRouter] Multipart: using local fallback for chunked upload");
+      }
+
+      const objectId = `uploads/${uploadId}`;
+      const storagePath = `/objects/${objectId}`;
+      const registrationKey = buildUploadCacheKey(userId, uploadId, conversationId);
+      const fingerprint = buildRegistrationFingerprint(fileName, safeMimeType, fileSize, storagePath);
+
+      const existingRegistration = fileRegistrationCache.get(registrationKey);
+      if (existingRegistration) {
+        if (existingRegistration.fingerprint === fingerprint) {
+          return res.json(existingRegistration.response);
+        }
+        return res.status(409).json({ error: "Duplicate upload-id with conflicting multipart metadata" });
+      }
+
+      const session: MultipartUploadSession = {
+        uploadId,
+        conversationId,
+        fileName,
+        mimeType: safeMimeType,
+        fileSize,
+        totalChunks,
+        storagePath,
+        basePath: isLocalFallback ? `local/${objectId}` : `${privateObjectDir}/${objectId}`,
+        bucketName: isLocalFallback ? "__local__" : (privateObjectDir.split('/')[1] || ''),
+        uploadedParts: new Map(),
+        createdAt: new Date(),
+      };
+
+      multipartSessions.set(uploadId, session);
+      fileRegistrationCache.set(registrationKey, {
+        createdAt: Date.now(),
+        fingerprint,
+        response: { uploadId, storagePath },
+        uploadId,
+        conversationId,
+        userId,
+      });
+
+      res.json({ uploadId, storagePath });
+    } catch (error: any) {
+      console.error("Error creating multipart upload:", error);
+      res.status(500).json({ error: "Failed to create multipart upload session" });
+    }
+  });
+
+  router.post("/api/objects/multipart/sign-part", async (req, res) => {
+    try {
+      const { uploadId: rawUploadId, partNumber } = req.body;
+      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
+
+      if (!uploadId || partNumber === undefined) {
+        return res.status(400).json({ error: "Missing required fields: uploadId, partNumber" });
+      }
+      if (typeof rawUploadId === "string" && !uploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
       }
 
       const session = multipartSessions.get(uploadId);
@@ -841,11 +1108,14 @@ export function createFilesRouter() {
         parts?: unknown;
         conversationId?: unknown;
       };
+      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
 
       if (!rawUploadId || typeof rawUploadId !== "string" || !rawParts || !Array.isArray(rawParts)) {
         return res.status(400).json({ error: "Missing required fields: uploadId, parts" });
       }
-      const uploadId = rawUploadId.trim();
+      if (!uploadId) {
+        return res.status(400).json({ error: "Invalid uploadId format" });
+      }
 
       const normalizedParts = rawParts
         .map((part: { partNumber?: unknown }) => {
@@ -1049,9 +1319,12 @@ export function createFilesRouter() {
       console.error("Error completing multipart upload:", error);
       const rawUploadId = req.body?.uploadId;
       if (typeof rawUploadId === "string") {
+        const normalizedUploadId = sanitizeUploadId(rawUploadId);
+        if (normalizedUploadId) {
         const conversationId = getConversationId(req, req.body?.conversationId);
-        const completionKey = buildUploadCacheKey(getOrCreateSecureUserId(req), rawUploadId.trim(), conversationId);
-        multipartCompletionCache.delete(completionKey);
+          const completionKey = buildUploadCacheKey(getOrCreateSecureUserId(req), normalizedUploadId, conversationId);
+          multipartCompletionCache.delete(completionKey);
+        }
       }
       res.status(500).json({ error: "Failed to complete multipart upload" });
     }
@@ -1059,9 +1332,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/abort", async (req, res) => {
     try {
-      const { uploadId } = req.body;
+      const { uploadId: rawUploadId } = req.body;
+      const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
 
-      if (!uploadId) {
+      if (!rawUploadId || !uploadId) {
         return res.status(400).json({ error: "Missing required field: uploadId" });
       }
 
@@ -1102,6 +1376,7 @@ export function createFilesRouter() {
         }
       }
 
+      removeUploadIdempotencyEntries(uploadId);
       multipartSessions.delete(uploadId);
 
       res.json({ success: true });
