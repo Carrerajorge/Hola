@@ -1,5 +1,6 @@
 import { Response, Router } from "express";
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   generateWordDocument,
@@ -69,6 +70,10 @@ const MAX_LLM_TIMEOUT_MS = 12_000;
 const MAX_LLM_JSON_BYTES = 50_000;
 const MAX_PLAN_COMMANDS = 500;
 const MAX_TRANSLATED_CODE_BYTES = 200_000;
+const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
+const IDEMPOTENCY_MAX_ENTRIES = 200;
+const IDEMPOTENCY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
 
 const ALLOWED_LOCALES = new Set(["en", "es", "fr", "pt", "de"]);
 const PLAN_ALLOWED_COMMANDS = new Set([
@@ -112,6 +117,145 @@ const documentsLlmCircuitBreaker = getCircuitBreaker("documents.llmGateway", {
 });
 
 const logger = createLogger("documents-router");
+
+type IdempotencyRecord = {
+  requestFingerprint: string;
+  statusCode: number;
+  headers: Record<string, string>;
+  bodyBase64: string;
+  bodySize: number;
+  createdAt: number;
+};
+
+const idempotencyStore = new Map<string, IdempotencyRecord>();
+
+function canonicalizeForHash(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => canonicalizeForHash(entry));
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    const sortedEntries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    const normalized: Record<string, unknown> = {};
+    for (const [entryKey, entryValue] of sortedEntries) {
+      normalized[entryKey] = canonicalizeForHash(entryValue);
+    }
+    return normalized;
+  }
+  return `${value}`;
+}
+
+function buildIdempotencyFingerprint(payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify(canonicalizeForHash(payload))).digest("hex");
+}
+
+function readIdempotencyKey(value: string | undefined): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!IDEMPOTENCY_KEY_RE.test(trimmed)) {
+    return null;
+  }
+  return trimmed;
+}
+
+function getIdempotencyCacheKey(prefix: string, idempotencyKey: string): string {
+  return `${prefix}:${idempotencyKey}`;
+}
+
+function normalizeHeaderValue(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return String(value[0]);
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return typeof value === "string" ? value : String(value);
+}
+
+function extractReplayHeaders(headers: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    const normalized = normalizeHeaderValue(value);
+    if (normalized !== undefined) {
+      result[name] = normalized;
+    }
+  }
+  return result;
+}
+
+function pruneIdempotencyStore(): void {
+  const now = Date.now();
+  for (const [key, entry] of idempotencyStore.entries()) {
+    if (now - entry.createdAt > IDEMPOTENCY_TTL_MS) {
+      idempotencyStore.delete(key);
+    }
+  }
+
+  if (idempotencyStore.size <= IDEMPOTENCY_MAX_ENTRIES) {
+    return;
+  }
+
+  const byAge = [...idempotencyStore.entries()].sort(([, a], [, b]) => a.createdAt - b.createdAt);
+  const removeCount = idempotencyStore.size - IDEMPOTENCY_MAX_ENTRIES;
+  for (let i = 0; i < removeCount; i += 1) {
+    idempotencyStore.delete(byAge[i]![0]);
+  }
+}
+
+function getIdempotencyReplay(
+  cacheKey: string,
+  requestFingerprint: string
+): IdempotencyRecord | "conflict" | null {
+  pruneIdempotencyStore();
+
+  const existing = idempotencyStore.get(cacheKey);
+  if (!existing) {
+    return null;
+  }
+  if (existing.requestFingerprint !== requestFingerprint) {
+    return "conflict";
+  }
+  return existing;
+}
+
+function replayIdempotentResponse(res: Response, entry: IdempotencyRecord): void {
+  for (const [name, value] of Object.entries(entry.headers)) {
+    res.setHeader(name, value);
+  }
+  res.status(entry.statusCode).send(Buffer.from(entry.bodyBase64, "base64"));
+}
+
+function storeIdempotentResponse(cacheKey: string, requestFingerprint: string, entry: {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: Buffer;
+}): void {
+  if (entry.body.length > IDEMPOTENCY_MAX_RESPONSE_BYTES) {
+    return;
+  }
+
+  idempotencyStore.set(cacheKey, {
+    requestFingerprint,
+    statusCode: entry.statusCode,
+    headers: entry.headers,
+    bodyBase64: entry.body.toString("base64"),
+    bodySize: entry.body.length,
+    createdAt: Date.now(),
+  });
+}
 
 const GenerateDocumentRequestSchema = z.object({
   type: z.enum(["word", "excel", "ppt"]),
@@ -427,6 +571,24 @@ export function createDocumentsRouter() {
       if (!parsedBody) {
         return res.status(400).json({ error: "Invalid request body for /generate" });
       }
+      const rawIdempotencyKey = req.get("Idempotency-Key");
+      const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
+      if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+        return res.status(400).json({ error: "Invalid Idempotency-Key header" });
+      }
+      const requestFingerprint = buildIdempotencyFingerprint(parsedBody);
+      if (idempotencyKey) {
+        const replay = getIdempotencyReplay(
+          getIdempotencyCacheKey("/generate", idempotencyKey),
+          requestFingerprint
+        );
+        if (replay === "conflict") {
+          return res.status(409).json({ error: "Idempotency key replay mismatch" });
+        }
+        if (replay) {
+          return replayIdempotentResponse(res, replay);
+        }
+      }
 
       const type = parsedBody.type;
       const safeTitle = sanitizePlainText(parsedBody.title, { maxLen: MAX_DOC_TITLE_LENGTH, collapseWs: true });
@@ -677,6 +839,7 @@ export function createDocumentsRouter() {
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
+      res.setHeader("Content-Length", buffer.length);
       sendToolRunnerHeaders(
         res,
         toolRunnerReport,
@@ -684,6 +847,17 @@ export function createDocumentsRouter() {
         toolRunnerRequested,
         runnerLocale
       );
+      if (idempotencyKey) {
+        storeIdempotentResponse(
+          getIdempotencyCacheKey("/generate", idempotencyKey),
+          requestFingerprint,
+          {
+            statusCode: 200,
+            headers: extractReplayHeaders(res.getHeaders() as Record<string, unknown>),
+            body: buffer,
+          }
+        );
+      }
       res.send(buffer);
     } catch (error: any) {
       console.error("Document generation error:", error);
@@ -1440,9 +1614,29 @@ export function createDocumentsRouter() {
     const startTime = Date.now();
 
     try {
+      const rawIdempotencyKey = req.get("Idempotency-Key");
+      const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
       const executeRequest = parseValidated(ExecuteCodeSchema, req.body, "/execute-code");
       if (!executeRequest) {
         return res.status(400).json({ error: "Invalid request body for /execute-code" });
+      }
+
+      if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+        return res.status(400).json({ error: "Invalid Idempotency-Key header" });
+      }
+
+      const requestFingerprint = buildIdempotencyFingerprint({ code: executeRequest.code });
+      if (idempotencyKey) {
+        const replay = getIdempotencyReplay(
+          getIdempotencyCacheKey("/execute-code", idempotencyKey),
+          requestFingerprint
+        );
+        if (replay === "conflict") {
+          return res.status(409).json({ error: "Idempotency key replay mismatch" });
+        }
+        if (replay) {
+          return replayIdempotentResponse(res, replay);
+        }
       }
 
       const code = sanitizePlainText(executeRequest.code, { maxLen: MAX_EXECUTE_CODE_LENGTH, collapseWs: false });
@@ -1487,6 +1681,17 @@ export function createDocumentsRouter() {
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
       res.setHeader("Content-Length", buffer.length);
+      if (idempotencyKey) {
+        storeIdempotentResponse(
+          getIdempotencyCacheKey("/execute-code", idempotencyKey),
+          requestFingerprint,
+          {
+            statusCode: 200,
+            headers: extractReplayHeaders(res.getHeaders() as Record<string, unknown>),
+            body: buffer,
+          }
+        );
+      }
       res.send(buffer);
     } catch (error: any) {
       logger.error("Code execution error", {
