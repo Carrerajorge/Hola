@@ -23,6 +23,8 @@ const MAX_WEBHOOK_HEADER_NAME_LENGTH = 96;
 const MAX_WEBHOOK_HEADER_VALUE_LENGTH = 1024;
 const MAX_WEBHOOK_PATH_LENGTH = 256;
 const MAX_WEBHOOK_CONTENT_TYPE_LENGTH = 128;
+const MAX_WEBHOOK_RUN_ID_LENGTH = 96;
+const WEBHOOK_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
 const WEBHOOK_REPLAY_TTL_MS = 10 * 60 * 1000;
 const WEBHOOK_REPLAY_MAX_ENTRIES = 2000;
@@ -80,6 +82,51 @@ function normalizeContentType(raw: unknown): string | null {
   }
 
   return null;
+}
+
+function normalizeWebhookId(raw: unknown, maxLength = MAX_WEBHOOK_RUN_ID_LENGTH): string | null {
+  if (typeof raw !== "string") return null;
+  const normalized = raw.normalize("NFKC").replace(/\u0000/g, "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+  if (normalized.length === 0 || normalized.length > maxLength) return null;
+  if (!WEBHOOK_RUN_ID_RE.test(normalized)) return null;
+  return normalized;
+}
+
+function readWebhookRunId(req: Request, channel: string): string {
+  const candidates = [
+    req.header("x-run-id"),
+    req.header("x-correlation-id"),
+    req.header("x-request-id"),
+    req.header("x-idempotency-key"),
+    req.header("idempotency-key"),
+    req.header("x-telegram-bot-api-secret-token"),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeWebhookId(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  const body = getRawBodyBuffer(req);
+  const bodyHash = crypto.createHash("sha256")
+    .update(body ? body.toString("utf8") : "")
+    .update(req.path || "")
+    .update(normalizeReplayQueryFingerprint(req))
+    .digest("hex")
+    .slice(0, 48);
+
+  const fallback = `${channel}_${bodyHash}`;
+  return normalizeWebhookId(fallback) || `run_${crypto.createHash("sha256").update(fallback).digest("hex").slice(0, 48)}`;
+}
+
+function setWebhookCorrelationHeaders(res: Response, runId: string): void {
+  const normalizedRunId = normalizeWebhookId(runId);
+  if (!normalizedRunId) return;
+  res.setHeader("x-correlation-id", normalizedRunId);
+  res.setHeader("x-request-id", normalizedRunId);
+  res.setHeader("x-run-id", normalizedRunId);
 }
 
 function extractQueryPairs(query: Request["query"]): Array<[string, string]> {
@@ -362,6 +409,8 @@ export function createChannelWebhooksRouter(): Router {
     if (!boundary.ok) {
       return rejectWebhookBoundary(res, "telegram", req, boundary.failure);
     }
+    const runId = readWebhookRunId(req, "telegram");
+    setWebhookCorrelationHeaders(res, runId);
 
     try {
       if (isWebhookReplay("telegram", req)) {
@@ -386,6 +435,7 @@ export function createChannelWebhooksRouter(): Router {
         channel: "telegram",
         update: req.body,
         receivedAt: new Date().toISOString(),
+        runId,
       });
 
       return res.status(200).send("ok");
@@ -399,6 +449,7 @@ export function createChannelWebhooksRouter(): Router {
   router.get("/whatsapp", (req: Request, res: Response) => {
     const boundary = validateWebhookGetBoundary(req);
     if (boundary) return rejectWebhookBoundary(res, "whatsapp_cloud", req, boundary);
+    setWebhookCorrelationHeaders(res, readWebhookRunId(req, "whatsapp_cloud"));
 
     const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
     if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
@@ -422,6 +473,8 @@ export function createChannelWebhooksRouter(): Router {
     if (!boundary.ok) {
       return rejectWebhookBoundary(res, "whatsapp_cloud", req, boundary.failure);
     }
+    const runId = readWebhookRunId(req, "whatsapp_cloud");
+    setWebhookCorrelationHeaders(res, runId);
 
     try {
       if (isWebhookReplay("whatsapp_cloud", req)) {
@@ -448,6 +501,7 @@ export function createChannelWebhooksRouter(): Router {
         channel: "whatsapp_cloud",
         payload: req.body,
         receivedAt: new Date().toISOString(),
+        runId,
       });
 
       return res.status(200).send("ok");
@@ -461,6 +515,7 @@ export function createChannelWebhooksRouter(): Router {
   router.get("/messenger", (req: Request, res: Response) => {
     const boundary = validateWebhookGetBoundary(req);
     if (boundary) return rejectWebhookBoundary(res, "messenger", req, boundary);
+    setWebhookCorrelationHeaders(res, readWebhookRunId(req, "messenger"));
 
     const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
     if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
@@ -484,6 +539,8 @@ export function createChannelWebhooksRouter(): Router {
     if (!boundary.ok) {
       return rejectWebhookBoundary(res, "messenger", req, boundary.failure);
     }
+    const runId = readWebhookRunId(req, "messenger");
+    setWebhookCorrelationHeaders(res, runId);
 
     try {
       if (isWebhookReplay("messenger", req)) {
@@ -510,6 +567,7 @@ export function createChannelWebhooksRouter(): Router {
         channel: "messenger",
         payload: req.body,
         receivedAt: new Date().toISOString(),
+        runId,
       });
 
       return res.status(200).send("EVENT_RECEIVED");
@@ -523,6 +581,7 @@ export function createChannelWebhooksRouter(): Router {
   router.get("/wechat", (req: Request, res: Response) => {
     const boundary = validateWebhookGetBoundary(req);
     if (boundary) return rejectWebhookBoundary(res, "wechat", req, boundary);
+    setWebhookCorrelationHeaders(res, readWebhookRunId(req, "wechat"));
 
     const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
     if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
@@ -560,6 +619,8 @@ export function createChannelWebhooksRouter(): Router {
     if (!boundary.ok) {
       return rejectWebhookBoundary(res, "wechat", req, boundary.failure);
     }
+    const runId = readWebhookRunId(req, "wechat");
+    setWebhookCorrelationHeaders(res, runId);
 
     try {
       if (isWebhookReplay("wechat", req)) {
@@ -595,6 +656,7 @@ export function createChannelWebhooksRouter(): Router {
         channel: "wechat",
         payload: rawXml,
         receivedAt: new Date().toISOString(),
+        runId,
       });
 
       // WeChat expects "success" response to acknowledge receipt

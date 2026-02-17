@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const MAX_RECEIVED_AT_LENGTH = 64;
 const MAX_CHANNEL_META_ID_LENGTH = 255;
+const MAX_INGEST_RUN_ID_LENGTH = 128;
+const INGEST_RUN_ID_RE = /^[A-Za-z0-9._:-]+$/;
 
 export type ExternalChannel = "telegram" | "whatsapp_cloud" | "messenger" | "wechat";
 
@@ -66,6 +68,16 @@ export type ChannelIngestJob =
 const BASE_INGEST_JOB = z.object({
   receivedAt: z
     .preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string().min(20).max(MAX_RECEIVED_AT_LENGTH).optional()),
+  runId: z
+    .preprocess(
+      (v) => (typeof v === "string" ? v.trim().slice(0, MAX_INGEST_RUN_ID_LENGTH) : v),
+      z.string().min(12).max(MAX_INGEST_RUN_ID_LENGTH).optional(),
+    )
+    .superRefine((value, ctx) => {
+      if (value && !INGEST_RUN_ID_RE.test(value)) {
+        ctx.addIssue({ code: "custom", message: "runId has invalid format", path: ["runId"] });
+      }
+    }),
 });
 
 const telegramIngestJobSchema = BASE_INGEST_JOB.extend({
