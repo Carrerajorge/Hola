@@ -121,13 +121,16 @@ class TestFileTools:
     
     @pytest.mark.asyncio
     async def test_read_nonexistent_file(self, read_tool):
-        result = await read_tool.execute(FileReadInput(path="/tmp/nonexistent_file_12345.txt"))
+        temp_dir = tempfile.gettempdir()
+        result = await read_tool.execute(FileReadInput(path=f"{temp_dir}/nonexistent_file_12345.txt"))
         assert not result.success
         assert "not found" in result.error.lower()
-    
+
     @pytest.mark.asyncio
     async def test_write_file(self, write_tool):
-        temp_path = f"/tmp/test_write_{os.getpid()}.txt"
+        fd, temp_path = tempfile.mkstemp(suffix='.txt')
+        os.close(fd)
+        os.unlink(temp_path)
         try:
             result = await write_tool.execute(FileWriteInput(
                 path=temp_path,
@@ -146,7 +149,7 @@ class TestFileTools:
     @pytest.mark.asyncio
     async def test_write_blocked_extension(self, write_tool):
         result = await write_tool.execute(FileWriteInput(
-            path="/tmp/test.sh",
+            path=f"{tempfile.gettempdir()}/test.sh",
             content="#!/bin/bash\necho hello",
             overwrite=True
         ))
