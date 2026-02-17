@@ -4,6 +4,7 @@
  */
 
 import net from "node:net";
+import path from "node:path";
 
 // Sensitive field names to always redact from logs
 export const SENSITIVE_FIELDS = [
@@ -38,11 +39,15 @@ export function sanitizeSensitiveData<T extends Record<string, any>>(obj: T): T 
   if (!obj || typeof obj !== 'object') return obj;
 
   const sanitized = { ...obj };
+
   for (const [key, value] of Object.entries(sanitized)) {
     const lowerKey = key.toLowerCase();
     if (SENSITIVE_FIELDS.some(field => lowerKey.includes(field))) {
       sanitized[key as keyof T] = '[REDACTED]' as any;
-    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    } else if (Array.isArray(value)) {
+      sanitized[key as keyof T] = value
+        .map((item) => sanitizeSensitiveData(item) as Record<string, unknown>) as any;
+    } else if (typeof value === 'object' && value !== null) {
       sanitized[key as keyof T] = sanitizeSensitiveData(value);
     }
   }
@@ -53,7 +58,10 @@ export function sanitizeSensitiveData<T extends Record<string, any>>(obj: T): T 
  * Check if a SQL query contains dangerous patterns
  */
 export function containsDangerousSql(query: string): boolean {
-  return DANGEROUS_SQL_PATTERNS.some(pattern => pattern.test(query));
+  if (typeof query !== "string") {
+    return false;
+  }
+  return DANGEROUS_SQL_PATTERNS.some((pattern) => pattern.test(query));
 }
 
 /**
@@ -62,7 +70,12 @@ export function containsDangerousSql(query: string): boolean {
 export function sanitizeCsvValue(value: any): string {
   if (value === null || value === undefined) return "";
 
-  let str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  let str: string;
+  try {
+    str = typeof value === "object" ? JSON.stringify(value) : String(value);
+  } catch (_error) {
+    str = String(value);
+  }
 
   // Escape double quotes
   str = str.replace(/"/g, '""');
@@ -84,24 +97,28 @@ export function sanitizeCsvValue(value: any): string {
  * Validate and sanitize a file path to prevent traversal
  */
 export function sanitizeFilePath(filePath: string, baseDir?: string): string | null {
-  const path = require('path');
-
+  if (typeof filePath !== "string" || filePath.length === 0) {
+    return null;
+  }
   // Normalize and resolve path
-  const normalized = path.normalize(filePath).replace(/\\/g, '/');
-
-  // Block obvious traversal attempts
-  if (normalized.includes('..') || normalized.includes('\0')) {
+  const normalized = path.normalize(filePath).replace(/\\/g, "/");
+  const hasPathTraversal = normalized.includes("..") || normalized.includes("\0");
+  if (hasPathTraversal) {
     return null;
   }
 
-  // If baseDir provided, ensure path stays within it
   if (baseDir) {
     const resolvedBase = path.resolve(baseDir);
     const resolvedPath = path.resolve(baseDir, normalized);
-    if (!resolvedPath.startsWith(resolvedBase)) {
+    if (!resolvedPath.startsWith(`${resolvedBase}${path.sep}`) && resolvedPath !== resolvedBase) {
       return null;
     }
     return resolvedPath;
+  }
+
+  if (!path.isAbsolute(normalized) && normalized.includes("/")) {
+    const absolute = path.resolve(normalized);
+    return absolute;
   }
 
   return normalized;
@@ -112,11 +129,15 @@ export function sanitizeFilePath(filePath: string, baseDir?: string): string | n
  */
 export function sanitizeFileName(fileName: string, maxLength: number = 255): string {
   // Remove path separators, null bytes, and other dangerous characters
-  let safe = fileName.replace(/[\/\\:\*\?"<>|\x00]/g, '_');
+  if (typeof fileName !== "string") {
+    return "";
+  }
+
+  let safe = fileName.replace(/[\/\\:\*\?"<>|\x00\r\n\t]/g, "_");
+  safe = safe.replace(/[^\x20-\x7E]/g, "_");
 
   // Limit length while preserving extension
   if (safe.length > maxLength) {
-    const path = require('path');
     const ext = path.extname(safe);
     safe = safe.substring(0, maxLength - ext.length) + ext;
   }

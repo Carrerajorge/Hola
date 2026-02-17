@@ -160,12 +160,17 @@ export const validateParams = <T extends ZodSchema>(schema: T) => validate({ par
  * Sanitize string input (basic XSS prevention)
  */
 export function sanitizeString(input: string): string {
-    return input
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#x27;')
-        .replace(/\//g, '&#x2F;');
+    const normalized = input.normalize("NFC");
+    const withoutNulls = normalized.replace(/\u0000/g, "");
+    const withoutControl = withoutNulls.replace(/[\u0001-\u0008\u000B-\u001F\u007F]/g, "");
+    const escaped = withoutControl
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#x27;")
+        .replace(/\//g, "&#x2F;");
+
+    return escaped.slice(0, 10000);
 }
 
 /**
