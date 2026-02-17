@@ -37,27 +37,16 @@ const initialState: BrowserSessionState = {
   error: null,
 };
 
-// ─── Per-chat browser session store ───
-// Each chat gets its own independent browser session state.
-// This prevents Chat A's browser automation from overwriting Chat B's state.
+// ─── Global singleton store ───
+// This state lives OUTSIDE React so it survives component remounts.
+// When ChatInterface remounts (new chat key), the new instance picks up
+// the in-flight browser session state from the old async handleSubmit.
 
-const chatSessions = new Map<string, BrowserSessionState>();
+let globalState: BrowserSessionState = { ...initialState };
 const listeners = new Set<() => void>();
 
-// Track which chatId is "active" in the UI so the hook reads the right slot
-let activeChatId: string | null = null;
-
-function notify() {
-  listeners.forEach(l => l());
-}
-
-function getSessionForChat(chatId: string | null): BrowserSessionState {
-  if (!chatId) return { ...initialState };
-  return chatSessions.get(chatId) || { ...initialState };
-}
-
 function getSnapshot(): BrowserSessionState {
-  return getSessionForChat(activeChatId);
+  return globalState;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -65,29 +54,19 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function setChatState(
-  chatId: string,
-  updater: BrowserSessionState | ((prev: BrowserSessionState) => BrowserSessionState)
-) {
-  const prev = chatSessions.get(chatId) || { ...initialState };
-  const newState = typeof updater === "function" ? updater(prev) : updater;
-  if (newState !== prev) {
-    chatSessions.set(chatId, newState);
-    notify();
+function setGlobalState(updater: BrowserSessionState | ((prev: BrowserSessionState) => BrowserSessionState)) {
+  const newState = typeof updater === "function" ? updater(globalState) : updater;
+  if (newState !== globalState) {
+    globalState = newState;
+    listeners.forEach(l => l());
   }
 }
 
 // ─── Standalone functions (callable from stale closures) ───
-// These now require a chatId parameter to scope updates correctly.
 
-export function globalStartSseSession(objective: string, chatId?: string | null) {
-  const targetChatId = chatId || activeChatId;
-  if (!targetChatId) {
-    console.warn('[BrowserSession] startSseSession called without chatId — ignored');
-    return;
-  }
-  console.log('[BrowserSession] startSseSession called:', objective, 'chatId:', targetChatId);
-  setChatState(targetChatId, {
+export function globalStartSseSession(objective: string) {
+  console.log('[BrowserSession] startSseSession called:', objective);
+  setGlobalState({
     ...initialState,
     sessionId: `sse-browser-${Date.now()}`,
     status: "connecting",
@@ -104,14 +83,9 @@ export function globalUpdateFromSseStep(step: {
   screenshot: string;
   url: string;
   title: string;
-}, chatId?: string | null) {
-  const targetChatId = chatId || activeChatId;
-  if (!targetChatId) {
-    console.warn('[BrowserSession] updateFromSseStep called without chatId — ignored');
-    return;
-  }
-  console.log('[BrowserSession] updateFromSseStep called:', step.stepNumber, step.action, step.url?.substring(0, 50), 'chatId:', targetChatId);
-  setChatState(targetChatId, prev => {
+}) {
+  console.log('[BrowserSession] updateFromSseStep called:', step.stepNumber, step.action, step.url?.substring(0, 50));
+  setGlobalState(prev => {
     // Auto-initialize session if this is the first step (stepNumber 0 = browser_started)
     const sessionId = prev.sessionId || `sse-browser-${Date.now()}`;
     const status = step.action === "done" ? "completed" : "active";
@@ -146,38 +120,13 @@ export function globalUpdateFromSseStep(step: {
   });
 }
 
-export function globalResetBrowserSession(chatId?: string | null) {
-  const targetChatId = chatId || activeChatId;
-  if (targetChatId) {
-    chatSessions.delete(targetChatId);
-    notify();
-  }
-}
-
-/** Set which chatId the hook should return state for */
-export function setActiveBrowserChatId(chatId: string | null) {
-  if (activeChatId !== chatId) {
-    activeChatId = chatId;
-    notify();
-  }
-}
-
-/** Check if a specific chat has an active browser session */
-export function hasBrowserSession(chatId: string): boolean {
-  const session = chatSessions.get(chatId);
-  return !!session && session.status !== "idle";
+export function globalResetBrowserSession() {
+  setGlobalState({ ...initialState });
 }
 
 // ─── React hook ───
 
-export function useBrowserSession(chatId?: string | null) {
-  // Keep activeChatId in sync with the chatId prop
-  useEffect(() => {
-    if (chatId !== undefined) {
-      setActiveBrowserChatId(chatId || null);
-    }
-  }, [chatId]);
-
+export function useBrowserSession() {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const wsRef = useRef<WebSocket | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -188,54 +137,48 @@ export function useBrowserSession(chatId?: string | null) {
       if (response.ok) {
         const data = await response.json();
         if (data.screenshot) {
-          const targetChatId = chatId || activeChatId;
-          if (targetChatId) {
-            setChatState(targetChatId, prev => {
-              if (prev.sessionId === sessionId) {
-                return { ...prev, screenshot: data.screenshot };
-              }
-              return prev;
-            });
-          }
+          setGlobalState(prev => {
+            if (prev.sessionId === sessionId) {
+              return { ...prev, screenshot: data.screenshot };
+            }
+            return prev;
+          });
         }
       }
     } catch (e) {
       // Silently ignore polling errors
     }
-  }, [chatId]);
+  }, []);
 
   const fetchSessionState = useCallback(async (sessionId: string) => {
     try {
       const response = await fetch(`/api/browser/session/${sessionId}`);
       if (response.ok) {
         const session = await response.json();
-        const targetChatId = chatId || activeChatId;
-        if (targetChatId) {
-          setChatState(targetChatId, prev => {
-            if (prev.sessionId === sessionId) {
-              let newStatus = prev.status;
-              if (session.status === "completed") newStatus = "completed";
-              else if (session.status === "error") newStatus = "error";
-              else if (session.status === "cancelled") newStatus = "cancelled";
-              else if (session.status === "active" || session.status === "running") newStatus = "active";
+        setGlobalState(prev => {
+          if (prev.sessionId === sessionId) {
+            let newStatus = prev.status;
+            if (session.status === "completed") newStatus = "completed";
+            else if (session.status === "error") newStatus = "error";
+            else if (session.status === "cancelled") newStatus = "cancelled";
+            else if (session.status === "active" || session.status === "running") newStatus = "active";
 
-              return {
-                ...prev,
-                status: newStatus,
-                currentUrl: session.currentUrl || prev.currentUrl,
-                currentTitle: session.currentTitle || prev.currentTitle,
-              };
-            }
-            return prev;
-          });
-        }
+            return {
+              ...prev,
+              status: newStatus,
+              currentUrl: session.currentUrl || prev.currentUrl,
+              currentTitle: session.currentTitle || prev.currentTitle,
+            };
+          }
+          return prev;
+        });
         return session;
       }
     } catch (e) {
       // Silently ignore
     }
     return null;
-  }, [chatId]);
+  }, []);
 
   const startPolling = useCallback((sessionId: string) => {
     if (pollingRef.current) {
@@ -271,20 +214,15 @@ export function useBrowserSession(chatId?: string | null) {
     }
     stopPolling();
 
-    const targetChatId = chatId || activeChatId;
-    if (targetChatId) {
-      setChatState(targetChatId, {
-        ...initialState,
-        sessionId,
-        status: "connecting",
-        objective,
-      });
-    }
+    setGlobalState({
+      ...initialState,
+      sessionId,
+      status: "connecting",
+      objective,
+    });
 
     startPolling(sessionId);
-    if (targetChatId) {
-      setChatState(targetChatId, prev => ({ ...prev, status: "active" }));
-    }
+    setGlobalState(prev => ({ ...prev, status: "active" }));
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
@@ -297,11 +235,9 @@ export function useBrowserSession(chatId?: string | null) {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        const targetChatId2 = chatId || activeChatId;
-        if (!targetChatId2) return;
 
         if (data.type === "subscribed") {
-          setChatState(targetChatId2, prev => ({ ...prev, status: "active" }));
+          setGlobalState(prev => ({ ...prev, status: "active" }));
         } else if (data.messageType === "browser_event") {
           const eventType = data.eventType as BrowserEvent["type"];
           const browserEvent: BrowserEvent = {
@@ -311,7 +247,7 @@ export function useBrowserSession(chatId?: string | null) {
             data: data.data,
           };
 
-          setChatState(targetChatId2, prev => {
+          setGlobalState(prev => {
             const newState = { ...prev, events: [...prev.events, browserEvent] };
 
             if (browserEvent.data?.screenshot) {
@@ -361,14 +297,11 @@ export function useBrowserSession(chatId?: string | null) {
     ws.onclose = () => {
       wsRef.current = null;
     };
-  }, [chatId, startPolling, stopPolling]);
+  }, [startPolling, stopPolling]);
 
   const createSession = useCallback(async (objective: string, config?: any) => {
     try {
-      const targetChatId = chatId || activeChatId;
-      if (targetChatId) {
-        setChatState(targetChatId, prev => ({ ...prev, status: "connecting", objective }));
-      }
+      setGlobalState(prev => ({ ...prev, status: "connecting", objective }));
 
       const response = await fetch("/api/browser/session", {
         method: "POST",
@@ -386,13 +319,10 @@ export function useBrowserSession(chatId?: string | null) {
 
       return sessionId;
     } catch (error: any) {
-      const targetChatId = chatId || activeChatId;
-      if (targetChatId) {
-        setChatState(targetChatId, prev => ({ ...prev, status: "error", error: error.message }));
-      }
+      setGlobalState(prev => ({ ...prev, status: "error", error: error.message }));
       throw error;
     }
-  }, [chatId, subscribeToSession]);
+  }, [subscribeToSession]);
 
   const navigate = useCallback(async (url: string) => {
     if (!state.sessionId) return null;
@@ -476,14 +406,11 @@ export function useBrowserSession(chatId?: string | null) {
     try {
       await fetch(`/api/browser/session/${state.sessionId}/cancel`, { method: "POST" });
       stopPolling();
-      const targetChatId = chatId || activeChatId;
-      if (targetChatId) {
-        setChatState(targetChatId, prev => ({ ...prev, status: "cancelled" }));
-      }
+      setGlobalState(prev => ({ ...prev, status: "cancelled" }));
     } catch (error) {
       console.error("Cancel error:", error);
     }
-  }, [chatId, state.sessionId, stopPolling]);
+  }, [state.sessionId, stopPolling]);
 
   const close = useCallback(async () => {
     if (!state.sessionId) return;
@@ -495,15 +422,11 @@ export function useBrowserSession(chatId?: string | null) {
         wsRef.current.close();
         wsRef.current = null;
       }
-      const targetChatId = chatId || activeChatId;
-      if (targetChatId) {
-        chatSessions.delete(targetChatId);
-        notify();
-      }
+      setGlobalState({ ...initialState });
     } catch (error) {
       console.error("Close error:", error);
     }
-  }, [chatId, state.sessionId, stopPolling]);
+  }, [state.sessionId, stopPolling]);
 
   const reset = useCallback(() => {
     stopPolling();
@@ -511,12 +434,8 @@ export function useBrowserSession(chatId?: string | null) {
       wsRef.current.close();
       wsRef.current = null;
     }
-    const targetChatId = chatId || activeChatId;
-    if (targetChatId) {
-      chatSessions.delete(targetChatId);
-      notify();
-    }
-  }, [chatId, stopPolling]);
+    setGlobalState({ ...initialState });
+  }, [stopPolling]);
 
   // Direct update from SSE browser_step events (no WebSocket/polling needed)
   // These now delegate to global functions so they work across remounts
@@ -530,13 +449,13 @@ export function useBrowserSession(chatId?: string | null) {
     url: string;
     title: string;
   }) => {
-    globalUpdateFromSseStep(step, chatId);
-  }, [chatId]);
+    globalUpdateFromSseStep(step);
+  }, []);
 
   // Start an SSE-based browser session (for agent loop browser automation)
   const startSseSession = useCallback((objective: string) => {
-    globalStartSseSession(objective, chatId);
-  }, [chatId]);
+    globalStartSseSession(objective);
+  }, []);
 
   useEffect(() => {
     return () => {

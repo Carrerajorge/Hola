@@ -1527,7 +1527,7 @@ export function ChatInterface({
   // The streaming will complete and update the correct chat via onSendMessage
 
   const agent = useAgent();
-  const browserSession = useBrowserSession(chatId);
+  const browserSession = useBrowserSession();
 
   useEffect(() => {
     if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
@@ -2049,11 +2049,11 @@ export function ChatInterface({
         } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
           // Browser automation starting — open the virtual computer panel
           setAiState("agent_working");
-          globalStartSseSession(data.args?.goal || "Automatización web", chatId);
+          globalStartSseSession(data.args?.goal || "Automatización web");
           setIsBrowserOpen(true);
         } else if (eventType === "browser_step") {
           // Real-time browser step with screenshot — update the virtual computer
-          globalUpdateFromSseStep(data, chatId);
+          globalUpdateFromSseStep(data);
           setAiState("agent_working");
           if (!isBrowserOpen) setIsBrowserOpen(true);
         } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -2068,7 +2068,7 @@ export function ChatInterface({
               screenshot: "",
               url: "",
               title: "",
-            }, chatId);
+            });
           }
         }
       },
@@ -3027,10 +3027,10 @@ export function ChatInterface({
         onEvent: (eventType, data) => {
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
+            globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data, effectiveChatIdForStream);
+            globalUpdateFromSseStep(data);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           }
@@ -3174,10 +3174,10 @@ export function ChatInterface({
           // Handle browser automation events from agent loop
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
+            globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data, effectiveChatIdForStream);
+            globalUpdateFromSseStep(data);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -3191,7 +3191,7 @@ export function ChatInterface({
                 screenshot: "",
                 url: "",
                 title: "",
-              }, effectiveChatIdForStream);
+              });
             }
           }
         },
@@ -5064,22 +5064,22 @@ IMPORTANTE:
                   }
 
                   // Handle browser automation events (tool_start, browser_step, tool_result)
-                  // IMPORTANT: Use global functions with chatId to scope updates to the correct chat.
-                  // This async loop may outlive the component mount (ChatInterface remounts
-                  // when a new chat is created). Global functions update a per-chat store
+                  // IMPORTANT: Use global functions (not browserSession.xxx) because
+                  // this async loop may outlive the component mount (ChatInterface remounts
+                  // when a new chat is created). Global functions update a singleton store
                   // that survives remounts.
                   if (currentEventType === 'tool_start' && data.toolName === 'browse_and_act') {
-                    console.log('[SSE] 🌐 Browser automation starting:', data.args?.goal, 'chatId:', effectiveStreamChatId);
+                    console.log('[SSE] 🌐 Browser automation starting:', data.args?.goal);
                     setAiState("agent_working");
-                    globalStartSseSession(data.args?.goal || "Automatización web", effectiveStreamChatId);
+                    globalStartSseSession(data.args?.goal || "Automatización web");
                     setIsBrowserOpen(true);
                     currentEventType = "chunk";
                     continue;
                   }
 
                   if (currentEventType === 'browser_step') {
-                    console.log('[SSE] 🖥️ Browser step:', data.stepNumber, data.action, data.url, 'chatId:', effectiveStreamChatId);
-                    globalUpdateFromSseStep(data, effectiveStreamChatId);
+                    console.log('[SSE] 🖥️ Browser step:', data.stepNumber, data.action, data.url);
+                    globalUpdateFromSseStep(data);
                     setAiState("agent_working");
                     if (!isBrowserOpen) setIsBrowserOpen(true);
                     currentEventType = "chunk";
@@ -5087,7 +5087,7 @@ IMPORTANTE:
                   }
 
                   if (currentEventType === 'tool_result' && data.toolName === 'browse_and_act') {
-                    console.log('[SSE] ✅ Browser automation completed:', data.result?.success, 'chatId:', effectiveStreamChatId);
+                    console.log('[SSE] ✅ Browser automation completed:', data.result?.success);
                     if (data.result?.success) {
                       globalUpdateFromSseStep({
                         stepNumber: data.result.stepsCount || 0,
@@ -5098,7 +5098,7 @@ IMPORTANTE:
                         screenshot: "",
                         url: "",
                         title: "",
-                      }, effectiveStreamChatId);
+                      });
                     }
                     currentEventType = "chunk";
                     continue;

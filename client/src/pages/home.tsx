@@ -284,11 +284,9 @@ export default function Home() {
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
 
-    // Reset aiState for the NEW chat's UI so the submit button is unblocked.
-    // Background streams from the OLD chat continue independently — their
-    // setAiState calls will be no-op'd by the chatId guard in ChatInterface.
-    setAiStateRaw('idle');
-    setAiStateChatId(null);
+    // DO NOT reset aiState - let background streaming complete naturally
+    // The aiStateChatId check prevents the indicator from showing on wrong chat
+    // Only reset process steps for UI display
     setAiProcessSteps([]);
 
     setIsNewChatMode(false);

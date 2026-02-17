@@ -1783,7 +1783,7 @@ export function ChatInterface({
   // The streaming will complete and update the correct chat via onSendMessage
 
   const agent = useAgent();
-  const browserSession = useBrowserSession(chatId);
+  const browserSession = useBrowserSession();
 
   useEffect(() => {
     if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
@@ -2437,11 +2437,11 @@ export function ChatInterface({
         } else if (eventType === "tool_start" && data.toolName === "browse_and_act") {
           // Browser automation starting — open the virtual computer panel
           setAiState("agent_working");
-          globalStartSseSession(data.args?.goal || "Automatización web", chatId);
+          globalStartSseSession(data.args?.goal || "Automatización web");
           setIsBrowserOpen(true);
         } else if (eventType === "browser_step") {
           // Real-time browser step with screenshot — update the virtual computer
-          globalUpdateFromSseStep(data, chatId);
+          globalUpdateFromSseStep(data);
           setAiState("agent_working");
           if (!isBrowserOpen) setIsBrowserOpen(true);
         } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -2456,7 +2456,7 @@ export function ChatInterface({
               screenshot: "",
               url: "",
               title: "",
-            }, chatId);
+            });
           }
         }
       },
@@ -3534,10 +3534,10 @@ export function ChatInterface({
         onEvent: (eventType, data) => {
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
+            globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data, effectiveChatIdForStream);
+            globalUpdateFromSseStep(data);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           }
@@ -3668,10 +3668,10 @@ export function ChatInterface({
           // Handle browser automation events from agent loop
           if (eventType === "tool_start" && data.toolName === "browse_and_act") {
             setAiState("agent_working");
-            globalStartSseSession(data.args?.goal || "Automatización web", effectiveChatIdForStream);
+            globalStartSseSession(data.args?.goal || "Automatización web");
             setIsBrowserOpen(true);
           } else if (eventType === "browser_step") {
-            globalUpdateFromSseStep(data, effectiveChatIdForStream);
+            globalUpdateFromSseStep(data);
             setAiState("agent_working");
             if (!isBrowserOpen) setIsBrowserOpen(true);
           } else if (eventType === "tool_result" && data.toolName === "browse_and_act") {
@@ -3685,7 +3685,7 @@ export function ChatInterface({
                 screenshot: "",
                 url: "",
                 title: "",
-              }, effectiveChatIdForStream);
+              });
             }
           }
         },
@@ -5447,14 +5447,14 @@ IMPORTANTE:
                 if (eventType === "tool_start" && data?.toolName === "browse_and_act") {
                   setAiState("agent_working");
                   setIsBrowserOpen(true);
-                  globalStartSseSession(data?.args?.goal || "Automatización web", effectiveStreamChatId);
+                  globalStartSseSession(data?.args?.goal || "Automatización web");
                   return;
                 }
 
                 if (eventType === "browser_step") {
                   setAiState("agent_working");
                   if (!isBrowserOpen) setIsBrowserOpen(true);
-                  globalUpdateFromSseStep(data, effectiveStreamChatId);
+                  globalUpdateFromSseStep(data);
                   return;
                 }
 
@@ -5469,7 +5469,7 @@ IMPORTANTE:
                       screenshot: "",
                       url: "",
                       title: "",
-                    }, effectiveStreamChatId);
+                    });
                   }
                   return;
                 }
