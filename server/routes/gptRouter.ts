@@ -7,6 +7,15 @@ import { gptActionCreateSchema, gptActionUpdateSchema, gptActionUseSchema } from
 const DEFAULT_GPT_MODEL = "grok-4-1-fast-non-reasoning";
 const DEFAULT_GPT_KNOWLEDGE_SOURCES: Array<Record<string, any>> = [];
 const DEFAULT_GPT_ACTIONS: string[] = [];
+const IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
+const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+const MAX_GPT_ACTION_USE_PAYLOAD_BYTES = 80_000;
+const MAX_GPT_ACTION_REQUEST_KEYS = 240;
+const MAX_GPT_ACTION_REQUEST_DEPTH = 16;
+const MAX_GPT_ACTION_REQUEST_ARRAY = 400;
+const MAX_GPT_ACTION_REQUEST_STRING_BYTES = 10_240;
+const MAX_GPT_ACTION_ERROR_MESSAGE_BYTES = 1_024;
+const FORBIDDEN_REQUEST_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
 function asRecord(value: unknown): Record<string, any> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : null;
@@ -147,6 +156,152 @@ function getRuntimePolicyPayload(policies: any) {
     temperatureOverride: asNumber(policies.temperatureOverride),
     allowClientOverride: asBoolean(policies.allowClientOverride, false),
   };
+}
+
+function sanitizeTextForRoute(value: string, maxBytes: number): string {
+  const normalized = value.normalize("NFKC").replace(CONTROL_CHAR_RE, "").trim();
+  const bytes = Buffer.byteLength(normalized, "utf8");
+  if (bytes <= maxBytes) {
+    return normalized;
+  }
+  return normalized.slice(0, maxBytes);
+}
+
+function normalizeIdentifier(rawId: unknown): string | null {
+  if (typeof rawId !== "string") {
+    return null;
+  }
+  const normalized = rawId.normalize("NFKC").trim().replace(CONTROL_CHAR_RE, "");
+  if (!IDENTIFIER_RE.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function sanitizeRoutePayloadObject(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (depth > MAX_GPT_ACTION_REQUEST_DEPTH) {
+    throw new Error("Request payload depth is too high");
+  }
+
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new Error("Request payload contains invalid numeric value");
+    }
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return sanitizeTextForRoute(value, MAX_GPT_ACTION_REQUEST_STRING_BYTES);
+  }
+
+  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+    throw new Error("Request payload contains unsupported type");
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > MAX_GPT_ACTION_REQUEST_ARRAY) {
+      throw new Error("Request payload array is too large");
+    }
+    if (seen.has(value)) {
+      throw new Error("Request payload contains circular reference");
+    }
+    seen.add(value);
+    const output = value.slice(0, MAX_GPT_ACTION_REQUEST_ARRAY).map((entry) => sanitizeRoutePayloadObject(entry, depth + 1, seen));
+    seen.delete(value);
+    return output;
+  }
+
+  if (typeof value !== "object") {
+    return String(value);
+  }
+
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== null && proto !== Object.prototype) {
+    throw new Error("Request payload contains invalid object");
+  }
+
+  if (seen.has(value as object)) {
+    throw new Error("Request payload contains circular reference");
+  }
+
+  seen.add(value as object);
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > MAX_GPT_ACTION_REQUEST_KEYS) {
+    throw new Error("Request payload contains too many keys");
+  }
+
+  const output: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of entries) {
+    const key = sanitizeTextForRoute(rawKey, 80);
+    if (!key || FORBIDDEN_REQUEST_KEYS.has(key) || !IDENTIFIER_RE.test(key)) {
+      continue;
+    }
+    output[key] = sanitizeRoutePayloadObject(rawValue, depth + 1, seen);
+  }
+  seen.delete(value as object);
+  return output;
+}
+
+function sanitizeErrorForRoute(message: string | undefined): string {
+  return sanitizeTextForRoute(message || "Action execution failed", MAX_GPT_ACTION_ERROR_MESSAGE_BYTES);
+}
+
+function sanitizeValidationIssues(issues: unknown): unknown[] {
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+
+  const allowed = ["code", "path", "message", "expected", "received"];
+  return issues.slice(0, 12).map((issue) => {
+    if (!issue || typeof issue !== "object") {
+      return { message: "Invalid payload issue" };
+    }
+
+    const source: Record<string, unknown> = issue as Record<string, unknown>;
+    const output: Record<string, unknown> = {};
+    for (const field of allowed) {
+      if (Object.prototype.hasOwnProperty.call(source, field)) {
+        const value = source[field];
+        if (typeof value === "string") {
+          output[field] = sanitizeTextForRoute(value, 256);
+        } else if (Array.isArray(value) || typeof value === "number" || typeof value === "boolean") {
+          output[field] = value;
+        } else if (value !== null && typeof value === "object") {
+          output[field] = "[redacted]";
+        } else {
+          output[field] = value;
+        }
+      }
+    }
+
+    if (Object.keys(output).length === 0) {
+      return { message: "Invalid payload issue" };
+    }
+
+    return output;
+  });
+}
+
+function parseHeaderRequestId(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    const head = value[0];
+    return head ? parseHeaderRequestId(head) : null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  return normalizeIdentifier(value);
+}
+
+function pickIdempotencyKey(bodyKey: string | undefined, headerKey: unknown): string | null {
+  const headerCandidate = parseHeaderRequestId(headerKey);
+  if (headerCandidate) {
+    return headerCandidate;
+  }
+  if (typeof bodyKey === "undefined") {
+    return null;
+  }
+  return normalizeIdentifier(bodyKey);
 }
 
 function getActionExecutionHttpStatus(result: {

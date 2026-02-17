@@ -543,12 +543,17 @@ export function createGptRouter() {
   router.get("/users/:userId/sidebar-gpts", async (req, res) => {
     try {
       const { userId } = req.params;
+      const normalizedUserId = normalizeIdentifier(userId);
+      const callerId = normalizeIdentifier(getOrCreateSecureUserId(req));
 
-      if (!userId) {
+      if (!normalizedUserId) {
         return res.json([]);
       }
+      if (!callerId || callerId !== normalizedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
-      const pinnedGpts = await storage.getSidebarPinnedGpts(userId);
+      const pinnedGpts = await storage.getSidebarPinnedGpts(normalizedUserId);
       res.json(pinnedGpts);
     } catch (error: any) {
       console.error("[api] sidebar-gpts load failed", error);
@@ -562,17 +567,25 @@ export function createGptRouter() {
     try {
       const { userId } = req.params;
       const { gptId, displayOrder } = req.body;
-      if (!userId) {
+      const normalizedUserId = normalizeIdentifier(userId);
+      const normalizedGptId = normalizeIdentifier(gptId);
+      const callerId = normalizeIdentifier(getOrCreateSecureUserId(req));
+      if (!normalizedUserId) {
         return res.status(400).json({ error: "userId is required" });
       }
-      if (!gptId) {
+      if (!normalizedGptId) {
         return res.status(400).json({ error: "gptId is required" });
       }
-      const pinned = await storage.pinGptToSidebar(userId, gptId, displayOrder || 0);
+      if (!callerId || callerId !== normalizedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const safeDisplayOrder = Number.isFinite(Number(displayOrder)) ? Number(displayOrder) : 0;
+      const pinned = await storage.pinGptToSidebar(normalizedUserId, normalizedGptId, safeDisplayOrder);
       res.json(pinned);
     } catch (error: any) {
       console.error("[api] sidebar-gpts pin failed", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeErrorForRoute(error?.message) });
     }
   });
 
@@ -580,14 +593,21 @@ export function createGptRouter() {
   router.delete("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
     try {
       const { userId, gptId } = req.params;
-      if (!userId || !gptId) {
+      const normalizedUserId = normalizeIdentifier(userId);
+      const normalizedGptId = normalizeIdentifier(gptId);
+      const callerId = normalizeIdentifier(getOrCreateSecureUserId(req));
+      if (!normalizedUserId || !normalizedGptId) {
         return res.status(400).json({ error: "userId and gptId are required" });
       }
-      await storage.unpinGptFromSidebar(userId, gptId);
+      if (!callerId || callerId !== normalizedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      await storage.unpinGptFromSidebar(normalizedUserId, normalizedGptId);
       res.json({ success: true });
     } catch (error: any) {
       console.error("[api] sidebar-gpts unpin failed", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeErrorForRoute(error?.message) });
     }
   });
 
@@ -595,14 +615,21 @@ export function createGptRouter() {
   router.get("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
     try {
       const { userId, gptId } = req.params;
-      if (!userId || !gptId) {
+      const normalizedUserId = normalizeIdentifier(userId);
+      const normalizedGptId = normalizeIdentifier(gptId);
+      const callerId = normalizeIdentifier(getOrCreateSecureUserId(req));
+      if (!normalizedUserId || !normalizedGptId) {
         return res.json({ isPinned: false });
       }
-      const isPinned = await storage.isGptPinnedToSidebar(userId, gptId);
+      if (!callerId || callerId !== normalizedUserId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const isPinned = await storage.isGptPinnedToSidebar(normalizedUserId, normalizedGptId);
       res.json({ isPinned });
     } catch (error: any) {
       console.error("[api] sidebar-gpts status check failed", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeErrorForRoute(error?.message) });
     }
   });
 
