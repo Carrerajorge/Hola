@@ -553,6 +553,16 @@ jobs:
             done
           done
 
+          # Prune mirrored local worktrees/snapshots from the ephemeral CI
+          # workspace so Trivy scans only the canonical repository tree.
+          for candidate in /src/Hola_wt_* /src/iliagpt_skills_push /src/Hola; do
+            [ -d "${candidate}" ] || continue
+            if [ -d "${candidate}/.config/replit/.semgrep" ]; then
+              echo "Pruning mirrored workspace directory: ${candidate#/src/}"
+              rm -rf -- "${candidate}"
+            fi
+          done
+
           TRIVY_ARGS=(
             --scanners secret
             --exit-code 1
