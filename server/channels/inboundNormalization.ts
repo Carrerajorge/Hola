@@ -1,5 +1,36 @@
 import type { ConversationKey, ExternalChannel, MessageEnvelope } from "./types";
 
+const MAX_TEXT_LENGTH = 4000;
+const MAX_ID_LENGTH = 80;
+const MAX_FILE_NAME_LENGTH = 180;
+const MAX_IDENTIFIER_TEXT_LENGTH = 120;
+const MAX_METADATA_TEXT_LENGTH = 280;
+const MAX_MEDIA_URL_LENGTH = 2_048;
+const MAX_CHANNEL_PAYLOAD_LENGTH = 10_000;
+const MAX_CHAT_ID_LENGTH = 160;
+
+const ALLOWED_MIME_TYPES: Record<MessageEnvelope["messageType"], ReadonlySet<string>> = {
+  text: new Set([]),
+  image: new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]),
+  audio: new Set(["audio/ogg", "audio/mpeg", "audio/mp3", "audio/wav", "audio/webm"]),
+  document: new Set([
+    "application/pdf",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/csv",
+    "application/zip",
+    "application/json",
+    "application/octet-stream",
+  ]),
+  unsupported: new Set([]),
+};
+
+const ALLOWED_CHANNEL_SCHEME = /^https?:$/i;
+const SAFE_ID_RE = /^[A-Za-z0-9._:-]+$/;
+
 export type NormalizedInboundMessage = {
   providerMessageId: string;
   senderId: string;
@@ -10,12 +41,90 @@ export type NormalizedInboundMessage = {
 };
 
 function normalizeText(value: unknown): string {
-  return String(value ?? "").trim();
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u202E/g, "")
+    .replace(/\x00/g, "")
+    .replace(/[\u0001-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, MAX_TEXT_LENGTH);
 }
 
-function textOrFallback(value: unknown, fallback: string): string {
-  const normalized = normalizeText(value);
-  return normalized || fallback;
+function sanitizeTextForStorage(value: unknown): string {
+  return normalizeText(value)
+    .replace(/<[^>]*>/g, "")
+    .replace(/[`*_~#>[\]{}]/g, "")
+    .slice(0, MAX_IDENTIFIER_TEXT_LENGTH);
+}
+
+function sanitizeIdentifier(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u202E/g, "")
+    .replace(/\x00/g, "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/["'`]/g, "")
+    .replace(/[\\\/]/g, "")
+    .replace(/[<>]/g, "")
+    .slice(0, MAX_ID_LENGTH);
+}
+
+function sanitizeIdentifierStrict(value: unknown): string {
+  const cleaned = sanitizeIdentifier(value);
+  if (!cleaned) return "";
+  if (SAFE_ID_RE.test(cleaned)) return cleaned;
+  return cleaned.replace(/[^A-Za-z0-9._:-]+/g, "").slice(0, MAX_ID_LENGTH);
+}
+
+function sanitizeOptionalText(value: unknown): string {
+  return normalizeText(value).slice(0, MAX_IDENTIFIER_TEXT_LENGTH);
+}
+
+function sanitizeMetadataText(value: unknown): string {
+  return sanitizeTextForStorage(value).slice(0, MAX_METADATA_TEXT_LENGTH);
+}
+
+function sanitizeMimeType(messageType: MessageEnvelope["messageType"], value: unknown): string {
+  const normalized = sanitizeOptionalText(value).toLowerCase();
+  if (!normalized) {
+    return messageType === "text" ? "text/plain" : "";
+  }
+
+  const allowed = ALLOWED_MIME_TYPES[messageType] ?? ALLOWED_MIME_TYPES.unsupported;
+  if (!allowed.size || allowed.has(normalized)) return normalized;
+  return messageType === "text" ? "text/plain" : "";
+}
+
+function sanitizeMediaUrl(value: unknown): string | undefined {
+  const normalized = sanitizeTextForStorage(value).slice(0, MAX_MEDIA_URL_LENGTH);
+  if (!normalized) return undefined;
+
+  try {
+    const parsed = new URL(normalized);
+    if (!ALLOWED_CHANNEL_SCHEME.test(parsed.protocol)) return undefined;
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeFileName(value: unknown, fallback: string): string {
+  const candidate = sanitizeMetadataText(value);
+  const safe = candidate
+    .replace(/[\\/]|\.{2,}|\s+/g, "_")
+    .replace(/[^\w.\-()]/g, "_")
+    .slice(0, MAX_FILE_NAME_LENGTH);
+  return safe || fallback;
+}
+
+function normalizeIncomingPayload<T>(value: unknown): T | null {
+  if (typeof value === "string") {
+    return value.length > MAX_CHANNEL_PAYLOAD_LENGTH ? null : (value as T);
+  }
+  if (typeof value !== "object" || value === null) return null;
+  if (Array.isArray(value)) return value.length > MAX_CHANNEL_PAYLOAD_LENGTH ? null : (value as T);
+  return value as T;
 }
 
 function parseTimestamp(raw: any): string {
@@ -27,27 +136,35 @@ function parseTimestamp(raw: any): string {
   return new Date().toISOString();
 }
 
+function normalizeChatId(value: unknown): string {
+  const normalized = sanitizeIdentifierStrict(value) || "";
+  return normalized.slice(0, MAX_CHAT_ID_LENGTH);
+}
+
 export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> {
   const out: MessageEnvelope[] = [];
+  const safePayload = normalizeIncomingPayload<any>(payload);
+  if (!safePayload) return out;
 
-  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+  const entries = Array.isArray(safePayload.entry) ? safePayload.entry : [];
   for (const entry of entries) {
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       const value = change?.value;
-      const phoneNumberId = normalizeText(value?.metadata?.phone_number_id);
+      const phoneNumberId = sanitizeIdentifierStrict(value?.metadata?.phone_number_id);
       if (!phoneNumberId) continue;
 
       const messages = Array.isArray(value?.messages) ? value.messages : [];
       const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
       const contact = contacts[0];
-      const contactName = normalizeText(contact?.profile?.name) || null;
+      const contactName = sanitizeMetadataText(contact?.profile?.name) || null;
 
       for (const m of messages) {
-        const providerMessageId = textOrFallback(m?.id, `wa_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+        const providerMessageId = sanitizeIdentifierStrict(m?.id)
+          || `wa_${Date.now()}_${Math.random().toString(16).slice(2)}`;
         if (!providerMessageId) continue;
 
-        const senderId = normalizeText(m?.from);
+        const senderId = sanitizeIdentifierStrict(m?.from);
         if (!senderId) continue;
 
         const envelopeBase: MessageEnvelope = {
@@ -56,7 +173,7 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
           channelKey: phoneNumberId,
           threadId: senderId,
           senderId,
-          recipientId: normalizeText(m?.to) || undefined,
+          recipientId: sanitizeIdentifierStrict(m?.to) || undefined,
           conversationKey: {
             workspaceId: "workspace:unknown",
             channel: "whatsapp_cloud",
@@ -67,96 +184,102 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
           text: "",
           messageType: "text",
           metadata: {
-            rawPayload: payload,
-            channelMessageType: m?.type,
+            rawPayload: safePayload,
+            channelMessageType: sanitizeIdentifierStrict(m?.type),
             messageId: providerMessageId,
             phoneNumberId,
             contactName,
-            contact,
+            contact: sanitizeMetadataText(contact),
           },
         };
 
         if (m?.type === "text") {
-          const text = textOrFallback(m?.text?.body, "");
+          const text = sanitizeTextForStorage(m?.text?.body);
           if (!text) continue;
-          out.push({
-            ...envelopeBase,
-            text,
-            messageType: "text",
-            metadata: {
-              ...envelopeBase.metadata,
-              textPreview: text.slice(0, 280),
-            },
-          });
+          out.push({ ...envelopeBase, text, messageType: "text" });
           continue;
         }
 
         if (m?.type === "image") {
-          const caption = normalizeText(m?.image?.caption);
+          const caption = sanitizeMetadataText(m?.image?.caption);
+          const mimeType = sanitizeMimeType("image", m?.image?.mime_type);
+          const providerAssetId = sanitizeIdentifierStrict(m?.image?.id);
+          if (!mimeType || !providerAssetId) continue;
+
+          const fileName = sanitizeFileName(m?.image?.filename, `image_${providerMessageId}.jpg`);
           out.push({
             ...envelopeBase,
             text: caption || "[Imagen recibida]",
             messageType: "image",
             media: {
-              providerAssetId: normalizeText(m?.image?.id),
-              fileName: "image.jpg",
-              mimeType: "image/jpeg",
+              providerAssetId,
+              fileName,
+              mimeType,
               raw: m,
             },
             metadata: {
               ...envelopeBase.metadata,
-              mediaId: normalizeText(m?.image?.id),
+              mediaId: providerAssetId,
+              mediaMimeType: mimeType,
             },
           });
           continue;
         }
 
         if (m?.type === "audio") {
-          const caption = normalizeText(m?.audio?.mime_type) || "[Mensaje de voz recibido]";
+          const mimeType = sanitizeMimeType("audio", m?.audio?.mime_type);
+          const providerAssetId = sanitizeIdentifierStrict(m?.audio?.id);
+          if (!mimeType || !providerAssetId) continue;
+
           out.push({
             ...envelopeBase,
             text: "[Mensaje de voz recibido. Transcripción no disponible en este momento.]",
             messageType: "audio",
             media: {
-              providerAssetId: normalizeText(m?.audio?.id),
+              providerAssetId,
               fileName: `audio_${providerMessageId}.ogg`,
-              mimeType: normalizeText(m?.audio?.mime_type) || "audio/ogg",
+              mimeType,
               raw: m,
             },
             metadata: {
               ...envelopeBase.metadata,
-              mimeType: normalizeText(m?.audio?.mime_type),
+              mediaId: providerAssetId,
+              mediaMimeType: mimeType,
             },
           });
           continue;
         }
 
         if (m?.type === "document") {
-          const caption = normalizeText(m?.document?.filename);
+          const mimeType = sanitizeMimeType("document", m?.document?.mime_type);
+          const providerAssetId = sanitizeIdentifierStrict(m?.document?.id);
+          if (!mimeType || !providerAssetId) continue;
+
+          const fileName = sanitizeFileName(m?.document?.filename, `document_${providerMessageId}`);
           out.push({
             ...envelopeBase,
-            text: caption ? `[Documento recibido: ${caption}]` : "[Documento recibido]",
+            text: fileName ? `[Documento recibido: ${fileName}]` : "[Documento recibido]",
             messageType: "document",
             media: {
-              providerAssetId: normalizeText(m?.document?.id),
-              fileName: caption || `document_${providerMessageId}`,
-              mimeType: normalizeText(m?.document?.mime_type) || "application/octet-stream",
+              providerAssetId,
+              fileName,
+              mimeType,
               raw: m,
             },
             metadata: {
               ...envelopeBase.metadata,
-              fileName: caption || null,
-              mimeType: normalizeText(m?.document?.mime_type),
+              fileName: fileName || null,
+              mediaMimeType: mimeType,
             },
           });
           continue;
         }
 
-        const text = textOrFallback(m?.text?.body, textOrFallback(m?.caption, "Mensaje recibido"));
-        if (!text) continue;
+        const fallback = sanitizeMetadataText(m?.text?.body) || sanitizeMetadataText(m?.caption) || "Mensaje recibido";
+        if (!fallback) continue;
         out.push({
           ...envelopeBase,
-          text,
+          text: fallback,
           messageType: "text",
         });
       }
@@ -168,22 +291,25 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
 
 export function normalizeMessengerMessages(payload: any): MessageEnvelope[] {
   const out: MessageEnvelope[] = [];
-  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+  const safePayload = normalizeIncomingPayload<any>(payload);
+  if (!safePayload) return out;
 
+  const entries = Array.isArray(safePayload.entry) ? safePayload.entry : [];
   for (const entry of entries) {
     const messaging = Array.isArray(entry?.messaging) ? entry.messaging : [];
-    const pageId = normalizeText(entry?.id);
+    const pageId = sanitizeIdentifierStrict(entry?.id);
 
     for (const event of messaging) {
       if (!event || typeof event !== "object") continue;
       if (event?.message?.is_echo || event?.delivery || event?.read) continue;
 
-      const senderId = normalizeText(event?.sender?.id);
-      const recipientId = normalizeText(event?.recipient?.id) || pageId;
+      const senderId = sanitizeIdentifierStrict(event?.sender?.id);
+      const recipientId = sanitizeIdentifierStrict(event?.recipient?.id) || pageId;
       const message = event?.message;
       if (!senderId || !recipientId || !message) continue;
 
-      const providerMessageId = textOrFallback(message?.mid, `ms_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+      const providerMessageId = sanitizeIdentifierStrict(message?.mid)
+        || `ms_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       const envelopeBase: MessageEnvelope = {
         providerMessageId,
         channel: "messenger",
@@ -201,79 +327,88 @@ export function normalizeMessengerMessages(payload: any): MessageEnvelope[] {
         text: "",
         messageType: "text",
         metadata: {
-          rawPayload: payload,
+          rawPayload: safePayload,
           pageId: recipientId,
           messageMid: providerMessageId,
         },
       };
 
-      if (typeof message?.text === "string" && normalizeText(message?.text)) {
-        out.push({ ...envelopeBase, text: normalizeText(message.text), messageType: "text" });
+      if (typeof message?.text === "string") {
+        const text = sanitizeTextForStorage(message.text);
+        if (!text) continue;
+        out.push({ ...envelopeBase, text, messageType: "text" });
         continue;
       }
 
-      if (message?.text?.body && normalizeText(message.text.body)) {
-        out.push({ ...envelopeBase, text: normalizeText(message.text.body), messageType: "text" });
+      if (message?.text?.body) {
+        const text = sanitizeTextForStorage(message.text.body);
+        if (!text) continue;
+        out.push({ ...envelopeBase, text, messageType: "text" });
         continue;
       }
 
       const firstAttachment = Array.isArray(message?.attachments) ? message.attachments[0] : null;
       if (!firstAttachment) continue;
 
-      const type = normalizeText(firstAttachment?.type || "");
-      if (type === "audio") {
+      const type = sanitizeIdentifierStrict(firstAttachment?.type || "").toLowerCase();
+      const attachmentPayload = firstAttachment?.payload || {};
+      const mimeType = sanitizeMimeType(type as MessageEnvelope["messageType"], attachmentPayload?.mime_type || firstAttachment?.mime_type);
+
+      if (type === "audio" && mimeType) {
         out.push({
           ...envelopeBase,
           text: "[Audio recibido. Transcripción no disponible.]",
           messageType: "audio",
           media: {
-            fileName: `audio_${providerMessageId}.ogg`,
-            mimeType: "audio/ogg",
+            fileName: sanitizeFileName(attachmentPayload?.name, `audio_${providerMessageId}.ogg`),
+            mimeType,
             raw: firstAttachment,
           },
           metadata: {
             ...envelopeBase.metadata,
             attachmentType: type,
+            attachmentMime: mimeType,
           },
         });
         continue;
       }
 
-      if (type === "image") {
+      if (type === "image" && mimeType) {
         out.push({
           ...envelopeBase,
           text: "[Imagen recibida]",
           messageType: "image",
           media: {
-            fileName: `image_${providerMessageId}.jpg`,
-            mimeType: "image/jpeg",
+            fileName: sanitizeFileName(attachmentPayload?.name, `image_${providerMessageId}.jpg`),
+            mimeType,
             raw: firstAttachment,
           },
           metadata: {
             ...envelopeBase.metadata,
             attachmentType: type,
+            attachmentMime: mimeType,
           },
         });
         continue;
       }
 
-      if (type === "file" || type === "application") {
-        const payload = firstAttachment?.payload || {};
-        const url = normalizeText(payload?.url);
-        const fileName = normalizeText(payload?.name) || `document_${providerMessageId}`;
+      if ((type === "file" || type === "application") && mimeType) {
+        const url = sanitizeMediaUrl(attachmentPayload?.url);
+        const fileName = sanitizeFileName(attachmentPayload?.name, `document_${providerMessageId}`);
         out.push({
           ...envelopeBase,
           text: fileName ? `[Documento recibido: ${fileName}]` : "[Documento recibido]",
           messageType: "document",
           media: {
             fileName,
-            mimeType: normalizeText(payload?.mime_type) || "application/octet-stream",
-            url: url || undefined,
+            mimeType,
+            url,
             raw: firstAttachment,
           },
           metadata: {
             ...envelopeBase.metadata,
             attachmentType: type,
+            attachmentMime: mimeType,
           },
         });
         continue;
@@ -286,11 +421,13 @@ export function normalizeMessengerMessages(payload: any): MessageEnvelope[] {
 
 export function normalizeWeChatMessage(rawXml: string, parsed: any): MessageEnvelope | null {
   if (!rawXml || typeof rawXml !== "string") return null;
+  const sanitizedXml = rawXml.slice(0, MAX_CHANNEL_PAYLOAD_LENGTH);
 
-  const msgType = parsed?.MsgType;
-  const from = normalizeText(parsed?.FromUserName);
-  const to = normalizeText(parsed?.ToUserName);
-  const msgId = normalizeText(parsed?.MsgId) || `wc_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const msgType = sanitizeIdentifierStrict(parsed?.MsgType);
+  const from = sanitizeIdentifierStrict(parsed?.FromUserName);
+  const to = sanitizeIdentifierStrict(parsed?.ToUserName);
+  const msgId = sanitizeIdentifierStrict(parsed?.MsgId)
+    || `wc_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
   if (!from || !to) return null;
 
@@ -311,56 +448,62 @@ export function normalizeWeChatMessage(rawXml: string, parsed: any): MessageEnve
     text: "",
     messageType: "text",
     metadata: {
-      rawPayload: rawXml,
+      rawPayload: sanitizedXml,
       msgType,
-      event: normalizeText(parsed?.Event),
-      eventKey: normalizeText(parsed?.EventKey),
+      event: sanitizeMetadataText(parsed?.Event),
+      eventKey: sanitizeMetadataText(parsed?.EventKey),
       toUserName: to,
       fromUserName: from,
     },
   };
 
   if (msgType === "text") {
-    const text = normalizeText(parsed?.Content);
+    const text = sanitizeTextForStorage(parsed?.Content);
     if (!text) return null;
     return { ...envelopeBase, text };
   }
 
   if (msgType === "image") {
+    const mimeType = sanitizeMimeType("image", "image/jpeg");
+    if (!mimeType) return null;
     return {
       ...envelopeBase,
       text: "[Imagen recibida]",
       messageType: "image",
       media: {
         fileName: `image_${msgId}.jpg`,
-        mimeType: "image/jpeg",
+        mimeType,
         raw: parsed,
       },
     };
   }
 
   if (msgType === "voice") {
+    const mimeType = sanitizeMimeType("audio", parsed?.Format || "audio/ogg");
+    if (!mimeType) return null;
     return {
       ...envelopeBase,
       text: "[Mensaje de voz recibido. Transcripción no disponible.]",
       messageType: "audio",
       media: {
         fileName: `audio_${msgId}.ogg`,
-        mimeType: "audio/ogg",
+        mimeType,
         raw: parsed,
       },
     };
   }
 
   if (msgType === "doc") {
-    const fileName = normalizeText(parsed?.Title) || `document_${msgId}`;
+    const mimeType = sanitizeMimeType("document", parsed?.FileMd5 || "application/octet-stream");
+    const fileName = sanitizeFileName(parsed?.Title, `document_${msgId}`);
+    if (!mimeType) return null;
     return {
       ...envelopeBase,
       text: `[Documento recibido: ${fileName}]`,
       messageType: "document",
       media: {
         fileName,
-        mimeType: normalizeText(parsed?.FileMd5) || "application/octet-stream",
+        mimeType,
         raw: parsed,
       },
     };
@@ -371,14 +514,17 @@ export function normalizeWeChatMessage(rawXml: string, parsed: any): MessageEnve
 
 export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   const out: MessageEnvelope[] = [];
-  const msg = payload?.message;
+  const safePayload = normalizeIncomingPayload<any>(payload);
+  if (!safePayload) return out;
+
+  const msg = safePayload?.message;
   if (!msg) return out;
 
-  const text = normalizeText(msg?.text);
-  const caption = normalizeText(msg?.caption);
-  const chatId = normalizeText(msg?.chat?.id);
-  const messageId = normalizeText(msg?.message_id) ? String(msg.message_id) : `tg_${Date.now()}`;
-  const from = normalizeText(msg?.from?.id);
+  const text = sanitizeTextForStorage(msg?.text);
+  const caption = sanitizeMetadataText(msg?.caption);
+  const chatId = sanitizeChatId(msg?.chat?.id);
+  const messageId = sanitizeIdentifierStrict(msg?.message_id) || `tg_${Date.now()}`;
+  const from = sanitizeIdentifierStrict(msg?.from?.id);
   if (!chatId || !from) return out;
 
   const conversationAccountId = "default";
@@ -399,28 +545,30 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
     text: "",
     messageType: "text",
     metadata: {
-      rawPayload: payload,
+      rawPayload: safePayload,
       from,
       chatId,
-      fromFirstName: normalizeText(msg?.from?.first_name),
-      fromLastName: normalizeText(msg?.from?.last_name),
-      fromUsername: normalizeText(msg?.from?.username),
+      fromFirstName: sanitizeMetadataText(msg?.from?.first_name),
+      fromLastName: sanitizeMetadataText(msg?.from?.last_name),
+      fromUsername: sanitizeMetadataText(msg?.from?.username),
     },
   };
 
   if (msg?.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
     const photo = msg.photo[msg.photo.length - 1];
     const photoText = caption || "[Imagen recibida en Telegram]";
+    const photoFileId = sanitizeIdentifierStrict(photo?.file_id);
+    if (!photoFileId) return out;
     out.push({
       ...baseEnvelope,
       text: photoText,
       messageType: "image",
       metadata: {
         ...baseEnvelope.metadata,
-        photoId: normalizeText(photo?.file_id),
+        photoId: photoFileId,
       },
       media: {
-        providerAssetId: normalizeText(photo?.file_id),
+        providerAssetId: photoFileId,
         fileName: `telegram-photo-${messageId}.jpg`,
         mimeType: "image/jpeg",
         raw: photo,
@@ -430,18 +578,23 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   }
 
   if (msg?.voice) {
+    const mimeType = sanitizeMimeType("audio", msg?.voice?.mime_type);
+    if (!mimeType) return out;
+    const voiceId = sanitizeIdentifierStrict(msg?.voice?.file_id);
+    if (!voiceId) return out;
+
     out.push({
       ...baseEnvelope,
       text: "[Audio recibido. Transcripción no disponible.]",
       messageType: "audio",
       metadata: {
         ...baseEnvelope.metadata,
-        voiceId: normalizeText(msg?.voice?.file_id),
+        voiceId,
       },
       media: {
-        providerAssetId: normalizeText(msg?.voice?.file_id),
+        providerAssetId: voiceId,
         fileName: `telegram-voice-${messageId}.ogg`,
-        mimeType: normalizeText(msg?.voice?.mime_type) || "audio/ogg",
+        mimeType,
         raw: msg?.voice,
       },
     });
@@ -449,18 +602,21 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   }
 
   if (msg?.audio) {
+    const mimeType = sanitizeMimeType("audio", msg?.audio?.mime_type || "audio/mpeg");
+    const audioId = sanitizeIdentifierStrict(msg?.audio?.file_id);
+    if (!mimeType || !audioId) return out;
     out.push({
       ...baseEnvelope,
       text: "[Audio recibido. Transcripción no disponible.]",
       messageType: "audio",
       metadata: {
         ...baseEnvelope.metadata,
-        audioId: normalizeText(msg?.audio?.file_id),
+        audioId,
       },
       media: {
-        providerAssetId: normalizeText(msg?.audio?.file_id),
+        providerAssetId: audioId,
         fileName: `telegram-audio-${messageId}.mp3`,
-        mimeType: normalizeText(msg?.audio?.mime_type) || "audio/mpeg",
+        mimeType,
         raw: msg?.audio,
       },
     });
@@ -468,19 +624,22 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   }
 
   if (msg?.document) {
-    const fileName = normalizeText(msg?.document?.file_name) || `document_${messageId}`;
+    const mimeType = sanitizeMimeType("document", msg?.document?.mime_type);
+    const documentId = sanitizeIdentifierStrict(msg?.document?.file_id);
+    if (!mimeType || !documentId) return out;
+    const fileName = sanitizeFileName(msg?.document?.file_name, `document_${messageId}`);
     out.push({
       ...baseEnvelope,
       text: `[Documento recibido: ${fileName}]`,
       messageType: "document",
       metadata: {
         ...baseEnvelope.metadata,
-        documentId: normalizeText(msg?.document?.file_id),
+        documentId,
       },
       media: {
-        providerAssetId: normalizeText(msg?.document?.file_id),
+        providerAssetId: documentId,
         fileName,
-        mimeType: normalizeText(msg?.document?.mime_type) || "application/octet-stream",
+        mimeType,
         raw: msg?.document,
       },
     });

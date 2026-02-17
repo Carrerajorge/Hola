@@ -1,7 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createChatMessageMock, getAssistantByUserMessageQuery, getOrCreateChannelConversationMock, findWhatsAppCloudAccountByPhoneNumberIdMock, sendWhatsAppCloudTextMock } = vi.hoisted(() => ({
+const {
+  createChatMessageMock,
+  findMessageByRequestIdMock,
+  createChatRunMock,
+  claimPendingRunMock,
+  getChatRunByClientRequestIdMock,
+  getChatMessagesMock,
+  updateChatRunAssistantMessageMock,
+  updateChatMessageContentMock,
+  updateChatRunLastSeqMock,
+  updateChatRunStatusMock,
+  getAssistantByUserMessageQuery,
+  getOrCreateChannelConversationMock,
+  findWhatsAppCloudAccountByPhoneNumberIdMock,
+  sendWhatsAppCloudTextMock,
+} = vi.hoisted(() => ({
   createChatMessageMock: vi.fn(),
+  findMessageByRequestIdMock: vi.fn(),
+  createChatRunMock: vi.fn(),
+  claimPendingRunMock: vi.fn(),
+  getChatRunByClientRequestIdMock: vi.fn(),
+  getChatMessagesMock: vi.fn(),
+  updateChatRunAssistantMessageMock: vi.fn(),
+  updateChatMessageContentMock: vi.fn(),
+  updateChatRunLastSeqMock: vi.fn(),
+  updateChatRunStatusMock: vi.fn(),
   getAssistantByUserMessageQuery: vi.fn(),
   getOrCreateChannelConversationMock: vi.fn(),
   findWhatsAppCloudAccountByPhoneNumberIdMock: vi.fn(),
@@ -11,6 +35,15 @@ const { createChatMessageMock, getAssistantByUserMessageQuery, getOrCreateChanne
 vi.mock("../../storage", () => ({
   storage: {
     createChatMessage: createChatMessageMock,
+    findMessageByRequestId: findMessageByRequestIdMock,
+    createChatRun: createChatRunMock,
+    claimPendingRun: claimPendingRunMock,
+    getChatRunByClientRequestId: getChatRunByClientRequestIdMock,
+    getChatMessages: getChatMessagesMock,
+    updateChatRunAssistantMessage: updateChatRunAssistantMessageMock,
+    updateChatMessageContent: updateChatMessageContentMock,
+    updateChatRunLastSeq: updateChatRunLastSeqMock,
+    updateChatRunStatus: updateChatRunStatusMock,
   },
 }));
 
@@ -30,10 +63,12 @@ vi.mock("../../channels/channelStore", () => ({
   getOrCreateChannelConversation: getOrCreateChannelConversationMock,
   getChannelConversation: vi.fn(),
   consumeChannelPairingCode: vi.fn(),
+  patchConversationMetadata: vi.fn(),
   findWhatsAppCloudAccountByPhoneNumberId: findWhatsAppCloudAccountByPhoneNumberIdMock,
   findMessengerAccountByPageId: vi.fn(),
   findWeChatAccountByAppId: vi.fn(),
   findTelegramAccountByUserId: vi.fn(),
+  touchChannelConversationHeartbeat: vi.fn(),
 }));
 
 vi.mock("../../channels/whatsappCloud/whatsappCloudApi", () => ({
@@ -84,6 +119,15 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getAssistantByUserMessageQuery.mockResolvedValue([]);
+    findMessageByRequestIdMock.mockResolvedValue(undefined);
+    createChatRunMock.mockResolvedValue({ id: "run-1" });
+    claimPendingRunMock.mockResolvedValue(null);
+    getChatRunByClientRequestIdMock.mockResolvedValue(null);
+    getChatMessagesMock.mockResolvedValue([]);
+    updateChatRunAssistantMessageMock.mockResolvedValue(null);
+    updateChatMessageContentMock.mockResolvedValue(null);
+    updateChatRunLastSeqMock.mockResolvedValue(null);
+    updateChatRunStatusMock.mockResolvedValue(null);
     createChatMessageMock.mockImplementation(async (input: any) => ({ id: `${input.role}-id`, ...input }));
     getOrCreateChannelConversationMock.mockResolvedValue({ chatId: "chat-1", userId: "user-1" });
   });
@@ -95,7 +139,11 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       metadata: { phoneNumberId: "12345", runtime: { responder_enabled: false } },
     });
 
-    await processChannelIngestJob({ channel: "whatsapp_cloud", payload: makeWhatsAppPayload(), receivedAt: new Date().toISOString() } as any);
+    await processChannelIngestJob({
+      channel: "whatsapp_cloud",
+      payload: makeWhatsAppPayload("51999999999", "wamid.disabled"),
+      receivedAt: new Date().toISOString(),
+    } as any);
 
     expect(sendWhatsAppCloudTextMock).not.toHaveBeenCalled();
     expect(createChatMessageMock).not.toHaveBeenCalled();
@@ -111,7 +159,11 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       },
     });
 
-    await processChannelIngestJob({ channel: "whatsapp_cloud", payload: makeWhatsAppPayload("52222222222"), receivedAt: new Date().toISOString() } as any);
+    await processChannelIngestJob({
+      channel: "whatsapp_cloud",
+      payload: makeWhatsAppPayload("52222222222", "wamid.non-owner"),
+      receivedAt: new Date().toISOString(),
+    } as any);
 
     expect(sendWhatsAppCloudTextMock).not.toHaveBeenCalled();
   });
@@ -126,8 +178,15 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       },
     });
 
-    await processChannelIngestJob({ channel: "whatsapp_cloud", payload: makeWhatsAppPayload("51999999999"), receivedAt: new Date().toISOString() } as any);
+    await processChannelIngestJob({
+      channel: "whatsapp_cloud",
+      payload: makeWhatsAppPayload("51999999999", "wamid.allowed"),
+      receivedAt: new Date().toISOString(),
+    } as any);
 
+    expect(findWhatsAppCloudAccountByPhoneNumberIdMock).toHaveBeenCalled();
+    expect(getOrCreateChannelConversationMock).toHaveBeenCalled();
+    expect(createChatMessageMock).toHaveBeenCalled();
     expect(sendWhatsAppCloudTextMock).toHaveBeenCalledTimes(1);
     expect(sendWhatsAppCloudTextMock.mock.calls[0][0].to).toBe("51999999999");
   });
@@ -139,8 +198,15 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
       metadata: { phoneNumberId: "12345", runtime: { responder_enabled: true } },
     });
 
-    await processChannelIngestJob({ channel: "whatsapp_cloud", payload: makeWhatsAppPayload("51999999999", "wamid.persist"), receivedAt: new Date().toISOString() } as any);
+    await processChannelIngestJob({
+      channel: "whatsapp_cloud",
+      payload: makeWhatsAppPayload("51999999999", "wamid.persist"),
+      receivedAt: new Date().toISOString(),
+    } as any);
 
+    expect(findWhatsAppCloudAccountByPhoneNumberIdMock).toHaveBeenCalled();
+    expect(getOrCreateChannelConversationMock).toHaveBeenCalled();
+    expect(createChatMessageMock).toHaveBeenCalled();
     const userCall = createChatMessageMock.mock.calls.find((c) => c[0].role === "user");
     const assistantCall = createChatMessageMock.mock.calls.find((c) => c[0].role === "assistant");
     expect(userCall?.[0].chatId).toBe("chat-1");

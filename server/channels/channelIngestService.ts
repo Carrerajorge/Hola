@@ -12,6 +12,7 @@ import {
 } from "./inboundNormalization";
 import {
   evaluateChannelPolicy,
+  getConversationPolicy,
   getConversationWindowState,
   parseChannelPairingCodeFromMessage,
 } from "./channelPolicyEngine";
@@ -66,6 +67,7 @@ const ORCHESTRATION_TIMEOUT_MS = 120_000;
 const SEND_RETRY_ATTEMPTS = 2;
 const SEND_RETRY_BACKOFF_MS = 750;
 const PROVIDER_ID_FALLBACK_KEY = "unknown";
+const RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_MEDIA_LABEL = {
   image: "[Imagen recibida]",
   audio: "[Audio recibido]",
@@ -75,6 +77,32 @@ const DEFAULT_MEDIA_LABEL = {
 const inFlightRunsByConversation = new Map<string, AbortController>();
 const conversationQueues = new Map<string, Promise<void>>();
 const seenProviderMessageIds = new Map<string, number>();
+const conversationRateBuckets = new Map<string, { startedAt: number; count: number }>();
+
+function isAllowedByRateLimit(conversationKey: string, perMinute: number): { allowed: boolean; retryAfterMs?: number } {
+  if (!perMinute || perMinute <= 0) return { allowed: true };
+
+  const now = Date.now();
+  const current = conversationRateBuckets.get(conversationKey);
+  if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {
+    conversationRateBuckets.set(conversationKey, { startedAt: now, count: 1 });
+    return { allowed: true };
+  }
+
+  if (current.count < perMinute) {
+    current.count += 1;
+    return { allowed: true };
+  }
+
+  return { allowed: false, retryAfterMs: current.startedAt + RATE_LIMIT_WINDOW_MS - now };
+}
+
+function pruneRateBuckets(ttlMs = RATE_LIMIT_WINDOW_MS): void {
+  const now = Date.now();
+  for (const [key, value] of conversationRateBuckets.entries()) {
+    if (now - value.startedAt > ttlMs) conversationRateBuckets.delete(key);
+  }
+}
 
 function serializeConversationKey(conversationKey: ConversationKey): string {
   return [conversationKey.workspaceId, conversationKey.channel, conversationKey.channelAccountId, conversationKey.threadId]
@@ -467,6 +495,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   const conversationKey = serializeConversationKey(envelope.conversationKey);
 
   pruneMessageIdLedger();
+  pruneRateBuckets();
   if (!messageId || !envelope.senderId || !envelope.threadId || !envelope.channelKey) {
     Logger.warn("[Channels] inbound message missing required IDs", {
       conversation: envelope.conversationKey,
@@ -538,6 +567,9 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     return;
   }
 
+  const policyConfig = getConversationPolicy(conversation);
+  const rateControl = isAllowedByRateLimit(serializeConversationKey(envelope.conversationKey), policyConfig.rateLimitPerMinute);
+
   const policyContext = {
     conversation,
     envelope,
@@ -545,16 +577,36 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     globalResponderEnabled: runtimeConfig.responder_enabled,
   };
 
-  const policy = evaluateChannelPolicy(policyContext, getConversationWindowState(conversation));
+  const policy = evaluateChannelPolicy(policyContext, getConversationWindowState(conversation), {
+    allowed: rateControl.allowed,
+    retryAfterIso: rateControl.retryAfterMs ? new Date(Date.now() + rateControl.retryAfterMs).toISOString() : undefined,
+  });
   if (!policy.allowed) {
-    await runOutboundDecision({
-      ...context,
-      jobChannel,
-      envelope,
-      account,
-      conversation,
-      runtimeConfig,
-    }, policy.replyText, "", sanitizeRequestIdentifier(messageId));
+    const shouldRespond = policy.shouldRespond !== false;
+    Logger.warn("[Channels] inbound message blocked by policy", {
+      conversation: envelope.conversationKey,
+      messageId,
+      policyCode: policy.code,
+      channel: jobChannel,
+      shouldRespond,
+      senderId: envelope.senderId,
+    });
+
+    if (!shouldRespond) return;
+
+    await runOutboundDecision(
+      {
+        ...context,
+        jobChannel,
+        envelope,
+        account,
+        conversation,
+        runtimeConfig,
+      },
+      policy.replyText,
+      "",
+      sanitizeRequestIdentifier(messageId),
+    );
     return;
   }
 
@@ -838,4 +890,3 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     });
   }
 }
-
