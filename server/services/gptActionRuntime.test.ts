@@ -472,6 +472,85 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("security_blocked");
     });
 
+    it("rejects IPv6 loopback endpoints", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-8a",
+        name: "action-ipv6-loopback",
+        endpoint: "https://[::1]/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("security_blocked");
+    });
+
+    it("rejects endpoints with invalid URL fragments", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-frag-1",
+        name: "action-fragment",
+        endpoint: "https://example.com/api#<script>",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid URL fragment");
+    });
+
+    it("rejects endpoints with oversized query parameter lists", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const url = new URL("https://example.com/search");
+      for (let index = 0; index <= 129; index += 1) {
+        url.searchParams.set(`k${index}`, "1");
+      }
+
+      const action = {
+        id: "action-query-count",
+        name: "action-query-count",
+        endpoint: url.toString(),
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("too many query parameters");
+    });
+
     it("rejects double-encoded path traversal in endpoint", async () => {
       const runtime = new GptActionRuntime({
         fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
