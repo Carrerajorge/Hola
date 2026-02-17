@@ -9,6 +9,8 @@
  * - Generation tracking and audit logging
  */
 
+import { createHash } from "node:crypto";
+
 // ============================================
 // FILENAME SANITIZATION
 // ============================================
@@ -142,6 +144,96 @@ export function validatePrompt(prompt: unknown): PromptValidationResult {
  * Maximum generated document size (100MB)
  */
 const MAX_GENERATED_BUFFER_SIZE = 100 * 1024 * 1024;
+
+// ============================================
+// SHARED DOCUMENT SECURITY
+// ============================================
+
+export const MAX_SHARED_DOCUMENT_BYTES = 25 * 1024 * 1024;
+export const SHARED_DOCUMENT_TTL_MS = 24 * 60 * 60 * 1000;
+export const MIN_SHARED_DOCUMENT_TTL_MS = 2 * 60 * 1000;
+export const MAX_SHARED_DOCUMENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+const MAX_SHARED_DOCUMENT_NAME_BYTES = 180;
+
+export function canonicalizeSharedContentType(value: unknown): string {
+  if (typeof value !== "string") {
+    return "application/octet-stream";
+  }
+
+  const normalized = value.split(";")[0]?.trim().toLowerCase();
+  return normalized || "application/octet-stream";
+}
+
+const SHARED_SIGNATURE_BY_MIME: Record<string, number[]> = {
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]: [0x50, 0x4B, 0x03, 0x04],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]: [0x50, 0x4B, 0x03, 0x04],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]: [0x50, 0x4B, 0x03, 0x04],
+  ["application/pdf"]: [0x25, 0x50, 0x44, 0x46],
+};
+
+const SHARED_SIGNATURE_BY_EXTENSION: Record<string, number[]> = {
+  ".docx": [0x50, 0x4B, 0x03, 0x04],
+  ".xlsx": [0x50, 0x4B, 0x03, 0x04],
+  ".pptx": [0x50, 0x4B, 0x03, 0x04],
+  ".pdf": [0x25, 0x50, 0x44, 0x46],
+};
+
+function normalizeSharedFileName(rawName: string): string {
+  if (!rawName || typeof rawName !== "string") {
+    return `shared_document_${Date.now()}`;
+  }
+
+  let sanitized = rawName
+    .replace(/[/\\]/g, "")
+    .replace(/\0/g, "")
+    .replace(/[\r\n]/g, "")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .replace(/["']/g, "");
+
+  if (sanitized.length > MAX_SHARED_DOCUMENT_NAME_BYTES) {
+    sanitized = sanitized.slice(0, MAX_SHARED_DOCUMENT_NAME_BYTES);
+  }
+
+  return sanitized || `shared_document_${Date.now()}`;
+}
+
+function getSharedFileExtension(fileName: string): string {
+  const lastDot = fileName.lastIndexOf(".");
+  if (lastDot < 0) {
+    return "";
+  }
+
+  return fileName.slice(lastDot).toLowerCase();
+}
+
+export function validateSharedDocumentSignature(
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string
+): boolean {
+  const normalizedMime = canonicalizeSharedContentType(mimeType);
+  const normalizedFileName = normalizeSharedFileName(fileName);
+  const signatureByMime = SHARED_SIGNATURE_BY_MIME[normalizedMime];
+  const signatureByExt = SHARED_SIGNATURE_BY_EXTENSION[getSharedFileExtension(normalizedFileName)];
+  const expectedSignature = signatureByMime ?? signatureByExt;
+
+  if (!expectedSignature || !Buffer.isBuffer(buffer)) {
+    return false;
+  }
+
+  if (buffer.length < expectedSignature.length) {
+    return false;
+  }
+
+  for (let i = 0; i < expectedSignature.length; i += 1) {
+    if (buffer[i] !== expectedSignature[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 /**
  * Expected magic bytes for common document types.
@@ -365,12 +457,16 @@ interface SharedDocument {
   blob: Buffer;
   expiresAt: Date;
   filename: string;
+  contentType: string;
   createdBy?: string;
+  createdAt: Date;
+  etag: string;
+  byteLength: number;
 }
 
 const MAX_SHARED_DOCUMENTS = 1000;
-const SHARED_DOCUMENT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const SHARED_DOCUMENT_ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 
 export class SharedDocumentStore {
   private documents = new Map<string, SharedDocument>();
@@ -384,7 +480,28 @@ export class SharedDocumentStore {
     }
   }
 
-  set(id: string, doc: Omit<SharedDocument, "expiresAt">, ttlMs: number = SHARED_DOCUMENT_TTL_MS): boolean {
+  set(
+    id: string,
+    doc: Omit<SharedDocument, "expiresAt" | "createdAt" | "etag" | "byteLength">,
+    ttlMs: number = SHARED_DOCUMENT_TTL_MS
+  ): boolean {
+    if (
+      typeof id !== "string" ||
+      !SHARED_DOCUMENT_ID_RE.test(id) ||
+      !doc ||
+      !Buffer.isBuffer(doc.blob) ||
+      !doc.blob.length ||
+      doc.blob.length > MAX_SHARED_DOCUMENT_BYTES ||
+      typeof doc.filename !== "string" ||
+      !doc.filename
+    ) {
+      return false;
+    }
+
+    if (this.documents.has(id)) {
+      return false;
+    }
+
     // Enforce maximum store size
     if (this.documents.size >= MAX_SHARED_DOCUMENTS) {
       this.cleanup();
@@ -394,9 +511,29 @@ export class SharedDocumentStore {
       }
     }
 
+    const normalizedTtlMs = Math.min(
+      Math.max(ttlMs, MIN_SHARED_DOCUMENT_TTL_MS),
+      MAX_SHARED_DOCUMENT_TTL_MS
+    );
+    const now = Date.now();
+    const sanitizedFileName = normalizeSharedFileName(doc.filename);
+    const contentType = canonicalizeSharedContentType(doc.contentType);
+    const blob = Buffer.from(doc.blob);
+    const etag = `W/"${createHash("sha256").update(blob).digest("hex")}"`;
+
+    if (!validateSharedDocumentSignature(blob, contentType, sanitizedFileName)) {
+      return false;
+    }
+
     this.documents.set(id, {
       ...doc,
-      expiresAt: new Date(Date.now() + ttlMs),
+      blob,
+      filename: sanitizedFileName,
+      contentType,
+      createdAt: new Date(now),
+      etag,
+      byteLength: blob.length,
+      expiresAt: new Date(now + normalizedTtlMs),
     });
     return true;
   }
@@ -410,7 +547,12 @@ export class SharedDocumentStore {
       return null;
     }
 
-    return doc;
+    return {
+      ...doc,
+      blob: Buffer.from(doc.blob),
+      createdAt: new Date(doc.createdAt),
+      expiresAt: new Date(doc.expiresAt),
+    };
   }
 
   delete(id: string): void {
@@ -423,15 +565,45 @@ export class SharedDocumentStore {
 
   private cleanup(): void {
     const now = new Date();
+    const originalSize = this.documents.size;
     let cleaned = 0;
+    const expiredIds: string[] = [];
+
     for (const [id, doc] of this.documents) {
       if (doc.expiresAt < now) {
-        this.documents.delete(id);
-        cleaned++;
+        expiredIds.push(id);
       }
     }
+
+    for (const id of expiredIds) {
+      if (this.documents.delete(id)) {
+        cleaned += 1;
+      }
+    }
+
+    const maxAllowedSize = Math.max(0, MAX_SHARED_DOCUMENTS - 1);
+    if (this.documents.size > maxAllowedSize) {
+      const removeCount = this.documents.size - maxAllowedSize;
+      const entries = [...this.documents.entries()].sort(([, a], [, b]) => {
+        const byCreatedAt = a.createdAt.getTime() - b.createdAt.getTime();
+        if (byCreatedAt !== 0) {
+          return byCreatedAt;
+        }
+        return a.expiresAt.getTime() - b.expiresAt.getTime();
+      });
+
+      for (let i = 0; i < removeCount; i += 1) {
+        const [removeId] = entries[i] || [];
+        if (removeId && this.documents.delete(removeId)) {
+          cleaned += 1;
+        }
+      }
+    }
+
     if (cleaned > 0) {
-      console.log(`[SharedDocumentStore] Cleaned up ${cleaned} expired documents, ${this.documents.size} remaining`);
+      console.log(
+        `[SharedDocumentStore] Cleaned up ${cleaned} documents from ${originalSize} entries, ${this.documents.size} remaining`
+      );
     }
   }
 
@@ -586,6 +758,7 @@ export function sanitizeErrorMessage(error: unknown): string {
 
 const MAX_CONCURRENT_PDF_GENERATIONS = 5;
 const MAX_CONCURRENT_DOC_GENERATIONS = 20;
+const MAX_CONCURRENT_SHARE_OPERATIONS = 8;
 
 class ConcurrencyLimiter {
   private active = 0;
@@ -612,3 +785,4 @@ class ConcurrencyLimiter {
 
 export const pdfConcurrencyLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_PDF_GENERATIONS, "PDF");
 export const docConcurrencyLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_DOC_GENERATIONS, "DOC");
+export const shareConcurrencyLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_SHARE_OPERATIONS, "SHARE");

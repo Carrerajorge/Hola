@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import fs from "node:fs/promises";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import multer from "multer";
 import {
@@ -36,9 +36,14 @@ import {
   validateBufferSize,
   validatePptSlides,
   sharedDocumentStore,
+  canonicalizeSharedContentType,
   logDocumentEvent,
   docConcurrencyLimiter,
+  shareConcurrencyLimiter,
   MAX_DOC_BODY_SIZE,
+  MAX_SHARED_DOCUMENT_BYTES,
+  SHARED_DOCUMENT_TTL_MS,
+  validateSharedDocumentSignature,
   applyDocumentSecurityHeaders,
   sanitizeErrorMessage,
 } from "../services/documentSecurity";
@@ -77,9 +82,14 @@ const IDEMPOTENCY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
 const CORRELATION_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
 const SHARE_UPLOAD_FIELD = "file";
-const SHARE_MAX_DOCUMENT_SIZE = 25 * 1024 * 1024;
-const SHARE_TTL_MS = 24 * 60 * 60 * 1000;
+const SHARE_MAX_DOCUMENT_SIZE = MAX_SHARED_DOCUMENT_BYTES;
+const SHARE_TTL_MS = SHARED_DOCUMENT_TTL_MS;
 const SHARE_ID_LENGTH = 8;
+const SHARE_ID_MAX_ATTEMPTS = 12;
+const SHARE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/;
+const SHARE_FIELD_NAME_MAX_BYTES = 256;
+const SHARE_FORM_BOUNDARY_MAX_LENGTH = 70;
+const SHARE_FORM_BOUNDARY_HEADER = /;\s*boundary=([A-Za-z0-9'()+_,-./:=?]+)(?=\s*;|\s*$)/i;
 const SHARE_ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 const SHARE_ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -97,6 +107,18 @@ const SHARE_DOCUMENT_TYPES = [
 type ShareDocumentType = (typeof SHARE_DOCUMENT_TYPES)[number]["docType"];
 const SHARE_UPLOAD_HANDLER = multer({
   storage: multer.memoryStorage(),
+  fileFilter: (_req, file, callback) => {
+    const normalizedMime = file.mimetype.split(";")[0]?.trim().toLowerCase();
+    const isAllowedMime = SHARE_ALLOWED_MIME_TYPES.has(normalizedMime);
+    const extension = file.originalname ? getUploadedFileExtension(file.originalname) : "";
+
+    if (!isAllowedMime || !SHARE_ALLOWED_EXTENSIONS.has(extension)) {
+      callback(new Error("Unsupported document type"));
+      return;
+    }
+
+    callback(null, true);
+  },
   limits: {
     fileSize: SHARE_MAX_DOCUMENT_SIZE,
     files: 1,
@@ -145,6 +167,23 @@ const documentsLlmCircuitBreaker = getCircuitBreaker("documents.llmGateway", {
 });
 
 const logger = createLogger("documents-router");
+
+const REPLAY_HEADER_ALLOWLIST = new Set([
+  "content-type",
+  "content-length",
+  "content-disposition",
+  "cache-control",
+  "x-request-id",
+  "x-tool-runner-status",
+  "x-tool-runner-cache-hit",
+  "x-tool-runner-command",
+  "x-tool-runner-validation",
+  "x-tool-runner-incident-count",
+  "x-tool-runner-incident-codes",
+  "x-generation-attempts",
+  "x-quality-warnings",
+  "x-postrender-warnings",
+]);
 
 type CorrelatedRequest = Request & { correlationId?: string };
 
@@ -239,12 +278,65 @@ function normalizeHeaderValue(value: unknown): string | undefined {
 function extractReplayHeaders(headers: Record<string, unknown>): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
+    const lowerName = name.toLowerCase();
+    if (!REPLAY_HEADER_ALLOWLIST.has(lowerName)) {
+      continue;
+    }
+
     const normalized = normalizeHeaderValue(value);
     if (normalized !== undefined) {
-      result[name] = normalized;
+      result[lowerName] = normalized;
     }
   }
   return result;
+}
+
+function parseContentLengthHeader(rawValue: unknown, max: number): { value: number; provided: boolean; valid: boolean } {
+  const normalized = normalizeHeaderValue(rawValue);
+  if (normalized === undefined) {
+    return { value: 0, provided: false, valid: true };
+  }
+
+  if (!/^\d+$/.test(normalized)) {
+    return { value: 0, provided: true, valid: false };
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > max) {
+    return { value: parsed, provided: true, valid: false };
+  }
+
+  return { value: parsed, provided: true, valid: true };
+}
+
+function parseMultipartBoundary(contentType: unknown): string | null {
+  if (typeof contentType !== "string") {
+    return null;
+  }
+
+  const match = contentType.match(SHARE_FORM_BOUNDARY_HEADER);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return match[1];
+}
+
+function isSafeMultipartBoundary(boundary: string): boolean {
+  const trimmed = boundary.trim();
+  return Boolean(
+    trimmed.length > 0 &&
+      trimmed.length <= SHARE_FORM_BOUNDARY_MAX_LENGTH &&
+      SHARE_FORM_BOUNDARY_HEADER.test(`; boundary=${trimmed}`)
+  );
+}
+
+function normalizeUploadedMimeType(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.split(";")[0]?.trim().toLowerCase() || "";
 }
 
 const shareUploadHandler = (req: Request, res: Response, next: NextFunction): void => {
@@ -283,6 +375,9 @@ function normalizeUploadedFileName(value: unknown): string {
   if (typeof value !== "string") {
     return "";
   }
+  if (value.length > SHARE_FIELD_NAME_MAX_BYTES) {
+    return value.slice(0, SHARE_FIELD_NAME_MAX_BYTES);
+  }
   return value.trim().toLowerCase();
 }
 
@@ -303,7 +398,7 @@ function resolveSharedDocumentType(input: { mimeType?: string; fileName?: string
     return null;
   }
 
-  const normalizedMime = normalizeUploadedFileName(input.mimeType ?? "");
+  const normalizedMime = normalizeUploadedMimeType(input.mimeType ?? "");
   const normalizedFileName = normalizeUploadedFileName(input.fileName ?? "");
   const extension = getUploadedFileExtension(normalizedFileName);
 
@@ -326,20 +421,60 @@ function resolveSharedDocumentType(input: { mimeType?: string; fileName?: string
   return resolved;
 }
 
-function resolveSharedContentType(fileName: string): string {
-  const extension = getUploadedFileExtension(normalizeUploadedFileName(fileName));
-  const match = SHARE_DOCUMENT_TYPES.find((entry) => entry.extension === extension);
-  return match ? match.mimeType : "application/octet-stream";
-}
-
-function safeShareRequestMeta(req: CorrelatedRequest): { requestId: string; contentType: string | undefined } {
+function safeShareRequestMeta(req: CorrelatedRequest): {
+  requestId: string;
+  contentType: string | undefined;
+  contentLengthBytes: number;
+  contentLengthProvided: boolean;
+  hasInvalidContentLength: boolean;
+  multipartBoundary: string | null;
+  multipartValid: boolean;
+} {
   const contentTypeHeader = req.headers["content-type"];
+  const contentLengthHeader = req.headers["content-length"];
   const contentType = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
+  const parsedContentLength = parseContentLengthHeader(contentLengthHeader, SHARE_MAX_DOCUMENT_SIZE);
+  const boundary = parseMultipartBoundary(contentType);
+  const hasBoundary = boundary !== null;
+  const multipartValid = hasBoundary && isSafeMultipartBoundary(boundary);
 
   return {
     requestId: getCorrelationId(req),
     contentType,
+    contentLengthBytes: parsedContentLength.value,
+    contentLengthProvided: parsedContentLength.provided,
+    hasInvalidContentLength: !parsedContentLength.valid,
+    multipartBoundary: boundary,
+    multipartValid,
   };
+}
+
+function parseIfNoneMatch(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const token = value.split(",")[0]?.trim();
+  return token || null;
+}
+
+function parseIfModifiedSince(value: unknown): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const millis = Date.parse(value);
+  return Number.isNaN(millis) ? null : millis;
+}
+
+function readSafeHost(req: CorrelatedRequest): string | null {
+  const rawHost = req.get("host");
+  if (!rawHost) {
+    return null;
+  }
+  const normalized = rawHost.trim().toLowerCase();
+  if (!SHARE_HOST_HEADER_RE.test(normalized)) {
+    return null;
+  }
+  return normalized;
 }
 
 function pruneIdempotencyStore(): void {
@@ -371,7 +506,14 @@ function getIdempotencyReplay(
   if (!existing) {
     return null;
   }
-  if (existing.requestFingerprint !== requestFingerprint) {
+
+  if (
+    existing.requestFingerprint.length !== requestFingerprint.length ||
+    !timingSafeEqual(
+      Buffer.from(existing.requestFingerprint, "utf8"),
+      Buffer.from(requestFingerprint, "utf8")
+    )
+  ) {
     return "conflict";
   }
   return existing;
@@ -2222,9 +2364,21 @@ Generate the command plan:`;
         return res.status(415).json(safeErrorResponseWithRequest("Unsupported media type", new Error("Expected multipart/form-data"), req));
       }
 
+      if (!shareMeta.multipartValid) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid multipart boundary", new Error("Validation failed"), req));
+      }
+
+      if (shareMeta.hasInvalidContentLength) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid Content-Length header", new Error("Validation failed"), req));
+      }
+
       const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
       if (!uploadedFile) {
         return res.status(400).json(safeErrorResponseWithRequest("No file provided", new Error("Missing file"), req));
+      }
+
+      if (shareMeta.contentLengthProvided && shareMeta.contentLengthBytes !== uploadedFile.size) {
+        return res.status(400).json(safeErrorResponseWithRequest("Content-Length mismatch", new Error("Validation failed"), req));
       }
 
       const resolvedType = resolveSharedDocumentType({
@@ -2248,91 +2402,131 @@ Generate the command plan:`;
         return res.status(422).json(safeErrorResponseWithRequest("Shared document failed validation", new Error(bufferCheck.error || "Validation failed"), req));
       }
 
-      const filename = sanitizeFilename(
-        uploadedFile.originalname || `shared_document${resolvedType.extension}`,
-        resolvedType.extension
-      );
+      const normalizedContentType = canonicalizeSharedContentType(uploadedFile.mimetype);
+      const normalizedFileName = normalizeUploadedFileName(uploadedFile.originalname || "shared_document");
+      const fileNameWithoutExt = normalizedFileName.endsWith(resolvedType.extension)
+        ? normalizedFileName.slice(0, -resolvedType.extension.length)
+        : normalizedFileName;
+      const filename = sanitizeFilename(fileNameWithoutExt || "shared_document", resolvedType.extension);
 
-      const rawIdempotencyKey = req.get("Idempotency-Key");
-      const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
-      if (rawIdempotencyKey !== undefined && !idempotencyKey) {
-        return res.status(400).json(safeErrorResponseWithRequest("Invalid Idempotency-Key header", new Error("Invalid idempotency key"), req));
+      if (!validateSharedDocumentSignature(uploadedFile.buffer, normalizedContentType, filename)) {
+        return res.status(422).json(safeErrorResponseWithRequest("Shared document signature mismatch", new Error("Invalid file signature"), req));
       }
 
-      const requestFingerprint = buildIdempotencyFingerprint({
-        mimeType: uploadedFile.mimetype,
-        fileName: filename,
-        size: uploadedFile.size,
-        checksum: createHash("sha256").update(uploadedFile.buffer).digest("hex"),
-      });
+      const checksum = createHash("sha256").update(uploadedFile.buffer).digest("hex");
 
-      if (idempotencyKey) {
-        const cacheKey = getIdempotencyCacheKey("/share", idempotencyKey);
-        const replay = getIdempotencyReplay(cacheKey, requestFingerprint);
-        if (replay === "conflict") {
-          return res.status(409).json(safeErrorResponseWithRequest("Idempotency replay mismatch", new Error("Idempotency conflict"), req));
+      const safeHost = readSafeHost(req);
+      if (!safeHost) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid host header", new Error("Validation failed"), req));
+      }
+
+      const acquired = await shareConcurrencyLimiter.acquire();
+      if (!acquired) {
+        return res.status(429).json(safeErrorResponseWithRequest("Too many concurrent share operations. Please try again.", new Error("Concurrency limit"), req));
+      }
+
+      try {
+        const rawIdempotencyKey = req.get("Idempotency-Key");
+        const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
+        if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+          return res.status(400).json(safeErrorResponseWithRequest("Invalid Idempotency-Key header", new Error("Invalid idempotency key"), req));
         }
-        if (replay) {
-          return replayIdempotentResponse(res, replay);
-        }
-      }
 
-      const shareId = createHash("sha256")
-        .update(`${shareMeta.requestId}:${uploadedFile.size}:${uploadedFile.originalname || "document"}`)
-        .digest("hex")
-        .slice(0, SHARE_ID_LENGTH);
-      if (!SHARE_ID_RE.test(shareId)) {
-        return res.status(500).json(safeErrorResponseWithRequest("Unable to generate share id", new Error("Internal error"), req));
-      }
-
-      const stored = sharedDocumentStore.set(shareId, {
-        blob: uploadedFile.buffer,
-        filename,
-        createdBy: shareMeta.requestId,
-      }, SHARE_TTL_MS);
-      if (!stored) {
-        return res.status(429).json(safeErrorResponseWithRequest("Too many shared documents", new Error("Share store full"), req));
-      }
-
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      const shareUrl = `${baseUrl}/api/documents/shared/${shareId}`;
-      const responsePayload = {
-        shareId,
-        shareUrl,
-        expiresIn: "24 hours",
-      };
-
-      if (idempotencyKey) {
-        const responseBody = Buffer.from(JSON.stringify(responsePayload));
-        storeIdempotentResponse(getIdempotencyCacheKey("/share", idempotencyKey), requestFingerprint, {
-          statusCode: 201,
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: responseBody,
+        const requestFingerprint = buildIdempotencyFingerprint({
+          mimeType: normalizedContentType,
+          fileName: filename,
+          size: uploadedFile.size,
+          checksum,
+          multipartBoundary: shareMeta.multipartBoundary,
         });
-      }
 
-      logger.info("Document shared", {
-        requestId: shareMeta.requestId,
-        shareId,
-        fileName: filename,
-        size: uploadedFile.size,
-      });
+        if (idempotencyKey) {
+          const cacheKey = getIdempotencyCacheKey("/share", idempotencyKey);
+          const replay = getIdempotencyReplay(cacheKey, requestFingerprint);
+          if (replay === "conflict") {
+            return res.status(409).json(safeErrorResponseWithRequest("Idempotency replay mismatch", new Error("Idempotency conflict"), req));
+          }
+          if (replay) {
+            return replayIdempotentResponse(res, replay);
+          }
+        }
 
-      const baseResponse = { ...responsePayload, requestId: shareMeta.requestId };
-      logDocumentEvent({
-        timestamp: new Date().toISOString(),
-        event: "shared_success",
-        docType: "share",
-        details: {
+        let shareId = "";
+        const shareSeed = `${shareMeta.requestId}:${checksum}:${filename}:${shareMeta.multipartBoundary ?? "none"}`;
+        for (let attempt = 0; attempt < SHARE_ID_MAX_ATTEMPTS; attempt += 1) {
+          const candidate = createHash("sha256")
+            .update(`${shareSeed}:${attempt}`)
+            .digest("hex")
+            .slice(0, SHARE_ID_LENGTH);
+          if (!SHARE_ID_RE.test(candidate)) {
+            continue;
+          }
+          if (!sharedDocumentStore.get(candidate)) {
+            shareId = candidate;
+            break;
+          }
+        }
+
+        if (!shareId) {
+          return res.status(503).json(safeErrorResponseWithRequest("Unable to generate unique share id", new Error("Capacity exceeded"), req));
+        }
+
+        const stored = sharedDocumentStore.set(shareId, {
+          blob: uploadedFile.buffer,
+          filename,
+          contentType: resolvedType.mimeType,
+          createdBy: shareMeta.requestId,
+        }, SHARE_TTL_MS);
+        if (!stored) {
+          return res.status(429).json(safeErrorResponseWithRequest("Too many shared documents", new Error("Share store full"), req));
+        }
+
+        const shareUrl = `${req.protocol}://${safeHost}/api/documents/shared/${shareId}`;
+        const responsePayload = {
+          shareId,
+          shareUrl,
+          expiresIn: `${Math.max(1, Math.round(SHARE_TTL_MS / (60 * 60 * 1000))} hours`,
+          contentType: normalizedContentType,
+        };
+        const responseBody = Buffer.from(JSON.stringify(responsePayload));
+
+        if (idempotencyKey) {
+          storeIdempotentResponse(getIdempotencyCacheKey("/share", idempotencyKey), requestFingerprint, {
+            statusCode: 201,
+            headers: extractReplayHeaders({
+              "Content-Type": "application/json; charset=utf-8",
+              "Content-Length": String(responseBody.length),
+              "Cache-Control": "private, no-store",
+              "X-Request-Id": shareMeta.requestId,
+            }),
+            body: responseBody,
+          });
+        }
+
+        logger.info("Document shared", {
           requestId: shareMeta.requestId,
           shareId,
-          filename,
+          fileName: filename,
           size: uploadedFile.size,
-        },
-      });
-      res.status(201).json(baseResponse);
+        });
+
+        const baseResponse = { ...responsePayload, requestId: shareMeta.requestId };
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "shared_success",
+          docType: "share",
+          details: {
+            requestId: shareMeta.requestId,
+            shareId,
+            filename,
+            size: uploadedFile.size,
+            contentType: normalizedContentType,
+          },
+        });
+        return res.status(201).json(baseResponse);
+      } finally {
+        shareConcurrencyLimiter.release();
+      }
     } catch (error: any) {
       logger.error("Share failed", {
         requestId: getCorrelationId(req),
@@ -2347,7 +2541,7 @@ Generate the command plan:`;
           error: sanitizeErrorMessage(error),
         },
       });
-      res.status(500).json(safeErrorResponseWithRequest("Share failed", error, req));
+      return res.status(500).json(safeErrorResponseWithRequest("Share failed", error, req));
     }
   });
 
@@ -2383,7 +2577,41 @@ Generate the command plan:`;
         });
         return res.status(404).json(safeErrorResponseWithRequest("Document not found or expired", new Error("Not found"), req));
       }
-      const filename = sanitizeFilename(doc.filename || "shared_document", getUploadedFileExtension(doc.filename || ".docx"));
+
+      if (!validateSharedDocumentSignature(doc.blob, doc.contentType, doc.filename)) {
+        sharedDocumentStore.delete(shareId);
+        return res.status(410).json(safeErrorResponseWithRequest("Shared document signature mismatch", new Error("Invalid document signature"), req));
+      }
+
+      const rangeHeader = req.get("range");
+      if (rangeHeader) {
+        return res.status(416).json(safeErrorResponseWithRequest("Range requests are not supported for shared documents", new Error("Range not supported"), req));
+      }
+
+      const ifNoneMatch = parseIfNoneMatch(req.get("if-none-match"));
+      if (ifNoneMatch && ifNoneMatch === doc.etag) {
+        res.setHeader("ETag", doc.etag);
+        res.setHeader("Last-Modified", doc.createdAt.toUTCString());
+        res.setHeader("Cache-Control", "private, no-store");
+        res.setHeader("Content-Type", canonicalizeSharedContentType(doc.contentType));
+        return res.status(304).end();
+      }
+
+      const ifModifiedSince = parseIfModifiedSince(req.get("if-modified-since"));
+      if (ifModifiedSince !== null && doc.createdAt.getTime() <= ifModifiedSince) {
+        res.setHeader("ETag", doc.etag);
+        res.setHeader("Last-Modified", doc.createdAt.toUTCString());
+        res.setHeader("Cache-Control", "private, no-store");
+        res.setHeader("Content-Type", canonicalizeSharedContentType(doc.contentType));
+        return res.status(304).end();
+      }
+
+      const storedFileName = normalizeUploadedFileName(doc.filename || "shared_document");
+      const storedExtension = getUploadedFileExtension(storedFileName);
+      const filename = sanitizeFilename(
+        storedFileName.slice(0, Math.max(0, storedFileName.length - storedExtension.length)),
+        storedExtension || ".docx"
+      );
       logDocumentEvent({
         timestamp: new Date().toISOString(),
         event: "shared_success",
@@ -2395,8 +2623,12 @@ Generate the command plan:`;
           bytes: doc.blob.length,
         },
       });
-      res.setHeader("Content-Type", resolveSharedContentType(filename));
+      res.setHeader("Content-Type", canonicalizeSharedContentType(doc.contentType));
+      res.setHeader("Content-Length", String(doc.byteLength));
+      res.setHeader("Last-Modified", doc.createdAt.toUTCString());
+      res.setHeader("ETag", doc.etag);
       res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Accept-Ranges", "none");
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
       res.setHeader("X-Request-Id", requestId);
       res.send(doc.blob);
@@ -2413,6 +2645,8 @@ Generate the command plan:`;
       res.status(500).json(safeErrorResponseWithRequest("Download failed", error, req));
     }
   });
+
+ 
 
 
   // Email endpoint (placeholder)
