@@ -15,6 +15,9 @@ const {
   getOrCreateChannelConversationMock,
   findWhatsAppCloudAccountByPhoneNumberIdMock,
   sendWhatsAppCloudTextMock,
+  loggerInfoMock,
+  loggerWarnMock,
+  loggerErrorMock,
 } = vi.hoisted(() => ({
   createChatMessageMock: vi.fn(),
   findMessageByRequestIdMock: vi.fn(),
@@ -30,6 +33,9 @@ const {
   getOrCreateChannelConversationMock: vi.fn(),
   findWhatsAppCloudAccountByPhoneNumberIdMock: vi.fn(),
   sendWhatsAppCloudTextMock: vi.fn(),
+  loggerInfoMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
 }));
 
 vi.mock("../../storage", () => ({
@@ -79,6 +85,14 @@ vi.mock("../../channels/whatsappCloud/whatsappCloudApi", () => ({
 vi.mock("../../channels/telegram/telegramApi", () => ({ telegramSendMessage: vi.fn(), telegramSendDocument: vi.fn() }));
 vi.mock("../../channels/messenger/messengerApi", () => ({ messengerSendText: vi.fn(), messengerSendDocument: vi.fn() }));
 vi.mock("../../channels/wechat/wechatApi", () => ({ wechatSendText: vi.fn(), wechatSendDocument: vi.fn(), parseWeChatXml: vi.fn() }));
+
+vi.mock("../../lib/logger", () => ({
+  Logger: {
+    info: loggerInfoMock,
+    warn: loggerWarnMock,
+    error: loggerErrorMock,
+  },
+}));
 
 vi.mock("../../channels/whatsappCloud/whatsappPolicy", () => ({
   evaluateWhatsAppPolicy: vi.fn(() => ({ allowed: true, category: "general" })),
@@ -186,6 +200,7 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
 
     expect(findWhatsAppCloudAccountByPhoneNumberIdMock).toHaveBeenCalled();
     expect(getOrCreateChannelConversationMock).toHaveBeenCalled();
+    expect(findMessageByRequestIdMock).toHaveBeenCalled();
     expect(createChatMessageMock).toHaveBeenCalled();
     expect(sendWhatsAppCloudTextMock).toHaveBeenCalledTimes(1);
     expect(sendWhatsAppCloudTextMock.mock.calls[0][0].to).toBe("51999999999");
@@ -206,6 +221,7 @@ describe("channel ingest runtime controls (whatsapp cloud)", () => {
 
     expect(findWhatsAppCloudAccountByPhoneNumberIdMock).toHaveBeenCalled();
     expect(getOrCreateChannelConversationMock).toHaveBeenCalled();
+    expect(findMessageByRequestIdMock).toHaveBeenCalled();
     expect(createChatMessageMock).toHaveBeenCalled();
     const userCall = createChatMessageMock.mock.calls.find((c) => c[0].role === "user");
     const assistantCall = createChatMessageMock.mock.calls.find((c) => c[0].role === "assistant");
