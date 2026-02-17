@@ -154,11 +154,11 @@ export function isInternalIP(ip: string | undefined): boolean {
   }
 
   if (version === 6) {
-    if (candidate === "::ffff:127.0.0.1") {
-      return true;
-    }
-    if (candidate.startsWith("::ffff:")) {
-      return isInternalIP(candidate.slice(7));
+    if (candidate.includes("::ffff:")) {
+      const mappedCandidate = candidate.split("::ffff:").pop() || "";
+      if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(mappedCandidate)) {
+        return isInternalIP(mappedCandidate);
+      }
     }
     if (candidate.startsWith("fc") || candidate.startsWith("fd") || candidate.startsWith("fe8") || candidate.startsWith("fe9") ||
         candidate.startsWith("fea") || candidate.startsWith("feb") || candidate.startsWith("fec") || candidate.startsWith("fed") ||

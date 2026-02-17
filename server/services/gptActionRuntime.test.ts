@@ -496,6 +496,30 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("security_blocked");
     });
 
+    it("rejects IPv6 mapped loopback endpoints", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-8b",
+        name: "action-ipv6-mapped-loopback",
+        endpoint: "https://[::ffff:127.0.0.1]/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("security_blocked");
+    });
+
     it("rejects endpoints with invalid URL fragments", async () => {
       const runtime = new GptActionRuntime({
         fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
