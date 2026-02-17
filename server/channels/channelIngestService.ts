@@ -643,7 +643,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   const claimedRun = await storage.claimPendingRun(conversation.chatId, messageId);
   if (!claimedRun) {
     const current = await storage.getChatRunByClientRequestId(conversation.chatId, messageId);
-    if (!current || current.status === "processing" || current.status === "done") {
+    if (current && (current.status === "processing" || current.status === "done")) {
       Logger.info("[Channels] run already claimed or done, skipping", {
         messageId,
         runId: current?.id,

@@ -23,6 +23,15 @@ describe("gptActionRuntime shared helpers", () => {
       expect(payload).toEqual({ fallback: "used" });
     });
 
+    it("falls back to input when request is null", () => {
+      const payload = normalizeGptActionRequestPayload({
+        request: null,
+        input: { fallback: "used-from-null" },
+      } as Record<string, unknown>);
+
+      expect(payload).toEqual({ fallback: "used-from-null" });
+    });
+
     it("returns empty object for non-object request/input", () => {
       const payload = normalizeGptActionRequestPayload({
         request: "invalid",

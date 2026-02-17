@@ -1589,7 +1589,7 @@ export function normalizeGptActionRequestPayload(rawInput: Record<string, unknow
   const request = rawInput.request;
   const fallback = rawInput.input;
   const normalized =
-    request !== undefined
+    request !== undefined && request !== null
       ? normalizeRequestInput(request)
       : normalizeRequestInput(fallback);
 
