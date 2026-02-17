@@ -487,10 +487,12 @@ function validateEndpointPathAndQuery(url: URL): void {
   }
 
   for (const [name, value] of params) {
-    if (!name || Buffer.byteLength(name, "utf8") > MAX_ENDPOINT_QUERY_KEY_BYTES) {
+    const normalizedName = decodeUrlComponentStrict(name, "query parameter name");
+    const normalizedValue = decodeUrlComponentStrict(value, "query parameter value");
+    if (!normalizedName || Buffer.byteLength(normalizedName, "utf8") > MAX_ENDPOINT_QUERY_KEY_BYTES) {
       throw toFetchError("Invalid query parameter name", "validation_error", false);
     }
-    if (Buffer.byteLength(value, "utf8") > MAX_ENDPOINT_QUERY_VALUE_BYTES) {
+    if (Buffer.byteLength(normalizedValue, "utf8") > MAX_ENDPOINT_QUERY_VALUE_BYTES) {
       throw toFetchError("Invalid query parameter value", "validation_error", false);
     }
   }

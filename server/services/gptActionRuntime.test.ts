@@ -718,6 +718,56 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.message).toContain("too many query parameters");
     });
 
+    it("rejects malformed percent-encoded query values", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-query-encoding",
+        name: "action-query-encoding",
+        endpoint: "https://example.com/search?term=%GG",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid percent-encoded");
+    });
+
+    it("rejects query strings containing encoded null bytes", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-query-null",
+        name: "action-query-null",
+        endpoint: "https://example.com/search?term=ok%00bad",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid query parameter value");
+    });
+
     it("rejects double-encoded path traversal in endpoint", async () => {
       const runtime = new GptActionRuntime({
         fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
