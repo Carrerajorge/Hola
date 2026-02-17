@@ -4,6 +4,9 @@
  */
 
 import { Logger } from '../../logger';
+import { evaluateSafeMathExpression } from "../mathExpressionEvaluator";
+
+const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // ============================================================================
 // Types
@@ -24,38 +27,48 @@ export class TheoryCalculator {
     solve(equation: string, variables: Record<string, number>): number {
         Logger.info(`[Theory] Solving: ${equation}`);
         try {
-            let sanitized = equation.replace(/\s+/g, '');
-
-            // Replace variable names with their numeric values (longest names first to avoid partial replacements)
-            const sortedKeys = Object.keys(variables).sort((a, b) => b.length - a.length);
-            for (const key of sortedKeys) {
-                const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                sanitized = sanitized.replace(new RegExp(`\\b${escaped}\\b`, 'g'), String(variables[key]));
-            }
-
-            // After variable substitution, only allow safe arithmetic:
-            // digits, decimal points, operators (+, -, *, /), parentheses, and scientific notation (e/E)
-            if (!/^[0-9+\-*/().eE]+$/.test(sanitized)) {
+            const normalized = typeof equation === "string" ? equation.normalize("NFC").trim() : "";
+            if (!normalized) {
                 Logger.error(`[Theory] Unsafe equation rejected: ${equation}`);
                 return NaN;
             }
 
-            // Validate balanced parentheses
-            let depth = 0;
-            for (const ch of sanitized) {
-                if (ch === '(') depth++;
-                if (ch === ')') depth--;
-                if (depth < 0) return NaN;
-            }
-            if (depth !== 0) return NaN;
+            const safeVariables = this.sanitizeVariables(variables);
+            const result = evaluateSafeMathExpression(normalized, {
+                constants: safeVariables,
+                maxExpressionLength: 1024,
+                maxDepth: 32,
+                maxOperations: 128,
+            });
 
-            // Safe to evaluate: expression contains only numeric arithmetic
-            const func = new Function(`"use strict"; return (${sanitized});`);
-            return func();
+            if (!Number.isFinite(result)) {
+                Logger.error(`[Theory] Invalid evaluation result: ${equation}`);
+                return NaN;
+            }
+            return result;
         } catch (e) {
             Logger.error(`[Theory] Calculation failed: ${e}`);
             return NaN;
         }
+    }
+
+    private sanitizeVariables(variables: Record<string, number>): Record<string, number> {
+        if (!variables || typeof variables !== "object" || Array.isArray(variables)) {
+            throw new Error("Invalid variable map");
+        }
+
+        const normalized: Record<string, number> = {};
+        for (const [name, rawValue] of Object.entries(variables)) {
+            if (typeof name !== "string" || !IDENTIFIER_RE.test(name)) {
+                throw new Error(`Invalid variable name: ${name}`);
+            }
+            const value = Number(rawValue);
+            if (!Number.isFinite(value)) {
+                throw new Error(`Invalid variable value for ${name}`);
+            }
+            normalized[name] = value;
+        }
+        return normalized;
     }
 
     // ========================================================================

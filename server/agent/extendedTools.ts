@@ -14,6 +14,7 @@
 import { z } from "zod";
 import { ToolDefinition, ToolResult, createArtifact, createError } from "./toolTypes";
 import { randomUUID } from "crypto";
+import { evaluateSafeMathExpression, type MathFunctionRegistry } from "../lib/mathExpressionEvaluator";
 import {
     getGmailClientForUser,
     gmailSearch,
@@ -34,6 +35,34 @@ const calculatorSchema = z.object({
     precision: z.number().min(0).max(15).default(6).describe("Decimal precision for the result"),
 });
 
+const CALCULATOR_FUNCTIONS: MathFunctionRegistry = {
+    sqrt: { fn: Math.sqrt, minArity: 1, maxArity: 1 },
+    sin: { fn: Math.sin, minArity: 1, maxArity: 1 },
+    cos: { fn: Math.cos, minArity: 1, maxArity: 1 },
+    tan: { fn: Math.tan, minArity: 1, maxArity: 1 },
+    asin: { fn: Math.asin, minArity: 1, maxArity: 1 },
+    acos: { fn: Math.acos, minArity: 1, maxArity: 1 },
+    atan: { fn: Math.atan, minArity: 1, maxArity: 1 },
+    log: { fn: Math.log, minArity: 1, maxArity: 1 },
+    log10: { fn: Math.log10, minArity: 1, maxArity: 1 },
+    log2: { fn: Math.log2, minArity: 1, maxArity: 1 },
+    exp: { fn: Math.exp, minArity: 1, maxArity: 1 },
+    abs: { fn: Math.abs, minArity: 1, maxArity: 1 },
+    floor: { fn: Math.floor, minArity: 1, maxArity: 1 },
+    ceil: { fn: Math.ceil, minArity: 1, maxArity: 1 },
+    round: { fn: Math.round, minArity: 1, maxArity: 1 },
+    pow: { fn: Math.pow, minArity: 2, maxArity: 2 },
+    min: { fn: Math.min, minArity: 1 },
+    max: { fn: Math.max, minArity: 1 },
+};
+
+const CALCULATOR_CONSTANTS: Record<string, number> = {
+    pi: Math.PI,
+    PI: Math.PI,
+    e: Math.E,
+    E: Math.E,
+};
+
 export const calculatorTool: ToolDefinition = {
     name: "calculator",
     description: "Evaluate mathematical expressions. Supports basic operations (+, -, *, /, ^), functions (sqrt, sin, cos, tan, log, exp, abs), and constants (pi, e).",
@@ -42,74 +71,19 @@ export const calculatorTool: ToolDefinition = {
     execute: async (input, context): Promise<ToolResult> => {
         const startTime = Date.now();
         try {
-            // Safe math evaluation with allowed functions
-            const mathFunctions: Record<string, Function> = {
-                sqrt: Math.sqrt,
-                sin: Math.sin,
-                cos: Math.cos,
-                tan: Math.tan,
-                asin: Math.asin,
-                acos: Math.acos,
-                atan: Math.atan,
-                log: Math.log,
-                log10: Math.log10,
-                log2: Math.log2,
-                exp: Math.exp,
-                abs: Math.abs,
-                floor: Math.floor,
-                ceil: Math.ceil,
-                round: Math.round,
-                pow: Math.pow,
-                min: Math.min,
-                max: Math.max,
-            };
-
-            const constants: Record<string, number> = {
-                pi: Math.PI,
-                PI: Math.PI,
-                e: Math.E,
-                E: Math.E,
-            };
-
-            // Sanitize and prepare expression
-            let expr = input.expression
-                .replace(/\^/g, '**')  // Convert ^ to **
-                .replace(/\s+/g, '');  // Remove whitespace
-
-            // Replace constants
-            for (const [name, value] of Object.entries(constants)) {
-                expr = expr.replace(new RegExp(`\\b${name}\\b`, 'g'), value.toString());
+            const normalized = input.expression.normalize("NFC").trim();
+            if (!normalized) {
+                throw new Error("Expression cannot be empty");
             }
 
-            // Security: after replacing constants, only allowed function names should remain
-            // Allow only: digits, operators, parentheses, commas, dots, and known math function names
-            const allowedFunctionNames = Object.keys(mathFunctions).join('|');
-            const stripped = expr.replace(new RegExp(`(?:${allowedFunctionNames})`, 'g'), '');
-            if (!/^[0-9+\-*/().,%eE]*$/.test(stripped)) {
-                throw new Error('Expression contains disallowed characters or keywords');
-            }
-
-            // Validate balanced parentheses
-            let depth = 0;
-            for (const ch of expr) {
-                if (ch === '(') depth++;
-                if (ch === ')') depth--;
-                if (depth < 0) throw new Error('Unbalanced parentheses');
-            }
-            if (depth !== 0) throw new Error('Unbalanced parentheses');
-
-            // Create safe evaluation context - expression is now validated to contain only
-            // numbers, arithmetic operators, and whitelisted math function calls
-            const safeEval = new Function(
-                ...Object.keys(mathFunctions),
-                `"use strict"; return (${expr});`
-            );
-
-            const result = safeEval(...Object.values(mathFunctions));
-
-            if (typeof result !== 'number' || !isFinite(result)) {
-                throw new Error('Invalid result: ' + result);
-            }
+            const result = evaluateSafeMathExpression(normalized.replace(/\^/g, "**"), {
+                functions: CALCULATOR_FUNCTIONS,
+                constants: CALCULATOR_CONSTANTS,
+                maxExpressionLength: 2048,
+                maxTokenCount: 512,
+                maxDepth: 64,
+                maxOperations: 256,
+            });
 
             const roundedResult = Number(result.toFixed(input.precision));
 
