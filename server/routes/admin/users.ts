@@ -6,10 +6,25 @@ import { hashPassword } from "../../utils/password";
 import { validateBody } from "../../middleware/validateRequest";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { createUserBodySchema } from "../../schemas/apiSchemas";
-import { sql, ilike, or, desc, asc } from "drizzle-orm";
 import { auditLog, AuditActions } from "../../services/auditLogger";
+import { requireRecentAuth } from "../../middleware/jitElevation";
 
 export const usersRouter = Router();
+const USER_ID_PARAM_PATTERN = /^[a-zA-Z0-9_-]{4,128}$/;
+const RESERVED_USER_ID_SEGMENTS = new Set(["stats", "export", "probe"]);
+
+usersRouter.param("id", (req, res, next, value) => {
+  const userId = String(value || "").trim();
+  const normalizedUserId = userId.toLowerCase();
+  if (!USER_ID_PARAM_PATTERN.test(userId) || RESERVED_USER_ID_SEGMENTS.has(normalizedUserId)) {
+    res.status(400).json({
+      error: "Invalid user identifier",
+      code: "INVALID_USER_ID",
+    });
+    return;
+  }
+  next();
+});
 
 // GET /api/admin/users - List with pagination, search, and filters
 usersRouter.get("/", async (req, res) => {
@@ -98,6 +113,41 @@ usersRouter.get("/stats", async (req, res) => {
     }
 });
 
+usersRouter.get("/export", async (req, res) => {
+    try {
+        const { format = "json" } = req.query;
+        const allUsers = await storage.getAllUsers();
+
+        if (format === "csv") {
+            const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
+            const csvRows = [headers.join(",")];
+            allUsers.forEach(u => {
+                csvRows.push([
+                    u.id,
+                    u.email || "",
+                    u.fullName || `${u.firstName || ""} ${u.lastName || ""}`.trim(),
+                    u.plan || "",
+                    u.role || "",
+                    u.status || "",
+                    u.queryCount || 0,
+                    u.tokensConsumed || 0,
+                    u.createdAt?.toISOString() || "",
+                    u.lastLoginAt?.toISOString() || ""
+                ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+            });
+            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.csv`);
+            res.send(csvRows.join("\n"));
+        } else {
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
+            res.json(allUsers);
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (req, res) => {
     const { email, password, plan, role } = req.body;
     const existingUsers = await storage.getAllUsers();
@@ -129,8 +179,37 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
 
 usersRouter.patch("/:id", async (req, res) => {
     try {
+        // SECURITY: Field allowlist — prevent mass assignment of sensitive fields
+        const ALLOWED_PATCH_FIELDS = new Set([
+          "email", "firstName", "lastName", "fullName", "plan", "role",
+          "status", "profileImageUrl", "blockedAt", "blockReason",
+          "queryCount", "tokensConsumed",
+        ]);
+        const VALID_ROLES = new Set(["user", "admin", "moderator"]);
+        const VALID_STATUSES = new Set(["active", "blocked", "suspended", "pending"]);
+        const VALID_PLANS = new Set(["free", "pro", "enterprise", "unlimited"]);
+
+        const sanitizedBody: Record<string, any> = {};
+        for (const [key, value] of Object.entries(req.body)) {
+          if (!ALLOWED_PATCH_FIELDS.has(key)) continue;
+          sanitizedBody[key] = value;
+        }
+        // Validate enum fields
+        if (sanitizedBody.role && !VALID_ROLES.has(sanitizedBody.role)) {
+          return res.status(400).json({ error: `Invalid role. Must be one of: ${[...VALID_ROLES].join(", ")}` });
+        }
+        if (sanitizedBody.status && !VALID_STATUSES.has(sanitizedBody.status)) {
+          return res.status(400).json({ error: `Invalid status. Must be one of: ${[...VALID_STATUSES].join(", ")}` });
+        }
+        if (sanitizedBody.plan && !VALID_PLANS.has(sanitizedBody.plan)) {
+          return res.status(400).json({ error: `Invalid plan. Must be one of: ${[...VALID_PLANS].join(", ")}` });
+        }
+        if (Object.keys(sanitizedBody).length === 0) {
+          return res.status(400).json({ error: "No valid fields to update" });
+        }
+
         const previousUser = await storage.getUserById(req.params.id);
-        const user = await storage.updateUser(req.params.id, req.body);
+        const user = await storage.updateUser(req.params.id, sanitizedBody);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -140,8 +219,8 @@ usersRouter.patch("/:id", async (req, res) => {
             action: AuditActions.USER_UPDATED,
             resource: "users",
             resourceId: req.params.id,
-            details: { 
-                changes: req.body,
+            details: {
+                changes: sanitizedBody,
                 previousValues: previousUser ? {
                     email: previousUser.email,
                     role: previousUser.role,
@@ -160,7 +239,7 @@ usersRouter.patch("/:id", async (req, res) => {
     }
 });
 
-usersRouter.delete("/:id", async (req, res) => {
+usersRouter.delete("/:id", requireRecentAuth(), async (req, res) => {
     try {
         const userToDelete = await storage.getUserById(req.params.id);
         await storage.deleteUser(req.params.id);
@@ -202,7 +281,7 @@ usersRouter.get("/:id", async (req, res) => {
 });
 
 // POST /api/admin/users/:id/block - Block a user
-usersRouter.post("/:id/block", async (req, res) => {
+usersRouter.post("/:id/block", requireRecentAuth(), async (req, res) => {
     try {
         const { reason } = req.body || {};
         const previousUser = await storage.getUser(req.params.id);
@@ -233,7 +312,7 @@ usersRouter.post("/:id/block", async (req, res) => {
 });
 
 // POST /api/admin/users/:id/unblock - Unblock a user
-usersRouter.post("/:id/unblock", async (req, res) => {
+usersRouter.post("/:id/unblock", requireRecentAuth(), async (req, res) => {
     try {
         const previousUser = await storage.getUser(req.params.id);
         const user = await storage.updateUser(req.params.id, { 
@@ -262,7 +341,7 @@ usersRouter.post("/:id/unblock", async (req, res) => {
 });
 
 // PATCH /api/admin/users/:id/role - Update user role
-usersRouter.patch("/:id/role", async (req, res) => {
+usersRouter.patch("/:id/role", requireRecentAuth(), async (req, res) => {
     try {
         const { role } = req.body;
         if (!role || !["user", "admin", "moderator"].includes(role)) {
@@ -326,7 +405,7 @@ usersRouter.get("/:id/conversations", async (req, res) => {
 });
 
 // DELETE /api/admin/users/:id/conversations - Delete all conversations of a user
-usersRouter.delete("/:id/conversations", async (req, res) => {
+usersRouter.delete("/:id/conversations", requireRecentAuth(), async (req, res) => {
     try {
         const userId = req.params.id;
         const user = await storage.getUser(userId);
@@ -356,7 +435,7 @@ usersRouter.delete("/:id/conversations", async (req, res) => {
 });
 
 // POST /api/admin/users/:id/impersonate - Generate impersonation token (for support)
-usersRouter.post("/:id/impersonate", async (req, res) => {
+usersRouter.post("/:id/impersonate", requireRecentAuth(), async (req, res) => {
     try {
         const userId = req.params.id;
         const user = await storage.getUser(userId);
@@ -396,7 +475,7 @@ usersRouter.post("/:id/impersonate", async (req, res) => {
 });
 
 // POST /api/admin/users/:id/reset - Reset user to clean state
-usersRouter.post("/:id/reset", async (req, res) => {
+usersRouter.post("/:id/reset", requireRecentAuth(), async (req, res) => {
     try {
         const userId = req.params.id;
         const { deleteConversations = true, resetStats = false } = req.body;
@@ -437,42 +516,6 @@ usersRouter.post("/:id/reset", async (req, res) => {
             deletedConversations,
             statsReset: resetStats
         });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Export endpoints
-usersRouter.get("/export", async (req, res) => {
-    try {
-        const { format = "json" } = req.query;
-        const allUsers = await storage.getAllUsers();
-
-        if (format === "csv") {
-            const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
-            const csvRows = [headers.join(",")];
-            allUsers.forEach(u => {
-                csvRows.push([
-                    u.id,
-                    u.email || "",
-                    u.fullName || `${u.firstName || ""} ${u.lastName || ""}`.trim(),
-                    u.plan || "",
-                    u.role || "",
-                    u.status || "",
-                    u.queryCount || 0,
-                    u.tokensConsumed || 0,
-                    u.createdAt?.toISOString() || "",
-                    u.lastLoginAt?.toISOString() || ""
-                ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
-            });
-            res.setHeader("Content-Type", "text/csv");
-            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.csv`);
-            res.send(csvRows.join("\n"));
-        } else {
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
-            res.json(allUsers);
-        }
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

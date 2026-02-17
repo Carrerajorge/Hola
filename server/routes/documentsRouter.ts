@@ -449,12 +449,16 @@ function safeShareRequestMeta(req: CorrelatedRequest): {
   };
 }
 
-function parseIfNoneMatch(value: unknown): string | null {
+function parseIfNoneMatch(value: unknown): string[] {
   if (typeof value !== "string") {
-    return null;
+    return [];
   }
-  const token = value.split(",")[0]?.trim();
-  return token || null;
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .map((entry) => entry.replace(/^W\//i, "").trim())
+    .filter((entry) => Boolean(entry))
+    .map((entry) => entry.replace(/^\"|\"$/g, ""));
 }
 
 function parseIfModifiedSince(value: unknown): number | null {
@@ -2461,7 +2465,13 @@ Generate the command plan:`;
           if (!SHARE_ID_RE.test(candidate)) {
             continue;
           }
-          if (!sharedDocumentStore.get(candidate)) {
+          const candidateStored = sharedDocumentStore.set(candidate, {
+            blob: uploadedFile.buffer,
+            filename,
+            contentType: resolvedType.mimeType,
+            createdBy: shareMeta.requestId,
+          }, SHARE_TTL_MS);
+          if (candidateStored) {
             shareId = candidate;
             break;
           }
@@ -2469,16 +2479,6 @@ Generate the command plan:`;
 
         if (!shareId) {
           return res.status(503).json(safeErrorResponseWithRequest("Unable to generate unique share id", new Error("Capacity exceeded"), req));
-        }
-
-        const stored = sharedDocumentStore.set(shareId, {
-          blob: uploadedFile.buffer,
-          filename,
-          contentType: resolvedType.mimeType,
-          createdBy: shareMeta.requestId,
-        }, SHARE_TTL_MS);
-        if (!stored) {
-          return res.status(429).json(safeErrorResponseWithRequest("Too many shared documents", new Error("Share store full"), req));
         }
 
         const shareUrl = `${req.protocol}://${safeHost}/api/documents/shared/${shareId}`;
@@ -2589,7 +2589,8 @@ Generate the command plan:`;
       }
 
       const ifNoneMatch = parseIfNoneMatch(req.get("if-none-match"));
-      if (ifNoneMatch && ifNoneMatch === doc.etag) {
+      const ifNoneMatchAny = ifNoneMatch.includes("*");
+      if (ifNoneMatchAny || ifNoneMatch.includes(doc.etag)) {
         res.setHeader("ETag", doc.etag);
         res.setHeader("Last-Modified", doc.createdAt.toUTCString());
         res.setHeader("Cache-Control", "private, no-store");
