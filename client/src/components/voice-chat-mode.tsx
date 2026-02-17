@@ -369,7 +369,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     setResponse("");
 
     try {
-      const res = await fetch("/api/voice-chat", {
+      const res = await apiFetch("/api/voice-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),

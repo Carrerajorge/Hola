@@ -51,6 +51,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { apiFetch } from '@/lib/apiClient';
 
 // ============================================
 // TYPES
@@ -732,7 +733,7 @@ export function WordEditorPro({
   const handleExecute = useCallback(async () => {
     setIsExecuting(true);
     try {
-      const response = await fetch('/api/documents/execute-code', {
+      const response = await apiFetch('/api/documents/execute-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -796,7 +797,7 @@ export function WordEditorPro({
       const formData = new FormData();
       formData.append('file', previewBlob, `${title}.docx`);
 
-      const response = await fetch('/api/documents/convert-to-pdf', {
+      const response = await apiFetch('/api/documents/convert-to-pdf', {
         method: 'POST',
         body: formData,
       });
@@ -857,7 +858,7 @@ export function WordEditorPro({
   const handleTranslate = useCallback(async () => {
     setIsTranslating(true);
     try {
-      const response = await fetch('/api/documents/translate', {
+      const response = await apiFetch('/api/documents/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, targetLang }),
@@ -888,7 +889,7 @@ export function WordEditorPro({
       const formData = new FormData();
       formData.append('file', previewBlob, `${title}.docx`);
 
-      const response = await fetch('/api/documents/share', {
+      const response = await apiFetch('/api/documents/share', {
         method: 'POST',
         body: formData,
       });
@@ -914,7 +915,7 @@ export function WordEditorPro({
       formData.append('to', emailTo);
       formData.append('subject', `Documento: ${title}`);
 
-      const response = await fetch('/api/documents/email', {
+      const response = await apiFetch('/api/documents/email', {
         method: 'POST',
         body: formData,
       });
@@ -932,7 +933,7 @@ export function WordEditorPro({
   // Check grammar
   const handleCheckGrammar = useCallback(async () => {
     try {
-      const response = await fetch('/api/documents/grammar-check', {
+      const response = await apiFetch('/api/documents/grammar-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
@@ -959,7 +960,7 @@ export function WordEditorPro({
     formData.append('file', file);
 
     try {
-      const response = await fetch('/api/documents/import', {
+      const response = await apiFetch('/api/documents/import', {
         method: 'POST',
         body: formData,
       });

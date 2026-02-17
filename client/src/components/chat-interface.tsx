@@ -2288,7 +2288,7 @@ export function ChatInterface({
 
     if (att.fileId) {
       try {
-        const response = await fetch(`/api/files/${att.fileId}/content`);
+        const response = await apiFetch(`/api/files/${att.fileId}/content`);
         if (response.ok) {
           const data = await response.json();
           if (data.status === "ready" && data.content) {
@@ -2700,7 +2700,7 @@ export function ChatInterface({
           const stillTracked = uploadedFilesRef.current.some((f: UploadedFile) => f.id === fileId || f.id === trackingId);
           if (!stillTracked) { resolve(); return; }
 
-          const contentRes = await fetch(`/api/files/${fileId}/content`);
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`);
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
@@ -3083,7 +3083,7 @@ export function ChatInterface({
         }
 
         try {
-          const contentRes = await fetch(`/api/files/${fileId}/content`);
+          const contentRes = await apiFetch(`/api/files/${fileId}/content`);
 
           if (!contentRes.ok && contentRes.status !== 202) {
             setUploadedFiles((prev: any[]) =>
@@ -3196,7 +3196,7 @@ export function ChatInterface({
             // Fetch content once (with short retry for eventual consistency).
             for (let attempt = 0; attempt < 5; attempt++) {
               try {
-                const contentRes = await fetch(`/api/files/${fileId}/content`);
+                const contentRes = await apiFetch(`/api/files/${fileId}/content`);
                 if (contentRes.ok) {
                   const contentData = await contentRes.json();
                   if (contentData.status === "ready") {
@@ -3281,7 +3281,7 @@ export function ChatInterface({
       setUploadedFiles((prev: UploadedFile[]) => [...prev, tempFile]);
 
       const doImport = async (): Promise<void> => {
-        const response = await fetch("/api/files/import-url", {
+        const response = await apiFetch("/api/files/import-url", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: u }),
