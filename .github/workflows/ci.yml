@@ -220,6 +220,74 @@ jobs:
           path: dist/
           retention-days: 7
 
+  quality-gate:
+    name: Quality Gate
+    needs: [typecheck, test, build, audit]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+      - name: Run Hardening + Coverage Gate
+        env:
+          CI: "true"
+          NODE_ENV: "test"
+          DATABASE_URL: postgresql://test:test@localhost:5432/testdb
+          SESSION_SECRET: ci-session-secret-min-32-chars
+          OPENAI_API_KEY: ci_dummy_key
+          GEMINI_API_KEY: ci_dummy_key
+          XAI_API_KEY: ci_dummy_key
+          ANTHROPIC_API_KEY: ci_dummy_key
+          # Baseline thresholds. Ajustables para elevar a 90% en ciclos de cumplimiento.
+          QUALITY_GATE_LINES: "40"
+          QUALITY_GATE_STATEMENTS: "40"
+          QUALITY_GATE_FUNCTIONS: "40"
+          QUALITY_GATE_BRANCHES: "30"
+        run: |
+          set -euo pipefail
+          npm run quality:gate
+
+      - name: Upload quality gate report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: quality-gate-report
+          path: test_results/quality-gate-report.json
+          retention-days: 14
+
   audit:
     name: Security Audit (npm)
     runs-on: ubuntu-latest

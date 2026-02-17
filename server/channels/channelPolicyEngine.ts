@@ -63,6 +63,29 @@ function toStringSet(values: unknown): Set<string> {
   );
 }
 
+function addOwnerIdCandidate(target: Set<string>, value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      addOwnerIdCandidate(target, item);
+    }
+    return;
+  }
+
+  const candidate = String(value ?? "").trim();
+  if (candidate.length > 0) target.add(candidate);
+}
+
+function addOwnerIdCandidatesFromObject(target: Set<string>, value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const raw = value as Record<string, unknown>;
+
+  addOwnerIdCandidate(target, raw.ownerExternalId);
+  addOwnerIdCandidate(target, raw.ownerId);
+  addOwnerIdCandidate(target, raw.owner_external_ids);
+  addOwnerIdCandidate(target, raw.owner_external_id);
+  addOwnerIdCandidate(target, raw.owners);
+}
+
 function getMetadataObject(conversation: ChannelConversation): Record<string, unknown> {
   if (conversation && typeof conversation.metadata === "object" && conversation.metadata !== null) {
     return conversation.metadata as Record<string, unknown>;
@@ -76,32 +99,65 @@ function getPolicyMap(conversation: ChannelConversation): Record<string, unknown
   return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
 }
 
-function getIdentityOwnerIds(conversation: ChannelConversation): Set<string> {
-  const identity = getPolicyMap(conversation).ownerIdentity;
-  const result = new Set<string>();
+function getOwnerIdentityCandidatesFromMetadata(conversation: ChannelConversation): Set<string> {
+  const metadata = getMetadataObject(conversation);
+  const out = new Set<string>();
 
-  if (identity && typeof identity === "object" && !Array.isArray(identity)) {
-    const direct = identity.ownerExternalId;
-    if (typeof direct === "string" && direct.trim()) {
-      result.add(direct.trim());
-    }
-    const owners = Array.isArray((identity as { owners?: unknown }).owners)
-      ? (identity as { owners?: unknown }).owners
-      : [];
-    for (const owner of owners) {
-      const normalized = String(owner ?? "").trim();
-      if (normalized) result.add(normalized);
-    }
-  }
+  addOwnerIdCandidatesFromObject(out, metadata.ownerIdentity);
+  addOwnerIdCandidatesFromObject(out, getPolicyMap(conversation).ownerIdentity);
 
-  return result;
+  const runtime = metadata.runtime;
+  addOwnerIdCandidate(out, runtime && typeof runtime === "object" && !Array.isArray(runtime)
+    ? (runtime as Record<string, unknown>).owner_external_ids
+    : undefined);
+
+  return out;
 }
 
-function nowWithinWindow(channel: MessageEnvelope["channel"], lastTs: number, now: number): boolean {
-  const windowMs = CHANNEL_WINDOWS_MS[channel] ?? 0;
-  if (windowMs <= 0) return true;
-  if (!lastTs) return true;
-  return now - lastTs <= windowMs;
+export function getConversationOwnerIds(conversation: ChannelConversation): string[] {
+  const out = getOwnerIdentityCandidatesFromMetadata(conversation);
+  return Array.from(out).sort();
+}
+
+function conversationOwnerCandidates(
+  runtimeConfig: ChannelRuntimeConfig,
+  conversation: ChannelConversation,
+): Set<string> {
+  const out = new Set<string>(toStringSet(runtimeConfig.owner_external_ids));
+  addOwnerIdCandidate(out, getPolicyMap(conversation).owner_external_ids);
+
+  for (const owner of getConversationOwnerIds(conversation)) {
+    out.add(owner);
+  }
+
+  return out;
+}
+
+function normalizeWindowRecoveryMessage(channel: MessageEnvelope["channel"]): string {
+  if (channel === "whatsapp_cloud") {
+    return "La conversación de WhatsApp está fuera de la ventana activa (24h). Pide al usuario que reabra el chat y solo puedo responder con plantilla aprobada.";
+  }
+
+  if (channel === "messenger") {
+    return "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.";
+  }
+
+  return "Esta conversación está fuera de ventana. Pide al cliente que escriba de nuevo para reabrir el chat.";
+}
+
+function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string {
+  if (channel === "whatsapp_cloud") {
+    return "No puedo responder aquí ahora mismo. Envía el código de vinculación recibido desde la app para habilitar este canal.";
+  }
+  return "No se procesa este mensaje porque el auto-reply está desactivado para este chat.";
+}
+
+function normalizePayloadErrorMessage(): string {
+  return "No puedo continuar porque no se recibió un identificador válido del evento.";
+}
+
+function normalizeBlockedSenderMessage(): string {
+  return "Mensaje bloqueado por configuración de seguridad del canal.";
 }
 
 export type ChannelPolicyContext = {
@@ -156,43 +212,11 @@ export function getConversationPolicy(conversation: ChannelConversation): {
   };
 }
 
-function conversationOwnerCandidates(
-  runtimeConfig: ChannelRuntimeConfig,
-  conversation: ChannelConversation,
-): Set<string> {
-  const runtimeOwners = toStringSet(runtimeConfig.owner_external_ids);
-  const conversationPolicy = getPolicyMap(conversation);
-  const policyOwners = toStringSet(conversationPolicy.owner_external_ids);
-  const identityOwners = getIdentityOwnerIds(conversation);
-
-  return new Set<string>([...runtimeOwners, ...policyOwners, ...identityOwners]);
-}
-
-function normalizeWindowRecoveryMessage(channel: MessageEnvelope["channel"]): string {
-  if (channel === "whatsapp_cloud") {
-    return "La conversación de WhatsApp está fuera de la ventana activa (24h). Pide al usuario que reabra el chat y solo puedo responder con plantilla aprobada.";
-  }
-
-  if (channel === "messenger") {
-    return "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.";
-  }
-
-  return "Esta conversación está fuera de ventana. Pide al cliente que escriba de nuevo para reabrir el chat.";
-}
-
-function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string {
-  if (channel === "whatsapp_cloud") {
-    return "No puedo responder aquí ahora mismo. Envía el código de vinculación recibido desde la app para habilitar este canal.";
-  }
-  return "No se procesa este mensaje porque el auto-reply está desactivado para este chat.";
-}
-
-function normalizePayloadErrorMessage(): string {
-  return "No puedo continuar porque no se recibió un identificador válido del evento.";
-}
-
-function normalizeBlockedSenderMessage(): string {
-  return "Mensaje bloqueado por configuración de seguridad del canal.";
+function nowWithinWindow(channel: MessageEnvelope["channel"], lastTs: number, now: number): boolean {
+  const windowMs = CHANNEL_WINDOWS_MS[channel] ?? 0;
+  if (windowMs <= 0) return true;
+  if (!lastTs) return true;
+  return now - lastTs <= windowMs;
 }
 
 export function evaluateChannelPolicy(

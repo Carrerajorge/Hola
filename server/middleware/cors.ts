@@ -21,6 +21,47 @@ const DEVELOPMENT_ORIGINS = [
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+function dedupeAllowedOrigins(origins: string[]): string[] {
+    return [...new Set((origins || []).filter(Boolean))];
+}
+
+export interface OriginValidationOptions {
+    allowAnyLocalhost?: boolean;
+}
+
+export function getAllowedOrigins(options: OriginValidationOptions = {}): string[] | '*' {
+    const allowAnyLocalhost = options.allowAnyLocalhost ?? !isProduction;
+
+    if (!isProduction || !allowAnyLocalhost) {
+        return dedupeAllowedOrigins([
+            ...(isProduction ? [] : []),
+            ...(PRODUCTION_ORIGINS || []),
+        ]);
+    }
+
+    // In development allow localhost and explicit Replit domains.
+    const replitOrigins = (process.env.REPLIT_DOMAINS?.split(',') || [])
+        .filter(isValidReplitDomain)
+        .map(d => `https://${d.trim()}`);
+
+    const configuredOrigins = (process.env.ALLOWED_ORIGINS?.split(',').map(d => d.trim()).filter(Boolean) || []);
+    return dedupeAllowedOrigins([
+        ...DEVELOPMENT_ORIGINS,
+        ...configuredOrigins,
+        ...replitOrigins,
+    ]);
+}
+
+export function isAllowedOrigin(originHeader: string | undefined): boolean {
+    if (!originHeader) return false;
+
+    const allowedOrigins = getAllowedOrigins();
+    if (allowedOrigins === '*') return true;
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(originHeader);
+
+    return isLocalhost || allowedOrigins.includes(originHeader);
+}
+
 /** Security: validate Replit domain format to prevent injection */
 function isValidReplitDomain(domain: string): boolean {
     if (!domain || typeof domain !== 'string') return false;
@@ -30,7 +71,7 @@ function isValidReplitDomain(domain: string): boolean {
 }
 
 // Build the allowed origins list based on environment
-const getAllowedOrigins = (): string[] | '*' => {
+const getAllowedOriginsLegacy = (): string[] | '*' => {
     if (!isProduction) {
         // In development, allow localhost + validated Replit domains
         const replitOrigins = (process.env.REPLIT_DOMAINS?.split(',') || [])

@@ -18,6 +18,7 @@ import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { sessionDeviceInfoMiddleware } from "./middleware/sessionDeviceInfo";
 import { setupSecurity } from "./middleware/security";
+import { requestBoundaryGuard } from "./middleware/requestBoundary";
 
 import { authLimiter, billingLimiter, globalLimiter } from "./middleware/rateLimiter";
 
@@ -85,9 +86,6 @@ app.use(csrfTokenMiddleware);
 // API-specific security headers for /api routes
 app.use("/api", apiSecurityHeaders());
 
-// Legacy request tracer middleware for stats
-app.use(requestTracerMiddleware);
-
 // Defense in Depth
 app.disable("x-powered-by");
 
@@ -113,6 +111,12 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false, limit: '1mb', parameterLimit: 1000 }));
+
+// API hardening boundary: path/query/payload validation and canonicalization
+app.use("/api", requestBoundaryGuard);
+
+// Legacy request tracer middleware for stats
+app.use(requestTracerMiddleware);
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);

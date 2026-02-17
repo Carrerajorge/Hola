@@ -1,0 +1,251 @@
+import { NextFunction, Request, Response } from "express";
+import { validateJSONDepth } from "../services/advancedSecurity";
+
+const MAX_PATH_LENGTH = 2048;
+const MAX_JSON_DEPTH = 12;
+const MAX_QUERY_VALUE_LENGTH = 2048;
+const MAX_QUERY_PARAMS_COUNT = 100;
+
+const DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024;
+const CHAT_STREAM_MAX_BODY_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_MULTIPART_BYTES = 25 * 1024 * 1024;
+const MAX_MULTIPART_BYTES = Number(process.env.MAX_MULTIPART_BYTES || DEFAULT_MAX_MULTIPART_BYTES);
+
+const KNOWN_SAFE_PATH_PATTERNS = [
+  /^\/api\/chat\/stream(?:\/|$)/,
+  /^\/api\/health(?:\/|$)/,
+  /^\/api\/ready(?:\/|$)/,
+  /^\/api\/auth(?:\/|$)/,
+  /^\/api\/webhooks(?:\/|$)/,
+  /^\/api\/files(?:\/|$)/,
+  /^\/api\/packages(?:\/|$)/,
+];
+
+const MAX_BYTES_BY_ROUTE: ReadonlyArray<{ pattern: RegExp; maxBytes: number }> = [
+  { pattern: /^\/api\/chat\/stream(?:\/|$)/, maxBytes: CHAT_STREAM_MAX_BODY_BYTES },
+  { pattern: /^\/api\/files(?:\/|$)/, maxBytes: MAX_MULTIPART_BYTES },
+];
+
+const DISALLOWED_PATH_SEGMENTS = /(^|\/)(?:\.\.)(?=\/|$|%2e%2e|%2E%2E|..|%2e|%2E|\x00)/i;
+
+function getMaxBodyBytes(pathname: string): number {
+  const configured = Number(process.env.MAX_API_BODY_BYTES || DEFAULT_MAX_BODY_BYTES);
+  const routeLimit = MAX_BYTES_BY_ROUTE.find(({ pattern }) => pattern.test(pathname));
+  return routeLimit?.maxBytes ?? configured;
+}
+
+function getContentTypeValue(req: Request): string {
+  const raw = req.headers["content-type"];
+  if (!raw) return "";
+
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" ? value : "";
+}
+
+function parseContentTypeBase(rawValue: string): string {
+  return rawValue.split(";")[0].trim().toLowerCase();
+}
+
+function isJsonOrFormRequest(contentType: string): boolean {
+  if (!contentType) return false;
+
+  const baseType = parseContentTypeBase(contentType);
+  return (
+    baseType === "application/json" ||
+    baseType === "application/x-www-form-urlencoded" ||
+    baseType === "text/plain" ||
+    baseType.endsWith("+json") ||
+    baseType.startsWith("multipart/")
+  );
+}
+
+function hasValidCharset(contentType: string): boolean {
+  const charsetMatch = /charset=([^;]+)/i.exec(contentType);
+  if (!charsetMatch) {
+    return true;
+  }
+
+  const charset = (charsetMatch[1] || "").trim().toLowerCase();
+  return charset === "utf-8" || charset === "utf8";
+}
+
+function normalizeText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/\x00/g, "")
+    .replace(/[\x7f\x01-\x1f]/g, (char) => {
+      return char === "\n" || char === "\r" || char === "\t" ? char : "";
+    });
+}
+
+function normalizeInput(value: unknown, depth = 0, maxDepth = 8): unknown {
+  if (depth > maxDepth) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return normalizeText(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeInput(item, depth + 1, maxDepth));
+  }
+
+  if (value && typeof value === "object") {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value)) {
+      normalized[key] = normalizeInput(nested, depth + 1, maxDepth);
+    }
+    return normalized;
+  }
+
+  return value;
+}
+
+function validatePath(req: Request): { ok: boolean; status: number; message: string } {
+  if (!req.path || req.path.length > MAX_PATH_LENGTH) {
+    return { ok: false, status: 414, message: "Invalid request path length" };
+  }
+
+  if (/\x00/.test(req.path)) {
+    return { ok: false, status: 400, message: "Invalid request path" };
+  }
+
+  if (DISALLOWED_PATH_SEGMENTS.test(req.path)) {
+    return { ok: false, status: 400, message: "Path traversal-like request detected" };
+  }
+
+  try {
+    const decoded = decodeURIComponent(req.path);
+    if (decoded.includes("..") && /(^|\/)\.{2}(?:$|\/)/.test(decoded)) {
+      return { ok: false, status: 400, message: "Path traversal-like request detected" };
+    }
+  } catch {
+    return { ok: false, status: 400, message: "Malformed URL encoding" };
+  }
+
+  return { ok: true, status: 200, message: "ok" };
+}
+
+function validateHostHeader(req: Request): { ok: boolean; status: number; message: string } {
+  const host = req.headers.host;
+  if (!host) {
+    return { ok: false, status: 400, message: "Missing host header" };
+  }
+
+  if (/[\r\n]/.test(host)) {
+    return { ok: false, status: 400, message: "Invalid host header" };
+  }
+
+  return { ok: true, status: 200, message: "ok" };
+}
+
+function validateQuery(req: Request): { ok: boolean; status: number; message: string } {
+  const rawEntries = Object.entries(req.query || {});
+  if (rawEntries.length > MAX_QUERY_PARAMS_COUNT) {
+    return { ok: false, status: 400, message: "Too many query parameters" };
+  }
+
+  for (const [key, value] of rawEntries) {
+    if (key.length > 128) {
+      return { ok: false, status: 400, message: "Invalid query parameter" };
+    }
+
+    const toStringValue = Array.isArray(value)
+      ? value.join(",")
+      : typeof value === "object" || value === undefined || value === null
+        ? ""
+        : String(value);
+
+    if (toStringValue.length > MAX_QUERY_VALUE_LENGTH) {
+      return { ok: false, status: 413, message: "Query value too large" };
+    }
+
+    if (/\x00/.test(key) || toStringValue.includes("\u0000")) {
+      return { ok: false, status: 400, message: "Invalid query parameter" };
+    }
+  }
+
+  return { ok: true, status: 200, message: "ok" };
+}
+
+function validateMethodPayload(req: Request): { ok: boolean; status: number; message: string } {
+  const method = req.method.toUpperCase();
+  const hasPayload = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+  if (!hasPayload) {
+    return { ok: true, status: 200, message: "ok" };
+  }
+
+  const contentType = getContentTypeValue(req);
+  const contentLengthHeader = req.headers["content-length"];
+  const contentLength =
+    typeof contentLengthHeader === "string"
+      ? Number.parseInt(contentLengthHeader, 10)
+      : Number.isFinite(contentLengthHeader as number)
+        ? Number(contentLengthHeader)
+        : Number.NaN;
+
+  const maxBytes = getMaxBodyBytes(req.path);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    return { ok: false, status: 413, message: `Payload too large (${contentLength} > ${maxBytes})` };
+  }
+
+  if (req.path.startsWith("/api/") && contentType && !isJsonOrFormRequest(contentType)) {
+    return { ok: false, status: 415, message: "Unsupported content type" };
+  }
+
+  if (contentType && !hasValidCharset(contentType)) {
+    return { ok: false, status: 415, message: "Unsupported charset" };
+  }
+
+  if (req.body && typeof req.body === "object" && !validateJSONDepth(req.body, MAX_JSON_DEPTH)) {
+    return { ok: false, status: 413, message: "Request payload depth exceeded" };
+  }
+
+  return { ok: true, status: 200, message: "ok" };
+}
+
+function sendBoundaryViolation(
+  res: Response,
+  status: number,
+  message: string,
+): void {
+  res.status(status).json({
+    error: message,
+    code: "REQUEST_BOUNDARY_VIOLATION",
+    category: status === 413 ? "PAYLOAD_RESTRICTED" : "BAD_REQUEST",
+  });
+}
+
+export function requestBoundaryGuard(req: Request, res: Response, next: NextFunction): void {
+  const knownSafePath = KNOWN_SAFE_PATH_PATTERNS.some((pattern) => pattern.test(req.path));
+  if (!knownSafePath && req.path.includes("//")) {
+    return sendBoundaryViolation(res, 400, "Invalid path normalization");
+  }
+
+  const pathResult = validatePath(req);
+  if (!pathResult.ok) {
+    return sendBoundaryViolation(res, pathResult.status, pathResult.message);
+  }
+
+  const hostResult = validateHostHeader(req);
+  if (!hostResult.ok) {
+    return sendBoundaryViolation(res, hostResult.status, hostResult.message);
+  }
+
+  const queryResult = validateQuery(req);
+  if (!queryResult.ok) {
+    return sendBoundaryViolation(res, queryResult.status, queryResult.message);
+  }
+
+  const payloadResult = validateMethodPayload(req);
+  if (!payloadResult.ok) {
+    return sendBoundaryViolation(res, payloadResult.status, payloadResult.message);
+  }
+
+  req.body = normalizeInput(req.body) as typeof req.body;
+  req.query = normalizeInput(req.query) as typeof req.query;
+  req.params = normalizeInput(req.params) as typeof req.params;
+
+  next();
+}

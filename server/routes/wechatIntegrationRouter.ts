@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { getUserId } from "../types/express";
 import { integrationAccounts } from "@shared/schema";
+import { createChannelPairingCode } from "../channels/channelStore";
 import { ensureIntegrationCatalogSeeded } from "../services/integrationCatalog";
 import { extractRuntimeSettings, runtimeSettingsUpdateSchema, withRuntimeSettingsMetadata } from "../channels/runtimeConfigHttp";
 
@@ -13,6 +14,27 @@ const configSchema = z
     appSecret: z.string().min(1),
   })
   .strict();
+
+const pairingRequestSchema = z
+  .object({
+    ttlMinutes: z.number().int().min(1).max(60).optional(),
+    appId: z.string().min(1).optional(),
+  })
+  .strict();
+
+function wechatPairingPayload(code: string, appId?: string) {
+  const payload = `Asocia este chat de WeChat con el código: ${code}`;
+  const deeplink = appId
+    ? `weixin://dl/business/?appid=${encodeURIComponent(appId)}&text=${encodeURIComponent(code)}`
+    : null;
+
+  return {
+    code,
+    deeplink,
+    qrPayload: payload,
+    qrHint: "Abre el canal oficial de WeChat y envía el texto para completar la vinculación",
+  };
+}
 
 export function createWeChatIntegrationRouter(): Router {
   const router = Router();
@@ -71,6 +93,33 @@ export function createWeChatIntegrationRouter(): Router {
     });
 
     return res.json({ success: true, created: true });
+  });
+
+  router.post("/pairing-code", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsed = pairingRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.message });
+    }
+
+    const { code, expiresAt } = await createChannelPairingCode({
+      userId,
+      channel: "wechat",
+      ttlMinutes: parsed.data.ttlMinutes,
+    });
+    const payload = wechatPairingPayload(code, parsed.data.appId);
+
+    return res.json({
+      success: true,
+      channel: "wechat",
+      code: payload.code,
+      expiresAt: expiresAt.toISOString(),
+      deeplink: payload.deeplink,
+      qrPayload: payload.qrPayload,
+      qrHint: payload.qrHint,
+    });
   });
 
   router.get("/status", async (req: Request, res: Response) => {

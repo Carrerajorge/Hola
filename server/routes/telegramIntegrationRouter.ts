@@ -41,7 +41,16 @@ export function createTelegramIntegrationRouter(): Router {
       ttlMinutes: parsed.data.ttlMinutes,
     });
 
-    return res.json({ success: true, code, expiresAt: expiresAt.toISOString() });
+    const qrPayload = `Usa el código: ${code}`;
+    return res.json({
+      success: true,
+      code,
+      expiresAt: expiresAt.toISOString(),
+      channel: "telegram",
+      deeplink: `https://t.me/share/url?text=${encodeURIComponent(qrPayload)}`,
+      qrPayload,
+      qrHint: "Comparte este mensaje al bot para iniciar la verificación",
+    });
   });
 
   router.post("/config", async (req: Request, res: Response) => {

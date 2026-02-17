@@ -207,6 +207,15 @@ function normalizeMetadata(input: unknown): Record<string, unknown> {
   return isRecord(input) ? (input as Record<string, unknown>) : {};
 }
 
+function toStringSet(values: unknown): Set<string> {
+  if (!Array.isArray(values)) return new Set<string>();
+  return new Set(
+    values
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0),
+  );
+}
+
 function mergeMetadataObjects(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const merged: Record<string, unknown> = { ...base };
 
@@ -309,11 +318,53 @@ export async function setConversationOwnerIdentity(
   conversationId: string,
   ownerIdentity: Record<string, unknown>,
 ): Promise<ChannelConversation | null> {
+  const current = await getConversationMetadata(conversationId);
+  const ownerIdentityPatch = {
+    ...normalizeMetadata(current.ownerIdentity),
+    ...ownerIdentity,
+    updatedAt: new Date().toISOString(),
+  };
+  const ownerIds = new Set<string>();
+  const ownerCandidates = [
+    ownerIdentityPatch.ownerExternalId,
+    ownerIdentityPatch.ownerId,
+    ownerIdentityPatch.owner_external_ids,
+    ownerIdentityPatch.owners,
+  ];
+  for (const candidate of ownerCandidates) {
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        const normalized = String(item ?? "").trim();
+        if (normalized) ownerIds.add(normalized);
+      }
+      continue;
+    }
+    const normalized = String(candidate ?? "").trim();
+    if (normalized) ownerIds.add(normalized);
+  }
+
+  const runtimePatch = normalizeMetadata(current.runtime);
+  const policyPatch = normalizeMetadata(current.policy);
+
+  const mergedRuntimeOwnerIds = new Set([
+    ...toStringSet(runtimePatch.owner_external_ids),
+    ...ownerIds,
+  ]);
+  const mergedPolicyOwnerIds = new Set([
+    ...toStringSet(policyPatch.owner_external_ids),
+    ...ownerIds,
+  ]);
+
   return patchConversationMetadata(conversationId, {
-    ownerIdentity: {
-      ...normalizeMetadata((await getConversationMetadata(conversationId)).ownerIdentity),
-      ...ownerIdentity,
+    ownerIdentity: ownerIdentityPatch,
+    policy: {
+      ...policyPatch,
+      ...(ownerIds.size ? { owner_external_ids: Array.from(mergedPolicyOwnerIds) } : {}),
       updatedAt: new Date().toISOString(),
+    },
+    runtime: {
+      ...runtimePatch,
+      ...(ownerIds.size ? { owner_external_ids: Array.from(mergedRuntimeOwnerIds) } : {}),
     },
   });
 }

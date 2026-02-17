@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { getUserId } from "../types/express";
 import { integrationAccounts } from "@shared/schema";
+import { createChannelPairingCode } from "../channels/channelStore";
 import { ensureIntegrationCatalogSeeded } from "../services/integrationCatalog";
 import { extractRuntimeSettings, runtimeSettingsUpdateSchema, withRuntimeSettingsMetadata } from "../channels/runtimeConfigHttp";
 
@@ -15,6 +16,28 @@ const connectSchema = z
     displayName: z.string().optional(),
   })
   .strict();
+
+const pairingRequestSchema = z
+  .object({
+    ttlMinutes: z.number().int().min(1).max(60).optional(),
+    phoneNumberId: z.string().min(1).optional(),
+  })
+  .strict();
+
+function whatsappPairingPayload(code: string, phoneNumberId?: string) {
+  const deepLinkPayload = `Hola, activa este canal con este código: ${code}`;
+  const sanitizedPhone = phoneNumberId ? phoneNumberId.replace(/[^0-9]/g, "") : "";
+  const deeplink = sanitizedPhone
+    ? `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(deepLinkPayload)}`
+    : null;
+
+  return {
+    code,
+    deeplink,
+    qrPayload: deepLinkPayload,
+    qrHint: "Escanea este QR y envía el código al chat con tu cuenta de negocio",
+  };
+}
 
 export function createWhatsAppCloudIntegrationRouter(): Router {
   const router = Router();
@@ -100,6 +123,33 @@ export function createWhatsAppCloudIntegrationRouter(): Router {
     return res.json({ success: true, created: true });
   });
 
+  router.post("/pairing-code", async (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsed = pairingRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid body", details: parsed.error.message });
+    }
+
+    const { code, expiresAt } = await createChannelPairingCode({
+      userId,
+      channel: "whatsapp_cloud",
+      ttlMinutes: parsed.data.ttlMinutes,
+    });
+    const payload = whatsappPairingPayload(code, parsed.data.phoneNumberId);
+
+    return res.json({
+      success: true,
+      channel: "whatsapp_cloud",
+      code: payload.code,
+      expiresAt: expiresAt.toISOString(),
+      deeplink: payload.deeplink,
+      qrPayload: payload.qrPayload,
+      qrHint: payload.qrHint,
+    });
+  });
+
   router.get("/settings", async (req: Request, res: Response) => {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
@@ -179,4 +229,3 @@ export function createWhatsAppCloudIntegrationRouter(): Router {
 
   return router;
 }
-

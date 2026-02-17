@@ -13,6 +13,7 @@
     "sync:mathjax": "node scripts/sync-mathjax-assets.cjs",
     "check": "tsc",
     "type-check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=4096 -- tsc -p tsconfig.ci.json",
+    "type-check:app": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=4096 -- tsc -p tsconfig.ci.json",
     "db:push": "drizzle-kit push",
     "test": "vitest",
     "test:run": "vitest run",
@@ -35,7 +36,8 @@
     "test:openclaw1000": "vitest run tests/unit/openclaw1000-service.test.ts tests/unit/openclaw1000-capability-profiler.test.ts",
     "tool-runner:capabilities": "node --import tsx server/toolRunner/cli.ts --capabilities",
     "tool-runner:health": "node --import tsx server/toolRunner/cli.ts --healthcheck",
-    "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts"
+    "tool-runner:test": "npm run test:run -- server/toolRunner/cli.contract.test.ts server/toolRunner/orchestrator.golden.test.ts",
+    "quality:gate": "node --import tsx scripts/quality-gate.ts"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",

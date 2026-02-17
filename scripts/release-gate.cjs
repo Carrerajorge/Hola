@@ -2,6 +2,7 @@
 const fs = require("fs");
 
 const REPORT_PATH = "test_results/agent_certification_report.md";
+const QUALITY_GATE_REPORT_PATH = "test_results/quality-gate-report.json";
 const MAX_REPORT_AGE_HOURS = 24;
 
 function checkReleaseGate() {
@@ -11,6 +12,30 @@ function checkReleaseGate() {
     return {
       passed: false,
       reason: `Certification report not found at ${REPORT_PATH}. Run 'npm run agent:certify' first.`,
+    };
+  }
+
+  if (!fs.existsSync(QUALITY_GATE_REPORT_PATH)) {
+    return {
+      passed: false,
+      reason: `Quality gate report not found at ${QUALITY_GATE_REPORT_PATH}. Run 'npm run quality:gate' first.`,
+    };
+  }
+
+  let qualityReportStatus = "unknown";
+  try {
+    const qualityReport = JSON.parse(fs.readFileSync(QUALITY_GATE_REPORT_PATH, "utf-8"));
+    qualityReportStatus = qualityReport?.status || "unknown";
+    if (qualityReportStatus !== "passed") {
+      return {
+        passed: false,
+        reason: `Quality gate report indicates failure (${qualityReportStatus}).`,
+      };
+    }
+  } catch {
+    return {
+      passed: false,
+      reason: `Quality gate report is invalid JSON: ${QUALITY_GATE_REPORT_PATH}.`,
     };
   }
   
