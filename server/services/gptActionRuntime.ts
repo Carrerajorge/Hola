@@ -32,6 +32,12 @@ const MAX_RESPONSE_PAYLOAD_BYTES = 50000;
 const MAX_REQUEST_BODY_BYTES = 80_000;
 const MAX_FETCH_RESPONSE_BYTES = 256_000;
 const MAX_ENDPOINT_LENGTH = 2_048;
+const MAX_ENDPOINT_PATH_BYTES = 1_024;
+const MAX_ENDPOINT_QUERY_BYTES = 4_096;
+const MAX_ENDPOINT_QUERY_PARAMS = 128;
+const MAX_ENDPOINT_QUERY_KEY_BYTES = 256;
+const MAX_ENDPOINT_QUERY_VALUE_BYTES = 1_024;
+const MAX_ENDPOINT_FRAGMENT_BYTES = 512;
 const DEFAULT_CONVERSATION_RATE_WINDOW_MS = 60_000;
 const DEFAULT_RATE_BUFFER = 2;
 const DEFAULT_MAX_CONCURRENCY = 4;
@@ -59,6 +65,8 @@ const MAX_TOTAL_HEADER_BYTES = 16_384;
 const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
 const MAX_HEADER_VALUE_BYTES = 2_048;
 const MAX_SAFE_HEADER_NAME_BYTES = 80;
+const MAX_URL_DECODE_ITERATIONS = 4;
+const MAX_QUERY_SEGMENT_BYTES = 4_096;
 const ALLOWED_HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 const FORBIDDEN_HEADER_NAMES = new Set([
   "host",
@@ -327,7 +335,22 @@ function sanitizeHeaderValue(value: string | number | boolean): string {
   if (Buffer.byteLength(normalized, "utf8") <= MAX_HEADER_VALUE_BYTES) {
     return normalized;
   }
-  return normalized.slice(0, MAX_HEADER_VALUE_BYTES);
+  return truncateToUtf8ByteLimit(normalized, MAX_HEADER_VALUE_BYTES);
+}
+
+function truncateToUtf8ByteLimit(value: string, maxBytes: number): string {
+  let bytes = 0;
+  let output = "";
+  for (const char of value.normalize("NFKC")) {
+    const charBytes = Buffer.byteLength(char, "utf8");
+    if (bytes + charBytes > maxBytes) {
+      break;
+    }
+    bytes += charBytes;
+    output += char;
+  }
+
+  return output;
 }
 
 function isValidDomainLabel(label: string): boolean {
@@ -369,15 +392,15 @@ function safeStringify(value: unknown): string {
 
 function truncatePayload(value: unknown, maxBytes: number): unknown {
   const serialized = safeStringify(value);
-  if (serialized.length <= maxBytes) {
+  if (Buffer.byteLength(serialized, "utf8") <= maxBytes) {
     return value;
   }
 
   if (typeof value === "string") {
-    return value.slice(0, maxBytes);
+    return truncateToUtf8ByteLimit(value, maxBytes);
   }
 
-  return serialized.slice(0, maxBytes);
+  return truncateToUtf8ByteLimit(serialized, maxBytes);
 }
 
 function toPathParts(path: string): string[] {
@@ -391,6 +414,77 @@ function normalizeContentType(value: string | null | undefined): string | null {
 
   const normalized = value.split(";")[0]?.trim().toLowerCase();
   return normalized || null;
+}
+
+function decodeUrlComponentStrict(value: string, label: string): string {
+  let decoded = value;
+
+  for (let attempt = 0; attempt < MAX_URL_DECODE_ITERATIONS; attempt += 1) {
+    if (!decoded.includes("%")) {
+      break;
+    }
+
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) {
+        break;
+      }
+      decoded = next;
+    } catch {
+      throw toFetchError(`Invalid ${label} encoding`, "validation_error", false);
+    }
+  }
+
+  if (decoded.includes("\u0000")) {
+    throw toFetchError(`Invalid ${label} value`, "validation_error", false);
+  }
+
+  return decoded.normalize("NFKC");
+}
+
+function validateEndpointPathAndQuery(url: URL): void {
+  const pathname = decodeUrlComponentStrict(url.pathname, "path");
+  if (Buffer.byteLength(pathname, "utf8") > MAX_ENDPOINT_PATH_BYTES) {
+    throw toFetchError("Endpoint path is too long", "validation_error", false);
+  }
+
+  const segments = pathname.split("/").filter(Boolean);
+  for (const segment of segments) {
+    if (segment === "." || segment === "..") {
+      throw toFetchError("Endpoint path traversal is not allowed", "validation_error", false);
+    }
+    if (Buffer.byteLength(segment, "utf8") > MAX_QUERY_SEGMENT_BYTES) {
+      throw toFetchError("Endpoint path segment is too long", "validation_error", false);
+    }
+  }
+
+  if (url.search.length > MAX_ENDPOINT_QUERY_BYTES) {
+    throw toFetchError("Endpoint query is too long", "validation_error", false);
+  }
+
+  const params = Array.from(url.searchParams.entries());
+  if (params.length > MAX_ENDPOINT_QUERY_PARAMS) {
+    throw toFetchError("Endpoint has too many query parameters", "validation_error", false);
+  }
+
+  for (const [name, value] of params) {
+    if (!name || Buffer.byteLength(name, "utf8") > MAX_ENDPOINT_QUERY_KEY_BYTES) {
+      throw toFetchError("Invalid query parameter name", "validation_error", false);
+    }
+    if (Buffer.byteLength(value, "utf8") > MAX_ENDPOINT_QUERY_VALUE_BYTES) {
+      throw toFetchError("Invalid query parameter value", "validation_error", false);
+    }
+  }
+
+  if (url.hash) {
+    const fragment = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+    if (fragment.length > MAX_ENDPOINT_FRAGMENT_BYTES) {
+      throw toFetchError("Endpoint URL fragment is too long", "validation_error", false);
+    }
+    if (fragment && !/^[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%-]*$/.test(fragment)) {
+      throw toFetchError("Invalid URL fragment", "validation_error", false);
+    }
+  }
 }
 
 interface StructureLimits {
@@ -414,7 +508,7 @@ function sanitizeStructuredValue(
   if (typeof value === "string") {
     const normalized = value.normalize("NFKC").trim();
     if (Buffer.byteLength(normalized, "utf8") > limits.maxStringBytes) {
-      return normalized.slice(0, limits.maxStringBytes);
+      return truncateToUtf8ByteLimit(normalized, limits.maxStringBytes);
     }
     return normalized;
   }
@@ -863,11 +957,6 @@ function normalizeEndpoint(endpoint: string): string {
   if (/%(?![0-9a-fA-F]{2})/.test(trimmed)) {
     throw toFetchError("Invalid percent-encoded endpoint", "validation_error", false);
   }
-  try {
-    decodeURIComponent(trimmed);
-  } catch {
-    throw toFetchError("Invalid percent-encoding in endpoint", "validation_error", false);
-  }
 
   let parsed: URL;
   try {
@@ -880,15 +969,7 @@ function normalizeEndpoint(endpoint: string): string {
     throw toFetchError("Endpoint credentials are not allowed", "security_blocked", false);
   }
 
-  let decodedPath: string;
-  try {
-    decodedPath = decodeURIComponent(parsed.pathname);
-  } catch {
-    throw toFetchError("Invalid endpoint path encoding", "validation_error", false);
-  }
-  if (decodedPath.split("/").includes("..")) {
-    throw toFetchError("Endpoint path traversal is not allowed", "validation_error", false);
-  }
+  validateEndpointPathAndQuery(parsed);
 
   if (!/^https?:$/.test(parsed.protocol)) {
     throw toFetchError("Only http/https endpoints are allowed", "security_blocked", false);
@@ -930,6 +1011,8 @@ function normalizeEndpoint(endpoint: string): string {
   if (ipLike && isInternalIP(hostname)) {
     throw toFetchError("Private IP targets are denied", "security_blocked", false);
   }
+
+  parsed.hash = "";
 
   return parsed.toString();
 }

@@ -472,6 +472,56 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("security_blocked");
     });
 
+    it("rejects double-encoded path traversal in endpoint", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-14",
+        name: "action-double-traversal",
+        endpoint: "https://example.com/%252e%252e%252fsecret",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("path traversal");
+    });
+
+    it("rejects excessive endpoint query sizes", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      });
+
+      const action = {
+        id: "action-15",
+        name: "action-query-limit",
+        endpoint: `https://example.com/search?q=${"x".repeat(5_000)}`,
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("query is too long");
+    });
+
     it("rejects invalid header configuration before outbound execution", async () => {
       let called = false;
       const runtime = new GptActionRuntime({

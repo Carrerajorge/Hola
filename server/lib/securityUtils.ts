@@ -3,6 +3,8 @@
  * SECURITY FIX #50: Centralized input validation and sanitization utilities
  */
 
+import net from "node:net";
+
 // Sensitive field names to always redact from logs
 export const SENSITIVE_FIELDS = [
   'password', 'token', 'secret', 'apiKey', 'api_key', 'authorization',
@@ -128,8 +130,45 @@ export function sanitizeFileName(fileName: string, maxLength: number = 255): str
 export function isInternalIP(ip: string | undefined): boolean {
   if (!ip) return false;
 
-  const internalIPs = ['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost'];
-  if (internalIPs.includes(ip)) return true;
+  const normalized = ip.trim().toLowerCase();
+  if (!normalized) return false;
+
+  if (normalized === "localhost" || normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") {
+    return true;
+  }
+
+  const candidate = normalized.replace(/^\[(.+)\]$/, "$1");
+  const version = net.isIP(candidate);
+  if (version === 4) {
+    const octets = candidate.split(".").map((part) => Number.parseInt(part, 10));
+    if (octets.length !== 4 || octets.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+      return false;
+    }
+
+    return (
+      octets[0] === 10 ||
+      octets[0] === 127 ||
+      (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168)
+    );
+  }
+
+  if (version === 6) {
+    if (candidate === "::ffff:127.0.0.1") {
+      return true;
+    }
+    if (candidate.startsWith("::ffff:")) {
+      return isInternalIP(candidate.slice(7));
+    }
+    if (candidate.startsWith("fc") || candidate.startsWith("fd") || candidate.startsWith("fe8") || candidate.startsWith("fe9") ||
+        candidate.startsWith("fea") || candidate.startsWith("feb") || candidate.startsWith("fec") || candidate.startsWith("fed") ||
+        candidate.startsWith("fee") || candidate.startsWith("fef")) {
+      return true;
+    }
+    if (candidate.startsWith("fe80")) {
+      return true;
+    }
+  }
 
   const privateIPPrefixes = [
     '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.',
@@ -138,7 +177,7 @@ export function isInternalIP(ip: string | undefined): boolean {
   ];
 
   // Handle IPv6-mapped IPv4
-  const cleanIP = ip.replace('::ffff:', '');
+  const cleanIP = candidate.replace('::ffff:', '');
   return privateIPPrefixes.some(prefix => cleanIP.startsWith(prefix));
 }
 
