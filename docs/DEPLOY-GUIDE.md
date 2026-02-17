@@ -63,6 +63,25 @@ cd /opt/hola
 docker compose -p iliagpt -f docker-compose.prod.yml restart app worker
 ```
 
+### Observabilidad (Prometheus + InfluxDB)
+
+Enable with:
+
+```bash
+docker compose -p iliagpt -f docker-compose.prod.yml --profile monitoring up -d
+```
+
+Endpoints after startup:
+
+- Prometheus: `http://<host>:${PROMETHEUS_PORT:-9090}`
+- InfluxDB UI (incluye explorador/consulta): `http://<host>:${INFLUXDB_PORT:-8086}`
+
+Token compatibility:
+
+- `INFLUXDB_ADMIN_TOKEN` is the preferred variable.
+- If still using legacy `INFLUX_TOKEN`, the compose file currently falls back to it automatically.
+- Rotate credentials in `/opt/hola/.env.production` after first bootstrap and keep only the preferred variable.
+
 ---
 
 ## Deploying Updates

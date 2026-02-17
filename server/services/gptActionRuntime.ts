@@ -303,7 +303,11 @@ function sanitizeHeaderValue(value: string | number | boolean): string {
 
 function safeStringify(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) {
+      return String(value ?? "");
+    }
+    return serialized;
   } catch {
     return String(value ?? "");
   }

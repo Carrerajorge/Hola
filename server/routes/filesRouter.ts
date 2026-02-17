@@ -40,6 +40,7 @@ function sanitizeFileName(fileName: string): string {
 
 interface MultipartUploadSession {
   uploadId: string;
+  userId: string;
   conversationId?: string | null;
   fileName: string;
   mimeType: string;
@@ -55,10 +56,7 @@ interface MultipartUploadSession {
 interface FileRegistrationCacheEntry {
   createdAt: number;
   fingerprint: string;
-  response: {
-    uploadId: string;
-    storagePath: string;
-  };
+  response: Record<string, unknown>;
   uploadId: string;
   conversationId?: string | null;
   userId: string;
