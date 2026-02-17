@@ -16,6 +16,7 @@ import express from "express";
 const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
 const WEBHOOK_REPLAY_TTL_MS = 10 * 60 * 1000;
+const WEBHOOK_REPLAY_MAX_ENTRIES = 2000;
 const webhookReplayCache = new Map<string, number>();
 const REQUIRE_WEBHOOK_SECRETS = env.NODE_ENV === "production";
 
@@ -36,21 +37,66 @@ function normalizeWebhookTimestamp(value: number | null): number | null {
   return value > 0 && value < 1_000_000_000_000 ? value * 1000 : value;
 }
 
+function normalizeReplayProviderKey(req: Request): string {
+  const telegramToken = req.headers["x-telegram-bot-api-secret-token"];
+  if (typeof telegramToken === "string" && telegramToken.trim()) return telegramToken.trim();
+
+  const hubSig256 = req.headers["x-hub-signature-256"];
+  if (typeof hubSig256 === "string" && hubSig256.trim()) return hubSig256.trim();
+
+  const hubSig = req.headers["x-hub-signature"];
+  if (typeof hubSig === "string" && hubSig.trim()) return hubSig.trim();
+
+  return "";
+}
+
+function normalizeReplayQueryFingerprint(req: Request): string {
+  const normalized: Array<[string, string]> = [];
+  for (const [rawName, rawValue] of Object.entries(req.query)) {
+    const name = String(rawName);
+    if (rawValue === undefined || rawValue === null) {
+      continue;
+    }
+
+    if (Array.isArray(rawValue)) {
+      for (const item of rawValue) {
+        if (item === undefined || item === null) continue;
+        normalized.push([name, String(item)]);
+      }
+      continue;
+    }
+
+    normalized.push([name, String(rawValue)]);
+  }
+
+  normalized.sort(([aName, aValue], [bName, bValue]) => {
+    const nameOrder = aName.localeCompare(bName);
+    if (nameOrder !== 0) return nameOrder;
+    return aValue.localeCompare(bValue);
+  });
+
+  return new URLSearchParams(normalized).toString();
+}
+
 function pruneWebhookReplayCache(nowMs: number): void {
   for (const [key, startedAt] of webhookReplayCache.entries()) {
     if (nowMs - startedAt > WEBHOOK_REPLAY_TTL_MS) {
       webhookReplayCache.delete(key);
     }
   }
+
+  if (webhookReplayCache.size <= WEBHOOK_REPLAY_MAX_ENTRIES) {
+    return;
+  }
+
+  const excess = webhookReplayCache.size - WEBHOOK_REPLAY_MAX_ENTRIES;
+  const keys = Array.from(webhookReplayCache.keys()).slice(0, excess);
+  for (const key of keys) {
+    webhookReplayCache.delete(key);
+  }
 }
 
 function buildWebhookReplayKey(channel: string, req: Request): string {
-  const providerKey =
-    (req.headers["x-telegram-bot-api-secret-token"] as string) ||
-    (req.headers["x-hub-signature-256"] as string) ||
-    (req.headers["x-hub-signature"] as string) ||
-    "";
-
   const body = (() => {
     if (typeof req.body === "string") return req.body;
     if (Buffer.isBuffer(req.body as any)) return (req.body as any).toString("utf8");
@@ -63,10 +109,10 @@ function buildWebhookReplayKey(channel: string, req: Request): string {
 
   const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
   const queryHash = crypto.createHash("sha256")
-    .update(new URLSearchParams(req.query as Record<string, string>).toString())
+    .update(normalizeReplayQueryFingerprint(req))
     .digest("hex");
 
-  return `${channel}|${req.path}|${providerKey}|${bodyHash}|${queryHash}`;
+  return `${channel}|${req.path}|${normalizeReplayProviderKey(req)}|${bodyHash}|${queryHash}`;
 }
 
 function isWebhookReplay(channel: string, req: Request): boolean {
