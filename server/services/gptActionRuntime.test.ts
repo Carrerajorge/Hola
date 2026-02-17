@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as fc from "fast-check";
-import { GptActionRuntime, normalizeGptActionRequestPayload, parseRetryAfterHeader } from "./gptActionRuntime";
+import {
+  GptActionRuntime,
+  isAllowedResponseMimeTypeForTesting,
+  normalizeContentTypeForTesting,
+  normalizeGptActionRequestPayload,
+  parseRetryAfterHeader,
+  sanitizeLogValueForTesting,
+} from "./gptActionRuntime";
 
 describe("gptActionRuntime shared helpers", () => {
   describe("normalizeGptActionRequestPayload", () => {
@@ -75,9 +82,32 @@ describe("gptActionRuntime shared helpers", () => {
       expect(parseRetryAfterHeader(undefined)).toBeUndefined();
     });
 
+    it("ignores malformed negative and zero header values", () => {
+      expect(parseRetryAfterHeader("-1")).toBeUndefined();
+      expect(parseRetryAfterHeader("0")).toBeUndefined();
+    });
+
     it("returns undefined for past HTTP-date values", () => {
       const past = new Date(Date.now() - 30_000).toUTCString();
       expect(parseRetryAfterHeader(past)).toBeUndefined();
+    });
+  });
+
+  describe("content-type helpers", () => {
+    it("normalizes content-type headers", () => {
+      expect(normalizeContentTypeForTesting("application/json; charset=utf-8")).toBe("application/json");
+      expect(normalizeContentTypeForTesting("  Text/Plain; charset=UTF-8  ")).toBe("text/plain");
+      expect(normalizeContentTypeForTesting(null)).toBeNull();
+      expect(normalizeContentTypeForTesting("")).toBeNull();
+    });
+
+    it("allows only safe response content types", () => {
+      expect(isAllowedResponseMimeTypeForTesting("application/json; charset=utf-8")).toBe(true);
+      expect(isAllowedResponseMimeTypeForTesting("text/plain")).toBe(true);
+      expect(isAllowedResponseMimeTypeForTesting("text/csv; charset=utf-8")).toBe(true);
+      expect(isAllowedResponseMimeTypeForTesting("application/problem+json")).toBe(true);
+      expect(isAllowedResponseMimeTypeForTesting("image/png")).toBe(false);
+      expect(isAllowedResponseMimeTypeForTesting(null)).toBe(false);
     });
   });
 
@@ -108,6 +138,20 @@ describe("gptActionRuntime shared helpers", () => {
           expect(value).toBeLessThanOrEqual(expectedMax);
         })
       );
+    });
+  });
+
+  describe("sanitizeLogValue", () => {
+    it("normalizes and redacts risky substrings", () => {
+      const result = sanitizeLogValueForTesting({
+        title: " <script>alert(1)</script> hello ",
+        path: "javascript:alert(1)",
+      });
+
+      expect(result).toEqual({
+        title: " [redacted] hello ",
+        path: "[redacted]alert(1)",
+      });
     });
   });
 });

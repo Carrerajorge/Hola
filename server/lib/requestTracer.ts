@@ -4,6 +4,10 @@ import { createLogger } from "./structuredLogger";
 
 const logger = createLogger("request-tracer");
 
+const SENSITIVE_QUERY_PARAMS = ["token", "key", "secret", "password", "apiKey", "api_key", "access_token", "refresh_token", "code", "state"];
+const MAX_USER_AGENT_BYTES = 256;
+const MAX_QUERY_ITEM_LENGTH = 120;
+
 interface RequestInfo {
   requestId: string;
   method: string;
@@ -68,8 +72,8 @@ export function requestTracerMiddleware(req: Request, res: Response, next: NextF
   pathCounts[normalizedPath] = (pathCounts[normalizedPath] || 0) + 1;
   
   logger.withRequest(requestId, userId).info(`→ ${req.method} ${req.path}`, {
-    query: Object.keys(req.query).length > 0 ? req.query : undefined,
-    userAgent: req.get("user-agent"),
+    query: sanitizeQueryForLogging(req.query as Record<string, unknown>),
+    userAgent: sanitizeUserAgent(req.get("user-agent")),
   });
   
   // Handler para cuando termina la respuesta
@@ -122,6 +126,56 @@ function normalizePath(path: string): string {
     .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "/:id")
     .replace(/\/\d+/g, "/:id")
     .replace(/\/[a-zA-Z0-9_-]{16,}/g, "/:id");
+}
+
+function sanitizeQueryForLogging(query: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!query || Object.keys(query).length === 0) {
+    return undefined;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(query)) {
+    if (SENSITIVE_QUERY_PARAMS.some((fragment) => key.toLowerCase().includes(fragment.toLowerCase()))) {
+      sanitized[key] = "[REDACTED]";
+      continue;
+    }
+
+    if (typeof value === "string") {
+      sanitized[key] = truncateSafe(value, MAX_QUERY_ITEM_LENGTH);
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      sanitized[key] = value.slice(0, 5).map((item) => {
+        if (typeof item === "string") return truncateSafe(item, MAX_QUERY_ITEM_LENGTH);
+        return item;
+      });
+      continue;
+    }
+
+    sanitized[key] = value;
+  }
+
+  return sanitized;
+}
+
+function truncateSafe(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(maxLength - 1, 0))}…`;
+}
+
+function sanitizeUserAgent(userAgent: string | undefined): string | undefined {
+  if (!userAgent) return undefined;
+
+  const normalized = userAgent.normalize("NFKC").replace(/\x00/g, "");
+  if (normalized.length <= MAX_USER_AGENT_BYTES) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, MAX_USER_AGENT_BYTES)}...`;
 }
 
 export function getActiveRequests(): RequestInfo[] {

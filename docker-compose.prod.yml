@@ -26,6 +26,8 @@ services:
       # Exposed via /api/health for deploy verification (set by deploy workflow).
       APP_VERSION: ${APP_VERSION:-dev}
 
+      METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
+
       PORT: "5000"
 
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
@@ -281,6 +283,84 @@ services:
     mem_limit: 1g
 
 
+  prometheus:
+
+    image: prom/prometheus:v2.54.1
+
+    profiles:
+
+      - monitoring
+
+    command:
+
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+
+    volumes:
+
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+    ports:
+
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+    depends_on:
+
+      - app
+
+    networks:
+
+      - app-network
+
+    restart: unless-stopped
+
+
+  influxdb:
+
+    image: influxdb:2.7-alpine
+
+    profiles:
+
+      - monitoring
+
+    env_file:
+
+      - .env.production
+
+    environment:
+
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:?INFLUXDB_PASSWORD is required}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:?INFLUXDB_ORG is required}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:?INFLUXDB_BUCKET is required}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN:?INFLUXDB_ADMIN_TOKEN is required}
+
+    volumes:
+
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+
+    ports:
+
+      - "${INFLUXDB_PORT:-8086}:8086"
+
+    networks:
+
+      - app-network
+
+    healthcheck:
+
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8086/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+    restart: unless-stopped
 
 networks:
 
@@ -297,3 +377,9 @@ volumes:
   agent_workspace:
 
   ocr_models:
+
+  prometheus_data:
+
+  influxdb_data:
+
+  influxdb_config:

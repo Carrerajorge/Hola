@@ -37,6 +37,7 @@ const MAX_RETRY_ATTEMPTS = 10;
 const CONCURRENCY_KEY_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
 const BACKOFF_JITTER_RATIO = 0.2;
 const MAX_SCHEMA_VALIDATION_DEPTH = 64;
+const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
 
 interface GptActionExecuteInput {
   action: GptAction;
@@ -287,6 +288,71 @@ function truncatePayload(value: unknown, maxBytes: number): unknown {
 
 function toPathParts(path: string): string[] {
   return path.split(".").map((part) => part.trim()).filter(Boolean);
+}
+
+function normalizeContentType(value: string | null | undefined): string | null {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.split(";")[0]?.trim().toLowerCase();
+  return normalized || null;
+}
+
+function isAllowedResponseMimeType(value: string | null | undefined): boolean {
+  const normalized = normalizeContentType(value);
+  if (!normalized) {
+    return false;
+  }
+
+  return ALLOWED_RESPONSE_MIME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function isStructuredResponseSchema(schema: unknown): boolean {
+  if (!schema || typeof schema !== "object") {
+    return false;
+  }
+
+  const candidate = schema as JsonSchemaLike;
+  const schemaType = candidate.type;
+
+  if (schemaType === "object" || schemaType === "array") {
+    return true;
+  }
+
+  if (Array.isArray(schemaType)) {
+    return schemaType.includes("object") || schemaType.includes("array");
+  }
+
+  if (candidate.properties || candidate.required || candidate.items || candidate.additionalProperties === false || candidate.oneOf || candidate.anyOf) {
+    return true;
+  }
+
+  return false;
+}
+
+function sanitizeLogValue(raw: unknown): unknown {
+  if (typeof raw === "string") {
+    return raw
+      .normalize("NFKC")
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "[redacted]")
+      .replace(/javascript:/gi, "[redacted]");
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.map((item) => sanitizeLogValue(item));
+  }
+
+  if (raw && typeof raw === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      output[key] = sanitizeLogValue(value);
+    }
+    return output;
+  }
+
+  return raw;
 }
 
 function getValueByPath(value: unknown, path: string): unknown {
@@ -1031,9 +1097,25 @@ export class GptActionRuntime {
           throw error;
         }
 
-        const responseRaw = result.data.response;
         const statusCode = result.data.status;
         const responsePayload = result.data.body;
+        const responseContentType = result.data.contentType;
+
+        if (isStructuredResponseSchema(action.responseSchema) && !isAllowedResponseMimeType(responseContentType)) {
+          return this.createFailureResult(
+            payload,
+            startedAt,
+            this.now(),
+            retryCount,
+            "execution",
+            "validation_error",
+            statusCode,
+            "Response content-type is not compatible with structured response schema",
+            "validation_error",
+            false,
+            idempotencyKey
+          );
+        }
 
         if (action.responseSchema && action.responseSchema !== null) {
           const outputErrors = validateJsonSchema(action.responseSchema as JsonSchemaLike, responsePayload, []);
@@ -1147,7 +1229,7 @@ export class GptActionRuntime {
     headers: Record<string, string>,
     body: unknown,
     timeoutMs: number
-  ): Promise<{ data: { status: number; body: unknown; response: Response; durationMs: number; circuitState?: "closed" | "half_open" | "open" } }> {
+  ): Promise<{ data: { status: number; body: unknown; response: Response; contentType: string | null; durationMs: number; circuitState?: "closed" | "half_open" | "open" } }> {
     const started = this.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -1175,6 +1257,7 @@ export class GptActionRuntime {
       }
 
       response = await this.fetcher(endpoint, responseInit);
+      const contentType = response.headers.get("content-type");
       const durationMs = this.now() - started;
       clearTimeout(timeoutId);
 
@@ -1197,6 +1280,7 @@ export class GptActionRuntime {
           status: response.status,
           body: rawBody,
           response,
+          contentType,
           durationMs,
           circuitState: response.ok ? "closed" : "open",
         },
@@ -1229,7 +1313,7 @@ export class GptActionRuntime {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let total = 0;
+    let totalBytes = 0;
     const chunks: string[] = [];
 
     let completed = false;
@@ -1241,16 +1325,19 @@ export class GptActionRuntime {
           break;
         }
 
-        const chunk = decoder.decode(readResult.value, { stream: true });
-        total += chunk.length;
-        if (total > maxBytes) {
-          await reader.cancel();
-          throw this.makeNetworkError(
-            `Response body exceeds maximum allowed size: ${total} > ${maxBytes}`,
-            "response_too_large",
-            false
-          );
+        if (readResult.value) {
+          totalBytes += readResult.value.byteLength;
+          if (totalBytes > maxBytes) {
+            await reader.cancel();
+            throw this.makeNetworkError(
+              `Response body exceeds maximum allowed size: ${totalBytes} > ${maxBytes}`,
+              "response_too_large",
+              false
+            );
+          }
         }
+
+        const chunk = decoder.decode(readResult.value, { stream: true });
         chunks.push(chunk);
       }
     } finally {
@@ -1438,7 +1525,7 @@ export class GptActionRuntime {
     try {
       const piiRules = normalizePiiKeys(action.piiRedactionRules);
       const requestPayload = sanitizeSensitiveData({ ...payload.request, conversationId: payload.conversationId });
-      const safeRequest = redactSensitiveFields(requestPayload, piiRules);
+      const safeRequest = sanitizeLogValue(redactSensitiveFields(requestPayload, piiRules));
       const safeError = throwable ? sanitizeSensitiveData(throwable.message) : error;
 
       await logToolCall(
@@ -1660,6 +1747,18 @@ export function normalizeGptActionRequestPayload(rawInput: Record<string, unknow
       : normalizeRequestInput(fallback);
 
   return truncatePayload(normalized, MAX_REQUEST_PAYLOAD_BYTES) as Record<string, unknown>;
+}
+
+export function isAllowedResponseMimeTypeForTesting(rawContentType: string | null | undefined): boolean {
+  return isAllowedResponseMimeType(rawContentType);
+}
+
+export function normalizeContentTypeForTesting(rawContentType: string | null | undefined): string | null {
+  return normalizeContentType(rawContentType);
+}
+
+export function sanitizeLogValueForTesting(value: unknown): unknown {
+  return sanitizeLogValue(value);
 }
 
 export function createGptActionRuntime(): GptActionRuntime {

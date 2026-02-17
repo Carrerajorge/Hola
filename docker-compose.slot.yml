@@ -20,6 +20,7 @@ services:
     environment:
       NODE_ENV: production
       APP_VERSION: ${APP_VERSION:-dev}
+      METRICS_PUBLIC: ${METRICS_PUBLIC:-false}
       PORT: "5000"
       DATABASE_URL: postgres://postgres:postgres@hola-postgres:5432/iliagpt
       REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_password_change_me}@hola-redis:6379
@@ -205,6 +206,54 @@ services:
       com.iliagpt.version: "${APP_VERSION:-dev}"
       com.iliagpt.image: "${IMAGE_TAG:-latest}"
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles:
+      - monitoring
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - app
+    networks:
+      - hola-net
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    profiles:
+      - monitoring
+    env_file:
+      - .env.production
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:?INFLUXDB_PASSWORD is required}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:?INFLUXDB_ORG is required}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:?INFLUXDB_BUCKET is required}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN:?INFLUXDB_ADMIN_TOKEN is required}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    ports:
+      - "${INFLUXDB_PORT:-8086}:8086"
+    networks:
+      - hola-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8086/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
 networks:
   hola-net:
     external: true
@@ -218,3 +267,6 @@ volumes:
     name: hola_uploads_data
   generated_artifacts:
     name: hola_generated_artifacts
+  prometheus_data:
+  influxdb_data:
+  influxdb_config:

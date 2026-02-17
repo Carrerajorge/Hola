@@ -4,6 +4,7 @@ import { Request, Response, NextFunction } from "express";
 import { parse } from "cookie";
 import { isAllowedOrigin } from "./cors";
 import { getUserId } from "../types/express";
+import { createLogger } from "../lib/structuredLogger";
 
 const CSRF_COOKIE_NAME = "XSRF-TOKEN";
 const CSRF_HEADER_NAME = "X-CSRF-Token";
@@ -12,6 +13,21 @@ const IGNORED_METHODS = ["GET", "HEAD", "OPTIONS"];
 const CSRF_TOKEN_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
 const CSRF_TOKEN_BYTES = 16;
+const logger = createLogger("csrf");
+const CSRF_EXEMPT_PATHS = new Set([
+  "/api/auth/login",
+  "/api/auth/admin-login",
+  "/api/auth/logout",
+  "/api/auth/google",
+  "/api/auth/google/callback",
+  "/api/auth/microsoft",
+  "/api/auth/microsoft/callback",
+  "/api/auth/magic-link/send",
+  "/api/auth/magic-link/verify",
+  "/api/callback",
+  "/api/login",
+  "/api/webhooks",
+]);
 
 /**
  * Helper to ensure req.cookies exists
@@ -123,22 +139,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     // Exempt pre-auth and webhook endpoints from CSRF.
     // Webhooks are validated with provider signatures; auth endpoints are not session-authenticated yet.
-    const CSRF_EXEMPT_PATHS = [
-        "/api/auth/login",
-        "/api/auth/admin-login",
-        "/api/auth/logout",
-        "/api/auth/google",
-        "/api/auth/google/callback",
-        "/api/auth/microsoft",
-        "/api/auth/microsoft/callback",
-        "/api/auth/magic-link/send",
-        "/api/auth/magic-link/verify",
-        "/api/callback",
-        "/api/login",
-        "/api/webhooks",
-    ];
-
-    if (CSRF_EXEMPT_PATHS.some((path) => req.path === path || req.originalUrl === path)) {
+    if (CSRF_EXEMPT_PATHS.has(req.path) || CSRF_EXEMPT_PATHS.has(req.originalUrl || "")) {
         return next();
     }
 
@@ -151,7 +152,11 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
       const referer = req.headers.referer ? String(req.headers.referer) : undefined;
 
       if (origin && !isAllowedOrigin(origin)) {
-        console.warn(`[Security] CSRF origin check failed. Method: ${req.method}, IP: ${req.ip}, Origin: ${origin}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF origin validation blocked", {
+          method: req.method,
+          ip: req.ip,
+          origin,
+        });
         return res.status(403).json({
           error: "CSRF token validation failed",
           code: "CSRF_INVALID"
@@ -161,14 +166,21 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
       if (referer) {
         try {
           if (!isAllowedOrigin(new URL(referer).origin)) {
-            console.warn(`[Security] CSRF referer check failed. Method: ${req.method}, IP: ${req.ip}, Referer: ${referer}`);
+            logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF referer validation blocked", {
+              method: req.method,
+              ip: req.ip,
+              referer,
+            });
             return res.status(403).json({
               error: "CSRF token validation failed",
               code: "CSRF_INVALID"
             });
           }
         } catch {
-          console.warn(`[Security] CSRF referer parse failure. Method: ${req.method}, IP: ${req.ip}`);
+          logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF referer parse failure", {
+            method: req.method,
+            ip: req.ip,
+          });
           return res.status(403).json({
             error: "CSRF token validation failed",
             code: "CSRF_INVALID"
@@ -182,7 +194,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
     }
 
     if (!isAllowedCsrfPrincipal(req)) {
-        console.warn(`[Security] CSRF denied for non-authenticated request. Method: ${req.method}, IP: ${req.ip}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF denied: no authenticated principal", {
+          method: req.method,
+          ip: req.ip,
+        });
         return res.status(403).json({
           error: "CSRF token validation failed",
           code: "CSRF_INVALID"
@@ -202,7 +217,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        console.warn(`[Security] CSRF missing token. Method: ${req.method}, IP: ${req.ip}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF missing token", {
+          method: req.method,
+          ip: req.ip,
+        });
         return res.status(403).json({
             error: "CSRF token validation failed",
             code: "CSRF_INVALID"
@@ -213,7 +231,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        console.warn(`[Security] CSRF invalid token format. Method: ${req.method}, IP: ${req.ip}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF invalid token format", {
+          method: req.method,
+          ip: req.ip,
+        });
         return res.status(403).json({
             error: "CSRF token validation failed",
             code: "CSRF_INVALID"
@@ -224,7 +245,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        console.warn(`[Security] CSRF mismatch length. Method: ${req.method}, IP: ${req.ip}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF token length mismatch", {
+          method: req.method,
+          ip: req.ip,
+        });
         return res.status(403).json({
             error: "CSRF token validation failed",
             code: "CSRF_INVALID"
@@ -238,7 +262,10 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        console.warn(`[Security] CSRF mismatch/missing. Method: ${req.method}, IP: ${req.ip}`);
+        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF token mismatch", {
+          method: req.method,
+          ip: req.ip,
+        });
         return res.status(403).json({
             error: "CSRF token validation failed",
             code: "CSRF_INVALID"

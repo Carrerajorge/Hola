@@ -31,23 +31,29 @@ export interface OriginValidationOptions {
 
 export function getAllowedOrigins(options: OriginValidationOptions = {}): string[] | '*' {
     const allowAnyLocalhost = options.allowAnyLocalhost ?? !isProduction;
+    const configuredOrigins = (process.env.ALLOWED_ORIGINS?.split(",").map(d => d.trim()).filter(Boolean) || []);
+    const replitOrigins = (process.env.REPLIT_DOMAINS?.split(",") || [])
+        .filter(isValidReplitDomain)
+        .map(d => `https://${d.trim()}`);
 
-    if (!isProduction || !allowAnyLocalhost) {
+    if (!isProduction) {
+        if (allowAnyLocalhost) {
+            return dedupeAllowedOrigins([
+                ...DEVELOPMENT_ORIGINS,
+                ...configuredOrigins,
+                ...replitOrigins,
+            ]);
+        }
+
         return dedupeAllowedOrigins([
-            ...(isProduction ? [] : []),
+            ...configuredOrigins,
+            ...replitOrigins,
             ...(PRODUCTION_ORIGINS || []),
         ]);
     }
 
-    // In development allow localhost and explicit Replit domains.
-    const replitOrigins = (process.env.REPLIT_DOMAINS?.split(',') || [])
-        .filter(isValidReplitDomain)
-        .map(d => `https://${d.trim()}`);
-
-    const configuredOrigins = (process.env.ALLOWED_ORIGINS?.split(',').map(d => d.trim()).filter(Boolean) || []);
     return dedupeAllowedOrigins([
-        ...DEVELOPMENT_ORIGINS,
-        ...configuredOrigins,
+        ...(configuredOrigins.length > 0 ? configuredOrigins : PRODUCTION_ORIGINS),
         ...replitOrigins,
     ]);
 }
@@ -69,30 +75,6 @@ function isValidReplitDomain(domain: string): boolean {
     // Replit domains should match *.replit.dev, *.repl.co, or *.replit.app
     return /^[a-z0-9][a-z0-9\-]*\.(replit\.dev|repl\.co|replit\.app)$/.test(trimmed);
 }
-
-// Build the allowed origins list based on environment
-const getAllowedOriginsLegacy = (): string[] | '*' => {
-    if (!isProduction) {
-        // In development, allow localhost + validated Replit domains
-        const replitOrigins = (process.env.REPLIT_DOMAINS?.split(',') || [])
-            .filter(isValidReplitDomain)
-            .map(d => `https://${d.trim()}`);
-        return [...DEVELOPMENT_ORIGINS, ...replitOrigins];
-    }
-
-    // In production, only allow specific origins
-    const productionDomains = process.env.ALLOWED_ORIGINS?.split(',').map(d => d.trim()).filter(Boolean) || PRODUCTION_ORIGINS;
-
-    // Also allow validated Replit domains in production deployments
-    if (process.env.REPLIT_DOMAINS) {
-        const replitDomains = process.env.REPLIT_DOMAINS.split(',')
-            .filter(isValidReplitDomain)
-            .map(d => `https://${d.trim()}`);
-        return [...productionDomains, ...replitDomains];
-    }
-
-    return productionDomains;
-};
 
 export const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
