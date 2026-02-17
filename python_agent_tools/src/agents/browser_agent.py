@@ -3,6 +3,8 @@
 from typing import Any, Dict, List, Optional
 from .base_agent import BaseAgent, AgentConfig, AgentResult, AgentState
 import structlog
+from pathlib import Path
+import tempfile
 
 
 class BrowserAgentConfig(AgentConfig):
@@ -155,8 +157,8 @@ Best practices:
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the browser agent's main loop."""
-        self.state = AgentState.EXECUTING
-        context = context or {}
+            self.state = AgentState.EXECUTING
+            context = context or {}
         
         url = context.get("url", "")
         
@@ -180,7 +182,7 @@ Best practices:
             result = await self.search(query)
             return {"action": "search", "results": result}
         elif "screenshot" in task.lower():
-            output = context.get("output_path", "/tmp/screenshot.png")
+            output = context.get("output_path", str(Path(tempfile.gettempdir()) / "screenshot.png"))
             result = await self.screenshot(url, output)
             return {"action": "screenshot", "result": result}
         else:
