@@ -460,9 +460,21 @@ interface SharedDocument {
   contentType: string;
   downloadTokenHash?: string;
   createdBy?: string;
+  accessCount: number;
+  maxAccesses: number;
+  lastAccessedAt?: Date;
   createdAt: Date;
   etag: string;
   byteLength: number;
+}
+
+interface SharedDocumentInput {
+  blob: Buffer;
+  filename: string;
+  contentType: string;
+  downloadTokenHash?: string;
+  createdBy?: string;
+  maxAccesses?: number;
 }
 
 const SHARED_DOWNLOAD_TOKEN_HASH_RE = /^[a-f0-9]{64}$/;
@@ -474,6 +486,35 @@ export function hashSharedDownloadToken(token: string): string {
 const MAX_SHARED_DOCUMENTS = 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const SHARED_DOCUMENT_ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
+const DEFAULT_SHARED_MAX_DOWNLOADS = 100;
+const MIN_SHARED_MAX_DOWNLOADS = 1;
+const MAX_SHARED_MAX_DOWNLOADS = 1000;
+
+function resolveSharedMaxDownloads(raw: unknown): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SHARED_MAX_DOWNLOADS;
+  }
+
+  const rounded = Math.floor(parsed);
+  if (rounded < MIN_SHARED_MAX_DOWNLOADS) {
+    return MIN_SHARED_MAX_DOWNLOADS;
+  }
+  if (rounded > MAX_SHARED_MAX_DOWNLOADS) {
+    return MAX_SHARED_MAX_DOWNLOADS;
+  }
+  return rounded;
+}
+
+function cloneSharedDocument(doc: SharedDocument): SharedDocument {
+  return {
+    ...doc,
+    blob: Buffer.from(doc.blob),
+    createdAt: new Date(doc.createdAt),
+    expiresAt: new Date(doc.expiresAt),
+    lastAccessedAt: doc.lastAccessedAt ? new Date(doc.lastAccessedAt) : undefined,
+  };
+}
 
 export class SharedDocumentStore {
   private documents = new Map<string, SharedDocument>();
@@ -489,7 +530,7 @@ export class SharedDocumentStore {
 
   set(
     id: string,
-    doc: Omit<SharedDocument, "expiresAt" | "createdAt" | "etag" | "byteLength">,
+    doc: SharedDocumentInput,
     ttlMs: number = SHARED_DOCUMENT_TTL_MS
   ): boolean {
     if (
@@ -533,6 +574,9 @@ export class SharedDocumentStore {
     const contentType = canonicalizeSharedContentType(doc.contentType);
     const blob = Buffer.from(doc.blob);
     const etag = `W/"${createHash("sha256").update(blob).digest("hex")}"`;
+    const maxAccesses = resolveSharedMaxDownloads(
+      doc.maxAccesses ?? process.env.SHARE_MAX_DOWNLOADS
+    );
 
     if (!validateSharedDocumentSignature(blob, contentType, sanitizedFileName)) {
       return false;
@@ -546,6 +590,9 @@ export class SharedDocumentStore {
       createdAt: new Date(now),
       etag,
       byteLength: blob.length,
+      accessCount: 0,
+      maxAccesses,
+      lastAccessedAt: undefined,
       expiresAt: new Date(now + normalizedTtlMs),
     });
     return true;
@@ -560,12 +607,30 @@ export class SharedDocumentStore {
       return null;
     }
 
-    return {
-      ...doc,
-      blob: Buffer.from(doc.blob),
-      createdAt: new Date(doc.createdAt),
-      expiresAt: new Date(doc.expiresAt),
-    };
+    return cloneSharedDocument(doc);
+  }
+
+  consume(id: string): SharedDocument | null {
+    const doc = this.documents.get(id);
+    if (!doc) {
+      return null;
+    }
+
+    const now = new Date();
+    if (doc.expiresAt < now) {
+      this.documents.delete(id);
+      return null;
+    }
+
+    if (doc.accessCount >= doc.maxAccesses) {
+      this.documents.delete(id);
+      return null;
+    }
+
+    doc.accessCount += 1;
+    doc.lastAccessedAt = now;
+    this.documents.set(id, doc);
+    return cloneSharedDocument(doc);
   }
 
   delete(id: string): void {

@@ -3015,12 +3015,31 @@ Generate the command plan:`;
         return res.status(304).end();
       }
 
-      const storedFileName = normalizeUploadedFileName(doc.filename || "shared_document");
+      const consumedDoc = sharedDocumentStore.consume(shareId);
+      if (!consumedDoc) {
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "shared_failure",
+          docType: "share",
+          details: {
+            requestId,
+            shareId,
+            clientHash,
+            reason: "download_limit_or_expired",
+          },
+        });
+        return res.status(410).json(
+          safeErrorResponseWithRequest("Document not found, expired, or download limit reached", new Error("Download unavailable"), req)
+        );
+      }
+
+      const storedFileName = normalizeUploadedFileName(consumedDoc.filename || "shared_document");
       const storedExtension = getUploadedFileExtension(storedFileName);
       const filename = sanitizeFilename(
         storedFileName.slice(0, Math.max(0, storedFileName.length - storedExtension.length)),
         storedExtension || ".docx"
       );
+      const remainingDownloads = Math.max(consumedDoc.maxAccesses - consumedDoc.accessCount, 0);
       logDocumentEvent({
         timestamp: new Date().toISOString(),
         event: "shared_success",
@@ -3030,18 +3049,20 @@ Generate the command plan:`;
           shareId,
           clientHash,
           filename,
-          bytes: doc.blob.length,
+          bytes: consumedDoc.blob.length,
+          remainingDownloads,
         },
       });
-      res.setHeader("Content-Type", canonicalizeSharedContentType(doc.contentType));
-      res.setHeader("Content-Length", String(doc.byteLength));
-      res.setHeader("Last-Modified", doc.createdAt.toUTCString());
-      res.setHeader("ETag", doc.etag);
+      res.setHeader("Content-Type", canonicalizeSharedContentType(consumedDoc.contentType));
+      res.setHeader("Content-Length", String(consumedDoc.byteLength));
+      res.setHeader("Last-Modified", consumedDoc.createdAt.toUTCString());
+      res.setHeader("ETag", consumedDoc.etag);
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Accept-Ranges", "none");
+      res.setHeader("X-Share-Downloads-Remaining", String(remainingDownloads));
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
       res.setHeader("X-Request-Id", requestId);
-      res.send(doc.blob);
+      res.send(consumedDoc.blob);
     } catch (error: any) {
       logDocumentEvent({
         timestamp: new Date().toISOString(),
