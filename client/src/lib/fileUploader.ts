@@ -106,7 +106,7 @@ export class ChunkedFileUploader {
   private async fetchConfig(): Promise<FileConfig> {
     if (this.config) return this.config;
 
-    const response = await fetch('/api/files/config');
+    const response = await apiFetch('/api/files/config');
     if (!response.ok) {
       throw new Error('Failed to fetch file upload configuration');
     }
@@ -266,14 +266,18 @@ export class ChunkedFileUploader {
           registeredFileId = result.fileId;
         }
       } else {
-        const result = await this.uploadSingle(normalizedFile, options, (percent) => {
-          onProgress({
-            fileId: registeredFileId || fileId,
-            phase: 'uploading',
-            uploadProgress: percent,
-            processingProgress: 0,
-          });
-        });
+        const result = await this.uploadSingle(
+          normalizedFile,
+          options,
+          (percent) => {
+            onProgress({
+              fileId: registeredFileId || fileId,
+              phase: 'uploading',
+              uploadProgress: percent,
+              processingProgress: 0,
+            });
+          }
+        );
         storagePath = result.storagePath;
       }
 
@@ -337,8 +341,8 @@ export class ChunkedFileUploader {
 
   private async uploadSingle(
     file: File,
-    onProgress: (percent: number) => void,
-    options: UploadOptions = {}
+    options: UploadOptions = {},
+    onProgress: (percent: number) => void
   ): Promise<{ storagePath: string }> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -352,7 +356,7 @@ export class ChunkedFileUploader {
 
     // Get upload URL with retry
     const { uploadURL, storagePath } = await retryWithBackoff(async () => {
-      const response = await fetch('/api/objects/upload', {
+      const response = await apiFetch('/api/objects/upload', {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -372,7 +376,7 @@ export class ChunkedFileUploader {
 
     // Upload file with retry
     await retryWithBackoff(
-      () => this.uploadWithProgress(uploadURL, file, file.type, onProgress),
+      () => this.uploadWithProgress(uploadURL, file, onProgress),
       MAX_RETRIES,
       RETRY_BASE_DELAY_MS,
       this.abortController?.signal,
@@ -399,7 +403,7 @@ export class ChunkedFileUploader {
     }
 
     const createResponse = await retryWithBackoff(async () => {
-      const res = await fetch('/api/objects/multipart/create', {
+      const res = await apiFetch('/api/objects/multipart/create', {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -428,7 +432,7 @@ export class ChunkedFileUploader {
       const chunk = file.slice(start, end);
 
       await retryWithBackoff(async () => {
-        const signResponse = await fetch('/api/objects/multipart/sign-part', {
+        const signResponse = await apiFetch('/api/objects/multipart/sign-part', {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -444,7 +448,7 @@ export class ChunkedFileUploader {
 
         const { signedUrl } = await signResponse.json();
 
-        await this.uploadWithProgress(signedUrl, chunk, file.type, () => {});
+        await this.uploadWithProgress(signedUrl, chunk, () => {});
       }, MAX_RETRIES, RETRY_BASE_DELAY_MS, this.abortController?.signal);
 
       uploadedParts.push({ partNumber });
@@ -460,12 +464,13 @@ export class ChunkedFileUploader {
     }
 
     const result = await retryWithBackoff(async () => {
-      const completeResponse = await fetch('/api/objects/multipart/complete', {
+      const completeResponse = await apiFetch('/api/objects/multipart/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           uploadId: session.uploadId,
           parts: uploadedParts.sort((a, b) => a.partNumber - b.partNumber),
+          ...(options.uploadId ? { uploadId: options.uploadId } : {}),
           ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         }),
       });
@@ -481,7 +486,6 @@ export class ChunkedFileUploader {
   private uploadWithProgress(
     url: string,
     data: Blob,
-    contentType: string,
     onProgress: (percent: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -511,10 +515,6 @@ export class ChunkedFileUploader {
       });
 
       xhr.open('PUT', url);
-      // Set Content-Type header so storage receives the correct MIME type
-      if (contentType) {
-        xhr.setRequestHeader('Content-Type', contentType);
-      }
       xhr.send(data);
 
       if (this.abortController) {

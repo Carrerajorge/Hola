@@ -3,7 +3,7 @@ import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import { useStreamingTransition } from "@/hooks/use-streaming-transition";
 import { useStreamChat } from "@/hooks/use-stream-chat";
-import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { apiFetch, getAnonUserIdHeader } from "@/lib/apiClient";
 import { getFileUploader } from "@/lib/fileUploader";
 import { WelcomeAnimation } from "@/components/welcome-animation-simple";
 import { WelcomeExplosion, useFirstVisit } from "@/components/welcome-explosion";
@@ -2875,6 +2875,16 @@ export function ChatInterface({
         };
 
         try {
+          const stableConversationId = chatId && !chatId.startsWith("pending-") ? chatId : null;
+          const uploadId = `upload-${tempId}`;
+          const uploadHeaders: Record<string, string> = {
+            "Content-Type": "application/json",
+            "X-Upload-Id": uploadId,
+          };
+          if (stableConversationId) {
+            uploadHeaders["X-Conversation-Id"] = stableConversationId;
+          }
+
           const safeJson = async (res: Response): Promise<any> => {
             try {
               return await res.json();
@@ -2883,7 +2893,14 @@ export function ChatInterface({
             }
           };
 
-          const urlRes = await retryFetch(() => fetch("/api/objects/upload", { method: "POST" }), 2);
+          const urlRes = await retryFetch(() => apiFetch("/api/objects/upload", {
+            method: "POST",
+            headers: uploadHeaders,
+            body: JSON.stringify({
+              uploadId,
+              ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+            }),
+          }), 2);
           const urlData = await safeJson(urlRes);
           if (!urlRes.ok) {
             throw new Error(urlData?.error || `Failed to get upload URL (status ${urlRes.status})`);
@@ -2893,7 +2910,6 @@ export function ChatInterface({
 
           const uploadRes = await retryFetch(() => fetch(uploadURL, {
             method: "PUT",
-            headers: { "Content-Type": file.type || "application/octet-stream" },
             body: file,
           }));
           if (!uploadRes.ok) throw new Error(`Upload failed with status ${uploadRes.status}`);
@@ -2905,8 +2921,9 @@ export function ChatInterface({
               const formData = new FormData();
               formData.append('file', file);
 
-              const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
+              const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
                 method: 'POST',
+                headers: uploadHeaders,
                 body: formData,
               });
 
@@ -2947,10 +2964,17 @@ export function ChatInterface({
           }
 
           if (isImage) {
-            const registerRes = await fetch("/api/files", {
+            const registerRes = await apiFetch("/api/files", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+              headers: uploadHeaders,
+              body: JSON.stringify({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                storagePath,
+                uploadId,
+                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+              }),
             });
             const registeredFile = await safeJson(registerRes);
             if (!registerRes.ok) {
@@ -2968,10 +2992,17 @@ export function ChatInterface({
               prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
             );
 
-            const registerRes = await fetch("/api/files", {
+            const registerRes = await apiFetch("/api/files", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+              headers: uploadHeaders,
+              body: JSON.stringify({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                storagePath,
+                uploadId,
+                ...(stableConversationId ? { conversationId: stableConversationId } : {}),
+              }),
             });
             const registeredFile = await safeJson(registerRes);
             if (!registerRes.ok) {

@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { normalizeFileForUpload } from "@/lib/attachmentIngest";
+import { apiFetch } from "@/lib/apiClient";
 
 const VOICE_UPLOAD_ALLOWED_TYPES = new Set([
   "text/plain",
@@ -286,6 +287,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     const file = files[0];
     const normalizedFile = normalizeFileForUpload(file);
     const normalizedType = (normalizedFile.type || "").trim().toLowerCase();
+    const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
 
     // Validate file
     const maxSize = 50 * 1024 * 1024; // 50MB
@@ -302,9 +304,13 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
     try {
       // Get signed upload URL from server
-      const uploadRes = await fetch("/api/objects/upload", {
+      const uploadRes = await apiFetch("/api/objects/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Upload-Id": uploadId,
+        },
+        body: JSON.stringify({ uploadId }),
       });
 
       if (!uploadRes.ok) {
@@ -316,7 +322,6 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       // Upload file directly to storage
       const putRes = await fetch(uploadURL, {
         method: "PUT",
-        headers: { "Content-Type": normalizedType },
         body: normalizedFile,
       });
 
@@ -325,14 +330,18 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       }
 
       // Register file in database
-      const registerRes = await fetch("/api/files", {
+      const registerRes = await apiFetch("/api/files", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Upload-Id": uploadId,
+        },
         body: JSON.stringify({
           name: normalizedFile.name,
           type: normalizedType,
           size: normalizedFile.size,
           storagePath,
+          uploadId,
         }),
       });
 
