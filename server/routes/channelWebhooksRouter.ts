@@ -7,8 +7,18 @@ import {
   verifyWhatsAppSignature256,
   verifyMessengerSignature256,
   verifyWeChatSignature,
+  extractWebhookPayloadTimestamp,
+  isWebhookTimestampFresh,
 } from "../channels/webhookSecurity";
 import express from "express";
+
+const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
+const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
+
+function normalizeWebhookTimestamp(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  return value > 0 && value < 1_000_000_000_000 ? value * 1000 : value;
+}
 
 function getRawBodyBuffer(req: Request): Buffer {
   const raw = (req as any).rawBody;
@@ -18,6 +28,23 @@ function getRawBodyBuffer(req: Request): Buffer {
   return Buffer.from(JSON.stringify(req.body ?? {}));
 }
 
+function hasTooLargePayload(req: Request): boolean {
+  if (getRawBodyBuffer(req).length > MAX_WEBHOOK_PAYLOAD_BYTES) return true;
+  return false;
+}
+
+function getWebhookTimestampFromRequest(channel: "telegram" | "whatsapp_cloud" | "messenger" | "wechat", req: Request): number | null {
+  if (channel === "wechat") {
+    return normalizeWebhookTimestamp(Number.parseInt(String(req.query.timestamp || ""), 10));
+  }
+
+  const queryTimestamp = Number.parseInt(String(req.query.timestamp || req.query["hub.timestamp"] || ""), 10);
+  if (Number.isFinite(queryTimestamp)) {
+    return normalizeWebhookTimestamp(queryTimestamp);
+  }
+  return extractWebhookPayloadTimestamp((req as any).body);
+}
+
 export function createChannelWebhooksRouter(): Router {
   const router = Router();
 
@@ -25,6 +52,15 @@ export function createChannelWebhooksRouter(): Router {
   // X-Telegram-Bot-Api-Secret-Token header on each request.
   router.post("/telegram", async (req: Request, res: Response) => {
     try {
+      if (hasTooLargePayload(req)) {
+        return res.status(413).send("payload_too_large");
+      }
+
+      const eventTimestamp = getWebhookTimestampFromRequest("telegram", req);
+      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+        return res.status(200).send("stale");
+      }
+
       const ok = verifyTelegramSecretToken({
         providedToken: req.header("x-telegram-bot-api-secret-token") || undefined,
         expectedToken: env.TELEGRAM_WEBHOOK_SECRET_TOKEN,
@@ -46,6 +82,11 @@ export function createChannelWebhooksRouter(): Router {
 
   // WhatsApp Cloud webhook verification (Meta)
   router.get("/whatsapp", (req: Request, res: Response) => {
+    const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
+    if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      return res.status(403).send("stale");
+    }
+
     const mode = String(req.query["hub.mode"] || "");
     const token = String(req.query["hub.verify_token"] || "");
     const challenge = String(req.query["hub.challenge"] || "");
@@ -58,6 +99,15 @@ export function createChannelWebhooksRouter(): Router {
 
   router.post("/whatsapp", async (req: Request, res: Response) => {
     try {
+      if (hasTooLargePayload(req)) {
+        return res.status(413).send("payload_too_large");
+      }
+
+      const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
+      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+        return res.status(200).send("stale");
+      }
+
       const sig = req.header("x-hub-signature-256") || undefined;
       const ok = verifyWhatsAppSignature256({
         rawBody: getRawBodyBuffer(req),
@@ -81,6 +131,11 @@ export function createChannelWebhooksRouter(): Router {
 
   // Messenger webhook verification (Meta — same pattern as WhatsApp)
   router.get("/messenger", (req: Request, res: Response) => {
+    const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
+    if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      return res.status(403).send("stale");
+    }
+
     const mode = String(req.query["hub.mode"] || "");
     const token = String(req.query["hub.verify_token"] || "");
     const challenge = String(req.query["hub.challenge"] || "");
@@ -93,6 +148,15 @@ export function createChannelWebhooksRouter(): Router {
 
   router.post("/messenger", async (req: Request, res: Response) => {
     try {
+      if (hasTooLargePayload(req)) {
+        return res.status(413).send("payload_too_large");
+      }
+
+      const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
+      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+        return res.status(200).send("stale");
+      }
+
       const sig = req.header("x-hub-signature-256") || undefined;
       const ok = verifyMessengerSignature256({
         rawBody: getRawBodyBuffer(req),
@@ -116,6 +180,11 @@ export function createChannelWebhooksRouter(): Router {
 
   // WeChat webhook verification (SHA1 signature, echo echostr)
   router.get("/wechat", (req: Request, res: Response) => {
+    const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
+    if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      return res.status(403).send("stale");
+    }
+
     const ok = verifyWeChatSignature({
       signature: String(req.query.signature || ""),
       timestamp: String(req.query.timestamp || ""),
@@ -129,6 +198,15 @@ export function createChannelWebhooksRouter(): Router {
   // WeChat inbound messages (XML body)
   router.post("/wechat", express.text({ type: ["text/xml", "application/xml"] }), async (req: Request, res: Response) => {
     try {
+      if (req.headers["content-length"] && Number(req.headers["content-length"]) > MAX_WEBHOOK_PAYLOAD_BYTES) {
+        return res.status(413).send("payload_too_large");
+      }
+
+      const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
+      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+        return res.status(200).send("stale");
+      }
+
       const ok = verifyWeChatSignature({
         signature: String(req.query.signature || ""),
         timestamp: String(req.query.timestamp || ""),
@@ -156,4 +234,3 @@ export function createChannelWebhooksRouter(): Router {
 
   return router;
 }
-
