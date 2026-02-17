@@ -15,6 +15,7 @@
     "type-check": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=4096 -- tsc -p tsconfig.ci.json",
     "type-check:app": "node scripts/with-env.cjs NODE_OPTIONS=--max-old-space-size=4096 -- tsc -p tsconfig.ci.json",
     "db:push": "drizzle-kit push",
+    "db:migrate:prod": "node dist/migrate.cjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

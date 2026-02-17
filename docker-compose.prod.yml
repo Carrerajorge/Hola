@@ -123,6 +123,38 @@ services:
     mem_limit: 768m
 
 
+  migrate:
+
+    image: iliagpt-app:${APP_VERSION:-dev}
+
+    profiles:
+      - ops
+
+    command: ["node", "dist/migrate.cjs"]
+
+    env_file:
+
+      - .env.production
+
+    environment:
+
+      NODE_ENV: production
+
+      APP_VERSION: ${APP_VERSION:-dev}
+
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-iliagpt}
+
+    depends_on:
+
+      - postgres
+
+    networks:
+
+      - app-network
+
+    restart: "no"
+
+
 
   postgres:
 
@@ -334,10 +366,10 @@ services:
     environment:
 
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:?INFLUXDB_USERNAME is required}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:?INFLUXDB_PASSWORD is required}
-      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:?INFLUXDB_ORG is required}
-      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:?INFLUXDB_BUCKET is required}
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_USERNAME:-}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-}
       # Compatibility: accepts legacy INFLUX_TOKEN as fallback for INFLUXDB_ADMIN_TOKEN.
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_ADMIN_TOKEN:-${INFLUX_TOKEN}}
 
