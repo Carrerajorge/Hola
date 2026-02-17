@@ -267,6 +267,44 @@ slot() {
     docker compose -p "hola-${slot_name}" -f "${SLOT_COMPOSE}" "$@"
 }
 
+free_target_port_if_safe() {
+  local target_port="$1"
+  local occupied
+  occupied="$(docker ps --filter "publish=${target_port}" --format '{{.Names}}' || true)"
+
+  if [ -z "${occupied}" ]; then
+    return 0
+  fi
+
+  logw "Port ${target_port} already occupied by: ${occupied//$'\n'/, }"
+
+  while IFS= read -r cname; do
+    [ -z "${cname}" ] && continue
+
+    # Safe auto-cleanup for known legacy stack that collides with blue/green port.
+    if [[ "${cname}" =~ ^iliagpt-(app|worker|sandbox-runner)-1$ ]]; then
+      logw "Stopping legacy container ${cname} to free port ${target_port}..."
+      docker rm -f "${cname}" >/dev/null 2>&1 || true
+      continue
+    fi
+
+    # If target port is unexpectedly held by active-slot app, abort instead of risking downtime.
+    if [[ "${cname}" =~ ^hola-${ACTIVE_SLOT}-app$ ]]; then
+      loge "Safety abort: active slot container ${cname} is holding target port ${target_port}."
+      loge "State/port mapping is inconsistent; manual intervention required."
+      exit 1
+    fi
+  done <<< "${occupied}"
+
+  if docker ps --filter "publish=${target_port}" --format '{{.Names}}' | grep -q .; then
+    loge "Port ${target_port} is still occupied after safe cleanup."
+    docker ps --filter "publish=${target_port}" --format '  - {{.Names}} :: {{.Ports}}' || true
+    exit 1
+  fi
+
+  logok "Port ${target_port} is free for slot startup."
+}
+
 # Rebuild legacy upstream files if the installed Nginx config still references
 # them, and keep their content aligned with expected ports.
 legacy_upstream_referenced() {
@@ -400,6 +438,9 @@ if [ -n "${STALE_APP}" ]; then
   logw "Found stale ${NEW_SLOT} containers — removing before deploy."
   slot "${NEW_SLOT}" down --remove-orphans 2>/dev/null || true
 fi
+
+# Ensure target slot port is truly free (handles legacy non-slot containers).
+free_target_port_if_safe "${NEW_PORT}"
 
 # ── Step 6: Start new slot ─────────────────────────────────
 log "[6/15] Starting ${NEW_SLOT} slot on port ${NEW_PORT}..."
