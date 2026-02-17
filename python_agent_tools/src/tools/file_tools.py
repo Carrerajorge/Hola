@@ -3,10 +3,11 @@ from pydantic import Field
 from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
 from ..core.registry import ToolRegistry
 import os
+import tempfile
 import aiofiles
 
 ALLOWED_BASE_PATHS = [
-    "/tmp",
+    tempfile.gettempdir(),
     os.path.expanduser("~"),
     os.getcwd(),
 ]
