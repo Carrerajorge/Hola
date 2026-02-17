@@ -2,9 +2,12 @@ import crypto from "crypto";
 import { timingSafeEqual } from "crypto";
 import { Request, Response, NextFunction } from "express";
 import { parse } from "cookie";
+import { isAllowedOrigin } from "./cors";
+import { getUserId } from "../types/express";
 
 const CSRF_COOKIE_NAME = "XSRF-TOKEN";
 const CSRF_HEADER_NAME = "X-CSRF-Token";
+const CSRF_HEADER_ALIASES = ["x-csrftoken", "x-csrf-token"];
 const IGNORED_METHODS = ["GET", "HEAD", "OPTIONS"];
 const CSRF_TOKEN_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{22,128}$/;
@@ -20,13 +23,43 @@ const ensureCookies = (req: Request) => {
     return req.cookies || {};
 };
 
-function issueCsrfCookie(res: Response, isReplitDeployment: boolean, isProduction: boolean) {
+function isCrossSiteRequest(req: Request): boolean {
+  const origin = req.headers.origin;
+  const referer = req.headers.referer;
+
+  if (!origin && !referer) {
+    return false;
+  }
+
+  if (origin && !isAllowedOrigin(String(origin))) {
+    return true;
+  }
+
+  if (referer) {
+    try {
+      const refererOrigin = new URL(String(referer)).origin;
+      if (!isAllowedOrigin(refererOrigin)) {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function issueCsrfCookie(req: Request, res: Response, isReplitDeployment: boolean, isProduction: boolean) {
   const token = crypto.randomBytes(CSRF_TOKEN_BYTES).toString("base64url");
+
+  const crossSite = isCrossSiteRequest(req);
+  const isSecure = isProduction || crossSite;
+  const sameSite = crossSite || isReplitDeployment ? "none" : "lax";
 
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false, // Must be readable by client JS to header-ize it
-    secure: isProduction,
-    sameSite: isReplitDeployment ? "none" : "lax",
+    secure: isSecure,
+    sameSite,
     maxAge: CSRF_TOKEN_MAX_AGE_MS,
     path: "/",
   });
@@ -46,10 +79,39 @@ export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunct
 
     // Only set the token if it doesn't exist or we want to rotate it
     if (!res.headersSent && (!cookies[CSRF_COOKIE_NAME] || !CSRF_TOKEN_PATTERN.test(cookies[CSRF_COOKIE_NAME]))) {
-        issueCsrfCookie(res, isReplitDeployment, isProduction);
+        issueCsrfCookie(req, res, isReplitDeployment, isProduction);
     }
     next();
 };
+
+function extractCsrfHeader(req: Request): string | undefined {
+    const value = req.headers[CSRF_HEADER_NAME.toLowerCase()] || req.headers[CSRF_HEADER_NAME];
+    if (typeof value === "string") {
+        return value;
+    }
+
+    for (const headerName of CSRF_HEADER_ALIASES) {
+      const aliasValue = req.headers[headerName];
+      if (typeof aliasValue === "string") {
+        return aliasValue;
+      }
+    }
+
+    return undefined;
+}
+
+function isStatelessAuthRequest(req: Request): boolean {
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ilgpt_")) {
+        return true;
+    }
+
+    return !!(req as any).apiKey;
+}
+
+function isAllowedCsrfPrincipal(req: Request): boolean {
+    return typeof (req as any).apiKey !== "undefined" || getUserId(req) !== undefined;
+}
 
 /**
  * Validates the CSRF token on state-changing requests.
@@ -84,10 +146,53 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         return next();
     }
 
+    if (req.headers.origin || req.headers.referer) {
+      const origin = req.headers.origin ? String(req.headers.origin) : undefined;
+      const referer = req.headers.referer ? String(req.headers.referer) : undefined;
+
+      if (origin && !isAllowedOrigin(origin)) {
+        console.warn(`[Security] CSRF origin check failed. Method: ${req.method}, IP: ${req.ip}, Origin: ${origin}`);
+        return res.status(403).json({
+          error: "CSRF token validation failed",
+          code: "CSRF_INVALID"
+        });
+      }
+
+      if (referer) {
+        try {
+          if (!isAllowedOrigin(new URL(referer).origin)) {
+            console.warn(`[Security] CSRF referer check failed. Method: ${req.method}, IP: ${req.ip}, Referer: ${referer}`);
+            return res.status(403).json({
+              error: "CSRF token validation failed",
+              code: "CSRF_INVALID"
+            });
+          }
+        } catch {
+          console.warn(`[Security] CSRF referer parse failure. Method: ${req.method}, IP: ${req.ip}`);
+          return res.status(403).json({
+            error: "CSRF token validation failed",
+            code: "CSRF_INVALID"
+          });
+        }
+      }
+    }
+
+    if (isStatelessAuthRequest(req)) {
+        return next();
+    }
+
+    if (!isAllowedCsrfPrincipal(req)) {
+        console.warn(`[Security] CSRF denied for non-authenticated request. Method: ${req.method}, IP: ${req.ip}`);
+        return res.status(403).json({
+          error: "CSRF token validation failed",
+          code: "CSRF_INVALID"
+        });
+    }
+
     const cookies = ensureCookies(req);
 
     // Frontend sends token in header
-    const headerToken = req.headers[CSRF_HEADER_NAME.toLowerCase()] || req.headers[CSRF_HEADER_NAME];
+    const headerToken = extractCsrfHeader(req);
     // Valid token comes from the cookie (which user agent sends automatically)
     const cookieToken = cookies[CSRF_COOKIE_NAME];
     const isReplitDeployment = !!process.env.REPL_SLUG;
@@ -95,7 +200,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     if (typeof headerToken !== "string" || typeof cookieToken !== "string") {
         if (!res.headersSent) {
-            issueCsrfCookie(res, isReplitDeployment, isProduction);
+            issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
         console.warn(`[Security] CSRF missing token. Method: ${req.method}, IP: ${req.ip}`);
         return res.status(403).json({
@@ -106,7 +211,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     if (!CSRF_TOKEN_PATTERN.test(cookieToken) || !CSRF_TOKEN_PATTERN.test(headerToken)) {
         if (!res.headersSent) {
-            issueCsrfCookie(res, isReplitDeployment, isProduction);
+            issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
         console.warn(`[Security] CSRF invalid token format. Method: ${req.method}, IP: ${req.ip}`);
         return res.status(403).json({
@@ -117,7 +222,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     if (cookieToken.length !== headerToken.length) {
         if (!res.headersSent) {
-            issueCsrfCookie(res, isReplitDeployment, isProduction);
+            issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
         console.warn(`[Security] CSRF mismatch length. Method: ${req.method}, IP: ${req.ip}`);
         return res.status(403).json({
@@ -131,7 +236,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     if (!timingSafeEqual(cookieBuf, headerBuf)) {
         if (!res.headersSent) {
-            issueCsrfCookie(res, isReplitDeployment, isProduction);
+            issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
         console.warn(`[Security] CSRF mismatch/missing. Method: ${req.method}, IP: ${req.ip}`);
         return res.status(403).json({

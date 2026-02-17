@@ -55,6 +55,12 @@ export function requestTracerMiddleware(req: Request, res: Response, next: NextF
   
   activeRequests.set(requestId, requestInfo);
   totalRequests++;
+
+  try {
+    res.setHeader("X-Request-ID", requestId);
+  } catch {
+    // Ignore if headers cannot be mutated at this point.
+  }
   
   // Contadores por método y path
   methodCounts[req.method] = (methodCounts[req.method] || 0) + 1;

@@ -138,6 +138,7 @@ export const corsOptions: cors.CorsOptions = {
     allowedHeaders: [
         'Content-Type',
         'Authorization',
+        'X-CSRFToken',
         'X-Requested-With',
         'X-Request-ID',
         'X-Idempotency-Key',

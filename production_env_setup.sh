@@ -60,6 +60,16 @@ SESSION_SECRET=$session_secret
 
 # Sandbox runner (optional; only required for shell/agent sandbox execution)
 # SANDBOX_RUNNER_TOKEN=
+
+# Monitoring (optional)
+# METRICS_PUBLIC=true
+# PROMETHEUS_PORT=9090
+# INFLUXDB_ORG=iliagpt
+# INFLUXDB_BUCKET=iliagpt
+# INFLUXDB_USERNAME=admin
+# INFLUXDB_PASSWORD=replace-with-strong-password
+# INFLUXDB_ADMIN_TOKEN=replace-with-long-random-token
+# INFLUXDB_PORT=8086
 EOF
 
 echo ".env.production creado exitosamente."

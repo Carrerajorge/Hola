@@ -37,6 +37,7 @@ import { startChatScheduleRunner } from "./services/chatScheduleRunner";
 import { registerAuthRoutes, setupAuth } from "./replit_integrations/auth";
 import { getUserId } from "./types/express";
 import { updateContext } from "./middleware/correlationContext";
+import { validateApiKey } from "./routes/apiKeysRouter";
 initTracing();
 
 const app = express();
@@ -204,6 +205,7 @@ export function log(message: string, source = "express") {
   // NOTE: /api/packages is an API endpoint; protect it via auth/feature-flags/policy (not CSRF),
   // and allow local/automation calls without Secure-cookie issues.
   if (!isTest) {
+    app.use("/api", validateApiKey);
     app.use("/api", (req, res, next) => {
       if (req.path.startsWith("/packages")) return next(); // /api/packages/*
       return csrfProtection(req, res, next);
