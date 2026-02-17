@@ -633,7 +633,11 @@ function extractToolIdentityFromPayload(payload: unknown): { toolLabel: string; 
   }
 
   const candidate = (payload as { tool?: unknown }).tool ?? (payload as { name?: unknown }).name;
-  const sanitizedCandidate = sanitizeText(candidate).toLowerCase().slice(0, 64);
+  if (typeof candidate !== "string") {
+    return { toolLabel: FALLBACK_TOOL_NAME };
+  }
+
+  const sanitizedCandidate = sanitizeText(candidate).trim().toLowerCase().slice(0, 64);
   if (!sanitizedCandidate) {
     return { toolLabel: FALLBACK_TOOL_NAME };
   }
@@ -1892,11 +1896,13 @@ export function createGmailMcpRouter(): Router {
           const responsePayload: Record<string, unknown> = {
             error: classification.body.error,
             code: fallbackCode,
-            retryAfter: classification.body.retryAfter,
             correlationId,
           };
+          if (classification.body.retryAfter) {
+            responsePayload.retryAfter = classification.body.retryAfter;
+          }
 
-          if (fallbackCode === 'timeout' || fallbackCode === 'circuit_open' || fallbackCode === 'internal') {
+          if (fallbackCode === 'timeout' || fallbackCode === 'circuit_open' || fallbackCode === 'internal' || fallbackCode === 'backpressure') {
             responsePayload.fallback = fallbackCarrier.fallbackPayload ??
               buildToolFallbackPayload(
                 safeTool ?? safeToolLabel,
@@ -2054,14 +2060,19 @@ export function createGmailMcpRouter(): Router {
             };
           }
 
-          logger.error('[MCP Gmail] JSON-RPC error', {
+          const logContext = {
             userId: sanitizeText(String(userId ?? "")),
             tool: safeTool ?? safeToolLabel,
             method: request.method,
             error: message,
             code,
             correlationId,
-          });
+          };
+          if (code === "validation" || code === "scope" || code === "unsupported_method") {
+            logger.warn('[MCP Gmail] JSON-RPC error', logContext);
+          } else {
+            logger.error('[MCP Gmail] JSON-RPC error', logContext);
+          }
         }
 
         res.status(200).json(response);
