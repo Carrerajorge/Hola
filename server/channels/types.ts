@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const MAX_RECEIVED_AT_LENGTH = 64;
+const MAX_CHANNEL_META_ID_LENGTH = 255;
+
 export type ExternalChannel = "telegram" | "whatsapp_cloud" | "messenger" | "wechat";
 
 export type ConversationKey = {
@@ -61,7 +64,8 @@ export type ChannelIngestJob =
     };
 
 const BASE_INGEST_JOB = z.object({
-  receivedAt: z.string().optional(),
+  receivedAt: z
+    .preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string().min(20).max(MAX_RECEIVED_AT_LENGTH).optional()),
 });
 
 const telegramIngestJobSchema = BASE_INGEST_JOB.extend({
@@ -69,24 +73,39 @@ const telegramIngestJobSchema = BASE_INGEST_JOB.extend({
   update: z.unknown(),
 });
 
+const whatsappMetaSchema = z
+  .object({
+    accountPhoneNumberId: z
+      .preprocess((v) => (typeof v === "string" ? v.trim().slice(0, MAX_CHANNEL_META_ID_LENGTH) : v), z.string().min(1).max(MAX_CHANNEL_META_ID_LENGTH)),
+  })
+  .passthrough();
+
 const whatsappIngestJobSchema = BASE_INGEST_JOB.extend({
   channel: z.literal("whatsapp_cloud"),
   payload: z.unknown(),
-  whatsappMeta: z.object({
-    accountPhoneNumberId: z.string().min(1).trim(),
-  }).passthrough().optional(),
+  whatsappMeta: whatsappMetaSchema.optional(),
 });
 
 const messengerIngestJobSchema = BASE_INGEST_JOB.extend({
   channel: z.literal("messenger"),
   payload: z.unknown(),
-  pageId: z.string().min(1).trim().optional(),
+  pageId: z
+    .preprocess((value) => (typeof value === "string" ? value.trim().slice(0, MAX_CHANNEL_META_ID_LENGTH) : value), z
+      .string()
+      .min(1)
+      .max(MAX_CHANNEL_META_ID_LENGTH))
+    .optional(),
 });
 
 const wechatIngestJobSchema = BASE_INGEST_JOB.extend({
   channel: z.literal("wechat"),
   payload: z.unknown(),
-  appId: z.string().min(1).trim().optional(),
+  appId: z
+    .preprocess((value) => (typeof value === "string" ? value.trim().slice(0, MAX_CHANNEL_META_ID_LENGTH) : value), z
+      .string()
+      .min(1)
+      .max(MAX_CHANNEL_META_ID_LENGTH))
+    .optional(),
 });
 
 export const channelIngestJobSchema = z.discriminatedUnion("channel", [

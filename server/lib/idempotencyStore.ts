@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { pareIdempotencyKeys, type PareIdempotencyStatus } from "@shared/schema";
-import { eq, lt, sql, and } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import crypto from "crypto";
 
 export type IdempotencyCheckResult = 
@@ -11,11 +11,43 @@ export type IdempotencyCheckResult =
 
 const TTL_HOURS = 24;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const MAX_PAYLOAD_HASH_BYTES = 128_000;
 
 let cleanupIntervalId: NodeJS.Timeout | null = null;
 
+function normalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (seen.has(value as object)) {
+    return "[circular]";
+  }
+  seen.add(value as object);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeForHash(entry, seen));
+  }
+
+  const source = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  const keys = Object.keys(source).sort();
+  for (const key of keys) {
+    output[key] = normalizeForHash(source[key], seen);
+  }
+  return output;
+}
+
 export function computePayloadHash(body: unknown): string {
-  const normalized = JSON.stringify(body);
+  const normalizedStructure = normalizeForHash(body);
+  const normalized = JSON.stringify(normalizedStructure);
+  if (Buffer.byteLength(normalized, "utf8") > MAX_PAYLOAD_HASH_BYTES) {
+    throw new Error("Idempotency payload too large");
+  }
   return crypto.createHash("sha256").update(normalized).digest("hex");
 }
 
@@ -221,6 +253,9 @@ export function startCleanupScheduler(): void {
   cleanupIntervalId = setInterval(async () => {
     await cleanupExpiredKeys();
   }, CLEANUP_INTERVAL_MS);
+  if (cleanupIntervalId.unref) {
+    cleanupIntervalId.unref();
+  }
   
   console.log(JSON.stringify({
     level: "info",

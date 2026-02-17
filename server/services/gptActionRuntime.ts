@@ -236,6 +236,7 @@ class ActionRateLimiter {
 
   consume(key: string, limit: number): { allowed: boolean; remaining: number; resetAt: number } {
     const now = Date.now();
+    this.cleanup(now);
     const existing = this.buckets.get(key);
     const windowStart = now - this.windowMs;
 
@@ -244,6 +245,7 @@ class ActionRateLimiter {
         windowStart: now,
         used: 1,
         maxRequests: limit,
+        lastAccess: now,
       };
       this.buckets.set(key, next);
       return {
@@ -272,6 +274,16 @@ class ActionRateLimiter {
       remaining: Math.max(0, existing.maxRequests - existing.used),
       resetAt: existing.windowStart + this.windowMs,
     };
+  }
+
+  private cleanup(now: number): void {
+    const staleThreshold = now - this.windowMs * 2;
+    for (const [entryKey, entry] of this.buckets.entries()) {
+      const lastAccess = entry.lastAccess ?? entry.windowStart;
+      if (lastAccess < staleThreshold) {
+        this.buckets.delete(entryKey);
+      }
+    }
   }
 }
 
@@ -536,6 +548,10 @@ function sanitizeStructuredValue(
 
   if (typeof value === "object") {
     const container = value as Record<string, unknown>;
+    const prototype = Object.getPrototypeOf(container);
+    if (prototype !== null && prototype !== Object.prototype) {
+      throw toFetchError(`Non-plain object rejected at ${path}`, "validation_error", false);
+    }
     const safeEntries = Object.entries(container);
     if (safeEntries.length > limits.maxObjectKeys) {
       throw toFetchError(`Object key count exceeds limit at ${path}`, "validation_error", false);
@@ -1011,6 +1027,12 @@ function normalizeEndpoint(endpoint: string): string {
   if (ipLike && isInternalIP(hostname)) {
     throw toFetchError("Private IP targets are denied", "security_blocked", false);
   }
+  if (!ipLike) {
+    const labels = canonicalHost.split(".");
+    if (labels.length === 0 || labels.length > MAX_DOMAIN_LABELS || !labels.every(isValidDomainLabel)) {
+      throw toFetchError("Endpoint hostname is invalid", "validation_error", false);
+    }
+  }
 
   parsed.hash = "";
 
@@ -1269,12 +1291,20 @@ function applyAuthHeaders(
   }
 
   if (normalizedAuthType === "custom") {
-    if (typeof config.headerName === "string" && typeof config.headerValue === "string") {
-      const customHeaderName = sanitizeHeaderName(config.headerName);
-      if (customHeaderName) {
-        output[customHeaderName] = sanitizeHeaderValue(config.headerValue);
-      }
+    if (
+      typeof config.headerName !== "string" ||
+      !config.headerName.trim() ||
+      typeof config.headerValue !== "string" ||
+      !config.headerValue.trim()
+    ) {
+      throw toFetchError("custom auth requires headerName and headerValue", "auth_error", false);
     }
+
+    const customHeaderName = sanitizeHeaderName(config.headerName);
+    if (!customHeaderName) {
+      throw toFetchError("Invalid custom auth header name", "auth_error", false);
+    }
+    output[customHeaderName] = sanitizeHeaderValue(config.headerValue);
     return output;
   }
 
@@ -1708,6 +1738,7 @@ export class GptActionRuntime {
 
         const stage = retryCount > 0 ? "execution" : "execution";
         const details = buildExecutionErrorPayload(error);
+        const partialData = this.extractPartialErrorData(error, action);
         const isRetryable = typeof error.retryable === "boolean"
           ? error.retryable
           : isRetryableCode(details.code);
@@ -1725,7 +1756,8 @@ export class GptActionRuntime {
             details.code,
             details.retryable,
             idempotencyKey,
-            details.retryAfter
+            details.retryAfter,
+            partialData
           );
           await this.storeToolCallLog(payload, action, false, undefined, failure.latencyMs, details.message, error);
           await this.failIdempotencyIfEnabled(idempotencyKey, failure, details.message);
@@ -1755,7 +1787,8 @@ export class GptActionRuntime {
       lastError?.code || "execution_error",
       false,
       idempotencyKey,
-      lastError?.retryAfter
+      lastError?.retryAfter,
+      this.extractPartialErrorData(lastError, action)
     );
 
     await this.failIdempotencyIfEnabled(idempotencyKey, fallback, fallback.error?.message || "Action execution failed");
@@ -1794,9 +1827,10 @@ export class GptActionRuntime {
       if (method !== "GET" && method !== "HEAD") {
         if (body !== undefined) {
           const content = typeof body === "string" ? body : safeStringify(body);
-          if (content.length > MAX_REQUEST_BODY_BYTES) {
+          const contentBytes = Buffer.byteLength(content, "utf8");
+          if (contentBytes > MAX_REQUEST_BODY_BYTES) {
             throw this.makeNetworkError(
-              `Request body exceeds maximum allowed size: ${content.length} > ${MAX_REQUEST_BODY_BYTES}`,
+              `Request body exceeds maximum allowed size: ${contentBytes} > ${MAX_REQUEST_BODY_BYTES}`,
               "execution_error",
               false
             );
@@ -1819,11 +1853,12 @@ export class GptActionRuntime {
       }
 
       if (response.status >= 300 && response.status < 400) {
-        throw this.makeNetworkError(
+        const redirectError = this.makeNetworkError(
           `Execution returned redirect status ${response.status}`,
           "execution_not_retryable",
           false
         );
+        throw redirectError;
       }
 
       const text = await this.readResponseBodySafe(response, MAX_FETCH_RESPONSE_BYTES);
@@ -1832,12 +1867,19 @@ export class GptActionRuntime {
       if (!response.ok) {
         const shouldRetry = response.status >= 500 || response.status === 429 || response.status === 408;
         const parsedRetryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
-        throw this.makeNetworkError(
+        const responseError = this.makeNetworkError(
           `Execution failed with status ${response.status}`,
           shouldRetry ? "execution_retryable" : "execution_not_retryable",
           shouldRetry,
           parsedRetryAfter
         );
+        (responseError as Error & { statusCode?: number; responseBody?: unknown; responseContentType?: string | null }).statusCode =
+          response.status;
+        (responseError as Error & { statusCode?: number; responseBody?: unknown; responseContentType?: string | null }).responseBody =
+          rawBody;
+        (responseError as Error & { statusCode?: number; responseBody?: unknown; responseContentType?: string | null }).responseContentType =
+          contentType;
+        throw responseError;
       }
 
       return {
@@ -1970,7 +2012,8 @@ export class GptActionRuntime {
           "Request with this idempotency key is already in progress",
           "idempotency_in_progress",
           false,
-          idempotencyKey
+          idempotencyKey,
+          1
         ),
       };
     }
@@ -2277,6 +2320,24 @@ export class GptActionRuntime {
     if (state === "OPEN" || state === "open") return 1;
     if (state === "HALF_OPEN" || state === "half_open") return 0.5;
     return 0;
+  }
+
+  private extractPartialErrorData(error: unknown, action: GptAction): unknown {
+    const candidate = error as {
+      responseBody?: unknown;
+      responseContentType?: string | null;
+      statusCode?: number;
+    };
+
+    if (typeof candidate.responseBody === "undefined") {
+      return undefined;
+    }
+
+    try {
+      return mapResponse(candidate.responseBody, action.responseMapping);
+    } catch {
+      return candidate.responseBody;
+    }
   }
 
   private now(): number {

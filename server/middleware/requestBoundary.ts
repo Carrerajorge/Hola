@@ -4,7 +4,10 @@ import { validateJSONDepth } from "../services/advancedSecurity";
 const MAX_PATH_LENGTH = 2048;
 const MAX_JSON_DEPTH = 12;
 const MAX_QUERY_VALUE_LENGTH = 2048;
+const MAX_QUERY_KEY_LENGTH = 128;
 const MAX_QUERY_PARAMS_COUNT = 100;
+const MAX_PATH_SEGMENT_COUNT = 64;
+const MAX_REQUEST_PATH_BYTES = Number(process.env.MAX_REQUEST_PATH_BYTES || 0);
 
 const DEFAULT_MAX_BODY_BYTES = 1 * 1024 * 1024;
 const CHAT_STREAM_MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -27,6 +30,9 @@ const MAX_BYTES_BY_ROUTE: ReadonlyArray<{ pattern: RegExp; maxBytes: number }> =
 ];
 
 const DISALLOWED_PATH_SEGMENTS = /(^|\/)(?:\.\.)(?=\/|$|%2e%2e|%2E%2E|..|%2e|%2E|\x00)/i;
+const MALFORMED_PERCENT_ENCODING = /%(?![0-9a-fA-F]{2})/;
+const DISALLOWED_CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+const ALLOWED_QUERY_KEY_PATTERN = /^[A-Za-z0-9._~!$&'()*+,;=:@\-\/[\]]+$/;
 
 function getMaxBodyBytes(pathname: string): number {
   const configured = Number(process.env.MAX_API_BODY_BYTES || DEFAULT_MAX_BODY_BYTES);
@@ -44,6 +50,54 @@ function getContentTypeValue(req: Request): string {
 
 function parseContentTypeBase(rawValue: string): string {
   return rawValue.split(";")[0].trim().toLowerCase();
+}
+
+function hasValidContentLengthHeader(contentLengthHeader: string | string[] | undefined): { ok: boolean; value?: number } {
+  if (typeof contentLengthHeader === "undefined") {
+    return { ok: true, value: undefined };
+  }
+
+  const raw = Array.isArray(contentLengthHeader) ? contentLengthHeader[0] : contentLengthHeader;
+  if (typeof raw !== "string" || raw.trim() === "" || /,/.test(raw) || /\s/.test(raw.trim())) {
+    return { ok: false };
+  }
+
+  if (MALFORMED_PERCENT_ENCODING.test(raw)) {
+    return { ok: false };
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || String(parsed) !== raw.trim()) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: parsed };
+}
+
+function isCanonicalPath(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+
+  if (DISALLOWED_CONTROL_CHARS.test(value) || DISALLOWED_PATH_SEGMENTS.test(value) || MALFORMED_PERCENT_ENCODING.test(value)) {
+    return false;
+  }
+
+  const segments = value.split("/").filter(Boolean);
+  if (segments.length > MAX_PATH_SEGMENT_COUNT) {
+    return false;
+  }
+
+  try {
+    const decoded = decodeURIComponent(value);
+    if (decoded.includes("..") || decoded.includes("\\") || /\x00/.test(decoded) || DISALLOWED_CONTROL_CHARS.test(decoded)) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
 }
 
 function isJsonOrFormRequest(contentType: string): boolean {
@@ -103,7 +157,11 @@ function normalizeInput(value: unknown, depth = 0, maxDepth = 8): unknown {
 }
 
 function validatePath(req: Request): { ok: boolean; status: number; message: string } {
-  if (!req.path || req.path.length > MAX_PATH_LENGTH) {
+  if (!req.path) {
+    return { ok: false, status: 414, message: "Invalid request path length" };
+  }
+
+  if (req.path.length > MAX_PATH_LENGTH) {
     return { ok: false, status: 414, message: "Invalid request path length" };
   }
 
@@ -111,17 +169,20 @@ function validatePath(req: Request): { ok: boolean; status: number; message: str
     return { ok: false, status: 400, message: "Invalid request path" };
   }
 
-  if (DISALLOWED_PATH_SEGMENTS.test(req.path)) {
+  if (!isCanonicalPath(req.path)) {
     return { ok: false, status: 400, message: "Path traversal-like request detected" };
   }
 
-  try {
-    const decoded = decodeURIComponent(req.path);
-    if (decoded.includes("..") && /(^|\/)\.{2}(?:$|\/)/.test(decoded)) {
-      return { ok: false, status: 400, message: "Path traversal-like request detected" };
+  if (MAX_REQUEST_PATH_BYTES > 0) {
+    const normalizedLength = Math.max(Buffer.byteLength(req.path, "utf8"), req.path.length);
+    if (normalizedLength > MAX_REQUEST_PATH_BYTES) {
+      return { ok: false, status: 413, message: "Request path too large" };
     }
-  } catch {
-    return { ok: false, status: 400, message: "Malformed URL encoding" };
+  }
+
+  const knownSafePath = KNOWN_SAFE_PATH_PATTERNS.some((pattern) => pattern.test(req.path));
+  if (!knownSafePath && req.path.includes("//")) {
+    return { ok: false, status: 400, message: "Invalid path normalization" };
   }
 
   return { ok: true, status: 200, message: "ok" };
@@ -147,22 +208,37 @@ function validateQuery(req: Request): { ok: boolean; status: number; message: st
   }
 
   for (const [key, value] of rawEntries) {
-    if (key.length > 128) {
+    if (key.length === 0 || key.length > MAX_QUERY_KEY_LENGTH) {
       return { ok: false, status: 400, message: "Invalid query parameter" };
     }
 
-    const toStringValue = Array.isArray(value)
-      ? value.join(",")
-      : typeof value === "object" || value === undefined || value === null
-        ? ""
-        : String(value);
-
-    if (toStringValue.length > MAX_QUERY_VALUE_LENGTH) {
-      return { ok: false, status: 413, message: "Query value too large" };
+    if (!ALLOWED_QUERY_KEY_PATTERN.test(key) || DISALLOWED_CONTROL_CHARS.test(key) || MALFORMED_PERCENT_ENCODING.test(key)) {
+      return { ok: false, status: 400, message: "Invalid query parameter" };
     }
 
-    if (/\x00/.test(key) || toStringValue.includes("\u0000")) {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       return { ok: false, status: 400, message: "Invalid query parameter" };
+    }
+
+    const values = Array.isArray(value) ? value : [value];
+    for (const queryValue of values) {
+      if (queryValue === undefined || queryValue === null) {
+        continue;
+      }
+
+      if (typeof queryValue !== "string" && typeof queryValue !== "number" && typeof queryValue !== "boolean") {
+        return { ok: false, status: 400, message: "Invalid query parameter" };
+      }
+
+      const toStringValue = String(queryValue);
+      const tooLarge = toStringValue.length > MAX_QUERY_VALUE_LENGTH;
+      if (DISALLOWED_CONTROL_CHARS.test(toStringValue) || MALFORMED_PERCENT_ENCODING.test(toStringValue)) {
+        return { ok: false, status: 400, message: "Invalid query parameter" };
+      }
+
+      if (tooLarge) {
+        return { ok: false, status: 413, message: "Query value too large" };
+      }
     }
   }
 
@@ -177,13 +253,12 @@ function validateMethodPayload(req: Request): { ok: boolean; status: number; mes
   }
 
   const contentType = getContentTypeValue(req);
-  const contentLengthHeader = req.headers["content-length"];
-  const contentLength =
-    typeof contentLengthHeader === "string"
-      ? Number.parseInt(contentLengthHeader, 10)
-      : Number.isFinite(contentLengthHeader as number)
-        ? Number(contentLengthHeader)
-        : Number.NaN;
+  const contentLengthValidation = hasValidContentLengthHeader(req.headers["content-length"]);
+  const contentLength = contentLengthValidation.value;
+
+  if (!contentLengthValidation.ok) {
+    return { ok: false, status: 400, message: "Invalid content-length header" };
+  }
 
   const maxBytes = getMaxBodyBytes(req.path);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
@@ -218,11 +293,6 @@ function sendBoundaryViolation(
 }
 
 export function requestBoundaryGuard(req: Request, res: Response, next: NextFunction): void {
-  const knownSafePath = KNOWN_SAFE_PATH_PATTERNS.some((pattern) => pattern.test(req.path));
-  if (!knownSafePath && req.path.includes("//")) {
-    return sendBoundaryViolation(res, 400, "Invalid path normalization");
-  }
-
   const pathResult = validatePath(req);
   if (!pathResult.ok) {
     return sendBoundaryViolation(res, pathResult.status, pathResult.message);

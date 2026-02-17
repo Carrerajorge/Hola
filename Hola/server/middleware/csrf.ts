@@ -59,6 +59,9 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/auth/microsoft/callback",
         "/api/auth/magic-link/send",
         "/api/auth/magic-link/verify",
+        "/api/auth/phone/send-code",
+        "/api/auth/phone/verify",
+        "/api/auth/phone/resend",
         "/api/callback",
         "/api/login",
     ];
