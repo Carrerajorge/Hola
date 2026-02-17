@@ -1,5 +1,7 @@
 import { nanoid } from "nanoid";
 import { logger as baseLogger, LogLevel, Logger as BaseLogger } from "../utils/logger";
+import { sanitizeSensitiveData } from "./securityUtils";
+import crypto from "node:crypto";
 
 export type { LogLevel };
 
@@ -40,6 +42,75 @@ export interface StructuredLogger extends BaseLogger {
 
 const MAX_LOG_ENTRIES = 5000;
 const logs: LogEntry[] = [];
+const MAX_METADATA_BYTES = 4096;
+const MAX_METADATA_DEPTH = 8;
+
+function safeSerialize(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value as object)) {
+    return "[circular]";
+  }
+  seen.add(value as object);
+
+  if (depth >= MAX_METADATA_DEPTH) {
+    return "[max-depth]";
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => safeSerialize(item, depth + 1, seen));
+  }
+
+  const record = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  const keys = Object.keys(record);
+  for (const key of keys) {
+    if (key.startsWith("__proto__") || key === "prototype" || key === "constructor") {
+      output[key] = "[redacted]";
+      continue;
+    }
+
+    output[key] = safeSerialize(record[key], depth + 1, seen);
+  }
+
+  return output;
+}
+
+function normalizeMetadata(metadata?: Record<string, any>): Record<string, unknown> | undefined {
+  if (!metadata || typeof metadata !== "object") {
+    return metadata ? { value: sanitizeSensitiveData({ value: metadata } as Record<string, unknown>) } : undefined;
+  }
+
+  let normalized: Record<string, unknown> = safeSerialize(
+    sanitizeSensitiveData(metadata as Record<string, unknown>)
+  ) as Record<string, unknown>;
+
+  const serialized = JSON.stringify(normalized);
+  if (serialized.length <= MAX_METADATA_BYTES) {
+    return normalized;
+  }
+
+  const truncatedHash = crypto.createHash("sha256").update(serialized).digest("hex");
+
+  normalized = {
+    _truncated: true,
+    _originalBytes: serialized.length,
+    _sha256: truncatedHash,
+    _timestamp: new Date().toISOString(),
+  };
+
+  return normalized;
+}
 
 /**
  * Adds a log entry to the in-memory buffer (for UI/Dashboard)
@@ -93,6 +164,8 @@ export function createLogger(component: string): StructuredLogger {
 
   const createLogMethod = (level: LogLevel) => {
     return (message: string, metadata?: Record<string, any>) => {
+      const normalizedMetadata = normalizeMetadata(metadata);
+
       addLog({
         level,
         message,
@@ -100,7 +173,7 @@ export function createLogger(component: string): StructuredLogger {
         requestId: contextRequestId,
         userId: contextUserId,
         duration: contextDuration,
-        metadata,
+        metadata: normalizedMetadata,
       });
     };
   };

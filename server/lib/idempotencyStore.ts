@@ -21,6 +21,7 @@ const IDEMPOTENCY_HASH_RE = /^[a-f0-9]{64}$/;
 const MAX_PAYLOAD_HASH_JSON_BYTES = 65_536;
 const MAX_IDEMPOTENCY_LOG_KEY_BYTES = 6;
 const MAX_IDEMPOTENCY_NESTING_DEPTH = 12;
+const STALE_PROCESSING_TTL_MS = 5 * 60 * 1000;
 
 let cleanupIntervalId: NodeJS.Timeout | null = null;
 const logger = createLogger("idempotency-store");
@@ -232,6 +233,26 @@ export async function checkIdempotencyKey(
     }
 
     if (existing.status === "processing") {
+      const createdAt = existing.createdAt;
+      const isStaleProcessing =
+        createdAt instanceof Date &&
+        Date.now() - createdAt.getTime() >= STALE_PROCESSING_TTL_MS;
+
+      if (isStaleProcessing) {
+        await db
+          .update(pareIdempotencyKeys)
+          .set({ status: "processing", expiresAt })
+          .where(eq(pareIdempotencyKeys.idempotencyKey, key));
+
+        logger.warn("Idempotency stale processing detected, forcing retry", {
+          event: "IDEMPOTENCY_STALE_PROCESSING",
+          key: obfuscateIdempotencyKey(key),
+          createdAt,
+          timestamp: new Date().toISOString(),
+        });
+        return { status: "new" };
+      }
+
       logger.info("Idempotency key in progress", {
         event: "IDEMPOTENCY_IN_PROGRESS",
         key: obfuscateIdempotencyKey(key),
