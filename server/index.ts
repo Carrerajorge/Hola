@@ -35,6 +35,7 @@ import { startChatScheduleRunner } from "./services/chatScheduleRunner";
 
 import { registerAuthRoutes, setupAuth } from "./replit_integrations/auth";
 import { getUserId } from "./types/express";
+import { updateContext } from "./middleware/correlationContext";
 initTracing();
 
 const app = express();
