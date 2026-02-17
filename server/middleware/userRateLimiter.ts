@@ -255,6 +255,12 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
         return next();
     }
 
+    // Google OAuth redirects/callbacks should not be blocked by generic auth limiter,
+    // otherwise users can get locked out with long Retry-After windows.
+    if (fullPath.startsWith('/api/auth/google')) {
+        return next();
+    }
+
     // Determine which limiter to use based on path
     let tier: RateLimitTier = 'default';
 
