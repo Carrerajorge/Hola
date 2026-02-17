@@ -119,6 +119,7 @@ class PackageManagerService {
     let auditId: string | null | undefined = undefined;
     try {
       const audit = await packageAuditStore.recordPlan({
+        confirmationId,
         command: plan.command,
         packageName: plan.packageName,
         managerId: manager.id,
@@ -239,7 +240,15 @@ class PackageManagerService {
 
     // Consume confirmation to avoid replay.
     confirmations.delete(input.confirmationId);
-
+    await packageAuditStore.recordExecute({
+      confirmationId: input.confirmationId,
+      status: result.ok ? "succeeded" : "failed",
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+      exitCode: result.exitCode ?? null,
+      durationMs: result.durationMs ?? 0,
+      rollbackCommand: rollbackPlan.command ?? null,
+    });
     return {
       confirmationId: input.confirmationId,
       executed: true,

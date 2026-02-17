@@ -1,61 +1,145 @@
+import { db } from "../../db";
+
+import { packageOperations } from "../../../shared/schema/packageManager";
+
+import { eq } from "drizzle-orm";
+
 import { Logger } from "../../lib/logger";
 
-/**
- * Phase 1 (REQ-002): we only PLAN operations and never execute.
- *
- * Audit storage is specified as SQLite `package_operations`.
- * In Phase 1 we only provide the schema + migration text and a no-op recorder.
- * Phase 2 will introduce a real executor + durable audit writes.
- */
 
-export interface PlanAuditPayload {
+export type PlanAuditPayload = {
+
+  confirmationId: string;
+
   command: string;
+
   packageName: string;
+
   managerId: string;
-  action: "install" | "uninstall";
-  osFamily: string;
-  osDistro?: string;
-  policyDecision: string;
-  policyWarnings?: string[];
+
+  action: string;
+
+  osFamily?: string | null;
+
+  osDistro?: string | null;
+
+  policyDecision?: string | null;
+
+  policyWarnings?: string[] | null;
+
   requestedBy?: string | null;
-}
 
-export type PackageOperationStatus = "planned" | "executing" | "succeeded" | "failed" | "rolled_back";
+};
 
-/**
- * SQLite migration (NOT executed in Phase 1).
- *
- * NOTE: Use a dedicated SQLite file (e.g. `data/package-ops.sqlite`) in later phases.
- */
-export const PACKAGE_OPERATIONS_SQLITE_MIGRATION_V1 = `
-CREATE TABLE IF NOT EXISTS package_operations (
-  id TEXT PRIMARY KEY,
-  package_name TEXT NOT NULL,
-  manager TEXT NOT NULL,
-  action TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'planned',
-  os_family TEXT,
-  os_distro TEXT,
-  command TEXT,
-  policy_decision TEXT,
-  policy_warnings TEXT, -- JSON string
-  requested_by TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
 
-CREATE INDEX IF NOT EXISTS package_operations_created_at_idx ON package_operations(created_at);
-CREATE INDEX IF NOT EXISTS package_operations_requested_by_idx ON package_operations(requested_by);
-`;
+export type ExecuteAuditPayload = {
+
+  confirmationId: string;
+
+  status: "succeeded" | "failed";
+
+  stdout: string;
+
+  stderr: string;
+
+  exitCode: number | null;
+
+  durationMs: number;
+
+  rollbackCommand?: string | null;
+
+};
+
 
 class PackageAuditStore {
-  /**
-   * Phase 1: no-op (we don't create/open SQLite yet).
-   */
-  async recordPlan(_payload: PlanAuditPayload): Promise<{ id: string } | null> {
-    Logger.info("[PackageAuditStore] recordPlan skipped (Phase 1: no SQLite executor yet)");
-    return null;
+
+  async recordPlan(payload: PlanAuditPayload): Promise<{ id: string } | null> {
+
+    try {
+
+      const rows = await db
+
+        .insert(packageOperations)
+
+        .values({
+
+          confirmationId: payload.confirmationId,
+
+          packageName: payload.packageName,
+
+          manager: payload.managerId,
+
+          action: payload.action,
+
+          status: "planned",
+
+          osFamily: payload.osFamily ?? null,
+
+          osDistro: payload.osDistro ?? null,
+
+          command: payload.command ?? null,
+
+          policyDecision: payload.policyDecision ?? null,
+
+          policyWarnings: payload.policyWarnings ?? [],
+
+          requestedBy: payload.requestedBy ?? null,
+
+        })
+
+        .returning({ id: packageOperations.id });
+
+
+      return rows?.[0] ? { id: rows[0].id } : null;
+
+    } catch (e: any) {
+
+      Logger.warn("[PackageAuditStore] recordPlan failed", { message: e?.message || String(e) });
+
+      return null;
+
+    }
+
   }
+
+
+  async recordExecute(payload: ExecuteAuditPayload): Promise<void> {
+
+    try {
+
+      await db
+
+        .update(packageOperations)
+
+        .set({
+
+          status: payload.status,
+
+          stdout: payload.stdout ?? null,
+
+          stderr: payload.stderr ?? null,
+
+          exitCode: payload.exitCode ?? null,
+
+          durationMs: payload.durationMs ?? null,
+
+          rollbackCommand: payload.rollbackCommand ?? null,
+
+          updatedAt: new Date(),
+
+        })
+
+        .where(eq(packageOperations.confirmationId, payload.confirmationId));
+
+    } catch (e: any) {
+
+      Logger.warn("[PackageAuditStore] recordExecute failed", { message: e?.message || String(e) });
+
+    }
+
+  }
+
 }
+
 
 export const packageAuditStore = new PackageAuditStore();
