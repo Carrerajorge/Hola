@@ -71,6 +71,35 @@ jobs:
       - name: Compile
         run: python -m compileall main.py fastapi_sse python_agent_tools
 
+  merge-marker-guard:
+    name: Merge Marker Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Detect unresolved merge markers
+        run: |
+          set -euo pipefail
+          if rg -n \
+            --hidden \
+            --glob '!.git/**' \
+            --glob '!node_modules/**' \
+            --glob '!dist/**' \
+            --glob '!artifacts/**' \
+            --glob '!test_results/**' \
+            --glob '!.config/**' \
+            --glob '!Hola/**' \
+            --glob '!Hola_wt_*/**' \
+            --glob '!iliagpt_skills_push/**' \
+            '^(<<<<<<<|=======|>>>>>>>)' .; then
+            echo "::error::Unresolved merge markers detected in repository files."
+            exit 1
+          fi
+
   ocr_service:
     name: OCR Service (Python)
     runs-on: ubuntu-latest
@@ -236,7 +265,7 @@ jobs:
 
   quality-gate:
     name: Quality Gate
-    needs: [typecheck, test, build, audit, python-security, secret-scan]
+    needs: [typecheck, merge-marker-guard, test, build, audit, python-security, secret-scan]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -584,6 +613,7 @@ jobs:
     if: always()
     needs:
       - typecheck
+      - merge-marker-guard
       - python
       - ocr_service
       - test
@@ -605,6 +635,7 @@ jobs:
           echo "| Job | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| typecheck | \`${{ needs.typecheck.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| merge-marker-guard | \`${{ needs.merge-marker-guard.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| python | \`${{ needs.python.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| ocr_service | \`${{ needs.ocr_service.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| test | \`${{ needs.test.result }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -621,6 +652,7 @@ jobs:
           FAILED=0
           for result in \
             "${{ needs.typecheck.result }}" \
+            "${{ needs.merge-marker-guard.result }}" \
             "${{ needs.python.result }}" \
             "${{ needs.ocr_service.result }}" \
             "${{ needs.test.result }}" \
