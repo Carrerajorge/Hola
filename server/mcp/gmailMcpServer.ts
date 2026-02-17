@@ -116,6 +116,7 @@ type GmailToolConcurrencyState = {
 };
 
 const logger = createLogger("gmail-mcp");
+const FALLBACK_TOOL_NAME = "gmail_unknown";
 
 const mcpRequestSchema = z.object({
   jsonrpc: z.literal("2.0").or(z.string().transform(() => "2.0" as const)),
@@ -611,6 +612,37 @@ async function acquireToolExecutionSlotWithTimeout(
 function readCorrelationId(req: Request): string {
   const raw = (req.headers["x-request-id"] as string) || (req.headers["x-correlation-id"] as string) || "";
   return sanitizeText(raw).slice(0, 64);
+}
+
+function resolveGmailTool(rawTool: unknown): GmailToolName | undefined {
+  if (typeof rawTool !== "string") {
+    return undefined;
+  }
+
+  const normalized = sanitizeText(rawTool).trim().toLowerCase();
+  if (!isKnownGmailToolName(normalized)) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+function extractToolIdentityFromPayload(payload: unknown): { toolLabel: string; canonicalTool?: GmailToolName } {
+  if (!isPlainObject(payload)) {
+    return { toolLabel: FALLBACK_TOOL_NAME };
+  }
+
+  const candidate = (payload as { tool?: unknown }).tool ?? (payload as { name?: unknown }).name;
+  const sanitizedCandidate = sanitizeText(candidate).toLowerCase().slice(0, 64);
+  if (!sanitizedCandidate) {
+    return { toolLabel: FALLBACK_TOOL_NAME };
+  }
+
+  const canonicalTool = resolveGmailTool(sanitizedCandidate);
+  return {
+    toolLabel: canonicalTool ?? sanitizedCandidate,
+    canonicalTool,
+  };
 }
 
 function stampCorrelationResponseHeaders(res: Response, correlationId: string): void {
@@ -1821,7 +1853,10 @@ export function createGmailMcpRouter(): Router {
 
         try {
           const parsed = toolCallSchema.parse(req.body);
-          const safeTool = sanitizeText(parsed.tool);
+          const safeTool = resolveGmailTool(parsed.tool);
+          if (!safeTool) {
+            throw createToolError("validation", "Unknown tool");
+          }
           const result = await executeToolCall(
             req,
             userId,
@@ -1837,10 +1872,9 @@ export function createGmailMcpRouter(): Router {
           });
           res.json({ success: true, result });
         } catch (error: unknown) {
-          const safeTool = sanitizeText((req.body as { tool?: string })?.tool || (req.body as { name?: string })?.name || 'gmail_unknown');
-          const normalizedTool = isKnownGmailToolName(safeTool) ? safeTool : undefined;
+          const { toolLabel: safeToolLabel, canonicalTool: safeTool } = extractToolIdentityFromPayload(req.body);
           const fallbackCarrier = error as { fallbackPayload?: Record<string, unknown> };
-          const classification = classifyToolError(error, normalizedTool);
+          const classification = classifyToolError(error, safeTool);
           if (classification.body.retryAfter) {
             res.setHeader("Retry-After", String(classification.body.retryAfter));
           }
@@ -1848,7 +1882,7 @@ export function createGmailMcpRouter(): Router {
           const level = classification.status >= 500 ? "error" : "warn";
           logger[level]('[MCP Gmail] Tool call error', {
             userId: sanitizeText(String(userId)),
-            tool: safeTool,
+            tool: safeTool ?? safeToolLabel,
             error: classification.body.error,
             code: classification.body.code,
             correlationId,
@@ -1865,7 +1899,7 @@ export function createGmailMcpRouter(): Router {
           if (fallbackCode === 'timeout' || fallbackCode === 'circuit_open' || fallbackCode === 'internal') {
             responsePayload.fallback = fallbackCarrier.fallbackPayload ??
               buildToolFallbackPayload(
-                safeTool,
+                safeTool ?? safeToolLabel,
                 fallbackCode,
                 classification.body.error,
                 'rest',
@@ -1964,7 +1998,10 @@ export function createGmailMcpRouter(): Router {
 
             case 'tools/call': {
               const params = toolCallSchema.parse(request.params || {});
-              const safeTool = sanitizeText(params.tool);
+              const safeTool = resolveGmailTool(params.tool);
+              if (!safeTool) {
+                throw createToolError("validation", "Unknown tool");
+              }
               response.result = await executeToolCall(
                 req,
                 userId,
@@ -1980,8 +2017,8 @@ export function createGmailMcpRouter(): Router {
               throw createToolError("unsupported_method", `Unknown method: ${request.method}`);
           }
         } catch (error: unknown) {
-          const safeRawTool = sanitizeText((request.params as { tool?: string })?.tool || (request.params as { name?: string })?.name || "gmail_unknown");
-          const safeTool = request.method === 'tools/call' && isKnownGmailToolName(safeRawTool) ? safeRawTool : undefined;
+          const { toolLabel: safeToolLabel, canonicalTool: safeParsedTool } = extractToolIdentityFromPayload(request.params);
+          const safeTool = request.method === 'tools/call' ? safeParsedTool : undefined;
           const message = extractToolErrorMessage(error, "Internal error");
           const code = resolveToolErrorCode(error, message);
           const safeMessage = normalizeErrorMessage(message);
@@ -1993,10 +2030,11 @@ export function createGmailMcpRouter(): Router {
           const retryAfter = isGmailToolError(error)
             ? error.retryAfterSeconds
             : getToolRetrySeconds(message, safeTool);
+          const normalizedRetryAfter = normalizeRetryAfterSeconds(retryAfter);
 
           if (code === "backpressure" || code === "circuit_open" || code === "timeout") {
             response.error.data = {
-              retryAfter,
+              retryAfter: normalizedRetryAfter,
               code,
             };
           }
@@ -2007,7 +2045,7 @@ export function createGmailMcpRouter(): Router {
               ...(response.error.data || {}),
               fallback: fallbackCarrier.fallbackPayload ??
                 buildToolFallbackPayload(
-                  safeRawTool,
+                  safeTool ?? safeToolLabel,
                   code,
                   message,
                   'jsonrpc',
@@ -2018,6 +2056,7 @@ export function createGmailMcpRouter(): Router {
 
           logger.error('[MCP Gmail] JSON-RPC error', {
             userId: sanitizeText(String(userId ?? "")),
+            tool: safeTool ?? safeToolLabel,
             method: request.method,
             error: message,
             code,
