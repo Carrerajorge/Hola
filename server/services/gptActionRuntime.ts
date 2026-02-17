@@ -40,6 +40,19 @@ const MAX_RETRY_ATTEMPTS = 10;
 const CONCURRENCY_KEY_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
 const BACKOFF_JITTER_RATIO = 0.2;
 const MAX_SCHEMA_VALIDATION_DEPTH = 64;
+const MAX_REQUEST_DEPTH = 12;
+const MAX_RESPONSE_DEPTH = 48;
+const MAX_REQUEST_OBJECT_KEYS = 128;
+const MAX_RESPONSE_OBJECT_KEYS = 512;
+const MAX_REQUEST_ARRAY_LENGTH = 256;
+const MAX_RESPONSE_ARRAY_LENGTH = 1_024;
+const MAX_REQUEST_STRING_BYTES = 8_192;
+const MAX_RESPONSE_STRING_BYTES = 32_768;
+const MAX_SAFE_STRUCTURE_KEY_BYTES = 64;
+const FORBIDDEN_STRUCTURE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const MAX_DOMAIN_ALLOWLIST_ENTRIES = 40;
+const MAX_DOMAIN_ALLOWLIST_ITEM_BYTES = 255;
+const MAX_TOTAL_HEADER_BYTES = 16_384;
 const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
 const MAX_HEADER_VALUE_BYTES = 2_048;
 const MAX_SAFE_HEADER_NAME_BYTES = 80;
@@ -58,6 +71,9 @@ const FORBIDDEN_HEADER_NAMES = new Set([
   "cookie",
   "set-cookie",
   "content-length",
+  "__proto__",
+  "constructor",
+  "prototype",
 ]);
 
 interface GptActionExecuteInput {
@@ -301,7 +317,10 @@ function sanitizeHeaderName(name: string): string {
 
 function sanitizeHeaderValue(value: string | number | boolean): string {
   const flattened = String(value).replace(/[\r\n]+/g, " ");
-  const normalized = flattened.normalize("NFKC").trim();
+  const normalized = flattened
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, "")
+    .trim();
   if (Buffer.byteLength(normalized, "utf8") <= MAX_HEADER_VALUE_BYTES) {
     return normalized;
   }
@@ -357,6 +376,110 @@ function normalizeContentType(value: string | null | undefined): string | null {
 
   const normalized = value.split(";")[0]?.trim().toLowerCase();
   return normalized || null;
+}
+
+interface StructureLimits {
+  maxDepth: number;
+  maxObjectKeys: number;
+  maxArrayLength: number;
+  maxStringBytes: number;
+  seen?: WeakSet<object>;
+}
+
+function sanitizeStructuredValue(
+  value: unknown,
+  path: string,
+  limits: StructureLimits,
+  depth = 0
+): unknown {
+  if (depth > limits.maxDepth) {
+    throw toFetchError(`Input depth limit exceeded at ${path}`, "validation_error", false);
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.normalize("NFKC").trim();
+    if (Buffer.byteLength(normalized, "utf8") > limits.maxStringBytes) {
+      return normalized.slice(0, limits.maxStringBytes);
+    }
+    return normalized;
+  }
+
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw toFetchError(`Invalid numeric value at ${path}`, "validation_error", false);
+    }
+    return value;
+  }
+
+  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol" || typeof value === "bigint") {
+    throw toFetchError(`Unsupported value type at ${path}`, "validation_error", false);
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > limits.maxArrayLength) {
+      throw toFetchError(`Array length exceeds limit at ${path}`, "validation_error", false);
+    }
+
+    return value.map((entry, index) =>
+      sanitizeStructuredValue(entry, `${path}[${index}]`, limits, depth + 1)
+    );
+  }
+
+  if (typeof value === "object") {
+    const container = value as Record<string, unknown>;
+    const safeEntries = Object.entries(container);
+    if (safeEntries.length > limits.maxObjectKeys) {
+      throw toFetchError(`Object key count exceeds limit at ${path}`, "validation_error", false);
+    }
+
+    const seen = limits.seen || new WeakSet<object>();
+    if (seen.has(container)) {
+      throw toFetchError(`Cyclic structure detected at ${path}`, "validation_error", false);
+    }
+    seen.add(container);
+
+    const output: Record<string, unknown> = {};
+    for (const [rawKey, rawValue] of safeEntries) {
+      const sanitizedKey = String(rawKey).normalize("NFKC").trim();
+      if (!sanitizedKey || sanitizedKey.length > MAX_SAFE_STRUCTURE_KEY_BYTES) {
+        throw toFetchError(`Invalid object key at ${path}`, "validation_error", false);
+      }
+
+      const keyLower = sanitizedKey.toLowerCase();
+      if (FORBIDDEN_STRUCTURE_KEYS.has(keyLower)) {
+        throw toFetchError(`Forbidden object key at ${path}.${sanitizedKey}`, "validation_error", false);
+      }
+
+      output[sanitizedKey] = sanitizeStructuredValue(
+        rawValue,
+        `${path}.${sanitizedKey}`,
+        { ...limits, seen },
+        depth + 1
+      );
+    }
+
+    return output;
+  }
+
+  throw toFetchError(`Unsupported payload structure at ${path}`, "validation_error", false);
+}
+
+function sanitizeRequestPayload(input: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeStructuredValue(input, "request", {
+    maxDepth: MAX_REQUEST_DEPTH,
+    maxObjectKeys: MAX_REQUEST_OBJECT_KEYS,
+    maxArrayLength: MAX_REQUEST_ARRAY_LENGTH,
+    maxStringBytes: MAX_REQUEST_STRING_BYTES,
+  }) as Record<string, unknown>;
+}
+
+function sanitizeResponsePayload(input: unknown): unknown {
+  return sanitizeStructuredValue(input, "response", {
+    maxDepth: MAX_RESPONSE_DEPTH,
+    maxObjectKeys: MAX_RESPONSE_OBJECT_KEYS,
+    maxArrayLength: MAX_RESPONSE_ARRAY_LENGTH,
+    maxStringBytes: MAX_RESPONSE_STRING_BYTES,
+  });
 }
 
 function isAllowedResponseMimeType(value: string | null | undefined): boolean {
@@ -761,9 +884,45 @@ function normalizeEndpoint(endpoint: string): string {
   return parsed.toString();
 }
 
+function normalizeDomainPattern(raw: string): string {
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed || trimmed.length > MAX_DOMAIN_ALLOWLIST_ITEM_BYTES) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const hasWildcard = trimmed.startsWith("*.") && trimmed.length > 2;
+  const candidate = hasWildcard ? trimmed.slice(2) : trimmed;
+
+  if (!candidate) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (candidate.includes("/") || candidate.includes("?") || candidate.includes("#")) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  let normalized: string;
+  try {
+    normalized = domainToASCII(candidate);
+  } catch {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (!normalized || normalized.length > MAX_DOMAIN_ALLOWLIST_ITEM_BYTES) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const sanitized = normalized.toLowerCase();
+  return hasWildcard ? `*.${sanitized}` : sanitized;
+}
+
 function checkDomainAllowlist(urlValue: string, allowlist: unknown): void {
   if (!Array.isArray(allowlist) || allowlist.length === 0) {
     return;
+  }
+
+  if (allowlist.length > MAX_DOMAIN_ALLOWLIST_ENTRIES) {
+    throw toFetchError("Domain allowlist is too long", "validation_error", false);
   }
 
   let url: URL;
@@ -773,16 +932,25 @@ function checkDomainAllowlist(urlValue: string, allowlist: unknown): void {
     throw toFetchError("Invalid URL", "validation_error", false);
   }
 
-  const hostname = url.hostname.toLowerCase();
-  const normalizedAllowlist = allowlist
-    .filter((raw): raw is string => typeof raw === "string")
-    .map((raw) => raw.trim().toLowerCase())
-    .filter(Boolean);
+  let hostname = url.hostname;
+  try {
+    hostname = domainToASCII(url.hostname).toLowerCase();
+  } catch {
+    throw toFetchError("Invalid endpoint hostname", "validation_error", false);
+  }
+
+  if (!allowlist.every((raw) => typeof raw === "string")) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const normalizedAllowlist = (allowlist as string[]).map((raw) => normalizeDomainPattern(raw));
 
   const allowed = normalizedAllowlist.some((candidate) => {
-    if (candidate.startsWith("*.") && hostname.endsWith(candidate.slice(2))) return true;
-    if (candidate === hostname) return true;
-    return false;
+    if (candidate.startsWith("*.") && candidate.length > 2) {
+      const base = candidate.slice(2);
+      return hostname === base ? false : hostname.endsWith(`.${base}`);
+    }
+    return candidate === hostname;
   });
 
   if (!allowed) {
@@ -800,6 +968,8 @@ function normalizeEndpointHeaders(actionHeaders: unknown, requestHeaders: Record
   const sanitized: Record<string, string> = {
     "content-type": "application/json",
   };
+  output["content-type"] = "application/json";
+  let headerBytes = Buffer.byteLength("content-type", "utf8") + Buffer.byteLength("application/json", "utf8");
 
   const source = {
     ...(typeof actionHeaders === "object" && actionHeaders !== null && !Array.isArray(actionHeaders)
@@ -825,6 +995,12 @@ function normalizeEndpointHeaders(actionHeaders: unknown, requestHeaders: Record
     }
     if (output[safeName]) continue;
     const safeValue = sanitizeHeaderValue(rawValue);
+    const headerContribution = Buffer.byteLength(safeName, "utf8") + Buffer.byteLength(safeValue, "utf8");
+    headerBytes += headerContribution;
+    if (headerBytes > MAX_TOTAL_HEADER_BYTES) {
+      throw toFetchError("Request headers are too large", "validation_error", false);
+    }
+
     sanitized[safeName] = safeValue;
     output[safeName] = safeValue;
     validHeaderCount += 1;
@@ -1041,12 +1217,38 @@ export class GptActionRuntime {
     const gptId = payload.gptId;
     const requestId = requestIdForLogging(payload.requestId);
     const normalizedIdempotency = normalizeIdempotencyKey(payload.idempotencyKey);
+    let safeRequestPayload: Record<string, unknown>;
+
+    try {
+      safeRequestPayload = sanitizeRequestPayload(payload.request);
+    } catch (error) {
+      recordGptActionValidationError(gptId, actionId, "requestPayload");
+      const validationError = this.createFailureResult(
+        payload,
+        startedAt,
+        this.now(),
+        0,
+        "validation",
+        "validation_error",
+        undefined,
+        (error as Error).message || "Invalid request payload",
+        "validation_error",
+        false,
+        normalizedIdempotency
+      );
+      await this.failIdempotencyIfEnabled(
+        normalizedIdempotency,
+        validationError,
+        validationError.error?.message || "Invalid request payload"
+      );
+      return validationError;
+    }
 
     const payloadCheck = await this.checkIdempotency(
       action,
       gptId,
       payload.conversationId,
-      payload.request,
+      safeRequestPayload,
       requestId,
       payload.userId,
       normalizedIdempotency
@@ -1088,7 +1290,7 @@ export class GptActionRuntime {
       }
 
       if (action.requestSchema && action.requestSchema !== null) {
-        const schemaErrors = validateJsonSchema(action.requestSchema as JsonSchemaLike, payload.request, []);
+        const schemaErrors = validateJsonSchema(action.requestSchema as JsonSchemaLike, safeRequestPayload, []);
         if (schemaErrors.length > 0) {
           recordGptActionValidationError(gptId, actionId, "requestSchema");
           const validationError = this.createFailureResult(
@@ -1117,11 +1319,11 @@ export class GptActionRuntime {
 
       const method = normalizeHttpMethod(action.httpMethod);
       const contextForTemplate: ParsedTemplateContext = {
-        input: payload.request,
+        input: safeRequestPayload,
         action,
       };
 
-      const requestBody = this.buildRequestBody(action, payload.request, contextForTemplate);
+      const requestBody = this.buildRequestBody(action, safeRequestPayload, contextForTemplate);
       const headers = this.buildHeaders(action, payload.headers || {});
 
       const maxRetries = clampRetryLimit(payload.maxRetries, DEFAULT_FETCH_RETRY_LIMIT);
@@ -1150,6 +1352,7 @@ export class GptActionRuntime {
         payload,
         { action, actionId, gptId, requestId, headers, requestBody, method, endpoint, timeoutMs: endpointTimeout },
         breaker,
+        isStructuredResponseSchema(action.responseSchema),
         maxRetries,
         startedAt,
         normalizedIdempotency
@@ -1175,6 +1378,7 @@ export class GptActionRuntime {
       timeoutMs: number;
     },
     breaker: ReturnType<typeof createServiceCircuitBreaker>,
+    enforceResponseLimits: boolean,
     maxRetries: number,
     startedAt: number,
     idempotencyKey: string | null
@@ -1193,7 +1397,15 @@ export class GptActionRuntime {
 
       try {
         const result = await breaker.call(async () => {
-          return await this.fetchAction(action, method, endpoint, headers, requestBody, timeoutMs);
+          return await this.fetchAction(
+            action,
+            method,
+            endpoint,
+            headers,
+            requestBody,
+            timeoutMs,
+            enforceResponseLimits
+          );
         }, `${method} ${endpoint}`);
 
         if (!result.success || !result.data) {
@@ -1220,7 +1432,9 @@ export class GptActionRuntime {
             "Response content-type is not compatible with structured response schema",
             "validation_error",
             false,
-            idempotencyKey
+            idempotencyKey,
+            undefined,
+            responsePayload
           );
         }
 
@@ -1239,7 +1453,9 @@ export class GptActionRuntime {
               `Response schema validation failed: ${outputErrors.slice(0, 3).join("; ")}`,
               "validation_error",
               false,
-              idempotencyKey
+              idempotencyKey,
+              undefined,
+              mappedData
             );
           }
         }
@@ -1337,7 +1553,8 @@ export class GptActionRuntime {
     endpoint: string,
     headers: Record<string, string>,
     body: unknown,
-    timeoutMs: number
+    timeoutMs: number,
+    enforceResponseLimits: boolean
   ): Promise<{ data: { status: number; body: unknown; response: Response; contentType: string | null; durationMs: number; circuitState?: "closed" | "half_open" | "open" } }> {
     const started = this.now();
     const controller = new AbortController();
@@ -1382,7 +1599,7 @@ export class GptActionRuntime {
       clearTimeout(timeoutId);
 
       const text = await this.readResponseBodySafe(response, MAX_FETCH_RESPONSE_BYTES);
-      const rawBody = this.safeParseResponseBody(text);
+      const rawBody = this.safeParseResponseBody(text, enforceResponseLimits);
 
       if (!response.ok) {
         const shouldRetry = response.status >= 500 || response.status === 429 || response.status === 408;
@@ -1407,6 +1624,9 @@ export class GptActionRuntime {
       };
     } catch (error) {
       clearTimeout(timeoutId);
+      if (error && typeof error === "object" && (error as { code?: string }).code === "validation_error") {
+        throw error as Error & { code: string; retryable: boolean; retryAfter?: number };
+      }
       if (error instanceof Error && (error.name === "AbortError" || error.message.includes("aborted"))) {
         throw this.makeNetworkError("Request timeout", "timeout", true);
       }
@@ -1625,10 +1845,17 @@ export class GptActionRuntime {
     return toFetchError(message, code, retryable, retryAfter);
   }
 
-  private safeParseResponseBody(text: string): unknown {
+  private safeParseResponseBody(text: string, enforceLimits = false): unknown {
     try {
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      if (enforceLimits) {
+        return sanitizeResponsePayload(parsed);
+      }
+      return parsed;
     } catch {
+      if (enforceLimits) {
+        this.logger.warn("gpt-action.response_parse_malformed", { preview: safeStringify(text).slice(0, 240) });
+      }
       return text;
     }
   }
@@ -1771,7 +1998,8 @@ export class GptActionRuntime {
     errorCode: string,
     retryable: boolean,
     idempotencyKey: string | null,
-    retryAfter?: number
+    retryAfter?: number,
+    partialData?: unknown
   ): GptActionExecutionPayload {
     const result: GptActionExecutionPayload = {
       success: false,
@@ -1781,6 +2009,7 @@ export class GptActionRuntime {
       status,
       stage,
       statusCode,
+      data: partialData === undefined ? undefined : truncatePayload(partialData, MAX_RESPONSE_PAYLOAD_BYTES),
       latencyMs: Math.max(0, finishedAt - startedAt),
       retryCount,
       circuitState: "CLOSED",
@@ -1928,7 +2157,14 @@ export function normalizeGptActionRequestPayload(rawInput: Record<string, unknow
       ? normalizeRequestInput(request)
       : normalizeRequestInput(fallback);
 
-  return truncatePayload(normalized, MAX_REQUEST_PAYLOAD_BYTES) as Record<string, unknown>;
+  try {
+    return truncatePayload(
+      sanitizeRequestPayload(normalized),
+      MAX_REQUEST_PAYLOAD_BYTES
+    ) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
 }
 
 export function isAllowedResponseMimeTypeForTesting(rawContentType: string | null | undefined): boolean {

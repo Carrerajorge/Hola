@@ -60,6 +60,21 @@ describe("gptActionRuntime shared helpers", () => {
       expect(payload).toBeTypeOf("string");
       expect(payload.length).toBeLessThanOrEqual(50_000);
     });
+
+    it("returns empty payload when request contains forbidden structure keys", () => {
+      const request = Object.create(null) as Record<string, unknown>;
+      request.good = "value";
+      Object.defineProperty(request, "__proto__", {
+        value: { escalated: true },
+        enumerable: true,
+      });
+
+      const payload = normalizeGptActionRequestPayload({
+        request,
+      } as Record<string, unknown>);
+
+      expect(payload).toEqual({});
+    });
   });
 
   describe("parseRetryAfterHeader", () => {
@@ -486,6 +501,124 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe("validation_error");
       expect(result.error?.message).toContain("Too many request headers");
+    });
+
+    it("rejects deeply nested requests before making outbound call", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const nestedRequest: Record<string, unknown> = {};
+      let pointer = nestedRequest;
+      for (let i = 0; i < 30; i += 1) {
+        const next: Record<string, unknown> = {};
+        pointer.level = i;
+        pointer.next = next;
+        pointer = next;
+      }
+
+      const action = {
+        id: "action-deep-request",
+        name: "action-deep-request",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: nestedRequest,
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("validation_error");
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("depth limit");
+    });
+
+    it("rejects forbidden object keys in payload at execution time", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const action = {
+        id: "action-prototype-key",
+        name: "action-prototype-key",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+      const request = Object.create(null) as Record<string, unknown>;
+      request.safe = "ok";
+      Object.defineProperty(request, "__proto__", {
+        value: { attack: "x" },
+        enumerable: true,
+      });
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request,
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("validation_error");
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Forbidden object key");
+    });
+
+    it("rejects overly deep response payloads when schema validation requires structure", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          let nested: Record<string, unknown> = {};
+          let cursor = nested;
+          for (let i = 0; i < 80; i += 1) {
+            const next: Record<string, unknown> = {};
+            cursor.value = i;
+            cursor.nested = next;
+            cursor = next;
+          }
+
+          return new Response(JSON.stringify({ payload: nested }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+
+      const action = {
+        id: "action-deep-response",
+        name: "action-deep-response",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        responseSchema: { type: "object" },
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("validation_error");
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("depth limit exceeded");
     });
   });
 });
