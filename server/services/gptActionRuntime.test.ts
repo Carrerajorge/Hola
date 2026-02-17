@@ -9,6 +9,7 @@ import {
   normalizeGptActionRequestPayload,
   parseRetryAfterHeader,
   sanitizeLogValueForTesting,
+  mapResponseForTesting,
 } from "./gptActionRuntime";
 
 describe("gptActionRuntime shared helpers", () => {
@@ -159,7 +160,7 @@ describe("gptActionRuntime shared helpers", () => {
   });
 
   describe("sanitizeLogValue", () => {
-    it("normalizes and redacts risky substrings", () => {
+  it("normalizes and redacts risky substrings", () => {
       const result = sanitizeLogValueForTesting({
         title: " <script>alert(1)</script> hello ",
         path: "javascript:alert(1)",
@@ -168,6 +169,18 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result).toEqual({
         title: " [redacted] hello ",
         path: "[redacted]alert(1)",
+      });
+    });
+
+    it("guards against cyclic log values", () => {
+      const payload: Record<string, unknown> = { message: "start" };
+      payload.self = payload;
+
+      const result = sanitizeLogValueForTesting(payload);
+
+      expect(result).toMatchObject({
+        message: "start",
+        self: "[redacted-cyclic]",
       });
     });
   });
@@ -185,6 +198,24 @@ describe("gptActionRuntime shared helpers", () => {
       expect(resolveActorIdForTesting("abcdef")).toBe("abcdef");
       expect(resolveActorIdForTesting("conv-1")).toBe("conv-1");
       expect(resolveActorIdForTesting("bad@id")).toBeNull();
+    });
+  });
+
+  describe("response mapping", () => {
+    it("rejects forbidden source paths and target keys to avoid prototype pollution", () => {
+      const response = {
+        safe: { value: "ok" },
+      };
+
+      expect(
+        mapResponseForTesting(response, {
+          poisoned: "__proto__",
+          safeAlias: "safe.value",
+          constructor: "safe.value",
+        })
+      ).toEqual({
+        safeAlias: "ok",
+      });
     });
   });
 
@@ -356,6 +387,43 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("execution_error");
       expect(result.error?.retryable).toBe(false);
       expect(result.data).toEqual({ reason: "bad data" });
+    });
+
+    it("redacts sensitive data from partial output on downstream errors", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          return new Response(
+            JSON.stringify({ secret: "very-sensitive-token", reason: "temporary outage" }),
+            {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            }
+          );
+        },
+      });
+
+      const action = {
+        id: "action-4d",
+        name: "action-test-4d",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        responseMapping: { reason: "reason", secret: "secret" },
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+        maxRetries: 0,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.data).toEqual({
+        reason: "temporary outage",
+        secret: "[REDACTED]",
+      });
     });
 
     it("retries transient 5xx response and exhausts at configured retry limit", async () => {
@@ -1009,7 +1077,7 @@ describe("gptActionRuntime shared helpers", () => {
         endpoint: "https://example.com/api",
         isActive: "true",
         httpMethod: "POST",
-        bodyTemplate: JSON.stringify({ safe: "ok", "__proto__": "bad" }),
+        bodyTemplate: '{"safe":"ok","__proto__":"bad"}',
       } as any;
 
       const result = await runtime.execute({
@@ -1025,6 +1093,38 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("validation_error");
       expect(result.error?.message).toContain("Forbidden object key");
     });
+
+    it("rejects outbound request body for GET methods", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      });
+
+      const action = {
+        id: "action-get-body",
+        name: "action-get-body",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        bodyTemplate: JSON.stringify({ forbidden: true }),
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Request bodies are not allowed for GET");
+    });
+
     it("rejects deeply nested requests before making outbound call", async () => {
       let called = false;
       const runtime = new GptActionRuntime({

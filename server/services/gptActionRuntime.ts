@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { domainToASCII } from "node:url";
+import net from "node:net";
 import { isInternalIP, sanitizeSensitiveData } from "../lib/securityUtils";
 import {
   checkIdempotencyKey,
@@ -67,6 +68,8 @@ const MAX_HEADER_VALUE_BYTES = 2_048;
 const MAX_SAFE_HEADER_NAME_BYTES = 80;
 const MAX_URL_DECODE_ITERATIONS = 4;
 const MAX_QUERY_SEGMENT_BYTES = 4_096;
+const MAX_LOG_VALUE_DEPTH = 64;
+const MAX_LOG_VALUE_BYTES = 8_192;
 const ALLOWED_HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
 const FORBIDDEN_HEADER_NAMES = new Set([
   "host",
@@ -419,6 +422,10 @@ function toPathParts(path: string): string[] {
   return path.split(".").map((part) => part.trim()).filter(Boolean);
 }
 
+function isForbiddenMappingKey(key: string): boolean {
+  return FORBIDDEN_STRUCTURE_KEYS.has(String(key).trim().toLowerCase());
+}
+
 function normalizeContentType(value: string | null | undefined): string | null {
   if (!value || typeof value !== "string") {
     return null;
@@ -471,7 +478,7 @@ function validateEndpointPathAndQuery(url: URL): void {
   }
 
   if (url.search.length > MAX_ENDPOINT_QUERY_BYTES) {
-    throw toFetchError("Endpoint query is too long", "validation_error", false);
+    throw toFetchError("query is too long", "validation_error", false);
   }
 
   const params = Array.from(url.searchParams.entries());
@@ -493,7 +500,8 @@ function validateEndpointPathAndQuery(url: URL): void {
     if (fragment.length > MAX_ENDPOINT_FRAGMENT_BYTES) {
       throw toFetchError("Endpoint URL fragment is too long", "validation_error", false);
     }
-    if (fragment && !/^[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%-]*$/.test(fragment)) {
+    const normalizedFragment = decodeUrlComponentStrict(fragment, "URL fragment");
+    if (normalizedFragment && !/^[a-zA-Z0-9._~:/?#\[\]@!$&'()*+,;=%-]*$/.test(normalizedFragment)) {
       throw toFetchError("Invalid URL fragment", "validation_error", false);
     }
   }
@@ -616,6 +624,28 @@ function sanitizeRequestBodyPayload(input: unknown): unknown {
   });
 }
 
+function parseActionTemplateJson(raw: string): unknown {
+  const marker = "__iliagpt_forbidden_template_key__";
+  if (/"(?:__proto__|constructor|prototype)"\s*:/.test(raw)) {
+    throw toFetchError("Forbidden object key in body template", "validation_error", false);
+  }
+
+  try {
+    return JSON.parse(raw, (key, value) => {
+      if (key && FORBIDDEN_STRUCTURE_KEYS.has(key.toLowerCase())) {
+        throw new Error(marker);
+      }
+      return value;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === marker) {
+      throw toFetchError("Forbidden object key in body template", "validation_error", false);
+    }
+
+    return raw;
+  }
+}
+
 function isAllowedResponseMimeType(value: string | null | undefined): boolean {
   const normalized = normalizeContentType(value);
   if (!normalized) {
@@ -648,23 +678,33 @@ function isStructuredResponseSchema(schema: unknown): boolean {
   return false;
 }
 
-function sanitizeLogValue(raw: unknown): unknown {
+function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): unknown {
+  if (depth > MAX_LOG_VALUE_DEPTH) {
+    return "[redacted-depth]";
+  }
+
   if (typeof raw === "string") {
-    return raw
+    const sanitized = raw
       .normalize("NFKC")
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "[redacted]")
       .replace(/javascript:/gi, "[redacted]");
+    return truncateToUtf8ByteLimit(sanitized, MAX_LOG_VALUE_BYTES);
   }
 
   if (Array.isArray(raw)) {
-    return raw.map((item) => sanitizeLogValue(item));
+    return raw.map((item) => sanitizeLogValue(item, seen, depth + 1));
   }
 
   if (raw && typeof raw === "object") {
+    if (seen.has(raw)) {
+      return "[redacted-cyclic]";
+    }
+
+    seen.add(raw);
     const output: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-      output[key] = sanitizeLogValue(value);
+      output[key] = sanitizeLogValue(value, seen, depth + 1);
     }
     return output;
   }
@@ -680,7 +720,11 @@ function getValueByPath(value: unknown, path: string): unknown {
   const normalizedPath = normalized.startsWith("$.") ? normalized.slice(2) : normalized;
 
   for (const part of toPathParts(normalizedPath)) {
-    if (current && typeof current === "object" && part in (current as Record<string, unknown>)) {
+    if (!part || isForbiddenMappingKey(part)) {
+      return undefined;
+    }
+
+    if (current && typeof current === "object" && Object.prototype.hasOwnProperty.call(current as Record<string, unknown>, part)) {
       current = (current as Record<string, unknown>)[part];
       continue;
     }
@@ -697,12 +741,20 @@ function setValueByPath(output: Record<string, unknown>, path: string, value: un
   let cursor = output as Record<string, unknown>;
   for (let i = 0; i < parts.length - 1; i += 1) {
     const segment = parts[i];
+    if (isForbiddenMappingKey(segment)) {
+      return;
+    }
+
     if (!(segment in cursor) || typeof cursor[segment] !== "object" || cursor[segment] === null) {
       cursor[segment] = {};
     }
     cursor = cursor[segment] as Record<string, unknown>;
   }
-  cursor[parts[parts.length - 1]] = value;
+  const terminal = parts[parts.length - 1];
+  if (isForbiddenMappingKey(terminal)) {
+    return;
+  }
+  cursor[terminal] = value;
 }
 
 function interpolateTemplate(value: unknown, context: ParsedTemplateContext): unknown {
@@ -931,6 +983,10 @@ function mapResponse(response: unknown, mapping: unknown): unknown {
 
   const output: Record<string, unknown> = {};
   for (const [targetKey, sourcePath] of Object.entries(mapping)) {
+    if (isForbiddenMappingKey(targetKey)) {
+      continue;
+    }
+
     if (typeof sourcePath === "string") {
       const mapped = getValueByPath(response, sourcePath);
       if (typeof mapped !== "undefined") {
@@ -964,9 +1020,6 @@ function normalizeEndpoint(endpoint: string): string {
   if (!trimmed) {
     throw toFetchError("endpoint is required", "validation_error", false);
   }
-  if (trimmed.length > MAX_ENDPOINT_LENGTH) {
-    throw toFetchError("endpoint too long", "validation_error", false);
-  }
   if (trimmed.includes("\u0000")) {
     throw toFetchError("Invalid endpoint characters", "validation_error", false);
   }
@@ -987,6 +1040,10 @@ function normalizeEndpoint(endpoint: string): string {
 
   validateEndpointPathAndQuery(parsed);
 
+  if (trimmed.length > MAX_ENDPOINT_LENGTH) {
+    throw toFetchError("endpoint too long", "validation_error", false);
+  }
+
   if (!/^https?:$/.test(parsed.protocol)) {
     throw toFetchError("Only http/https endpoints are allowed", "security_blocked", false);
   }
@@ -998,17 +1055,30 @@ function normalizeEndpoint(endpoint: string): string {
     }
   }
 
-  let canonicalHost: string;
-  try {
-    canonicalHost = domainToASCII(parsed.hostname);
-  } catch {
+  const rawHostname = parsed.hostname;
+  if (!rawHostname) {
     throw toFetchError("Invalid endpoint hostname", "validation_error", false);
+  }
+
+  let canonicalHost: string;
+  const canonicalHostInput = rawHostname.startsWith("[") && rawHostname.endsWith("]")
+    ? rawHostname.slice(1, -1)
+    : rawHostname;
+
+  if (net.isIP(canonicalHostInput)) {
+    canonicalHost = canonicalHostInput.toLowerCase();
+  } else {
+    try {
+      canonicalHost = domainToASCII(rawHostname);
+    } catch {
+      throw toFetchError("Invalid endpoint hostname", "validation_error", false);
+    }
+    canonicalHost = canonicalHost.endsWith(".") ? canonicalHost.slice(0, -1) : canonicalHost;
   }
 
   if (!canonicalHost) {
     throw toFetchError("Invalid endpoint hostname", "validation_error", false);
   }
-  canonicalHost = canonicalHost.endsWith(".") ? canonicalHost.slice(0, -1) : canonicalHost;
 
   if (canonicalHost.length > 255) {
     throw toFetchError("Endpoint hostname is invalid", "validation_error", false);
@@ -1023,7 +1093,7 @@ function normalizeEndpoint(endpoint: string): string {
     throw toFetchError("Internal host access is denied", "security_blocked", false);
   }
 
-  const ipLike = hostname.match(/^(\d{1,3}\.){3}\d{1,3}$/) || hostname.match(/^[0-9a-f:]+$/i);
+  const ipLike = net.isIP(hostname);
   if (ipLike && isInternalIP(hostname)) {
     throw toFetchError("Private IP targets are denied", "security_blocked", false);
   }
@@ -1567,8 +1637,48 @@ export class GptActionRuntime {
         action,
       };
 
-      const requestBody = this.buildRequestBody(action, safeRequestPayload, contextForTemplate);
-      const safeRequestBody = sanitizeRequestBodyPayload(requestBody);
+      let requestBody: unknown;
+      try {
+        requestBody = this.buildRequestBody(action, safeRequestPayload, contextForTemplate, method);
+      } catch (error) {
+        const details = buildExecutionErrorPayload(error);
+        const failure = this.createFailureResult(
+          payload,
+          startedAt,
+          this.now(),
+          0,
+          "validation",
+          "validation_error",
+          undefined,
+          details.message || "Invalid request body",
+          details.code || "validation_error",
+          false,
+          normalizedIdempotency
+        );
+        await this.failIdempotencyIfEnabled(normalizedIdempotency, failure, failure.error?.message || "Invalid request body");
+        return failure;
+      }
+
+      if (requestBody !== undefined) {
+        const rawBodyBytes = Buffer.byteLength(typeof requestBody === "string" ? requestBody : safeStringify(requestBody), "utf8");
+        if (rawBodyBytes > MAX_REQUEST_BODY_BYTES) {
+          return this.createFailureResult(
+            payload,
+            startedAt,
+            this.now(),
+            0,
+            "validation",
+            "failure",
+            undefined,
+            `Request body exceeds maximum allowed size: ${rawBodyBytes} > ${MAX_REQUEST_BODY_BYTES}`,
+            "execution_error",
+            false,
+            normalizedIdempotency
+          );
+        }
+      }
+
+      const safeRequestBody = requestBody === undefined ? undefined : sanitizeRequestBodyPayload(requestBody);
       const headers = this.buildHeaders(action, payload.headers || {});
 
       const maxRetries = clampRetryLimit(payload.maxRetries, DEFAULT_FETCH_RETRY_LIMIT);
@@ -1654,10 +1764,24 @@ export class GptActionRuntime {
         }, `${method} ${endpoint}`);
 
         if (!result.success || !result.data) {
-          const inferredCode = inferExecutionErrorCode(result.error || "execution_failed");
-          const error = new Error(result.error || "Execution failed") as Error & { retryable: boolean; code?: string };
-          error.retryable = isRetryableCode(inferredCode);
-          error.code = inferredCode;
+          const message = result.error || "Execution returned empty response";
+          const inferredCode = inferExecutionErrorCode(result.errorCode || message);
+          const isRetryable = typeof result.retryable === "boolean" ? result.retryable : isRetryableCode(inferredCode);
+          const error = this.makeNetworkError(message, inferredCode, isRetryable);
+          if (typeof result.statusCode === "number") {
+            (error as Error & { statusCode?: number }).statusCode = result.statusCode;
+          }
+          if (typeof result.responseBody !== "undefined") {
+            (error as Error & { responseBody?: unknown; responseContentType?: string | null }).responseBody =
+              result.responseBody;
+          }
+          if (typeof result.responseContentType !== "undefined") {
+            (error as Error & { responseBody?: unknown; responseContentType?: string | null }).responseContentType =
+              result.responseContentType;
+          }
+          if (typeof result.retryAfter === "number") {
+            error.retryAfter = result.retryAfter;
+          }
           throw error;
         }
 
@@ -1666,7 +1790,11 @@ export class GptActionRuntime {
         const responseContentType = result.data.contentType;
         const mappedData = mapResponse(responsePayload, action.responseMapping);
 
-        if (isStructuredResponseSchema(action.responseSchema) && !isAllowedResponseMimeType(responseContentType)) {
+        if (
+          isStructuredResponseSchema(action.responseSchema)
+          && responseContentType !== null
+          && !isAllowedResponseMimeType(responseContentType)
+        ) {
           return this.createFailureResult(
             payload,
             startedAt,
@@ -1738,6 +1866,7 @@ export class GptActionRuntime {
 
         const stage = retryCount > 0 ? "execution" : "execution";
         const details = buildExecutionErrorPayload(error);
+        const finalStatus = details.code === "validation_error" ? "validation_error" : details.retryable ? "timeout" : "failure";
         const partialData = this.extractPartialErrorData(error, action);
         const isRetryable = typeof error.retryable === "boolean"
           ? error.retryable
@@ -1750,7 +1879,7 @@ export class GptActionRuntime {
             this.now(),
             retryCount,
             stage,
-            details.retryable ? "timeout" : "failure",
+            finalStatus,
             (error as any).statusCode,
             details.message,
             details.code,
@@ -1824,23 +1953,29 @@ export class GptActionRuntime {
         signal: controller.signal,
       };
 
-      if (method !== "GET" && method !== "HEAD") {
+      if (method === "GET" || method === "HEAD") {
         if (body !== undefined) {
-          const content = typeof body === "string" ? body : safeStringify(body);
-          const contentBytes = Buffer.byteLength(content, "utf8");
-          if (contentBytes > MAX_REQUEST_BODY_BYTES) {
-            throw this.makeNetworkError(
-              `Request body exceeds maximum allowed size: ${contentBytes} > ${MAX_REQUEST_BODY_BYTES}`,
-              "execution_error",
-              false
-            );
-          }
-          responseInit.body = content;
-          responseInit.headers = {
-            ...responseInit.headers,
-            "Content-Type": "application/json",
-          };
+          throw this.makeNetworkError(
+            `Request bodies are not allowed for ${method} methods`,
+            "validation_error",
+            false
+          );
         }
+      } else if (body !== undefined) {
+        const content = typeof body === "string" ? body : safeStringify(body);
+        const contentBytes = Buffer.byteLength(content, "utf8");
+        if (contentBytes > MAX_REQUEST_BODY_BYTES) {
+          throw this.makeNetworkError(
+            `Request body exceeds maximum allowed size: ${contentBytes} > ${MAX_REQUEST_BODY_BYTES}`,
+            "execution_error",
+            false
+          );
+        }
+        responseInit.body = content;
+        responseInit.headers = {
+          ...responseInit.headers,
+          "Content-Type": "application/json",
+        };
       }
 
       response = await this.fetcher(endpoint, responseInit);
@@ -2083,14 +2218,25 @@ export class GptActionRuntime {
   private buildRequestBody(
     action: GptAction,
     request: Record<string, unknown>,
-    context: ParsedTemplateContext
+    context: ParsedTemplateContext,
+    method: string
   ): unknown {
+    if (method === "GET" || method === "HEAD") {
+      if (typeof action.bodyTemplate === "string") {
+        throw this.makeNetworkError(`Request bodies are not allowed for ${method} methods`, "validation_error", false);
+      }
+      return undefined;
+    }
+
     if (typeof action.bodyTemplate === "string") {
       const interpolated = interpolateTemplate(action.bodyTemplate, context);
       if (typeof interpolated === "string") {
         try {
-          return JSON.parse(interpolated as string);
-        } catch {
+          return parseActionTemplateJson(interpolated as string);
+        } catch (error) {
+          if (typeof (error as { code?: string }).code === "string") {
+            throw error;
+          }
           return interpolated;
         }
       }
@@ -2126,7 +2272,11 @@ export class GptActionRuntime {
         return sanitizeResponsePayload(parsed);
       }
       return parsed;
-    } catch {
+    } catch (error) {
+      if (enforceLimits && error && typeof error === "object" && (error as { code?: string }).code === "validation_error") {
+        throw error as Error;
+      }
+
       if (enforceLimits) {
         this.logger.warn("gpt-action.response_parse_malformed", { preview: safeStringify(text).slice(0, 240) });
       }
@@ -2334,9 +2484,10 @@ export class GptActionRuntime {
     }
 
     try {
-      return mapResponse(candidate.responseBody, action.responseMapping);
+      const mapped = mapResponse(candidate.responseBody, action.responseMapping);
+      return redactSensitiveFields(mapped, normalizePiiKeys(action.piiRedactionRules));
     } catch {
-      return candidate.responseBody;
+      return redactSensitiveFields(candidate.responseBody, normalizePiiKeys(action.piiRedactionRules));
     }
   }
 
@@ -2368,6 +2519,22 @@ function requestIdForLogging(rawId?: string | null): string {
 
 function inferExecutionErrorCode(message: string): string {
   const normalized = message.toLowerCase();
+  if (normalized === "validation_error"
+    || normalized === "execution_error"
+    || normalized === "fetch_error"
+    || normalized === "auth_error"
+    || normalized === "timeout"
+    || normalized === "rate_limited"
+    || normalized === "security_blocked") {
+    return normalized;
+  }
+  if (normalized === "execution_retryable") {
+    return "execution_retryable";
+  }
+  if (normalized === "execution_not_retryable") {
+    return "execution_error";
+  }
+
   if (normalized.includes("status 429") || normalized.includes("status 408")) {
     return "rate_limited";
   }
@@ -2445,7 +2612,7 @@ export function parseRetryAfterHeader(rawHeader: string | null | undefined): num
   return undefined;
 }
 
-export function normalizeGptActionRequestPayload(rawInput: Record<string, unknown>): Record<string, unknown> {
+export function normalizeGptActionRequestPayload(rawInput: Record<string, unknown>): unknown {
   const request = rawInput.request;
   const fallback = rawInput.input;
   const normalized =
@@ -2454,10 +2621,13 @@ export function normalizeGptActionRequestPayload(rawInput: Record<string, unknow
       : normalizeRequestInput(fallback);
 
   try {
-    return truncatePayload(
-      sanitizeRequestPayload(normalized),
-      MAX_REQUEST_PAYLOAD_BYTES
-    ) as Record<string, unknown>;
+    const rawSerialized = safeStringify(normalized);
+    if (Buffer.byteLength(rawSerialized, "utf8") > MAX_REQUEST_PAYLOAD_BYTES) {
+      return truncateToUtf8ByteLimit(rawSerialized, MAX_REQUEST_PAYLOAD_BYTES);
+    }
+
+    const sanitized = sanitizeRequestPayload(normalized);
+    return sanitized;
   } catch {
     return {};
   }
@@ -2473,6 +2643,10 @@ export function normalizeContentTypeForTesting(rawContentType: string | null | u
 
 export function sanitizeLogValueForTesting(value: unknown): unknown {
   return sanitizeLogValue(value);
+}
+
+export function mapResponseForTesting(response: unknown, mapping: unknown): unknown {
+  return mapResponse(response, mapping);
 }
 
 export function isValidActorIdForTesting(value: string | null | undefined): boolean {
