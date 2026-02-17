@@ -5,6 +5,7 @@ import {
   type ExecutionOptions,
   type ExecutionProgress,
   type ToolType,
+  type ExecutionResult,
 } from "../services/toolExecutionEngine";
 import { createLogger } from "../lib/structuredLogger";
 
@@ -31,6 +32,9 @@ const TOOL_EXECUTION_INPUT_KEY_MAX_LENGTH = 120;
 
 const TOOL_EXECUTION_CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/g;
 const PROHIBITED_TOOL_INPUT_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const TOOL_EXECUTION_HEADER_ID_RE = /^[a-zA-Z0-9._-]{6,140}$/;
+const TOOL_EXECUTION_RESPONSE_TIMEOUT_CODE = 504;
+const TOOL_EXECUTION_OVERLOAD_CODE = 429;
 
 function safeStringify(value: unknown): string {
   try {
@@ -69,6 +73,36 @@ function sanitizeToolErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error ?? "Unknown error");
+}
+
+function resolveHeaderValue(rawValue: unknown): string | null {
+  if (typeof rawValue === "string") {
+    const normalized = rawValue.trim();
+    if (!normalized || !TOOL_EXECUTION_HEADER_ID_RE.test(normalized)) {
+      return null;
+    }
+    return normalized;
+  }
+
+  if (Array.isArray(rawValue)) {
+    if (rawValue.length === 0) {
+      return null;
+    }
+    return resolveHeaderValue(rawValue[0]);
+  }
+
+  return null;
+}
+
+function resolveExecutionStatus(result: ExecutionResult): number {
+  if (result.errorCode === "IDEMPOTENCY_CONFLICT") return 409;
+  if (result.errorCode === "TOOL_NOT_FOUND") return 404;
+  if (result.errorCode === "INVALID_INPUT") return 400;
+  if (result.errorCode === "TOOL_CIRCUIT_OPEN") return 503;
+  if (result.errorCode === "TOOL_TIMEOUT") return TOOL_EXECUTION_RESPONSE_TIMEOUT_CODE;
+  if (result.errorCode === "TOOL_OVERLOADED") return TOOL_EXECUTION_OVERLOAD_CODE;
+  if (!result.success) return 502;
+  return 200;
 }
 
 function sanitizeText(value: unknown): string {
@@ -255,6 +289,38 @@ function resolveExecutionOptions(rawOptions: unknown): ExecutionOptions {
     }
   }
 
+  const conversationIdCandidate = (rawOptions as any).conversationId;
+  if (typeof conversationIdCandidate === "string") {
+    const normalizedConversationId = sanitizeText(conversationIdCandidate);
+    if (normalizedConversationId && TOOL_EXECUTION_KEY_SANITIZE_RE.test(normalizedConversationId)) {
+      output.conversationId = normalizedConversationId;
+    }
+  }
+
+  const runIdCandidate = (rawOptions as any).runId;
+  if (typeof runIdCandidate === "string") {
+    const normalizedRunId = sanitizeText(runIdCandidate);
+    if (normalizedRunId && TOOL_EXECUTION_KEY_SANITIZE_RE.test(normalizedRunId)) {
+      output.runId = normalizedRunId;
+    }
+  }
+
+  const traceIdCandidate = (rawOptions as any).traceId;
+  if (typeof traceIdCandidate === "string") {
+    const normalizedTraceId = sanitizeText(traceIdCandidate);
+    if (normalizedTraceId && TOOL_EXECUTION_HEADER_ID_RE.test(normalizedTraceId)) {
+      output.traceId = normalizedTraceId;
+    }
+  }
+
+  const requestIdCandidate = (rawOptions as any).requestId;
+  if (typeof requestIdCandidate === "string") {
+    const normalizedRequestId = sanitizeText(requestIdCandidate);
+    if (normalizedRequestId && TOOL_EXECUTION_HEADER_ID_RE.test(normalizedRequestId)) {
+      output.requestId = normalizedRequestId;
+    }
+  }
+
   const idempotencyKey = resolveOptionalIdempotencyKey((rawOptions as any).idempotencyKey);
   if (idempotencyKey) {
     output.idempotencyKey = idempotencyKey;
@@ -325,6 +391,15 @@ export function createToolExecutionRouter(): Router {
   });
 
   router.post("/tools/:name/execute", async (req: Request, res: Response) => {
+    const requestTraceId = resolveHeaderValue(req.headers["x-trace-id"])
+      || resolveHeaderValue(req.headers["x-request-id"])
+      || (typeof res.locals?.traceId === "string" ? res.locals.traceId : undefined)
+      || (typeof req.headers.traceid === "string" ? req.headers.traceid : undefined)
+      || "";
+    const requestLogger = requestTraceId
+      ? logger.withRequest(requestTraceId, (req as any).user?.id)
+      : logger;
+
     try {
       const name = resolveToolName(req.params.name);
       if (!name) {
@@ -346,6 +421,10 @@ export function createToolExecutionRouter(): Router {
 
       const executionOptions = resolveExecutionOptions(req.body?.options);
       executionOptions.userId = executionOptions.userId || (req as any).userId;
+      executionOptions.traceId = resolveHeaderValue(req.headers["x-trace-id"]) || requestTraceId || undefined;
+      executionOptions.conversationId = resolveHeaderValue(req.headers["x-conversation-id"]) || undefined;
+      executionOptions.runId = resolveHeaderValue(req.headers["x-run-id"]) || undefined;
+      executionOptions.requestId = resolveHeaderValue(req.headers["x-request-id"]) || requestTraceId || undefined;
 
       if (typeof req.body?.options === "object" && req.body.options !== null) {
         if (!isPlainObject(req.body.options)) {
@@ -370,20 +449,24 @@ export function createToolExecutionRouter(): Router {
         executionOptions.idempotencyKey = requestIdempotencyKey;
       }
 
-      logger.info(`Executing tool '${name}'`, {
+      requestLogger.info(`Executing tool '${name}'`, {
         toolName: name,
         inputKeys: Object.keys(input),
         timeout: executionOptions.timeout,
         maxRetries: executionOptions.maxRetries,
         userId: executionOptions.userId,
         hasIdempotencyKey: Boolean(executionOptions.idempotencyKey),
+        traceId: executionOptions.traceId,
+        conversationId: executionOptions.conversationId,
+        runId: executionOptions.runId,
+        requestId: executionOptions.requestId,
       });
 
       const result = await toolExecutionEngine.execute(name, input, executionOptions);
       const safeData = normalizeToolPayload(result.data);
       const safeError = sanitizeToolLogSnippet(result.error, 800);
-
-      const statusCode = result.errorCode === "IDEMPOTENCY_CONFLICT" ? 409 : 200;
+      const statusCode = resolveExecutionStatus(result);
+      const hasPartialOutput = !result.success && result.data !== undefined;
 
       res.status(statusCode).json({
         success: result.success,
@@ -391,10 +474,13 @@ export function createToolExecutionRouter(): Router {
         data: safeData,
         error: safeError,
         errorCode: result.errorCode,
+        complete: result.success || hasPartialOutput,
+        fallback: hasPartialOutput,
+        metadata: result.metadata,
         metrics: result.metrics,
       });
     } catch (error: any) {
-      logger.error(`Failed to execute tool '${req.params.name}'`, { error: error.message });
+      requestLogger.error(`Failed to execute tool '${req.params.name}'`, { error: error.message });
       res.status(500).json({
         success: false,
         error: error.message,
@@ -705,6 +791,22 @@ export function setupToolExecutionWebSocket(
           }
 
           const executionOptions = resolveExecutionOptions(message.options);
+          const traceId = resolveHeaderValue(message.traceId);
+          const conversationId = resolveHeaderValue(message.conversationId);
+          const runId = resolveHeaderValue(message.runId);
+          const requestId = resolveHeaderValue(message.requestId);
+          if (traceId) {
+            executionOptions.traceId = traceId;
+          }
+          if (conversationId) {
+            executionOptions.conversationId = conversationId;
+          }
+          if (runId) {
+            executionOptions.runId = runId;
+          }
+          if (requestId) {
+            executionOptions.requestId = requestId;
+          }
           const idempotencyKey = resolveOptionalIdempotencyKey(message.idempotencyKey);
           if (idempotencyKey) {
             executionOptions.idempotencyKey = idempotencyKey;
@@ -718,9 +820,16 @@ export function setupToolExecutionWebSocket(
           };
 
           const result = await toolExecutionEngine.execute(toolName, input, executionOptions);
+          const safeResultData = normalizeToolPayload(result.data);
+          const resultHasPartialOutput = !result.success && result.data !== undefined;
           safeSend({
             type: "result",
-            data: result,
+            data: {
+              ...result,
+              data: safeResultData,
+              complete: result.success || resultHasPartialOutput,
+              fallback: resultHasPartialOutput,
+            },
           });
           return;
         }

@@ -4,6 +4,7 @@ import { pythonToolsClient, PythonToolsClientError, type ToolExecuteResponse } f
 import { ALL_TOOLS, getToolByName } from '../agent/langgraph/tools';
 import { createServiceCircuitBreaker, type ServiceCircuitConfig, type ServiceCallResult, CircuitState } from '../lib/circuitBreaker';
 import { createLogger } from '../lib/structuredLogger';
+import { withToolSpan } from '../lib/tracing';
 
 const logger = createLogger('tool-execution-engine');
 
@@ -40,6 +41,13 @@ export interface ExecutionResult {
   data?: any;
   error?: string;
   errorCode?: string;
+  metadata?: {
+    userId?: string;
+    conversationId?: string;
+    runId?: string;
+    traceId?: string;
+    requestId?: string;
+  };
   metrics: {
     startTime: number;
     endTime: number;
@@ -60,6 +68,10 @@ export interface ExecutionHistoryEntry {
   timestamp: number;
   error?: string;
   userId?: string;
+  conversationId?: string;
+  runId?: string;
+  traceId?: string;
+  requestId?: string;
 }
 
 export interface ToolAnalytics {
@@ -87,6 +99,10 @@ export interface ExecutionOptions {
   timeout?: number;
   maxRetries?: number;
   userId?: string;
+  conversationId?: string;
+  runId?: string;
+  traceId?: string;
+  requestId?: string;
   skipCache?: boolean;
   onProgress?: (progress: ExecutionProgress) => void;
   idempotencyKey?: string;
@@ -133,6 +149,9 @@ const TOOL_HISTORY_PAYLOAD_BYTES = 12_000;
 const TOOL_IDEMPOTENCY_KEY_RE = /^[a-zA-Z0-9._-]{6,140}$/;
 const TOOL_IDEMPOTENCY_TTL_MS = 5 * 60_000;
 const TOOL_IDEMPOTENCY_MAX_ENTRIES = 300;
+const TOOL_MAX_CONCURRENT_EXECUTIONS = 64;
+
+const TOOL_EXECUTION_OVERLOADED_MESSAGE = "Tool execution concurrency limit exceeded";
 
 function safeStringify(value: unknown): string {
   try {
@@ -321,7 +340,8 @@ function buildFailureExecutionResult(
   executionId: string,
   toolName: string,
   startTime: number,
-  error: unknown
+  error: unknown,
+  metadata?: ExecutionResult['metadata'],
 ): ExecutionResult {
   const endTime = Date.now();
   return {
@@ -331,6 +351,7 @@ function buildFailureExecutionResult(
     success: false,
     error: safeToolError(error),
     errorCode: classifyToolError(error),
+    metadata,
     metrics: {
       startTime,
       endTime,
@@ -345,10 +366,27 @@ function classifyToolError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || '');
   if (message.includes('Tool not found')) return 'TOOL_NOT_FOUND';
   if (message.includes('Invalid tool name') || message.includes('Tool input')) return 'INVALID_INPUT';
+  if (message.includes('concurrency limit')) return 'TOOL_OVERLOADED';
   if (message.includes('timed out')) return 'TOOL_TIMEOUT';
   if (message.includes('Circuit breaker is OPEN')) return 'TOOL_CIRCUIT_OPEN';
   if (error instanceof PythonToolsClientError) return 'PYTHON_TOOL_FAILURE';
   return 'EXECUTION_FAILED';
+}
+
+function sanitizeMetadataValue(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  return normalized.length === 0 ? undefined : normalized;
+}
+
+function buildExecutionMetadata(options: ExecutionOptions): ExecutionResult['metadata'] {
+  return {
+    userId: sanitizeMetadataValue(options.userId),
+    conversationId: sanitizeMetadataValue(options.conversationId),
+    runId: sanitizeMetadataValue(options.runId),
+    traceId: sanitizeMetadataValue(options.traceId),
+    requestId: sanitizeMetadataValue(options.requestId),
+  };
 }
 
 function sanitizeErrorMessage(message: string): string {
@@ -727,118 +765,141 @@ export class ToolExecutionEngine extends EventEmitter {
     const executionId = crypto.randomUUID();
     const startTime = Date.now();
     const sanitizedToolName = sanitizeToolName(toolName);
+    const metadata = buildExecutionMetadata(options);
 
-    if (!sanitizedToolName) {
-      const errorMessage = "Invalid tool name";
-      const errorResult: ExecutionResult = {
-        executionId,
-        toolName,
-        toolType: "unknown",
-        success: false,
-        error: errorMessage,
-        errorCode: classifyToolError(new Error(errorMessage)),
-        metrics: {
-          startTime,
-          endTime: Date.now(),
-          durationMs: Date.now() - startTime,
-          attempts: 1,
-          circuitState: CircuitState.CLOSED,
-        },
-      };
-      this.recordExecution(errorResult, {});
-      return errorResult;
-    }
-
-    const sanitizedInput = buildSafeInputForExecution(input);
-    const {
-      timeout = DEFAULT_TIMEOUT_MS,
-      maxRetries = DEFAULT_MAX_RETRIES,
-      userId,
-      onProgress,
-      skipCache,
-      idempotencyKey,
-    } = options;
-    const safeTimeout = normalizeTimeout(timeout);
-    const safeMaxRetries = normalizeRetryCount(maxRetries);
-    const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
-    const idempotencyInputHash = buildIdempotencyHash(sanitizedToolName, sanitizedInput, {
-      timeout: safeTimeout,
-      maxRetries: safeMaxRetries,
-      skipCache,
-      userId,
-    });
-
-    if (normalizedIdempotencyKey) {
-      const existing = this.getIdempotentExecution(normalizedIdempotencyKey, idempotencyInputHash);
-      if (existing) {
-        if (existing.status === "running" && existing.promise) {
-          return existing.promise;
-        }
-        if (existing.status === "resolved" && existing.result) {
-          return existing.result;
-        }
-        if (existing.status === "error" && existing.error) {
-          const conflictResult: ExecutionResult = {
-            executionId,
-            toolName: sanitizedToolName,
-            toolType: "unknown",
-            success: false,
-            error: existing.error,
-            errorCode: "IDEMPOTENCY_CONFLICT",
-            metrics: {
-              startTime,
-              endTime: Date.now(),
-              durationMs: Date.now() - startTime,
-              attempts: 1,
-              circuitState: CircuitState.CLOSED,
-            },
-          };
-          return conflictResult;
-        }
+    try {
+      if (!sanitizedToolName) {
+        const errorMessage = "Invalid tool name";
+        const errorResult: ExecutionResult = {
+          executionId,
+          toolName,
+          toolType: "unknown",
+          success: false,
+          error: errorMessage,
+          errorCode: classifyToolError(new Error(errorMessage)),
+          metadata,
+          metrics: {
+            startTime,
+            endTime: Date.now(),
+            durationMs: Date.now() - startTime,
+            attempts: 1,
+            circuitState: CircuitState.CLOSED,
+          },
+        };
+        this.recordExecution(errorResult, {}, metadata);
+        return errorResult;
       }
-    }
 
-    const execution = this.performExecution({
-      executionId,
-      sanitizedToolName,
-      sanitizedInput,
-      safeTimeout,
-      safeMaxRetries,
-      userId,
-      onProgress,
-    });
+      const sanitizedInput = buildSafeInputForExecution(input);
+      const {
+        timeout = DEFAULT_TIMEOUT_MS,
+        maxRetries = DEFAULT_MAX_RETRIES,
+        userId,
+        onProgress,
+        skipCache,
+        idempotencyKey,
+      } = options;
+      const safeTimeout = normalizeTimeout(timeout);
+      const safeMaxRetries = normalizeRetryCount(maxRetries);
+      const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
+      const idempotencyInputHash = buildIdempotencyHash(sanitizedToolName, sanitizedInput, {
+        timeout: safeTimeout,
+        maxRetries: safeMaxRetries,
+        skipCache,
+        userId,
+      });
 
-      if (normalizedIdempotencyKey) {
-      const inFlight = this.registerInFlightExecution(
-        normalizedIdempotencyKey,
-        idempotencyInputHash,
-        execution,
-        startTime
-      );
-      try {
-        const result = await execution;
-        this.finalizeIdempotentExecution(inFlight.key, result);
-        return result;
-      } catch (error: unknown) {
-        const failureResult = buildFailureExecutionResult(
+      if (this.activeExecutions.size >= TOOL_MAX_CONCURRENT_EXECUTIONS) {
+        return buildFailureExecutionResult(
           executionId,
           sanitizedToolName,
           startTime,
-          error
+          new Error(TOOL_EXECUTION_OVERLOADED_MESSAGE),
+          metadata
         );
-        this.finalizeIdempotentExecution(inFlight.key, failureResult);
-        return failureResult;
       }
-    }
 
-    try {
+      if (normalizedIdempotencyKey) {
+        const existing = this.getIdempotentExecution(normalizedIdempotencyKey, idempotencyInputHash);
+        if (existing) {
+          if (existing.status === "running" && existing.promise) {
+            return existing.promise;
+          }
+          if (existing.status === "resolved" && existing.result) {
+            return existing.result;
+          }
+          if (existing.status === "error" && existing.error) {
+            const conflictResult: ExecutionResult = {
+              executionId,
+              toolName: sanitizedToolName,
+              toolType: "unknown",
+              success: false,
+              error: existing.error,
+              errorCode: "IDEMPOTENCY_CONFLICT",
+              metadata,
+              metrics: {
+                startTime,
+                endTime: Date.now(),
+                durationMs: Date.now() - startTime,
+                attempts: 1,
+                circuitState: CircuitState.CLOSED,
+              },
+            };
+            return conflictResult;
+          }
+        }
+      }
+
+      const execution = withToolSpan(
+        sanitizedToolName,
+        () => this.performExecution({
+          executionId,
+          sanitizedToolName,
+          sanitizedInput,
+          safeTimeout,
+          safeMaxRetries,
+          userId,
+          onProgress,
+          conversationId: options.conversationId,
+          runId: options.runId,
+          traceId: options.traceId,
+          requestId: options.requestId,
+        }),
+        { userId, requestId: options.requestId, sessionId: options.conversationId }
+      );
+
+      if (normalizedIdempotencyKey) {
+        const inFlight = this.registerInFlightExecution(
+          normalizedIdempotencyKey,
+          idempotencyInputHash,
+          execution,
+          startTime
+        );
+        try {
+          const result = await execution;
+          this.finalizeIdempotentExecution(inFlight.key, result);
+          return result;
+        } catch (error: unknown) {
+          const failureResult = buildFailureExecutionResult(
+            executionId,
+            sanitizedToolName,
+            startTime,
+            error,
+            metadata
+          );
+          this.finalizeIdempotentExecution(inFlight.key, failureResult);
+          return failureResult;
+        }
+      }
+
       return await execution;
     } catch (error: unknown) {
       return buildFailureExecutionResult(
         executionId,
         sanitizedToolName,
         startTime,
-        error
+        error,
+        metadata
       );
     }
   }
@@ -851,6 +912,10 @@ export class ToolExecutionEngine extends EventEmitter {
     safeMaxRetries: number;
     userId?: string;
     onProgress?: (progress: ExecutionProgress) => void;
+    conversationId?: string;
+    runId?: string;
+    traceId?: string;
+    requestId?: string;
   }): Promise<ExecutionResult> {
     const {
       executionId,
@@ -860,8 +925,30 @@ export class ToolExecutionEngine extends EventEmitter {
       safeMaxRetries,
       userId,
       onProgress,
+      conversationId,
+      runId,
+      traceId,
+      requestId,
     } = params;
     const startTime = Date.now();
+    const metadata = buildExecutionMetadata({
+      userId,
+      conversationId,
+      runId,
+      traceId,
+      requestId,
+    });
+
+    if (this.activeExecutions.size >= TOOL_MAX_CONCURRENT_EXECUTIONS) {
+      return buildFailureExecutionResult(
+        executionId,
+        sanitizedToolName,
+        startTime,
+        new Error(TOOL_EXECUTION_OVERLOADED_MESSAGE),
+        metadata
+      );
+    }
+
     let attempts = 1;
     const progress: ExecutionProgress = {
       executionId,
@@ -940,7 +1027,7 @@ export class ToolExecutionEngine extends EventEmitter {
       };
 
       attempts = executionResult.metrics.attempts;
-      this.recordExecution(executionResult, validatedInput, userId);
+      this.recordExecution(executionResult, validatedInput, userId, metadata);
 
       progress.step = 3;
       progress.progress = 100;
@@ -971,6 +1058,7 @@ export class ToolExecutionEngine extends EventEmitter {
         success: false,
         error: safeToolError(error),
         errorCode: classifyToolError(error),
+        metadata,
         metrics: {
           startTime,
           endTime,
@@ -980,7 +1068,7 @@ export class ToolExecutionEngine extends EventEmitter {
         },
       };
 
-      this.recordExecution(errorResult, sanitizedInput, userId);
+      this.recordExecution(errorResult, sanitizedInput, userId, metadata);
       return errorResult;
     }
   }
@@ -1076,9 +1164,11 @@ export class ToolExecutionEngine extends EventEmitter {
   private recordExecution(
     result: ExecutionResult,
     input: Record<string, any>,
-    userId?: string
+    userId?: string,
+    metadata?: ExecutionResult['metadata']
   ): void {
     const safeInput = input && isPlainObject(input) ? clipForHistory(input) : {};
+    const resolvedMetadata = metadata || result.metadata || {};
     const entry: ExecutionHistoryEntry = {
       executionId: result.executionId,
       toolName: result.toolName,
@@ -1088,7 +1178,11 @@ export class ToolExecutionEngine extends EventEmitter {
       durationMs: result.metrics.durationMs,
       timestamp: result.metrics.startTime,
       error: result.error,
-      userId,
+      userId: userId || resolvedMetadata.userId,
+      conversationId: resolvedMetadata.conversationId,
+      runId: resolvedMetadata.runId,
+      traceId: resolvedMetadata.traceId,
+      requestId: resolvedMetadata.requestId,
     };
 
     this.executionHistory.unshift(entry);
@@ -1132,6 +1226,9 @@ export class ToolExecutionEngine extends EventEmitter {
 
   getExecutionHistory(options?: {
     toolName?: string;
+    conversationId?: string;
+    runId?: string;
+    requestId?: string;
     userId?: string;
     limit?: number;
     successOnly?: boolean;
@@ -1143,6 +1240,15 @@ export class ToolExecutionEngine extends EventEmitter {
     }
     if (options?.userId) {
       history = history.filter(e => e.userId === options.userId);
+    }
+    if (options?.conversationId) {
+      history = history.filter(e => e.conversationId === options.conversationId);
+    }
+    if (options?.runId) {
+      history = history.filter(e => e.runId === options.runId);
+    }
+    if (options?.requestId) {
+      history = history.filter(e => e.requestId === options.requestId);
     }
     if (options?.successOnly) {
       history = history.filter(e => e.success);
