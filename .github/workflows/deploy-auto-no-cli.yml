@@ -74,13 +74,16 @@ jobs:
           BRANCH='${{ steps.branch.outputs.branch }}'
           TARGET_DIR='${{ env.DEPLOY_DIR }}'
           REPO='https://github.com/Carrerajorge/Hola.git'
+          APP_PORT='5000'
 
           cat > /tmp/deploy-remote.sh <<'REMOTE'
           set -euo pipefail
+          set -x
 
           TARGET_DIR="${TARGET_DIR}"
           BRANCH="${BRANCH}"
           REPO="${REPO}"
+          APP_PORT="${APP_PORT:-5000}"
 
           ensure_repo() {
             if [ -d "$TARGET_DIR/.git" ]; then
@@ -93,30 +96,71 @@ jobs:
             fi
           }
 
+          sync_with_retry() {
+            local attempt=1
+            while true; do
+              rm -f ".git/index.lock" ".git/FETCH_HEAD.lock" ".git/ORIG_HEAD.lock"
+              if git fetch --force --prune --depth=1 origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
+                break
+              fi
+
+              if [ "$attempt" -ge 3 ]; then
+                echo "::error::git fetch failed after ${attempt} attempts"
+                return 1
+              fi
+
+              echo "Retrying git fetch (attempt ${attempt}/3) after cleaning transient ref state..."
+              rm -f ".git/FETCH_HEAD"
+              rm -f ".git/refs/remotes/origin/${BRANCH}" ".git/logs/refs/remotes/origin/${BRANCH}"
+              attempt=$((attempt + 1))
+              sleep 2
+            done
+          }
+
           rollback_if_needed() {
             echo "Deploy failed, trying rollback to previous SHA: $PREV_SHA"
             git checkout "$PREV_SHA"
             ./deploy_direct.sh || true
           }
 
-          ensure_repo
-          git fetch --force --prune origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-          git checkout "$BRANCH"
+          show_deploy_diagnostics() {
+            echo "---- deploy diagnostics ----"
+            git status --short || true
+            pm2 status || true
+            pm2 logs michat --lines 120 --raw --nostream || true
+            echo "---- end diagnostics ----"
+          }
 
+          if command -v flock >/dev/null 2>&1; then
+            mkdir -p "$(dirname "${TARGET_DIR}")"
+            exec 9>"$TARGET_DIR/.deploy-sync.lock"
+            if ! flock -n 9; then
+              echo "::error::Another deployment is already syncing '$TARGET_DIR'."
+              exit 1
+            fi
+          else
+            echo "::warning::flock not available on VPS; proceeding without deploy serialization."
+          fi
+
+          ensure_repo
           PREV_SHA="$(git rev-parse HEAD)"
-          git pull --ff-only "origin" "$BRANCH"
+          sync_with_retry
+          git checkout -f -B "$BRANCH" "refs/remotes/origin/${BRANCH}"
 
           export LOCAL_DEPLOY=1
           export VPS_DIR="$TARGET_DIR"
           export DEPLOY_BRANCH="$BRANCH"
 
           if ! ./deploy_direct.sh; then
+            show_deploy_diagnostics
             rollback_if_needed
             exit 1
           fi
 
-          for i in $(seq 1 25); do
-            if curl -fsS https://iliagpt.com/api/health >/dev/null 2>&1; then
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 8 "http://127.0.0.1:${APP_PORT}/api/health/live" >/dev/null 2>&1 \
+              || curl -fsS --max-time 8 "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null 2>&1 \
+              || curl -fsS --max-time 8 "http://127.0.0.1:${APP_PORT}/health" >/dev/null 2>&1; then
               echo "Health check OK"
               exit 0
             fi
@@ -124,6 +168,8 @@ jobs:
           done
 
           echo "Health check failed"
+          show_deploy_diagnostics
+          pm2 logs michat --lines 120 --raw --nostream 2>/dev/null || true
           rollback_if_needed
           exit 1
           REMOTE
@@ -133,14 +179,14 @@ jobs:
           ssh -i ~/.ssh/deploy_key -4 -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout="${VPS_CONNECT_TIMEOUT}" \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes -o IdentitiesOnly=yes \
             "${VPS_USER}@${VPS_HOST}" \
-            TARGET_DIR="$TARGET_DIR" BRANCH="$BRANCH" REPO="$REPO" bash -s < /tmp/deploy-remote.sh
+            TARGET_DIR="$TARGET_DIR" BRANCH="$BRANCH" REPO="$REPO" APP_PORT="$APP_PORT" bash -s < /tmp/deploy-remote.sh
 
       - name: Verify production response
         if: always()
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
-            if curl -fsS https://iliagpt.com/api/health >/dev/null 2>&1; then
+            if curl -fsS --max-time 8 https://iliagpt.com/api/health >/dev/null 2>&1; then
               echo "production API healthy"
               exit 0
             fi
