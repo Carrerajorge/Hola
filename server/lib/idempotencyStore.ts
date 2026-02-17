@@ -13,12 +13,14 @@ export type IdempotencyCheckResult =
 const TTL_HOURS = 24;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_PAYLOAD_HASH_BYTES = 128_000;
+const MAX_RESPONSE_JSON_BYTES = 64_000;
 const IDEMPOTENCY_KEY_MIN_LENGTH = 6;
 const IDEMPOTENCY_KEY_MAX_LENGTH = 140;
 const IDEMPOTENCY_KEY_RE = /^[a-zA-Z0-9._-]+$/;
 const IDEMPOTENCY_HASH_RE = /^[a-f0-9]{64}$/;
 const MAX_PAYLOAD_HASH_JSON_BYTES = 65_536;
 const MAX_IDEMPOTENCY_LOG_KEY_BYTES = 6;
+const MAX_IDEMPOTENCY_NESTING_DEPTH = 12;
 
 let cleanupIntervalId: NodeJS.Timeout | null = null;
 const logger = createLogger("idempotency-store");
@@ -72,6 +74,88 @@ function normalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet())
     output[key] = normalizeForHash(source[key], seen);
   }
   return output;
+}
+
+function normalizeForStorage(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0
+): unknown {
+  if (depth > MAX_IDEMPOTENCY_NESTING_DEPTH) {
+    return "[max_depth_exceeded]";
+  }
+
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return `${value}n`;
+  }
+
+  if (typeof value === "symbol" || typeof value === "function") {
+    return `[unsupported:${typeof value}]`;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value !== "object") {
+    return String(value);
+  }
+
+  if (seen.has(value as object)) {
+    return "[circular]";
+  }
+  seen.add(value as object);
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeForStorage(entry, seen, depth + 1));
+  }
+
+  const source = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  const keys = Object.keys(source).sort();
+
+  for (const key of keys) {
+    if (key === "__proto__" || key === "prototype" || key === "constructor") {
+      output[key] = "[redacted_proto_key]";
+      continue;
+    }
+
+    output[key] = normalizeForStorage(source[key], seen, depth + 1);
+  }
+
+  return output;
+}
+
+function safeSerializedResponse(payload: Record<string, unknown>): Record<string, unknown> {
+  const normalized = normalizeForStorage(payload) as Record<string, unknown>;
+  const serialized = JSON.stringify(normalized);
+  if (serialized === undefined) {
+    return {
+      _truncated: true,
+      _reason: "Unable to serialize response payload",
+      _timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (Buffer.byteLength(serialized, "utf8") <= MAX_RESPONSE_JSON_BYTES) {
+    return normalized;
+  }
+
+  return {
+    _truncated: true,
+    _reason: "Response payload exceeds idempotency cache size limit",
+    _originalBytes: Buffer.byteLength(serialized, "utf8"),
+    _cachedAt: new Date().toISOString(),
+    _digest: crypto.createHash("sha256").update(serialized).digest("hex"),
+  };
 }
 
 export function computePayloadHash(body: unknown): string {
@@ -188,18 +272,21 @@ export async function completeIdempotencyKey(
   response: Record<string, unknown>
 ): Promise<void> {
   validateIdempotencyKey(key);
+  const responseJson = safeSerializedResponse(response);
+  const responseBytes = Buffer.byteLength(JSON.stringify(responseJson), "utf8");
   try {
     await db
       .update(pareIdempotencyKeys)
       .set({
         status: "completed" as PareIdempotencyStatus,
-        responseJson: response,
+        responseJson,
       })
       .where(eq(pareIdempotencyKeys.idempotencyKey, key));
 
     logger.info("Idempotency key completed", {
       event: "IDEMPOTENCY_KEY_COMPLETED",
       key: obfuscateIdempotencyKey(key),
+      responseBytes,
       timestamp: new Date().toISOString(),
     });
   } catch (error: unknown) {
@@ -288,7 +375,15 @@ export function startCleanupScheduler(): void {
   }
 
   cleanupIntervalId = setInterval(async () => {
-    await cleanupExpiredKeys();
+    try {
+      await cleanupExpiredKeys();
+    } catch (error: unknown) {
+      logger.error("Idempotency cleanup interval failed", {
+        event: "IDEMPOTENCY_CLEANUP_INTERVAL_ERROR",
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+    }
   }, CLEANUP_INTERVAL_MS);
   if (cleanupIntervalId.unref) {
     cleanupIntervalId.unref();
@@ -321,30 +416,32 @@ export async function getIdempotencyKeyStats(): Promise<{
   expired: number;
 }> {
   const now = new Date();
+  const [totalResult, processingResult, completedResult, failedResult, expiredResult] =
+    await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(pareIdempotencyKeys),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(pareIdempotencyKeys)
+        .where(eq(pareIdempotencyKeys.status, "processing")),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(pareIdempotencyKeys)
+        .where(eq(pareIdempotencyKeys.status, "completed")),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(pareIdempotencyKeys)
+        .where(eq(pareIdempotencyKeys.status, "failed")),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(pareIdempotencyKeys)
+        .where(lt(pareIdempotencyKeys.expiresAt, now)),
+    ]);
 
-  const [allKeys] = await Promise.all([
-    db.query.pareIdempotencyKeys.findMany(),
-  ]);
-
-  const stats = {
-    total: allKeys.length,
-    processing: 0,
-    completed: 0,
-    failed: 0,
-    expired: 0,
+  return {
+    total: totalResult[0]?.count ?? 0,
+    processing: processingResult[0]?.count ?? 0,
+    completed: completedResult[0]?.count ?? 0,
+    failed: failedResult[0]?.count ?? 0,
+    expired: expiredResult[0]?.count ?? 0,
   };
-
-  for (const key of allKeys) {
-    if (key.expiresAt < now) {
-      stats.expired++;
-    } else if (key.status === "processing") {
-      stats.processing++;
-    } else if (key.status === "completed") {
-      stats.completed++;
-    } else if (key.status === "failed") {
-      stats.failed++;
-    }
-  }
-
-  return stats;
 }
