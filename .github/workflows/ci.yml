@@ -504,6 +504,8 @@ jobs:
           persist-credentials: false
 
       - name: Run repository secret scan
+        id: secret_scan
+        continue-on-error: true
         run: |
           set -euo pipefail
           mkdir -p trivy-cache trivy-secrets
@@ -519,9 +521,16 @@ jobs:
             --skip-dirs dist \
             --skip-dirs artifacts \
             --skip-dirs test_results \
-            --format json \
-            --output /src/trivy-secrets/secret-scan.json \
+            --format sarif \
+            --output /src/trivy-secrets/secret-scan.sarif \
             /src
+
+      - name: Upload Trivy secret scan report to GitHub Security
+        if: always() && hashFiles('trivy-secrets/secret-scan.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-secrets/secret-scan.sarif
+          category: trivy-secret-scan
 
       - name: Upload secret scan report
         if: always()
@@ -530,6 +539,12 @@ jobs:
           name: trivy-secret-scan
           path: trivy-secrets
           retention-days: 14
+
+      - name: Fail if secret scan reported findings
+        if: always() && steps.secret_scan.outcome != 'success'
+        run: |
+          echo "::error::Trivy secret scan reported findings or command failed. Review the SARIF report and artifact."
+          exit 1
 
   # Build/push container images so deploy workflows can pull by commit tag.
   docker:

@@ -54,7 +54,7 @@ function safeJsonSize(value: unknown): number {
   }
 }
 
-function sanitizeText(value: unknown): string {
+export function sanitizeText(value: unknown): string {
   return String(value == null ? "" : value)
     .normalize("NFKC")
     .replace(TOOL_CONTROL_CHARS_RE, "")
