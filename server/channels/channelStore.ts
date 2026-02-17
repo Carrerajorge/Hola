@@ -15,11 +15,115 @@ const pairingAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const makePairingCode = customAlphabet(pairingAlphabet, 8);
 const MAX_OWNER_IDENTITY_VALUE_LENGTH = 120;
 const MAX_POLICY_ARRAY_LENGTH = 64;
+const MAX_METADATA_PATCH_KEYS = 280;
+const MAX_METADATA_KEY_LENGTH = 96;
+const MAX_METADATA_STRING_LENGTH = 640;
+const MAX_METADATA_ARRAY_ITEMS = 128;
+const MAX_METADATA_DEPTH = 8;
 const SAFE_OWNER_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const SAFE_METADATA_KEY_RE = /^[A-Za-z0-9._:@+\-]+$/;
 
 function isUniqueViolation(err: unknown): boolean {
   const code = (err as any)?.code;
   return code === "23505";
+}
+
+function sanitizeMetadataKey(rawKey: unknown): string {
+  const normalized = String(rawKey ?? "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, MAX_METADATA_KEY_LENGTH);
+
+  if (!normalized || !SAFE_METADATA_KEY_RE.test(normalized)) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function sanitizeMetadataValue(value: unknown, depth = 0, seen = new Set<object>()): unknown {
+  if (depth >= MAX_METADATA_DEPTH) {
+    return "[truncated-depth]";
+  }
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value
+      .normalize("NFKC")
+      .replace(/\u0000/g, "")
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+      .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
+      .slice(0, MAX_METADATA_STRING_LENGTH);
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > MAX_METADATA_ARRAY_ITEMS) {
+      value = value.slice(0, MAX_METADATA_ARRAY_ITEMS);
+    }
+
+    return value.map((item) => sanitizeMetadataValue(item, depth + 1, seen));
+  }
+
+  if (typeof value === "object") {
+    if (seen.has(value as object)) {
+      return "[circular]";
+    }
+
+    const rawObject = value as Record<string, unknown>;
+    const keys = Object.keys(rawObject);
+    if (!keys.length) return {};
+
+    const out: Record<string, unknown> = {};
+    seen.add(value as object);
+
+    const limit = Math.min(keys.length, MAX_METADATA_PATCH_KEYS);
+    let written = 0;
+    for (const key of keys) {
+      if (written >= limit) break;
+
+      const safeKey = sanitizeMetadataKey(key);
+      if (!safeKey) {
+        continue;
+      }
+
+      out[safeKey] = sanitizeMetadataValue(rawObject[key], depth + 1, seen);
+      written += 1;
+    }
+
+    seen.delete(value as object);
+    return out;
+  }
+
+  return String(value)
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+    .slice(0, MAX_METADATA_STRING_LENGTH);
+}
+
+function sanitizeMetadataPatch(input: unknown): Record<string, unknown> {
+  if (!isRecord(input)) {
+    return {};
+  }
+
+  const sanitized = sanitizeMetadataValue(input as Record<string, unknown>) as unknown;
+  return isRecord(sanitized) ? sanitized : {};
 }
 
 export async function createChannelPairingCode(input: {
@@ -160,7 +264,7 @@ export async function getOrCreateChannelConversation(input: {
         channelKey: input.channelKey,
         externalConversationId: input.externalConversationId,
         chatId: chat.id,
-        metadata: input.metadata ?? null,
+        metadata: sanitizeMetadataPatch(input.metadata ?? null),
       })
       .returning();
 
@@ -189,11 +293,21 @@ export async function updateChannelConversationMetadata(
   conversationId: string,
   patch: Record<string, unknown>,
 ): Promise<ChannelConversation | null> {
+  const safePatch = sanitizeMetadataPatch(patch);
+  if (Object.keys(safePatch).length === 0) {
+    const [unchanged] = await db
+      .select()
+      .from(channelConversations)
+      .where(eq(channelConversations.id, conversationId))
+      .limit(1);
+    return unchanged ?? null;
+  }
+
   const now = new Date();
   const [row] = await db
     .update(channelConversations)
     .set({
-      metadata: sql`COALESCE(${channelConversations.metadata}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`,
+      metadata: sql`COALESCE(${channelConversations.metadata}, '{}'::jsonb) || ${JSON.stringify(safePatch)}::jsonb`,
       updatedAt: now,
     })
     .where(eq(channelConversations.id, conversationId))
@@ -264,6 +378,7 @@ export async function patchConversationMetadata(
   conversationId: string,
   patch: Record<string, unknown>,
 ): Promise<ChannelConversation | null> {
+  const safePatch = sanitizeMetadataPatch(patch);
   const [row] = await db
     .select()
     .from(channelConversations)
@@ -272,7 +387,7 @@ export async function patchConversationMetadata(
 
   if (!row) return null;
 
-  const merged = mergeMetadataObjects(normalizeMetadata(row.metadata), patch);
+  const merged = mergeMetadataObjects(normalizeMetadata(row.metadata), safePatch);
 
   const [updated] = await db
     .update(channelConversations)
@@ -316,10 +431,12 @@ export async function touchChannelConversationHeartbeat(
 
   if (!row) return null;
 
-  const merged = mergeHistoryMetadata(row.metadata, {
-    lastInboundAt: touch.lastInboundAt ?? row.metadata?.lastInboundAt,
-    lastOutboundAt: touch.lastOutboundAt ?? row.metadata?.lastOutboundAt,
-  } as Record<string, unknown>);
+  const merged = sanitizeMetadataPatch(
+    mergeHistoryMetadata(row.metadata, {
+      lastInboundAt: touch.lastInboundAt ?? row.metadata?.lastInboundAt,
+      lastOutboundAt: touch.lastOutboundAt ?? row.metadata?.lastOutboundAt,
+    }),
+  ) as Record<string, unknown>;
 
   const [updated] = await db
     .update(channelConversations)
@@ -336,8 +453,8 @@ export async function setConversationPolicy(
 ): Promise<ChannelConversation | null> {
   return patchConversationMetadata(conversationId, {
     policy: {
-      ...(await getConversationMetadata(conversationId)).policy,
-      ...policy,
+      ...sanitizeMetadataPatch((await getConversationMetadata(conversationId)).policy),
+      ...sanitizeMetadataPatch(policy),
       updatedAt: new Date().toISOString(),
     },
   });
@@ -409,12 +526,12 @@ export async function setConversationOwnerIdentity(
   return patchConversationMetadata(conversationId, {
     ownerIdentity: normalizedOwnerIdentityPatch,
     policy: {
-      ...policyPatch,
+      ...sanitizeMetadataPatch(policyPatch),
       ...(ownerIds.size ? { owner_external_ids: Array.from(mergedPolicyOwnerIds) } : {}),
       updatedAt: new Date().toISOString(),
     },
     runtime: {
-      ...runtimePatch,
+      ...sanitizeMetadataPatch(runtimePatch),
       ...(ownerIds.size ? { owner_external_ids: Array.from(mergedRuntimeOwnerIds) } : {}),
     },
   });

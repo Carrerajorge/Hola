@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 
 import type { ChannelConversation } from "@shared/schema/channels";
 import type { ChannelRuntimeConfig } from "./runtimeConfig";
-import type { MessageEnvelope } from "./types";
+import type { ExternalChannel, MessageEnvelope } from "./types";
 
 export type ChannelPolicyDecisionCode =
   | "ok"
@@ -37,11 +37,34 @@ export type ResultErr<T> = {
 
 export type ChannelPolicyResult = ResultOk<ChannelPolicyDecision> | ResultErr<ChannelPolicyDecision>;
 
-const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
-  whatsapp_cloud: 24 * 60 * 60 * 1000,
-  messenger: 24 * 60 * 60 * 1000,
-  wechat: 24 * 60 * 60 * 1000,
-  telegram: 0,
+type ChannelPolicyProfile = {
+  windowMs: number;
+  templateRequired: boolean;
+  canUseOtnTags: boolean;
+};
+
+const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CHANNEL_POLICY_PROFILE: Record<ExternalChannel, ChannelPolicyProfile> = {
+  whatsapp_cloud: {
+    windowMs: DEFAULT_WINDOW_MS,
+    templateRequired: true,
+    canUseOtnTags: false,
+  },
+  messenger: {
+    windowMs: DEFAULT_WINDOW_MS,
+    templateRequired: true,
+    canUseOtnTags: true,
+  },
+  wechat: {
+    windowMs: 12 * 60 * 60 * 1000,
+    templateRequired: false,
+    canUseOtnTags: false,
+  },
+  telegram: {
+    windowMs: 0,
+    templateRequired: false,
+    canUseOtnTags: false,
+  },
 };
 const MAX_RATE_LIMIT_PER_MINUTE = 120;
 const MAX_IDENTITY_LIST_SIZE = 64;
@@ -50,14 +73,30 @@ const MAX_POLICY_ID_TEXT_LENGTH = 160;
 const MAX_PAIRING_CODE_LENGTH = 16;
 const MAX_OWNER_SET_SIZE = 128;
 const SAFE_CHANNEL_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const MAX_POLICY_MESSAGE_LENGTH = 320;
 
-function normalizeIdentity(value: unknown): string {
+function enforcePolicyText(value: unknown, fallback: string): string {
+  return String(value ?? fallback)
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+    .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
+    .replace(/<[^>]*>/g, "")
+    .trim()
+    .slice(0, MAX_POLICY_MESSAGE_LENGTH);
+}
+
+function channelProfile(channel: MessageEnvelope["channel"]): ChannelPolicyProfile {
+  return CHANNEL_POLICY_PROFILE[channel] ?? CHANNEL_POLICY_PROFILE.telegram;
+}
+
+function normalizeIdentity(value: unknown, maxLength = MAX_IDENTITY_TEXT_LENGTH): string {
   return String(value ?? "")
     .normalize("NFKC")
     .replace(/\u0000/g, "")
     .replace(/[\x00-\x1f\x7f]/g, "")
     .trim()
-    .slice(0, MAX_IDENTITY_TEXT_LENGTH);
+    .slice(0, maxLength);
 }
 
 function normalizeIdentityStrict(value: unknown, maxLength = MAX_POLICY_ID_TEXT_LENGTH): string {
@@ -203,29 +242,47 @@ function conversationOwnerCandidates(
 
 function normalizeWindowRecoveryMessage(channel: MessageEnvelope["channel"]): string {
   if (channel === "whatsapp_cloud") {
-    return "La conversación de WhatsApp está fuera de la ventana activa (24h). Pide al usuario que reabra el chat y solo puedo responder con plantilla aprobada.";
+    return enforcePolicyText(
+      "La conversación de WhatsApp está fuera de la ventana activa (24h). Pide al usuario que escriba de nuevo; solo puedo responder con plantilla aprobada.",
+      "La conversación está fuera de ventana. Reabre el chat y usa plantilla aprobada.",
+    );
   }
 
   if (channel === "messenger") {
-    return "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.";
+    return enforcePolicyText(
+      "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.",
+      "Esta conversación está fuera de la ventana de Messenger.",
+    );
   }
 
-  return "Esta conversación de WeChat está fuera de ventana. El contacto debe escribir de nuevo y confirmar para reabrir el canal.";
+  return enforcePolicyText(
+    "Esta conversación de WeChat está fuera de la ventana de servicio. El contacto debe escribir de nuevo para reabrir el canal.",
+    "Esta conversación está fuera de ventana.",
+  );
 }
 
 function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string {
   if (channel === "whatsapp_cloud") {
-    return "No puedo responder aquí ahora mismo. Envía el código de vinculación recibido desde la app para habilitar este canal.";
+    return enforcePolicyText(
+      "No puedo responder aquí ahora mismo. Envía el código de vinculación recibido desde la app para habilitar este canal.",
+      "No puedo responder aquí. Envía el código de vinculación.",
+    );
   }
-  return "No se procesa este mensaje porque el auto-reply está desactivado para este chat.";
+  return enforcePolicyText(
+    "No se procesa este mensaje porque el auto-reply está desactivado para este chat.",
+    "Auto-reply desactivado para este chat.",
+  );
 }
 
 function normalizePayloadErrorMessage(): string {
-  return "Evento no procesable. Verifica que el mensaje contenga un identificador válido.";
+  return enforcePolicyText(
+    "Evento no procesable. Verifica que el mensaje contenga un identificador válido.",
+    "Evento no procesable.",
+  );
 }
 
 function normalizeBlockedSenderMessage(): string {
-  return "Mensaje bloqueado por configuración de seguridad del canal.";
+  return enforcePolicyText("Mensaje bloqueado por configuración de seguridad del canal.", "Mensaje bloqueado por configuración.");
 }
 
 export type ChannelPolicyContext = {
@@ -283,7 +340,7 @@ export function getConversationPolicy(conversation: ChannelConversation): {
       policy.ownerExternalIds ??
       policy.owner_ids ??
       policy.owners ??
-      policy.ownerExternalIds,
+      policy.owner_ids,
   );
 
   const rate = Number(
@@ -305,7 +362,7 @@ export function getConversationPolicy(conversation: ChannelConversation): {
 }
 
 function nowWithinWindow(channel: MessageEnvelope["channel"], lastTs: number, now: number): boolean {
-  const windowMs = CHANNEL_WINDOWS_MS[channel] ?? 0;
+  const windowMs = channelProfile(channel).windowMs;
   if (windowMs <= 0) return true;
   if (!lastTs) return true;
   return now - lastTs <= windowMs;
@@ -316,11 +373,29 @@ export function evaluateChannelPolicy(
   windowState: ChannelWindowState,
   rateControl?: { allowed: boolean; retryAfterIso?: string },
 ): ChannelPolicyResult {
+  if (context.envelope.conversationKey.channel !== context.envelope.channel) {
+    return {
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
+        requiresOwnerHandshake: true,
+        shouldRespond: false,
+      },
+    };
+  }
+
   if (
     !context.envelope.providerMessageId ||
     !context.envelope.senderId ||
     !context.envelope.channelKey ||
-    !context.envelope.threadId
+    !context.envelope.threadId ||
+    !context.envelope.conversationKey.workspaceId ||
+    !context.envelope.conversationKey.channelAccountId ||
+    !context.envelope.conversationKey.threadId
   ) {
     return {
       ok: false,
@@ -376,7 +451,10 @@ export function evaluateChannelPolicy(
       data: {
         allowed: false,
         code: "rate_limited",
-        replyText: "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+        replyText: enforcePolicyText(
+          "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+          "Espera un momento y vuelve a intentarlo.",
+        ),
         policyTraceId: buildPolicyTraceId(context, "rate_limited"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
@@ -422,8 +500,10 @@ export function evaluateChannelPolicy(
       data: {
         allowed: false,
         code: "off_for_owner_only",
-        replyText:
+        replyText: enforcePolicyText(
           "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
+          "Este chat está bloqueado para auto-reply.",
+        ),
         policyTraceId: buildPolicyTraceId(context, "off_for_owner_only"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
@@ -437,6 +517,7 @@ export function evaluateChannelPolicy(
   );
 
   if (!nowWithinWindow(context.envelope.channel, latestTs, Date.now())) {
+    const profile = channelProfile(context.envelope.channel);
     return {
       ok: false,
       error: "outside_window",
@@ -444,7 +525,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "outside_window",
         replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
-        requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
+        requiresTemplate: profile.templateRequired,
         policyTraceId: buildPolicyTraceId(context, "outside_window"),
         requiresOwnerHandshake: isOwner,
         shouldRespond: true,
