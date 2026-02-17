@@ -5305,7 +5305,7 @@ IMPORTANTE:
               body: JSON.stringify({
                 messages: finalChatHistory,
                 conversationId: chatId,
-                runId: runInfo.id,
+                runId: streamRunContext.runId,
                 chatId: chatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
                 provider: selectedProvider,
