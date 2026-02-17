@@ -6,6 +6,7 @@ export type ChannelPolicyDecisionCode =
   | "ok"
   | "off_for_owner_only"
   | "outside_window"
+  | "rate_limited"
   | "blocked_sender"
   | "disabled"
   | "invalid_payload";
@@ -16,6 +17,8 @@ export type ChannelPolicyDecision = {
   replyText: string;
   requiresTemplate?: boolean;
   requiresOwnerHandshake?: boolean;
+  shouldRespond?: boolean;
+  throttleUntilIso?: string;
 };
 
 const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
@@ -153,7 +156,7 @@ function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string
 }
 
 function normalizePayloadErrorMessage(): string {
-  return "No puedo continuar porque no se recibió un identificador válido del evento.";
+  return "Evento no procesable. Verifica que el mensaje contenga un identificador válido.";
 }
 
 function normalizeBlockedSenderMessage(): string {
@@ -192,16 +195,29 @@ export function getConversationPolicy(conversation: ChannelConversation): {
   const autoResponderEnabled =
     typeof policy.autoResponderEnabled === "boolean"
       ? policy.autoResponderEnabled
-      : null;
+      : typeof policy.auto_responder_enabled === "boolean"
+        ? policy.auto_responder_enabled
+        : typeof policy.enabled === "boolean"
+          ? policy.enabled
+          : null;
 
   const ownerOnly =
     typeof policy.ownerOnly === "boolean"
       ? policy.ownerOnly
-      : false;
+      : typeof policy.owner_only === "boolean"
+        ? policy.owner_only
+        : false;
 
-  const ownerExternalIds = toStringSet(policy.owner_external_ids);
+  const ownerExternalIds = toStringSet(
+    policy.owner_external_ids ?? policy.ownerExternalIds ?? policy.owner_ids ?? policy.owners ?? policy.ownerExternalIds,
+  );
 
-  const rate = Number(policy.rateLimitPerMinute);
+  const rate = Number(
+    policy.rateLimitPerMinute ??
+      policy.rateLimit ??
+      policy.rate_limit_per_minute ??
+      policy.rate_limit,
+  );
   const rateLimitPerMinute = Number.isFinite(rate) && rate > 0 ? Math.floor(rate) : 6;
 
   return {
@@ -222,6 +238,7 @@ function nowWithinWindow(channel: MessageEnvelope["channel"], lastTs: number, no
 export function evaluateChannelPolicy(
   context: ChannelPolicyContext,
   windowState: ChannelWindowState,
+  rateControl?: { allowed: boolean; retryAfterIso?: string },
 ): ChannelPolicyDecision {
   if (
     !context.envelope.providerMessageId ||
@@ -234,6 +251,7 @@ export function evaluateChannelPolicy(
       code: "invalid_payload",
       replyText: normalizePayloadErrorMessage(),
       requiresOwnerHandshake: true,
+      shouldRespond: false,
     };
   }
 
@@ -244,6 +262,18 @@ export function evaluateChannelPolicy(
       code: "blocked_sender",
       replyText: normalizeBlockedSenderMessage(),
       requiresOwnerHandshake: false,
+      shouldRespond: false,
+    };
+  }
+
+  if (rateControl && !rateControl.allowed) {
+    return {
+      allowed: false,
+      code: "rate_limited",
+      replyText: "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+      requiresOwnerHandshake: true,
+      shouldRespond: false,
+      throttleUntilIso: rateControl.retryAfterIso,
     };
   }
 
@@ -269,6 +299,7 @@ export function evaluateChannelPolicy(
       code: "off_for_owner_only",
       replyText: normalizeOwnerBlockMessage(context.envelope.channel),
       requiresOwnerHandshake: true,
+      shouldRespond: false,
     };
   }
 
@@ -278,6 +309,7 @@ export function evaluateChannelPolicy(
       code: "off_for_owner_only",
       replyText: "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
       requiresOwnerHandshake: true,
+      shouldRespond: false,
     };
   }
 
@@ -293,6 +325,7 @@ export function evaluateChannelPolicy(
       replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
       requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
       requiresOwnerHandshake: isOwner,
+      shouldRespond: true,
     };
   }
 
@@ -300,5 +333,6 @@ export function evaluateChannelPolicy(
     allowed: true,
     code: "ok",
     replyText: "",
+    shouldRespond: true,
   };
 }

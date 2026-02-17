@@ -77,6 +77,7 @@ interface GptActionExecutionPayload {
 interface RuntimeDependencies {
   fetch?: typeof fetch;
   now?: () => number;
+  random?: () => number;
 }
 
 interface ConcurrencyEntry {
@@ -787,12 +788,14 @@ export class GptActionRuntime {
   private readonly rateLimiter: ActionRateLimiter;
   private readonly dependencies: RuntimeDependencies;
   private readonly fetcher: typeof fetch;
+  private readonly random: () => number;
 
   constructor(
     dependencies: RuntimeDependencies = {}
   ) {
     this.dependencies = dependencies;
     this.fetcher = dependencies.fetch || globalThis.fetch;
+    this.random = dependencies.random || Math.random;
     this.limiter = new ConversationActionLimiter(
       DEFAULT_MAX_CONCURRENCY,
       8_000,
@@ -1515,7 +1518,8 @@ export class GptActionRuntime {
   private computeBackoff(attempt: number): number {
     const base = DEFAULT_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
     const capped = Math.min(8_000, base);
-    const jitter = capped * BACKOFF_JITTER_RATIO * (Math.random() - 0.5) * 2;
+    const jitterSeed = this.random();
+    const jitter = capped * BACKOFF_JITTER_RATIO * (jitterSeed - 0.5) * 2;
     return Math.max(DEFAULT_RETRY_DELAY_MS, Math.floor(capped + jitter));
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeGptActionRequestPayload, parseRetryAfterHeader } from "./gptActionRuntime";
+import * as fc from "fast-check";
+import { GptActionRuntime, normalizeGptActionRequestPayload, parseRetryAfterHeader } from "./gptActionRuntime";
 
 describe("gptActionRuntime shared helpers", () => {
   describe("normalizeGptActionRequestPayload", () => {
@@ -63,6 +64,36 @@ describe("gptActionRuntime shared helpers", () => {
       expect(parseRetryAfterHeader("invalid")).toBeUndefined();
       expect(parseRetryAfterHeader("")).toBeUndefined();
       expect(parseRetryAfterHeader(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("computeBackoff jitter behavior", () => {
+    it("respects bounds and fallback delay", () => {
+      const runtime = new GptActionRuntime({ random: () => 0.5 });
+      const firstAttempt = (runtime as any).computeBackoff(1);
+      const secondAttempt = (runtime as any).computeBackoff(2);
+      const maxAttempt = (runtime as any).computeBackoff(20);
+
+      expect(firstAttempt).toBe(500);
+      expect(secondAttempt).toBe(1000);
+      expect(maxAttempt).toBeGreaterThanOrEqual(500);
+      expect(maxAttempt).toBeLessThanOrEqual(8000);
+    });
+
+    it("bounds random samples", () => {
+      fc.assert(
+        fc.property(fc.float({ min: 0, max: 1, noNaN: true }), (random) => {
+          const runtime = new GptActionRuntime({ random: () => random });
+          const value = (runtime as any).computeBackoff(4);
+          const base = 500 * Math.pow(2, 3);
+          const capped = Math.min(8000, base);
+          const jitter = capped * 0.2 * (random - 0.5) * 2;
+          const expectedMin = Math.max(500, Math.floor(capped + jitter - 0.0001));
+          const expectedMax = Math.floor(capped + jitter + 0.0001);
+          expect(value).toBeGreaterThanOrEqual(expectedMin);
+          expect(value).toBeLessThanOrEqual(expectedMax);
+        })
+      );
     });
   });
 });
