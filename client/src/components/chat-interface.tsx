@@ -3501,9 +3501,11 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
-    // Prevent double-submit while a request is already in flight
-    if (aiState !== "idle") {
-      console.log("[handleSubmit] Blocked: aiState is", aiState, "(not idle)");
+    // Prevent double-submit while THIS chat has a request in flight.
+    // If a DIFFERENT chat is busy (aiStateChatId !== chatId), allow submission.
+    const thisChatBusy = aiState !== "idle" && (!aiStateChatId || aiStateChatId === chatId);
+    if (thisChatBusy) {
+      console.log("[handleSubmit] Blocked: aiState is", aiState, "for chatId", aiStateChatId);
       return;
     }
 

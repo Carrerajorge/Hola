@@ -284,9 +284,11 @@ export default function Home() {
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
 
-    // DO NOT reset aiState - let background streaming complete naturally
-    // The aiStateChatId check prevents the indicator from showing on wrong chat
-    // Only reset process steps for UI display
+    // Reset aiState for the NEW chat's UI so the submit button is unblocked.
+    // Background streams from the OLD chat continue independently — their
+    // setAiState calls target the parent but aiStateChatId won't match the new chat.
+    setAiStateRaw('idle');
+    setAiStateChatId(null);
     setAiProcessSteps([]);
 
     setIsNewChatMode(false);
@@ -294,7 +296,7 @@ export default function Home() {
     setActiveChatId(id);
     setLocation(`/chat/${id}`);
     setSelectedProjectId(null); // Clear project selection when selecting a chat
-  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
+  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps, setAiStateRaw, setAiStateChatId]);
 
   // Listen for select-chat custom event (used by Agent Mode navigation)
   // This event is used when agent creates a new chat - we need to preserve the stable key
