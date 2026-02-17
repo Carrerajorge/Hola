@@ -13,9 +13,10 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
   packages: write
 
@@ -141,22 +142,24 @@ jobs:
 
       - name: Run blue-green deploy
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
-            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
-            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
-            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
-             cd ${{ env.DEPLOY_PATH }} && \
-             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
-             APP_VERSION='${{ steps.tag.outputs.app_version }}' \
-             bash scripts/deploy-bluegreen.sh"
+          set -euo pipefail
+          for attempt in 1 2; do
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                bash scripts/deploy-bluegreen.sh"; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Blue-green deploy failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
       - name: Verify production
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
           echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
-          sleep 5
+          sleep $(( (i < 10 ? 3 : 5) ))
           for i in $(seq 1 20); do
             HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
             if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
@@ -190,6 +193,19 @@ jobs:
           else
             echo "⚠️ /api/health/ready → HTTP ${READY_CODE} (non-fatal)"
           fi
+          # SSL + 5xx guardrails
+          SSL_OK=$(echo | openssl s_client -servername iliagpt.com -connect iliagpt.com:443 2>/dev/null | grep -c "Verify return code: 0 (ok)" || true)
+          if [ "${SSL_OK}" -lt 1 ]; then
+            echo "::error::SSL verification failed for iliagpt.com"
+            exit 1
+          fi
+
+          STATUS_CODE=$(curl -s -o /dev/null -w '%{http_code}' https://iliagpt.com/)
+          if [ "${STATUS_CODE}" -ge 500 ]; then
+            echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
+            exit 1
+          fi
+
 
       - name: Deploy summary
         if: always()
@@ -250,17 +266,29 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.tag.outputs.image_tag }}"
           echo "▸ Waiting for ghcr.io/carrerajorge/iliagpt-app:${TAG}..."
-          for i in $(seq 1 40); do
+          for i in $(seq 1 60); do
             if docker manifest inspect "ghcr.io/carrerajorge/iliagpt-app:${TAG}" > /dev/null 2>&1; then
               echo "  ✓ Image available after ${i} attempts"
               break
             fi
             if [ "$i" -eq 40 ]; then
-              echo "✗ Images not available in GHCR after 200s"
+              echo "✗ Images not available in GHCR after retries"
               exit 1
             fi
-            sleep 5
+            sleep $(( (i < 10 ? 3 : 5) ))
           done
+
+      - name: Deploy circuit breaker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          failures=$(gh run list --repo ${{ github.repository }} --workflow "Deploy to Production (Blue-Green)" --branch main --limit 8 --json conclusion --jq '[.[] | select(.conclusion=="failure")] | length')
+          echo "Recent deploy failures: ${failures}"
+          if [ "${failures}" -ge 3 ]; then
+            echo "::error::Circuit breaker open: 3+ recent deploy failures on main. Aborting auto deploy."
+            exit 1
+          fi
 
       - name: Setup SSH key
         run: |
@@ -322,22 +350,24 @@ jobs:
 
       - name: Run blue-green deploy
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
-            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
-            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
-            "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
-             cd ${{ env.DEPLOY_PATH }} && \
-             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
-             APP_VERSION='${{ steps.tag.outputs.app_version }}' \
-             bash scripts/deploy-bluegreen.sh"
+          set -euo pipefail
+          for attempt in 1 2; do
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                bash scripts/deploy-bluegreen.sh"; then
+              break
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              echo "Blue-green deploy failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
       - name: Verify production
         run: |
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
           echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
-          sleep 5
+          sleep $(( (i < 10 ? 3 : 5) ))
           for i in $(seq 1 20); do
             HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
             if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
@@ -364,6 +394,19 @@ jobs:
           else
             echo "⚠️ /api/health/ready → HTTP ${READY_CODE} (non-fatal)"
           fi
+          # SSL + 5xx guardrails
+          SSL_OK=$(echo | openssl s_client -servername iliagpt.com -connect iliagpt.com:443 2>/dev/null | grep -c "Verify return code: 0 (ok)" || true)
+          if [ "${SSL_OK}" -lt 1 ]; then
+            echo "::error::SSL verification failed for iliagpt.com"
+            exit 1
+          fi
+
+          STATUS_CODE=$(curl -s -o /dev/null -w '%{http_code}' https://iliagpt.com/)
+          if [ "${STATUS_CODE}" -ge 500 ]; then
+            echo "::error::Production returned 5xx on root endpoint: ${STATUS_CODE}"
+            exit 1
+          fi
+
 
       - name: Deploy summary
         if: always()

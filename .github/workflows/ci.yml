@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -34,7 +34,16 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Type check
         run: npm run type-check
@@ -131,10 +140,28 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Run tests
-        run: npm run test:run -- --silent --passWithNoTests
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            npm run test:run -- --silent --passWithNoTests && break
+            if [ "$attempt" -eq 2 ]; then
+              echo "Unit tests failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
         env:
           CI: "true"
           NODE_ENV: test
@@ -161,10 +188,28 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Build
-        run: npm run build
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            npm run build && break
+            if [ "$attempt" -eq 2 ]; then
+              echo "Build failed after retry" >&2
+              exit 1
+            fi
+            sleep 10
+          done
         env:
           NODE_ENV: production
 
@@ -191,7 +236,16 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: npm audit (high+)
         run: npm audit --omit=dev --audit-level=high
@@ -239,7 +293,16 @@ jobs:
 
       - name: Install dependencies
         if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
-        run: npm ci
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            npm ci && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
 
       - name: Install Playwright browsers
         if: ${{ steps.e2e_gate.outputs.should_run == 'true' }}
