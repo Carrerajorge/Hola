@@ -233,5 +233,39 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.code).toBe("validation_error");
       expect(result.error?.message).toContain("content-type");
     });
+
+    it("does not retry non-retriable client errors returned by downstream", async () => {
+      let calls = 0;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          calls += 1;
+          return new Response("bad request", {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+
+      const action = {
+        id: "action-3",
+        name: "action-test-3",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(calls).toBe(1);
+      expect(result.success).toBe(false);
+      expect(result.error?.retryable).toBe(false);
+      expect(result.error?.code).toBe("execution_error");
+      expect(result.error?.message).toContain("status 400");
+    });
   });
 });

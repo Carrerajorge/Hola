@@ -1781,6 +1781,10 @@ function inferExecutionErrorCode(message: string): string {
     return "execution_retryable";
   }
 
+  if (/\b(?:status|code)\s*4\d\d\b/.test(normalized)) {
+    return "execution_error";
+  }
+
   if (normalized.includes("timeout")) {
     return "timeout";
   }
