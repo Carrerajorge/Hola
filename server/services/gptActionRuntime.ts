@@ -39,6 +39,23 @@ const CONCURRENCY_KEY_RE = /^[a-zA-Z0-9._-]+:[a-zA-Z0-9._-]+$/;
 const BACKOFF_JITTER_RATIO = 0.2;
 const MAX_SCHEMA_VALIDATION_DEPTH = 64;
 const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
+const MAX_HEADER_VALUE_BYTES = 2_048;
+const MAX_SAFE_HEADER_NAME_BYTES = 80;
+const FORBIDDEN_HEADER_NAMES = new Set([
+  "host",
+  "connection",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "keep-alive",
+  "expect",
+  "cookie",
+  "set-cookie",
+  "content-length",
+]);
 
 interface GptActionExecuteInput {
   action: GptAction;
@@ -243,6 +260,10 @@ interface JsonSchemaLike {
   additionalProperties?: boolean;
 }
 
+function isRetryableCode(code: string): boolean {
+  return code === "timeout" || code === "fetch_error" || code === "execution_retryable" || code === "rate_limited";
+}
+
 interface ParsedTemplateContext {
   input: Record<string, unknown>;
   action: GptAction;
@@ -259,11 +280,25 @@ function sanitizeActionId(value: string): string {
 
 function sanitizeHeaderName(name: string): string {
   const trimmed = name.trim();
-  return SAFE_HEADER_NAME_RE.test(trimmed) ? trimmed.toLowerCase() : "";
+  if (!trimmed) {
+    return "";
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (!SAFE_HEADER_NAME_RE.test(trimmed) || lower.length > MAX_SAFE_HEADER_NAME_BYTES) {
+    return "";
+  }
+
+  if (FORBIDDEN_HEADER_NAMES.has(lower)) {
+    return "";
+  }
+
+  return lower;
 }
 
 function sanitizeHeaderValue(value: string | number | boolean): string {
-  return String(value).replace(/[\r\n]+/g, " ");
+  const flattened = String(value).replace(/[\r\n]+/g, " ");
+  return flattened.slice(0, MAX_HEADER_VALUE_BYTES).normalize("NFKC");
 }
 
 function safeStringify(value: unknown): string {
@@ -1092,9 +1127,10 @@ export class GptActionRuntime {
         }, `${method} ${endpoint}`);
 
         if (!result.success || !result.data) {
+          const inferredCode = inferExecutionErrorCode(result.error || "execution_failed");
           const error = new Error(result.error || "Execution failed") as Error & { retryable: boolean; code?: string };
-          error.retryable = retryCount < 1;
-          error.code = result.error || "execution_failed";
+          error.retryable = isRetryableCode(inferredCode);
+          error.code = inferredCode;
           throw error;
         }
 
@@ -1171,7 +1207,9 @@ export class GptActionRuntime {
 
         const stage = retryCount > 0 ? "execution" : "execution";
         const details = buildExecutionErrorPayload(error);
-        const isRetryable = !!(error.retryable ?? (error.code === "timeout" || error.code === "fetch_error"));
+        const isRetryable = typeof error.retryable === "boolean"
+          ? error.retryable
+          : isRetryableCode(details.code);
 
         if (!isRetryable || retryCount >= maxRetries || (error.message || "").includes("security_blocked")) {
           const failure = this.createFailureResult(
@@ -1535,9 +1573,10 @@ export class GptActionRuntime {
       const requestPayload = sanitizeSensitiveData({ ...payload.request, conversationId: payload.conversationId });
       const safeRequest = sanitizeLogValue(redactSensitiveFields(requestPayload, piiRules));
       const safeError = throwable ? sanitizeSensitiveData(throwable.message) : error;
+      const actorId = resolveActorId(payload.userId);
 
       await logToolCall(
-        payload.userId || payload.conversationId,
+        actorId,
         action.id,
         `gpt-action:${payload.gptId}`,
         safeRequest,
@@ -1732,6 +1771,46 @@ function requestIdForLogging(rawId?: string | null): string {
   return rawId;
 }
 
+function inferExecutionErrorCode(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("status 429") || normalized.includes("status 408")) {
+    return "rate_limited";
+  }
+
+  if (/\b(?:status|code)\s*5\d\d\b/.test(normalized)) {
+    return "execution_retryable";
+  }
+
+  if (normalized.includes("timeout")) {
+    return "timeout";
+  }
+
+  if (normalized.includes("request body exceeds") || normalized.includes("response body exceeds")) {
+    return "execution_error";
+  }
+
+  if (normalized.includes("invalid") || normalized.includes("validation") || normalized.includes("blocked")
+    || normalized.includes("not in allowed") || normalized.includes("content-type") || normalized.includes("forbidden")) {
+    return "execution_error";
+  }
+
+  return "execution_failed";
+}
+
+function isValidActorId(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return /^[a-zA-Z0-9._-]{6,140}$/.test(value);
+}
+
+function resolveActorId(value: string | null | undefined): string | null {
+  if (!isValidActorId(value)) {
+    return null;
+  }
+  return value;
+}
+
 function normalizeRequestInput(input: unknown): Record<string, unknown> {
   if (input && typeof input === "object" && !Array.isArray(input)) {
     return input as Record<string, unknown>;
@@ -1784,6 +1863,14 @@ export function normalizeContentTypeForTesting(rawContentType: string | null | u
 
 export function sanitizeLogValueForTesting(value: unknown): unknown {
   return sanitizeLogValue(value);
+}
+
+export function isValidActorIdForTesting(value: string | null | undefined): boolean {
+  return isValidActorId(value);
+}
+
+export function resolveActorIdForTesting(value: string | null | undefined): string | null {
+  return resolveActorId(value);
 }
 
 export function createGptActionRuntime(): GptActionRuntime {

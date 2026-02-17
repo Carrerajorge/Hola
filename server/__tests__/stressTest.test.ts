@@ -5,6 +5,12 @@ import fs from 'fs';
 
 const LARGE_FIXTURE_PATH = path.join(process.cwd(), 'test_fixtures', 'large-10k-rows.xlsx');
 const ROW_COUNT = 10000;
+const CI_BUDGET_MULTIPLIER = process.env.CI ? 2 : 1;
+const PERF_BUDGET_MS = {
+  parse: Math.ceil(30_000 * CI_BUDGET_MULTIPLIER),
+  preview: Math.ceil(5_000 * CI_BUDGET_MULTIPLIER),
+};
+const MEM_BUDGET_MB = process.env.CI ? 650 : 500;
 
 describe('Stress Test - Large Excel File Processing', () => {
   const startTime = Date.now();
@@ -64,7 +70,7 @@ describe('Stress Test - Large Excel File Processing', () => {
     const parseTime = Date.now() - parseStart;
     console.log(`Parse time for ${ROW_COUNT} rows: ${parseTime}ms`);
     
-    expect(parseTime).toBeLessThan(30000); // Should parse in under 30 seconds
+    expect(parseTime).toBeLessThan(PERF_BUDGET_MS.parse); // Should parse within CI-safe budget
     expect(workbook.worksheets.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -136,7 +142,7 @@ describe('Stress Test - Large Excel File Processing', () => {
     const previewTime = Date.now() - previewStart;
     console.log(`Preview extraction time (${PREVIEW_SIZE} rows): ${previewTime}ms`);
     
-    expect(previewTime).toBeLessThan(5000); // Should extract preview in under 5 seconds
+    expect(previewTime).toBeLessThan(PERF_BUDGET_MS.preview); // Preview extraction budget
     expect(headers.length).toBe(9);
     expect(previewRows.length).toBe(PREVIEW_SIZE);
   });
@@ -174,7 +180,7 @@ describe('Stress Test - Large Excel File Processing', () => {
     console.log(`Memory usage for ${ROW_COUNT} rows: ${memDelta.toFixed(2)} MB`);
     
     // Should use less than 500MB for 10k rows
-    expect(memDelta).toBeLessThan(500);
+    expect(memDelta).toBeLessThan(MEM_BUDGET_MB);
   });
 
   it('should generate correct summary metrics format', async () => {

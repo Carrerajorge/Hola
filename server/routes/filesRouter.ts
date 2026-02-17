@@ -1,5 +1,4 @@
-import { Router } from "express";
-import path from "path";
+import { Router, type Request } from "express";
 import { storage } from "../storage";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "../objectStorage";
 import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, HTTP_HEADERS, LIMITS } from "../lib/constants";
@@ -11,6 +10,7 @@ import { sanitizeFilename } from "../services/fileValidation";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "node:path";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
 // SECURITY FIX #28: Path traversal prevention helper
 function sanitizeFilePath(filePath: string): string | null {
@@ -40,6 +40,7 @@ function sanitizeFileName(fileName: string): string {
 
 interface MultipartUploadSession {
   uploadId: string;
+  conversationId?: string | null;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -51,12 +52,39 @@ interface MultipartUploadSession {
   createdAt: Date;
 }
 
+interface FileRegistrationCacheEntry {
+  createdAt: number;
+  fingerprint: string;
+  response: {
+    uploadId: string;
+    storagePath: string;
+  };
+  uploadId: string;
+  conversationId?: string | null;
+  userId: string;
+}
+
+interface MultipartCompletionCacheEntry {
+  createdAt: number;
+  status: "processing" | "done";
+  response: { fileId: string; storagePath: string } | null;
+  fingerprint: string;
+}
+
 // ============================================
 // SECURITY: Multipart session limits & cleanup
 // ============================================
 
 /** Maximum concurrent multipart upload sessions */
 const MAX_MULTIPART_SESSIONS = 100;
+
+const UPLOAD_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_IDEMPOTENCY_ENTRIES = 2000;
+
+const HEADER_UPLOAD_ID = "x-upload-id";
+const HEADER_CONVERSATION_ID = "x-conversation-id";
+const UPLOAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{5,126}$/;
+const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{3,255}$/;
 
 /** Maximum session age before auto-cleanup (30 minutes) */
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -65,6 +93,8 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
 const multipartSessions: Map<string, MultipartUploadSession> = new Map();
+const fileRegistrationCache = new Map<string, FileRegistrationCacheEntry>();
+const multipartCompletionCache = new Map<string, MultipartCompletionCacheEntry>();
 
 // Periodic cleanup of stale multipart sessions to prevent memory leaks
 setInterval(() => {
@@ -76,6 +106,84 @@ setInterval(() => {
     }
   }
 }, SESSION_CLEANUP_INTERVAL_MS).unref();
+
+function extractHeader(req: any, key: string): string | undefined {
+  const value = req.headers?.[key] ?? req.headers?.[key.toLowerCase()];
+  if (Array.isArray(value)) return value[0];
+  if (typeof value === "string") return value;
+  return undefined;
+}
+
+function sanitizeUploadId(rawUploadId: string | undefined): string | null {
+  if (!rawUploadId) return null;
+  const trimmed = rawUploadId.trim();
+  if (!UPLOAD_ID_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+function sanitizeConversationId(rawConversationId: string | undefined): string | null {
+  if (!rawConversationId) return null;
+  const trimmed = rawConversationId.trim();
+  if (!CONVERSATION_ID_PATTERN.test(trimmed)) return null;
+  return trimmed;
+}
+
+function getUploadId(req: Request, bodyUploadId?: unknown): string | null {
+  const headerUploadId = sanitizeUploadId(extractHeader(req, HEADER_UPLOAD_ID));
+  if (headerUploadId) return headerUploadId;
+  if (typeof bodyUploadId === "string") return sanitizeUploadId(bodyUploadId);
+  return null;
+}
+
+function getConversationId(req: Request, bodyConversationId?: unknown): string | null {
+  const headerConversationId = sanitizeConversationId(extractHeader(req, HEADER_CONVERSATION_ID));
+  if (headerConversationId) return headerConversationId;
+  if (typeof bodyConversationId === "string") return sanitizeConversationId(bodyConversationId);
+  return null;
+}
+
+function buildRegistrationFingerprint(name: string, type: string, size: number, storagePath: string): string {
+  return `${name}::${type}::${size}::${storagePath}`;
+}
+
+function buildCompletionFingerprint(parts: { partNumber: number }[]): string {
+  const normalized = parts.map((part) => part.partNumber).sort((a, b) => a - b);
+  return normalized.join(",");
+}
+
+function buildUploadCacheKey(userId: string, uploadId: string, conversationId: string | null): string {
+  return `${userId}|${conversationId || "__no_conversation__"}|${uploadId}`;
+}
+
+function cleanupIdempotencyCaches() {
+  const now = Date.now();
+
+  for (const [key, entry] of fileRegistrationCache) {
+    if (now - entry.createdAt > UPLOAD_IDEMPOTENCY_TTL_MS) {
+      fileRegistrationCache.delete(key);
+    }
+  }
+
+  for (const [key, entry] of multipartCompletionCache) {
+    if (now - entry.createdAt > UPLOAD_IDEMPOTENCY_TTL_MS) {
+      multipartCompletionCache.delete(key);
+    }
+  }
+
+  if (fileRegistrationCache.size > MAX_IDEMPOTENCY_ENTRIES) {
+    const excess = fileRegistrationCache.size - MAX_IDEMPOTENCY_ENTRIES;
+    const keys = Array.from(fileRegistrationCache.keys()).slice(0, excess);
+    keys.forEach((key) => fileRegistrationCache.delete(key));
+  }
+
+  if (multipartCompletionCache.size > MAX_IDEMPOTENCY_ENTRIES) {
+    const excess = multipartCompletionCache.size - MAX_IDEMPOTENCY_ENTRIES;
+    const keys = Array.from(multipartCompletionCache.keys()).slice(0, excess);
+    keys.forEach((key) => multipartCompletionCache.delete(key));
+  }
+}
+
+setInterval(cleanupIdempotencyCaches, 10 * 60 * 1000).unref();
 
 /** Security: validate objectId to prevent path traversal */
 function isValidObjectId(objectId: string): boolean {
@@ -594,14 +702,30 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/create", async (req, res) => {
     try {
-      const { fileName, mimeType, fileSize, totalChunks } = req.body;
+      const { fileName: rawFileName, mimeType, fileSize: rawFileSize, totalChunks: rawTotalChunks } = req.body as {
+        fileName?: unknown;
+        mimeType?: unknown;
+        fileSize?: unknown;
+        totalChunks?: unknown;
+      };
 
-      if (!fileName || !mimeType || !fileSize || !totalChunks) {
-        return res.status(400).json({ error: "Missing required fields: fileName, mimeType, fileSize, totalChunks" });
+      const fileName = sanitizeFilename(typeof rawFileName === "string" ? rawFileName : "");
+      const safeMimeType = typeof mimeType === "string" ? stripContentType(mimeType) || mimeType : "";
+      const fileSize = Number(rawFileSize);
+      const totalChunks = Number(rawTotalChunks);
+      const userId = getOrCreateSecureUserId(req);
+      const conversationId = getConversationId(req, req.body?.conversationId);
+      const requestedUploadId = getUploadId(req, req.body?.uploadId);
+
+      if (!fileName || !safeMimeType || !Number.isFinite(fileSize) || !Number.isInteger(totalChunks)) {
+        return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
+      }
+      if (fileSize <= 0 || totalChunks <= 0) {
+        return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
       }
 
-      if (!ALLOWED_MIME_TYPES.includes(mimeType as any)) {
-        return res.status(400).json({ error: `Unsupported file type: ${mimeType}` });
+      if (!ALLOWED_MIME_TYPES.includes(safeMimeType as any)) {
+        return res.status(400).json({ error: `Unsupported file type: ${safeMimeType}` });
       }
 
       if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
@@ -613,7 +737,7 @@ export function createFilesRouter() {
         return res.status(429).json({ error: "Too many concurrent upload sessions. Please try again later." });
       }
 
-      const uploadId = `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      const uploadId = requestedUploadId || `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
       let privateObjectDir: string;
       let isLocalFallback = false;
@@ -628,11 +752,22 @@ export function createFilesRouter() {
 
       const objectId = `uploads/${uploadId}`;
       const storagePath = `/objects/${objectId}`;
+      const registrationKey = buildUploadCacheKey(userId, uploadId, conversationId);
+      const fingerprint = buildRegistrationFingerprint(fileName, safeMimeType, fileSize, storagePath);
+
+      const existingRegistration = fileRegistrationCache.get(registrationKey);
+      if (existingRegistration) {
+        if (existingRegistration.fingerprint === fingerprint) {
+          return res.json(existingRegistration.response);
+        }
+        return res.status(409).json({ error: "Duplicate upload-id with conflicting multipart metadata" });
+      }
 
       const session: MultipartUploadSession = {
         uploadId,
+        conversationId,
         fileName,
-        mimeType,
+        mimeType: safeMimeType,
         fileSize,
         totalChunks,
         storagePath,
@@ -643,6 +778,14 @@ export function createFilesRouter() {
       };
 
       multipartSessions.set(uploadId, session);
+      fileRegistrationCache.set(registrationKey, {
+        createdAt: Date.now(),
+        fingerprint,
+        response: { uploadId, storagePath },
+        uploadId,
+        conversationId,
+        userId,
+      });
 
       res.json({ uploadId, storagePath });
     } catch (error: any) {
@@ -693,18 +836,70 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/complete", async (req, res) => {
     try {
-      const { uploadId, parts } = req.body;
+      const { uploadId: rawUploadId, parts: rawParts, conversationId: rawConversationId } = req.body as {
+        uploadId?: unknown;
+        parts?: unknown;
+        conversationId?: unknown;
+      };
 
-      if (!uploadId || !parts || !Array.isArray(parts)) {
+      if (!rawUploadId || typeof rawUploadId !== "string" || !rawParts || !Array.isArray(rawParts)) {
         return res.status(400).json({ error: "Missing required fields: uploadId, parts" });
       }
+      const uploadId = rawUploadId.trim();
+
+      const normalizedParts = rawParts
+        .map((part: { partNumber?: unknown }) => {
+          const partNumber = Number(part?.partNumber);
+          return Number.isFinite(partNumber) && Number.isInteger(partNumber) ? partNumber : NaN;
+        })
+        .filter((partNumber) => partNumber > 0);
+
+      if (normalizedParts.length === 0) {
+        return res.status(400).json({ error: "Invalid or missing part list" });
+      }
+
+      const parts = normalizedParts
+        .sort((a, b) => a - b)
+        .filter((partNumber, index, arr) => index === 0 || partNumber !== arr[index - 1]);
+
+      const userId = getOrCreateSecureUserId(req);
+      const sessionConversationId = getConversationId(req, rawConversationId);
 
       const session = multipartSessions.get(uploadId);
       if (!session) {
         return res.status(404).json({ error: "Upload session not found" });
       }
 
+      if (parts.some((partNumber) => partNumber > session.totalChunks)) {
+        return res.status(400).json({ error: "Invalid or missing part list" });
+      }
+
+      const completionKey = buildUploadCacheKey(
+        userId,
+        uploadId,
+        sessionConversationId || session.conversationId || null
+      );
+      const completionFingerprint = buildCompletionFingerprint(parts.map((partNumber) => ({ partNumber })));
+      const existingCompletion = multipartCompletionCache.get(completionKey);
+      if (existingCompletion) {
+        if (existingCompletion.fingerprint === completionFingerprint) {
+          if (existingCompletion.status === "processing") {
+            return res.status(409).json({ error: "Multipart completion already in progress" });
+          }
+          return res.json(existingCompletion.response);
+        }
+        return res.status(409).json({ error: "Duplicate completion request with different parts" });
+      }
+
+      multipartCompletionCache.set(completionKey, {
+        createdAt: Date.now(),
+        status: "processing",
+        response: null,
+        fingerprint: completionFingerprint,
+      });
+
       const isLocalFallback = session.bucketName === "__local__";
+      let completionResponse: { success: true; storagePath: string; fileId: string } | null = null;
 
       if (isLocalFallback) {
         // Local fallback: concatenate part files into a single file
@@ -720,19 +915,16 @@ export function createFilesRouter() {
         const finalObjectId = crypto.randomUUID();
         const finalPath = pathMod.default.join(UPLOADS_DIR, finalObjectId);
 
-        const sortedParts = parts.sort(
-          (a: { partNumber: number }, b: { partNumber: number }) => a.partNumber - b.partNumber
-        );
-
         // Concatenate all part files into the final file
         const writeStream = fs.default.createWriteStream(finalPath);
-        for (const part of sortedParts) {
-          const partFileName = `${uploadId}_part_${part.partNumber}`;
+        for (const partNumber of parts) {
+          const partFileName = `${uploadId}_part_${partNumber}`;
           const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
 
           if (!fs.default.existsSync(partPath)) {
             writeStream.destroy();
-            return res.status(500).json({ error: `Missing part file: ${part.partNumber}` });
+            multipartCompletionCache.delete(completionKey);
+            return res.status(500).json({ error: `Missing part file: ${partNumber}` });
           }
 
           const partContent = await fs.promises.readFile(partPath);
@@ -746,8 +938,8 @@ export function createFilesRouter() {
         });
 
         // Clean up part files
-        for (const part of sortedParts) {
-          const partFileName = `${uploadId}_part_${part.partNumber}`;
+        for (const partNumber of parts) {
+          const partFileName = `${uploadId}_part_${partNumber}`;
           const partPath = pathMod.default.join(UPLOADS_DIR, partFileName);
           try {
             await fs.promises.unlink(partPath);
@@ -771,74 +963,96 @@ export function createFilesRouter() {
 
         processFileAsync(file.id, storagePath, session.mimeType, session.fileName);
 
-        return res.json({ success: true, storagePath, fileId: file.id });
+        completionResponse = { success: true, storagePath, fileId: file.id };
       }
+      else {
+        // Object storage path
+        const { bucketName } = parseObjectPath(session.basePath);
+        const bucket = objectStorageClient.bucket(bucketName);
 
-      // Object storage path
-      const { bucketName } = parseObjectPath(session.basePath);
-      const bucket = objectStorageClient.bucket(bucketName);
+        const partPaths = parts
+          .map((partNumber) => {
+            const partPath = `${session.basePath}_part_${partNumber}`;
+            const { objectName } = parseObjectPath(partPath);
+            return objectName;
+          });
 
-      const partPaths = parts
-        .sort((a: { partNumber: number }, b: { partNumber: number }) => a.partNumber - b.partNumber)
-        .map((p: { partNumber: number }) => {
-          const partPath = `${session.basePath}_part_${p.partNumber}`;
-          const { objectName } = parseObjectPath(partPath);
-          return objectName;
+        const { objectName: finalObjectName } = parseObjectPath(session.basePath);
+        const destinationFile = bucket.file(finalObjectName);
+
+        try {
+          await bucket.combine(
+            partPaths.map(p => bucket.file(p)),
+            destinationFile
+          );
+
+          await destinationFile.setMetadata({ contentType: session.mimeType });
+
+          for (const objectPath of partPaths) {
+            try {
+              const fileRef = bucket.file(objectPath);
+              await fileRef.delete();
+            } catch (cleanupErr) {
+              console.warn(JSON.stringify({
+                event: "multipart_cleanup_failed",
+                path: objectPath
+              }));
+            }
+          }
+        } catch (composeError: any) {
+          console.error("Failed to compose parts:", composeError);
+          multipartCompletionCache.delete(completionKey);
+          return res.status(500).json({ error: "Failed to compose file parts" });
+        }
+
+        multipartSessions.delete(uploadId);
+
+        const file = await storage.createFile({
+          name: session.fileName,
+          type: session.mimeType,
+          size: session.fileSize,
+          storagePath: session.storagePath,
+          status: "processing",
+          userId: null,
         });
 
-      const { objectName: finalObjectName } = parseObjectPath(session.basePath);
-      const destinationFile = bucket.file(finalObjectName);
+        await storage.createFileJob({
+          fileId: file.id,
+          status: "pending",
+        });
 
-      try {
-        await bucket.combine(
-          partPaths.map(p => bucket.file(p)),
-          destinationFile
-        );
+        fileProcessingQueue.enqueue({
+          fileId: file.id,
+          storagePath: session.storagePath,
+          mimeType: session.mimeType,
+          fileName: session.fileName,
+        });
 
-        await destinationFile.setMetadata({ contentType: session.mimeType });
+        completionResponse = { success: true, storagePath: session.storagePath, fileId: file.id };
+      }
 
-        for (const objectPath of partPaths) {
-          try {
-            const fileRef = bucket.file(objectPath);
-            await fileRef.delete();
-          } catch (cleanupErr) {
-            console.warn(JSON.stringify({
-              event: "multipart_cleanup_failed",
-              path: objectPath
-            }));
-          }
-        }
-      } catch (composeError: any) {
-        console.error("Failed to compose parts:", composeError);
-        return res.status(500).json({ error: "Failed to compose file parts" });
+      if (!completionResponse) {
+        multipartCompletionCache.delete(completionKey);
+        return res.status(500).json({ error: "Multipart completion failed" });
       }
 
       multipartSessions.delete(uploadId);
-
-      const file = await storage.createFile({
-        name: session.fileName,
-        type: session.mimeType,
-        size: session.fileSize,
-        storagePath: session.storagePath,
-        status: "processing",
-        userId: null,
+      multipartCompletionCache.set(completionKey, {
+        createdAt: Date.now(),
+        status: "done",
+        response: completionResponse,
+        fingerprint: completionFingerprint,
       });
 
-      await storage.createFileJob({
-        fileId: file.id,
-        status: "pending",
-      });
-
-      fileProcessingQueue.enqueue({
-        fileId: file.id,
-        storagePath: session.storagePath,
-        mimeType: session.mimeType,
-        fileName: session.fileName,
-      });
-
-      res.json({ success: true, storagePath: session.storagePath, fileId: file.id });
+      return res.json(completionResponse);
     } catch (error: any) {
       console.error("Error completing multipart upload:", error);
+      const rawUploadId = req.body?.uploadId;
+      if (typeof rawUploadId === "string") {
+        const conversationId = getConversationId(req, req.body?.conversationId);
+        const completionKey = buildUploadCacheKey(getOrCreateSecureUserId(req), rawUploadId.trim(), conversationId);
+        multipartCompletionCache.delete(completionKey);
+      }
       res.status(500).json({ error: "Failed to complete multipart upload" });
     }
   });

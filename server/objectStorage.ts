@@ -11,6 +11,21 @@ import {
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
 
+const UPLOAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{5,126}$/;
+
+function sanitizeUploadId(rawUploadId: string | undefined): string | null {
+  if (typeof rawUploadId !== "string") {
+    return null;
+  }
+
+  const normalized = rawUploadId.trim();
+  if (!UPLOAD_ID_PATTERN.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
 export const objectStorageClient = new Storage({
   credentials: {
     audience: "replit",
@@ -115,7 +130,7 @@ export class ObjectStorageService {
     return uploadURL;
   }
 
-  async getObjectEntityUploadURLWithPath(): Promise<{ uploadURL: string; storagePath: string }> {
+  async getObjectEntityUploadURLWithPath(uploadId?: string): Promise<{ uploadURL: string; storagePath: string }> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
       throw new Error(
@@ -123,7 +138,8 @@ export class ObjectStorageService {
           "tool and set PRIVATE_OBJECT_DIR env var."
       );
     }
-    const objectId = randomUUID();
+    const safeUploadId = sanitizeUploadId(uploadId);
+    const objectId = safeUploadId || randomUUID();
     const entityId = `uploads/${objectId}`;
     const fullPath = `${privateObjectDir}/${entityId}`;
     const { bucketName, objectName } = parseObjectPath(fullPath);

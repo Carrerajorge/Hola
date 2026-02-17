@@ -4,6 +4,7 @@ import { Request, Response, NextFunction } from "express";
 import { parse } from "cookie";
 import { isAllowedOrigin } from "./cors";
 import { getUserId } from "../types/express";
+import { getSecureUserId } from "../lib/anonUserHelper";
 import { createLogger } from "../lib/structuredLogger";
 
 const CSRF_COOKIE_NAME = "XSRF-TOKEN";
@@ -126,7 +127,7 @@ function isStatelessAuthRequest(req: Request): boolean {
 }
 
 function isAllowedCsrfPrincipal(req: Request): boolean {
-    return typeof (req as any).apiKey !== "undefined" || getUserId(req) !== undefined;
+    return typeof (req as any).apiKey !== "undefined" || getSecureUserId(req) !== null;
 }
 
 /**
@@ -194,7 +195,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
     }
 
     if (!isAllowedCsrfPrincipal(req)) {
-        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF denied: no authenticated principal", {
+        logger.withRequest(res.locals.requestId, getSecureUserId(req)).warn("CSRF denied: no authenticated principal", {
           method: req.method,
           ip: req.ip,
         });
@@ -231,7 +232,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF invalid token format", {
+        logger.withRequest(res.locals.requestId, getSecureUserId(req)).warn("CSRF invalid token format", {
           method: req.method,
           ip: req.ip,
         });
@@ -245,7 +246,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF token length mismatch", {
+        logger.withRequest(res.locals.requestId, getSecureUserId(req)).warn("CSRF token length mismatch", {
           method: req.method,
           ip: req.ip,
         });
@@ -262,7 +263,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         if (!res.headersSent) {
             issueCsrfCookie(req, res, isReplitDeployment, isProduction);
         }
-        logger.withRequest(res.locals.requestId, getUserId(req)).warn("CSRF token mismatch", {
+        logger.withRequest(res.locals.requestId, getSecureUserId(req)).warn("CSRF token mismatch", {
           method: req.method,
           ip: req.ip,
         });

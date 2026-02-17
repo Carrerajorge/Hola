@@ -131,13 +131,13 @@ describe("chat skill integration", () => {
       const outboundMessages = llmMessages || chatMessages;
 
       if (outboundMessages?.[0]) {
-        expect(outboundMessages[0].role).toBe("system");
-        expect(outboundMessages[0].content).toContain("[SKILL_CONTEXT]");
+      expect(outboundMessages[0].role).toBe("system");
+      expect(outboundMessages[0].content).toContain("[SKILL_CONTEXT]");
       }
 
       expect(res.text.includes("event: done") || res.text.includes("event: error")).toBe(true);
     } finally {
       await close();
     }
-  });
+  }, 20000);
 });

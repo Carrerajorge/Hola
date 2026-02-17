@@ -28,10 +28,10 @@ interface CoverageSummary {
 
 const QUALITY_REPORT_PATH = "test_results/quality-gate-report.json";
 const DEFAULT_THRESHOLDS = {
-  lines: Number(process.env.QUALITY_GATE_LINES || 40),
-  statements: Number(process.env.QUALITY_GATE_STATEMENTS || 40),
-  functions: Number(process.env.QUALITY_GATE_FUNCTIONS || 40),
-  branches: Number(process.env.QUALITY_GATE_BRANCHES || 30),
+  lines: Number(process.env.QUALITY_GATE_LINES || 90),
+  statements: Number(process.env.QUALITY_GATE_STATEMENTS || 90),
+  functions: Number(process.env.QUALITY_GATE_FUNCTIONS || 90),
+  branches: Number(process.env.QUALITY_GATE_BRANCHES || 90),
 };
 
 const CI_DEFAULT_ENV: Record<string, string> = {

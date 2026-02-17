@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import crypto from "crypto";
 import { env } from "../config/env";
 import { Logger } from "../lib/logger";
 import { submitChannelIngest } from "../channels/channelIngestQueue";
@@ -14,6 +15,8 @@ import express from "express";
 
 const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
+const WEBHOOK_REPLAY_TTL_MS = 10 * 60 * 1000;
+const webhookReplayCache = new Map<string, number>();
 const REQUIRE_WEBHOOK_SECRETS = env.NODE_ENV === "production";
 
 function parseWebhookQueryTimestamp(raw: unknown): number | null {
@@ -31,6 +34,53 @@ function parseWebhookQueryTimestamp(raw: unknown): number | null {
 function normalizeWebhookTimestamp(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null;
   return value > 0 && value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
+function pruneWebhookReplayCache(nowMs: number): void {
+  for (const [key, startedAt] of webhookReplayCache.entries()) {
+    if (nowMs - startedAt > WEBHOOK_REPLAY_TTL_MS) {
+      webhookReplayCache.delete(key);
+    }
+  }
+}
+
+function buildWebhookReplayKey(channel: string, req: Request): string {
+  const providerKey =
+    (req.headers["x-telegram-bot-api-secret-token"] as string) ||
+    (req.headers["x-hub-signature-256"] as string) ||
+    (req.headers["x-hub-signature"] as string) ||
+    "";
+
+  const body = (() => {
+    if (typeof req.body === "string") return req.body;
+    if (Buffer.isBuffer(req.body as any)) return (req.body as any).toString("utf8");
+    try {
+      return JSON.stringify(req.body || {});
+    } catch {
+      return "";
+    }
+  })();
+
+  const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
+  const queryHash = crypto.createHash("sha256")
+    .update(new URLSearchParams(req.query as Record<string, string>).toString())
+    .digest("hex");
+
+  return `${channel}|${req.path}|${providerKey}|${bodyHash}|${queryHash}`;
+}
+
+function isWebhookReplay(channel: string, req: Request): boolean {
+  const key = buildWebhookReplayKey(channel, req);
+  const now = Date.now();
+  pruneWebhookReplayCache(now);
+  if (webhookReplayCache.has(key)) return true;
+  webhookReplayCache.set(key, now);
+  return false;
+}
+
+function isTimestampFreshOrMissing(timestampMs: number | null): boolean {
+  if (timestampMs === null) return true;
+  return isWebhookTimestampFresh(timestampMs, { maxSkewMs: WEBHOOK_MAX_AGE_MS });
 }
 
 function getRawBodyBuffer(req: Request): Buffer {
@@ -69,12 +119,16 @@ export function createChannelWebhooksRouter(): Router {
   // X-Telegram-Bot-Api-Secret-Token header on each request.
   router.post("/telegram", async (req: Request, res: Response) => {
     try {
+      if (isWebhookReplay("telegram", req)) {
+        return res.status(200).send("ok");
+      }
+
       if (hasTooLargePayload(req)) {
         return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("telegram", req);
-      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      if (!isTimestampFreshOrMissing(eventTimestamp)) {
         return res.status(200).send("stale");
       }
 
@@ -117,12 +171,16 @@ export function createChannelWebhooksRouter(): Router {
 
   router.post("/whatsapp", async (req: Request, res: Response) => {
     try {
+      if (isWebhookReplay("whatsapp_cloud", req)) {
+        return res.status(200).send("ok");
+      }
+
       if (hasTooLargePayload(req)) {
         return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
-      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      if (!isTimestampFreshOrMissing(eventTimestamp)) {
         return res.status(200).send("stale");
       }
 
@@ -167,12 +225,16 @@ export function createChannelWebhooksRouter(): Router {
 
   router.post("/messenger", async (req: Request, res: Response) => {
     try {
+      if (isWebhookReplay("messenger", req)) {
+        return res.status(200).send("ok");
+      }
+
       if (hasTooLargePayload(req)) {
         return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
-      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      if (!isTimestampFreshOrMissing(eventTimestamp)) {
         return res.status(200).send("stale");
       }
 
@@ -219,12 +281,16 @@ export function createChannelWebhooksRouter(): Router {
   // WeChat inbound messages (XML body)
   router.post("/wechat", express.text({ type: ["text/xml", "application/xml"] }), async (req: Request, res: Response) => {
     try {
+      if (isWebhookReplay("wechat", req)) {
+        return res.status(200).send("success");
+      }
+
       if (req.headers["content-length"] && Number(req.headers["content-length"]) > MAX_WEBHOOK_PAYLOAD_BYTES) {
         return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
-      if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
+      if (!isTimestampFreshOrMissing(eventTimestamp)) {
         return res.status(200).send("stale");
       }
 

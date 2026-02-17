@@ -271,11 +271,11 @@ jobs:
           GEMINI_API_KEY: ci_dummy_key
           XAI_API_KEY: ci_dummy_key
           ANTHROPIC_API_KEY: ci_dummy_key
-          # Baseline thresholds. Ajustables para elevar a 90% en ciclos de cumplimiento.
-          QUALITY_GATE_LINES: "40"
-          QUALITY_GATE_STATEMENTS: "40"
-          QUALITY_GATE_FUNCTIONS: "40"
-          QUALITY_GATE_BRANCHES: "30"
+          # Quality gate aligned to ISO-25010 operability/security targets.
+          QUALITY_GATE_LINES: "90"
+          QUALITY_GATE_STATEMENTS: "90"
+          QUALITY_GATE_FUNCTIONS: "90"
+          QUALITY_GATE_BRANCHES: "90"
         run: |
           set -euo pipefail
           npm run quality:gate

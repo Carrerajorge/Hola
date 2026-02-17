@@ -121,6 +121,8 @@ export const corsOptions: cors.CorsOptions = {
         'Content-Type',
         'Authorization',
         'X-CSRFToken',
+        'X-Upload-Id',
+        'X-Conversation-Id',
         'X-Requested-With',
         'X-Request-ID',
         'X-Idempotency-Key',

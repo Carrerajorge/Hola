@@ -4,6 +4,8 @@ import {
   GptActionRuntime,
   isAllowedResponseMimeTypeForTesting,
   normalizeContentTypeForTesting,
+  isValidActorIdForTesting,
+  resolveActorIdForTesting,
   normalizeGptActionRequestPayload,
   parseRetryAfterHeader,
   sanitizeLogValueForTesting,
@@ -155,6 +157,22 @@ describe("gptActionRuntime shared helpers", () => {
     });
   });
 
+  describe("actor id resolution", () => {
+    it("validates actor ids and rejects non-compliant values", () => {
+      expect(isValidActorIdForTesting("user_123")).toBe(true);
+      expect(isValidActorIdForTesting("conv-1")).toBe(true);
+      expect(isValidActorIdForTesting("short")).toBe(false);
+      expect(isValidActorIdForTesting("  user@bad ")).toBe(false);
+      expect(isValidActorIdForTesting(null)).toBe(false);
+    });
+
+    it("resolves actor id to null when invalid", () => {
+      expect(resolveActorIdForTesting("abcdef")).toBe("abcdef");
+      expect(resolveActorIdForTesting("conv-1")).toBe("conv-1");
+      expect(resolveActorIdForTesting("bad@id")).toBeNull();
+    });
+  });
+
   describe("request/response hardening", () => {
     it("rejects oversized request bodies before fetching", async () => {
       let called = false;
@@ -183,6 +201,8 @@ describe("gptActionRuntime shared helpers", () => {
 
       expect(called).toBe(false);
       expect(result.success).toBe(false);
+      expect(result.error?.retryable).toBe(false);
+      expect(result.error?.code).toBe("execution_error");
       expect(result.error?.message || "").toContain("exceeds");
     });
 
