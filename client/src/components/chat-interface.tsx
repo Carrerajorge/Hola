@@ -377,10 +377,10 @@ export function ChatInterface({
   onCloseSidebar,
   activeGpt,
   aiState,
-  setAiState: setAiStateProp,
+  setAiState,
   aiStateChatId,
   aiProcessSteps,
-  setAiProcessSteps: setAiProcessStepsProp,
+  setAiProcessSteps,
   chatId,
   chatTitle,
   onOpenApps,
@@ -418,31 +418,6 @@ export function ChatInterface({
   docGenerationState: docGenerationStateProp,
   setDocGenerationState: setDocGenerationStateProp,
 }: ChatInterfaceProps) {
-  // ─── Chat-scoped setAiState wrapper ───
-  // When the user switches to a different chat, this component remounts with a new key.
-  // However, the OLD component's async SSE loop still holds a stale reference to the
-  // parent's setAiState. This wrapper captures the chatId at mount time and ignores
-  // state changes from stale closures after the component unmounts.
-  const mountedChatIdRef = useRef(chatId);
-  const unmountedRef = useRef(false);
-  useEffect(() => {
-    mountedChatIdRef.current = chatId;
-    unmountedRef.current = false;
-    return () => { unmountedRef.current = true; };
-  }, [chatId]);
-
-  // Replace setAiState and setAiProcessSteps with guarded versions that prevent cross-chat pollution.
-  // After unmount (user switched chats), calls from stale SSE loops are silently dropped.
-  const setAiState = useCallback((newState: AiState | ((prev: AiState) => AiState)) => {
-    if (unmountedRef.current) return; // Component unmounted — drop stale update
-    setAiStateProp(newState);
-  }, [setAiStateProp]) as React.Dispatch<React.SetStateAction<AiState>>;
-
-  const setAiProcessSteps = useCallback((newSteps: any) => {
-    if (unmountedRef.current) return; // Component unmounted — drop stale update
-    setAiProcessStepsProp(newSteps);
-  }, [setAiProcessStepsProp]) as React.Dispatch<React.SetStateAction<any[]>>;
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const { settings } = useSettingsContext();
   const {
