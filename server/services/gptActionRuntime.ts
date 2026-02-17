@@ -330,6 +330,18 @@ function sanitizeHeaderValue(value: string | number | boolean): string {
   return normalized.slice(0, MAX_HEADER_VALUE_BYTES);
 }
 
+function isValidDomainLabel(label: string): boolean {
+  if (!label || label.length > MAX_DOMAIN_LABEL_LENGTH) {
+    return false;
+  }
+
+  if (label.startsWith("-") || label.endsWith("-")) {
+    return false;
+  }
+
+  return SAFE_DOMAIN_LABEL_RE.test(label);
+}
+
 function normalizeHttpMethod(method: unknown): string {
   if (typeof method !== "string" || !method.trim()) {
     return "GET";
@@ -989,18 +1001,6 @@ function normalizeDomainPattern(raw: string): string {
 
   const sanitized = canonical.toLowerCase();
   return hasWildcard ? `*.${sanitized}` : sanitized;
-}
-
-function isValidDomainLabel(label: string): boolean {
-  if (!label || label.length > MAX_DOMAIN_LABEL_LENGTH) {
-    return false;
-  }
-
-  if (label.startsWith("-") || label.endsWith("-")) {
-    return false;
-  }
-
-  return SAFE_DOMAIN_LABEL_RE.test(label);
 }
 
 function checkDomainAllowlist(urlValue: string, allowlist: unknown): void {
@@ -1713,7 +1713,7 @@ export class GptActionRuntime {
           if (content.length > MAX_REQUEST_BODY_BYTES) {
             throw this.makeNetworkError(
               `Request body exceeds maximum allowed size: ${content.length} > ${MAX_REQUEST_BODY_BYTES}`,
-              "request_too_large",
+              "execution_error",
               false
             );
           }
@@ -1785,7 +1785,7 @@ export class GptActionRuntime {
       if (Number.isFinite(parsedLength) && parsedLength > maxBytes) {
         throw this.makeNetworkError(
           `Response body exceeds maximum allowed size: ${parsedLength} > ${maxBytes}`,
-          "response_too_large",
+          "execution_error",
           false
         );
       }
@@ -1815,7 +1815,7 @@ export class GptActionRuntime {
             await reader.cancel();
             throw this.makeNetworkError(
               `Response body exceeds maximum allowed size: ${totalBytes} > ${maxBytes}`,
-              "response_too_large",
+              "execution_error",
               false
             );
           }
