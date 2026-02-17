@@ -1782,16 +1782,16 @@ export class GptActionRuntime {
   private async readResponseBodySafe(response: Response, maxBytes: number): Promise<string> {
     const declaredLength = response.headers.get("content-length");
     if (declaredLength) {
-    const parsedLength = Number.parseInt(declaredLength, 10);
-    if (!Number.isFinite(parsedLength) || parsedLength < 0) {
-      throw this.makeNetworkError("Invalid response Content-Length header", "execution_error", false);
-    }
-    if (parsedLength > maxBytes) {
-      throw this.makeNetworkError(
-        `Response body exceeds maximum allowed size: ${parsedLength} > ${maxBytes}`,
-        "execution_error",
-        false
-      );
+      const parsedLength = Number.parseInt(declaredLength, 10);
+      if (!Number.isFinite(parsedLength) || parsedLength < 0) {
+        throw this.makeNetworkError("Invalid response Content-Length header", "execution_error", false);
+      }
+      if (parsedLength > maxBytes) {
+        throw this.makeNetworkError(
+          `Response body exceeds maximum allowed size: ${parsedLength} > ${maxBytes}`,
+          "execution_error",
+          false
+        );
       }
     }
 
