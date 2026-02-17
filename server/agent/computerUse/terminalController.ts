@@ -129,6 +129,9 @@ export interface TerminalSession {
   commandsInWindow: number;
   activeCommandCount: number;
   idempotentCommands: Map<string, { result: CommandResult; createdAt: number }>;
+  commandFailureCount: number;
+  commandFailureWindowStart: number;
+  circuitOpenUntil: number;
   createdAt: number;
   lastActivity: number;
 }
@@ -226,7 +229,13 @@ const MAX_COMMANDS_PER_WINDOW = parsePositiveInt(process.env.TERMINAL_MAX_COMMAN
 const COMMAND_RATE_WINDOW_MS = parsePositiveInt(process.env.TERMINAL_COMMAND_WINDOW_MS, 60_000, 1_000);
 const MAX_ACTIVE_COMMANDS_PER_SESSION = parsePositiveInt(process.env.TERMINAL_MAX_ACTIVE_COMMANDS_PER_SESSION, 4, 1);
 const MAX_IDEMPOTENCY_TTL_MS = parsePositiveInt(process.env.TERMINAL_IDEMPOTENCY_TTL_MS, 5 * 60_000, 1_000);
+const MAX_CONSECUTIVE_COMMAND_FAILURES = parsePositiveInt(process.env.TERMINAL_MAX_CONSECUTIVE_FAILURES, 6, 1);
+const COMMAND_FAILURE_WINDOW_MS = parsePositiveInt(process.env.TERMINAL_COMMAND_FAILURE_WINDOW_MS, 60_000, 1_000);
+const COMMAND_FAILURE_COOLDOWN_MS = parsePositiveInt(process.env.TERMINAL_COMMAND_FAILURE_COOLDOWN_MS, 30_000, 1_000);
 const MAX_SEARCH_PATTERN_LENGTH = 256;
+const MAX_LIST_ENTRIES = parsePositiveInt(process.env.TERMINAL_MAX_LIST_ENTRIES, 500, 10);
+const MAX_HISTORY_ENTRIES = parsePositiveInt(process.env.TERMINAL_MAX_HISTORY_ENTRIES, 100, 10);
+const MAX_SEARCH_RESULTS = parsePositiveInt(process.env.TERMINAL_MAX_SEARCH_RESULTS, 200, 10);
 const ALLOWED_KILL_SIGNALS = new Set<NodeJS.Signals>([
   "SIGABRT",
   "SIGALRM",
@@ -718,6 +727,40 @@ export class TerminalController extends EventEmitter {
     };
   }
 
+  private evaluateCircuitBreaker(session: TerminalSession): string | undefined {
+    const now = Date.now();
+    if (session.circuitOpenUntil && now < session.circuitOpenUntil) {
+      const remainingMs = Math.max(0, session.circuitOpenUntil - now);
+      const remainingSec = Math.ceil(remainingMs / 1000);
+      return `circuit breaker active (${remainingSec}s remaining)`;
+    }
+
+    if (session.commandFailureCount > 0 && now - session.commandFailureWindowStart > COMMAND_FAILURE_WINDOW_MS) {
+      session.commandFailureCount = 0;
+      session.commandFailureWindowStart = now;
+    }
+
+    return undefined;
+  }
+
+  private recordCommandResult(session: TerminalSession, result: CommandResult): void {
+    const now = Date.now();
+    if (result.success) {
+      session.commandFailureCount = 0;
+      session.commandFailureWindowStart = now;
+      return;
+    }
+
+    if (session.commandFailureCount === 0) {
+      session.commandFailureWindowStart = now;
+    }
+    session.commandFailureCount += 1;
+
+    if (session.commandFailureCount >= MAX_CONSECUTIVE_COMMAND_FAILURES) {
+      session.circuitOpenUntil = now + COMMAND_FAILURE_COOLDOWN_MS;
+    }
+  }
+
   private getCachedCommandResult(session: TerminalSession, key?: string): CommandResult | undefined {
     if (!key) return undefined;
     const entry = session.idempotentCommands.get(key);
@@ -739,6 +782,13 @@ export class TerminalController extends EventEmitter {
       if (now - entry.createdAt > MAX_IDEMPOTENCY_TTL_MS) {
         session.idempotentCommands.delete(key);
       }
+    }
+  }
+
+  private appendHistory(session: TerminalSession, result: CommandResult): void {
+    session.history.push(result);
+    if (session.history.length > MAX_HISTORY_ENTRIES) {
+      session.history = session.history.slice(-MAX_HISTORY_ENTRIES);
     }
   }
 
@@ -788,6 +838,9 @@ export class TerminalController extends EventEmitter {
       commandsInWindow: 0,
       activeCommandCount: 0,
       idempotentCommands: new Map(),
+      commandFailureCount: 0,
+      commandFailureWindowStart: Date.now(),
+      circuitOpenUntil: 0,
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -858,6 +911,25 @@ export class TerminalController extends EventEmitter {
       return cached;
     }
 
+    const circuitReason = this.evaluateCircuitBreaker(session);
+    if (circuitReason) {
+      const blockedResult: CommandResult = {
+        id: commandId,
+        command,
+        exitCode: 1,
+        stdout: "",
+        stderr: `Command execution blocked: ${circuitReason}`,
+        duration: 0,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+      if (idempotencyKey) {
+        this.setCachedCommandResult(session, idempotencyKey, blockedResult);
+      }
+      return blockedResult;
+    }
+
     // Safety check
     const safetyResult = this.checkCommandSafety(command);
     const bypassSafety =
@@ -877,6 +949,7 @@ export class TerminalController extends EventEmitter {
       if (idempotencyKey) {
         this.setCachedCommandResult(session, idempotencyKey, blockedResult);
       }
+      this.recordCommandResult(session, blockedResult);
       return blockedResult;
     }
 
@@ -1042,12 +1115,8 @@ export class TerminalController extends EventEmitter {
           success: exitCode === 0,
         };
 
-        session.history.push(result);
+        this.appendHistory(session, result);
         session.lastActivity = Date.now();
-
-        if (session.history.length > 100) {
-          session.history = session.history.slice(-100);
-        }
 
         this.emit("command:complete", { sessionId, commandId, result });
         resolve(result);
@@ -1069,7 +1138,7 @@ export class TerminalController extends EventEmitter {
           success: false,
         };
 
-        session.history.push(result);
+        this.appendHistory(session, result);
         resolve(result);
       });
     });
@@ -1092,15 +1161,34 @@ export class TerminalController extends EventEmitter {
       if (idempotencyKey) {
         this.setCachedCommandResult(session, idempotencyKey, errorResult);
       }
+      this.recordCommandResult(session, errorResult);
       return errorResult;
     }
 
     try {
       const result = await executeFlow();
+      this.recordCommandResult(session, result);
       if (idempotencyKey) {
         this.setCachedCommandResult(session, idempotencyKey, result);
       }
       return result;
+    } catch (error: any) {
+      const errorResult: CommandResult = {
+        id: commandId,
+        command: fullCommand,
+        exitCode: 1,
+        stdout: "",
+        stderr: `Command execution failed: ${error?.message || "unexpected error"}`,
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+      this.recordCommandResult(session, errorResult);
+      if (idempotencyKey) {
+        this.setCachedCommandResult(session, idempotencyKey, errorResult);
+      }
+      return errorResult;
     } finally {
       commandSlot.release();
       this.pruneExpiredIdempotentCommands(session);
@@ -1176,7 +1264,7 @@ export class TerminalController extends EventEmitter {
                 success: exitCode === 0
             };
             
-            session.history.push(result);
+            this.appendHistory(session, result);
             this.emit("command:complete", { sessionId, commandId, result });
             resolve(result);
         });
@@ -1267,7 +1355,7 @@ export class TerminalController extends EventEmitter {
             containerId: container.id
         };
 
-        session.history.push(cmdResult);
+        this.appendHistory(session, cmdResult);
         this.emit("command:complete", { sessionId, commandId, result: cmdResult });
         return cmdResult;
 
@@ -1385,13 +1473,19 @@ export class TerminalController extends EventEmitter {
 
         case "list": {
           const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
-          const items = entries.map(e => ({
+          const limitedEntries = entries.slice(0, MAX_LIST_ENTRIES);
+          const items = limitedEntries.map(e => ({
             name: e.name,
             isDirectory: e.isDirectory(),
             isFile: e.isFile(),
             isSymlink: e.isSymbolicLink(),
           }));
-          return { success: true, data: items };
+          return {
+            success: true,
+            data: items,
+            truncated: entries.length > MAX_LIST_ENTRIES,
+            total: entries.length,
+          };
         }
 
         case "stat": {
@@ -1427,7 +1521,7 @@ export class TerminalController extends EventEmitter {
           }
           return {
             success: true,
-            data: result.stdout.trim().split("\n").filter(Boolean).slice(0, 200),
+            data: result.stdout.trim().split("\n").filter(Boolean).slice(0, MAX_SEARCH_RESULTS),
           };
         }
 
@@ -1779,7 +1873,8 @@ export class TerminalController extends EventEmitter {
 
   getHistory(sessionId: string, limit: number = 50): CommandResult[] {
     const session = this.getSessionOrFail(sessionId);
-    return session.history.slice(-limit);
+    const safeLimit = Math.max(1, Math.min(limit, MAX_HISTORY_ENTRIES));
+    return session.history.slice(-safeLimit);
   }
 
   async replayCommand(sessionId: string, commandId: string): Promise<CommandResult> {
