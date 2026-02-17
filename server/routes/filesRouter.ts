@@ -133,6 +133,19 @@ function getUploadId(req: Request, bodyUploadId?: unknown): string | null {
   return null;
 }
 
+function isStatelessAuthRequest(req: Request): boolean {
+  const authHeader = req.headers.authorization;
+  return (typeof authHeader === "string" && authHeader.startsWith("Bearer ilgpt_"))
+    || typeof (req as any).apiKey !== "undefined";
+}
+
+function getUploadActorId(req: Request): string {
+  if (isStatelessAuthRequest(req)) {
+    return "__stateless_upload__";
+  }
+  return getOrCreateSecureUserId(req);
+}
+
 function getConversationId(req: Request, bodyConversationId?: unknown): string | null {
   const headerConversationId = sanitizeConversationId(extractHeader(req, HEADER_CONVERSATION_ID));
   if (headerConversationId) return headerConversationId;
@@ -691,7 +704,7 @@ export function createFilesRouter() {
 
   router.post("/api/objects/upload", async (req, res) => {
     try {
-      const userId = getOrCreateSecureUserId(req);
+      const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
       const uploadId = getUploadId(req, rawUploadId);
@@ -763,7 +776,7 @@ export function createFilesRouter() {
           localFallback: true,
         };
         if (uploadId) {
-          const cacheKey = buildUploadCacheKey(userId, uploadId, conversationId);
+          const cacheKey = buildUploadCacheKey(actorId, uploadId, conversationId);
           const existingRegistration = fileRegistrationCache.get(cacheKey);
           const fingerprint = buildRequestFingerprint({
             route: "/api/objects/upload",
@@ -812,7 +825,7 @@ export function createFilesRouter() {
       const safeMimeType = typeof mimeType === "string" ? stripContentType(mimeType) || mimeType : "";
       const fileSize = Number(rawFileSize);
       const totalChunks = Number(rawTotalChunks);
-      const userId = getOrCreateSecureUserId(req);
+      const actorId = getUploadActorId(req);
       const conversationId = getConversationId(req, req.body?.conversationId);
       const requestedUploadId = getUploadId(req, req.body?.uploadId);
       if (typeof req.body?.uploadId === "string" && !requestedUploadId) {
@@ -857,7 +870,7 @@ export function createFilesRouter() {
 
       const objectId = `uploads/${uploadId}`;
       const storagePath = `/objects/${objectId}`;
-      const registrationKey = buildUploadCacheKey(userId, uploadId, conversationId);
+      const registrationKey = buildUploadCacheKey(actorId, uploadId, conversationId);
       const fingerprint = buildRegistrationFingerprint(fileName, safeMimeType, fileSize, storagePath);
 
       const existingRegistration = fileRegistrationCache.get(registrationKey);
@@ -968,7 +981,7 @@ export function createFilesRouter() {
       const safeMimeType = typeof mimeType === "string" ? stripContentType(mimeType) || mimeType : "";
       const fileSize = Number(rawFileSize);
       const totalChunks = Number(rawTotalChunks);
-      const userId = getOrCreateSecureUserId(req);
+      const actorId = getUploadActorId(req);
       const conversationId = getConversationId(req, req.body?.conversationId);
       const requestedUploadId = getUploadId(req, req.body?.uploadId);
       if (typeof req.body?.uploadId === "string" && !requestedUploadId) {
@@ -1130,7 +1143,7 @@ export function createFilesRouter() {
         .sort((a, b) => a - b)
         .filter((partNumber, index, arr) => index === 0 || partNumber !== arr[index - 1]);
 
-      const userId = getOrCreateSecureUserId(req);
+      const actorId = getUploadActorId(req);
       const sessionConversationId = getConversationId(req, rawConversationId);
 
       const session = multipartSessions.get(uploadId);
@@ -1143,7 +1156,7 @@ export function createFilesRouter() {
       }
 
       const completionKey = buildUploadCacheKey(
-        userId,
+        actorId,
         uploadId,
         sessionConversationId || session.conversationId || null
       );
@@ -1318,9 +1331,9 @@ export function createFilesRouter() {
       const rawUploadId = req.body?.uploadId;
       if (typeof rawUploadId === "string") {
         const normalizedUploadId = sanitizeUploadId(rawUploadId);
-        if (normalizedUploadId) {
-        const conversationId = getConversationId(req, req.body?.conversationId);
-          const completionKey = buildUploadCacheKey(getOrCreateSecureUserId(req), normalizedUploadId, conversationId);
+          if (normalizedUploadId) {
+            const conversationId = getConversationId(req, req.body?.conversationId);
+          const completionKey = buildUploadCacheKey(getUploadActorId(req), normalizedUploadId, conversationId);
           multipartCompletionCache.delete(completionKey);
         }
       }
