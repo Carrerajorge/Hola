@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Request, Router } from "express";
 import { storage } from "../../storage";
 import { db } from "../../db";
 import { users } from "@shared/schema";
@@ -27,6 +27,8 @@ const MAX_CONVERSATIONS_VIEW = 500;
 
 type SortOrder = "asc" | "desc";
 type UserSortField = "createdAt" | "email" | "queryCount" | "tokensConsumed" | "lastLoginAt";
+type ConversationRecord = { id: string; [key: string]: unknown };
+type RequestWithActor = Request & { user?: { id?: string; email?: string } };
 
 const VALID_SORT_FIELDS = new Set<UserSortField>([
   "createdAt",
@@ -99,6 +101,14 @@ function safeAdminError(error: unknown): string {
     if (lower.includes("timeout")) return "Operation timed out";
   }
   return "Internal server error";
+}
+
+function actorId(req: Request): string | undefined {
+  return (req as RequestWithActor).user?.id;
+}
+
+function actorEmail(req: Request): string | undefined {
+  return (req as RequestWithActor).user?.email;
 }
 
 function safeToNumber(value: unknown): number | null {
@@ -436,7 +446,7 @@ usersRouter.get("/export", async (req, res) => {
     const filteredUsers = filterUsers(allUsers, { search, status, role, plan, sortBy, sortOrder });
     const rows = filteredUsers.slice(offset, offset + limit);
     const total = filteredUsers.length;
-    const filenameBase = `users_${(req as any).user?.id || "admin"}_${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const filenameBase = `users_${actorId(req) || "admin"}_${new Date().toISOString().replace(/[:.]/g, "-")}`;
 
     if (format === "csv") {
       const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
@@ -509,7 +519,7 @@ usersRouter.post("/", requireRecentAuth(), validateBody(createUserBodySchema), a
         action: AuditActions.USER_CREATED,
         resource: "users",
         resourceId: user.id,
-        details: { email: normalizedEmail, plan: normalizedPlan, role: normalizedRole, createdBy: (req as any).user?.email },
+        details: { email: normalizedEmail, plan: normalizedPlan, role: normalizedRole, createdBy: actorEmail(req) },
         category: "admin",
         severity: "info"
     });
@@ -543,7 +553,7 @@ usersRouter.patch("/:id", requireRecentAuth(), async (req, res) => {
                         plan: previousUser.plan,
                         status: previousUser.status
                     } : null,
-                    updatedBy: (req as any).user?.email,
+                    updatedBy: actorEmail(req),
                 },
                 category: "admin",
                 severity: "info"
@@ -589,7 +599,7 @@ usersRouter.delete("/:id", requireRecentAuth(), async (req, res) => {
                     role: result.role,
                     plan: result.plan
                 } : null,
-                deletedBy: (req as any).user?.email
+                deletedBy: actorEmail(req)
             },
             category: "admin",
             severity: "warning"
@@ -641,7 +651,7 @@ usersRouter.post("/:id/block", requireRecentAuth(), async (req, res) => {
             details: { 
                 reason: reasonRaw,
                 userEmail: user.email,
-                blockedBy: (req as any).user?.email
+                blockedBy: actorEmail(req)
             },
             category: "security",
             severity: "warning"
@@ -678,7 +688,7 @@ usersRouter.post("/:id/unblock", requireRecentAuth(), async (req, res) => {
             resourceId: req.params.id,
             details: {
                 userEmail: user.email,
-                unblockedBy: (req as any).user?.email
+                unblockedBy: actorEmail(req)
             },
             category: "security",
             severity: "info"
@@ -738,7 +748,7 @@ usersRouter.get("/:id/conversations", async (req, res) => {
         
         // Get message counts for each conversation
         const conversationsWithStats = await Promise.all(
-            conversationsWindow.map(async (conv: any) => {
+            conversationsWindow.map(async (conv: ConversationRecord) => {
                 const messages = await storage.getMessagesByConversationId(conv.id);
                 return {
                     ...conv,
@@ -784,7 +794,7 @@ usersRouter.delete("/:id/conversations", requireRecentAuth(), async (req, res) =
             for (let index = 0; index < conversations.length; index += BATCH_SIZE) {
                 const chunk = conversations.slice(index, index + BATCH_SIZE);
                 await Promise.all(
-                    chunk.map(async (conv: any) => {
+                    chunk.map(async (conv: ConversationRecord) => {
                         await storage.deleteConversation(conv.id);
                         return;
                     })
@@ -812,6 +822,10 @@ usersRouter.delete("/:id/conversations", requireRecentAuth(), async (req, res) =
 usersRouter.post("/:id/impersonate", requireRecentAuth(), async (req, res) => {
     try {
         const userId = req.params.id;
+        const adminId = actorId(req);
+        if (!adminId) {
+            return res.status(401).json({ error: "Unauthorized" });
+        }
         const tokenTTLMs = 60 * 60 * 1000;
         const user = await storage.getUser(userId);
         if (!user) {
@@ -826,7 +840,7 @@ usersRouter.post("/:id/impersonate", requireRecentAuth(), async (req, res) => {
         // Store impersonation token
         await storage.createImpersonationToken({
             token,
-            adminId: (req as any).user?.id,
+            adminId,
             targetUserId: userId,
             expiresAt
         });
@@ -872,7 +886,7 @@ usersRouter.post("/:id/reset", requireRecentAuth(), async (req, res) => {
                 for (let index = 0; index < conversations.length; index += BATCH_SIZE) {
                     const chunk = conversations.slice(index, index + BATCH_SIZE);
                     await Promise.all(
-                        chunk.map(async (conv: any) => {
+                        chunk.map(async (conv: ConversationRecord) => {
                             await storage.deleteConversation(conv.id);
                             return;
                         })
