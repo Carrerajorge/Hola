@@ -11,8 +11,9 @@
 import { useCallback, useRef, useEffect } from "react";
 import { getAnonUserIdHeader } from "@/lib/apiClient";
 import type { Message } from "@/hooks/use-chats";
+import { type AIState } from "@/components/chat-interface/types";
 
-type AiState = "idle" | "thinking" | "responding" | "agent_working";
+type StreamRetryState = "idle" | "running" | "retry";
 
 export interface StreamChatDeps {
   setOptimisticMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -35,6 +36,9 @@ export interface StreamOptions {
   buildErrorMessage?: (error: Error, messageId?: string) => Message;
   queueMode?: "replace" | "reject";
   timeoutMs?: number;
+  firstTokenTimeoutMs?: number;
+  doneTimeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface StreamResult {
@@ -54,6 +58,8 @@ interface ConversationSession {
   rafId: number | null;
   finalizing: boolean;
   timeoutId: ReturnType<typeof setTimeout> | null;
+  firstTokenTimeoutId: ReturnType<typeof setTimeout> | null;
+  doneTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 function createSession(): ConversationSession {
@@ -66,7 +72,17 @@ function createSession(): ConversationSession {
     rafId: null,
     finalizing: false,
     timeoutId: null,
+    firstTokenTimeoutId: null,
+    doneTimeoutId: null,
   };
+}
+
+const DEFAULT_STREAM_TIMEOUT_MS = 120_000;
+const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 8_000;
+const DEFAULT_DONE_TIMEOUT_MS = 45_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function generateRequestId(): string {

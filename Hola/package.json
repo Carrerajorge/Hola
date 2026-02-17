@@ -188,7 +188,7 @@
     "mathjax": "^3.2.2",
     "memoizee": "^0.4.17",
     "memorystore": "^1.6.7",
-    "mermaid": "^11.12.2",
+    "mermaid": "^11.12.3",
     "multer": "^2.0.2",
     "nanoid": "^5.1.6",
     "natural": "^8.1.0",
@@ -304,6 +304,20 @@
   "overrides": {
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "pdfjs-dist": "4.10.38",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "mermaid": "^11.12.3",
+    "markdown-it": "^14.1.1",
+    "ajv": "^8.18.0",
+    "langium": "^4.2.1",
+    "@mermaid-js/parser": "^1.0.0",
+    "chevrotain": "^11.1.1",
+    "@chevrotain/cst-dts-gen": "^11.1.1",
+    "@chevrotain/gast": "^11.1.1",
+    "lodash-es": "^4.17.23",
+    "axios": "^1.13.5",
+    "qs": "^6.15.0",
+    "fast-xml-parser": "^5.3.6",
+    "@isaacs/brace-expansion": "^5.0.1",
+    "@aws-sdk/xml-builder": "^3.972.4"
   }
 }

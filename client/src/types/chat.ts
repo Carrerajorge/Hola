@@ -27,7 +27,7 @@ export interface ActiveGpt {
     };
 }
 
-export type AiState = "idle" | "thinking" | "responding" | "agent_working";
+export type AiState = "idle" | "sending" | "streaming" | "done" | "error" | "agent_working";
 
 export interface Message {
     id: string;

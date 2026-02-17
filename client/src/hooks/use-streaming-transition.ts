@@ -22,8 +22,7 @@
 
 import { useCallback, useRef } from "react";
 import type { Message } from "@/hooks/use-chats";
-
-type AiState = "idle" | "thinking" | "responding" | "agent_working";
+import { type AIState } from "@/components/chat-interface/types";
 
 export interface StreamingTransitionDeps {
   /** Adds message to optimistic list for immediate display */
@@ -88,7 +87,7 @@ export function useStreamingTransition(deps: StreamingTransitionDeps) {
 
       // STEP 4: Reset AI state
       if (!options?.keepAiState) {
-        setAiState(options?.targetAiState ?? "idle");
+        setAiState(options?.targetAiState ?? "done");
       }
 
       // STEP 5: Clear process steps if applicable
@@ -115,7 +114,7 @@ export function useStreamingTransition(deps: StreamingTransitionDeps) {
    * Start a new streaming session — clears previous state.
    */
   const startStreaming = useCallback(
-    (aiState: AiState = "thinking") => {
+    (aiState: AiState = "sending") => {
       streamingContentRef.current = "";
       setStreamingContent("");
       setAiState(aiState);

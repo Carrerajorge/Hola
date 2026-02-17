@@ -88,7 +88,7 @@ export interface ChatMetadata {
 // UI STATE TYPES
 // ============================================
 
-export type AIState = 'idle' | 'thinking' | 'responding' | 'error' | 'agent_working';
+export type AIState = 'idle' | 'sending' | 'streaming' | 'done' | 'error' | 'agent_working';
 
 export interface AiProcessStep {
     id?: string;
