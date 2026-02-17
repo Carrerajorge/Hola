@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    bash scripts/rollback-bluegreen.sh --stop-bad    # Also stop the bad slot
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.1.0"
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
 readonly STATE_FILE="${DEPLOY_PATH}/deploy-state.json"
@@ -63,6 +63,74 @@ logok(){ echo "[$(date '+%H:%M:%S')]   ✓ $*"; }
 logw() { echo "[$(date '+%H:%M:%S')]   ⚠ $*"; }
 loge() { echo "[$(date '+%H:%M:%S')]   ✗ $*" >&2; }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  echo "${value}"
+}
+
+validate_not_weak_default() {
+  local name="$1"
+  local value="$2"
+  local lowered
+  lowered="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+
+  case "${lowered}" in
+    *changeme*|*change_me*|*default*|*test*|*dev*|*example*|*password*|*secret*|*placeholder*|*todo*)
+      loge "Weak/default ${name} detected; update in .env.production."
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+validate_secret() {
+  local name="$1"
+  local value="$2"
+  local min_len="$3"
+  local trimmed
+  trimmed="$(trim "${value}")"
+
+  if [ -z "${trimmed}" ]; then
+    loge "${name} is missing in .env.production"
+    return 1
+  fi
+  if [ "${#trimmed}" -lt "${min_len}" ]; then
+    loge "${name} is too short for production use (min: ${min_len})"
+    return 1
+  fi
+  if printf '%s' "${trimmed}" | grep -Eq '[[:space:]]'; then
+    loge "${name} must not contain whitespace."
+    return 1
+  fi
+  if ! validate_not_weak_default "${name}" "${trimmed}"; then
+    return 1
+  fi
+  echo "${trimmed}"
+}
+
+load_env_value() {
+  local key="$1"
+  local file="$2"
+  local line
+  local value=""
+
+  line="$(grep -m1 -E "^${key}=" "${file}" 2>/dev/null || true)"
+  if [ -n "${line}" ]; then
+    value="${line#*=}"
+    value="${value%$'\r'}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    echo "${value}"
+    return 0
+  fi
+
+  echo ""
+}
+
 ROLLBACK_START="$(date +%s)"
 
 # ── Preflight ──────────────────────────────────────────────
@@ -83,6 +151,23 @@ if ! command -v nginx > /dev/null 2>&1; then
   loge "nginx not found in PATH."
   exit 1
 fi
+
+if [ ! -f .env.production ]; then
+  loge "Missing .env.production — required for secure rollback."
+  exit 1
+fi
+
+SANDBOX_RUNNER_TOKEN="$(load_env_value "SANDBOX_RUNNER_TOKEN" ".env.production" || true)"
+if ! SANDBOX_RUNNER_TOKEN="$(validate_secret "SANDBOX_RUNNER_TOKEN" "${SANDBOX_RUNNER_TOKEN}" 48)"; then
+  exit 1
+fi
+export SANDBOX_RUNNER_TOKEN
+
+REDIS_PASSWORD="$(load_env_value "REDIS_PASSWORD" ".env.production" || true)"
+if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"; then
+  exit 1
+fi
+export REDIS_PASSWORD
 
 # ── Check for concurrent deploy ──────────────────────────
 if [ -f "${LOCK_FILE}" ]; then
@@ -173,11 +258,7 @@ cd "${DEPLOY_PATH}"
 # ── Backup current state ──────────────────────────────────
 cp "${STATE_FILE}" "${STATE_FILE_BAK}"
 
-# ── Load secrets for compose ────────────────────────────
-if [ -f .env.production ]; then
-  export SANDBOX_RUNNER_TOKEN="$(grep '^SANDBOX_RUNNER_TOKEN=' .env.production | head -n1 | cut -d= -f2- || true)"
-  export REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env.production | head -n1 | cut -d= -f2- || true)"
-fi
+# Secrets loaded from .env.production (validated in preflight).
 
 # ── Step 1: Check/start previous slot ────────────────────
 log "[1/7] Checking ${PREVIOUS_SLOT} slot containers..."
@@ -212,8 +293,8 @@ else
     HOST_PORT="${ROLLBACK_PORT}" \
     IMAGE_TAG="${PREVIOUS_IMAGE}" \
     APP_VERSION="${PREVIOUS_VERSION}" \
-    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
-    REDIS_PASSWORD="${REDIS_PASSWORD:-redis_secure_password_change_me}" \
+    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+    REDIS_PASSWORD="${REDIS_PASSWORD}" \
     docker compose -p "hola-${PREVIOUS_SLOT}" -f "${SLOT_COMPOSE}" up -d --force-recreate --remove-orphans
 
   logok "Started ${PREVIOUS_SLOT} slot."
@@ -351,15 +432,15 @@ if [ "${STOP_BAD}" = "true" ]; then
     HOST_PORT="${CURRENT_PORT}" \
     IMAGE_TAG="${CURRENT_IMAGE}" \
     APP_VERSION="${CURRENT_VERSION}" \
-    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
-    REDIS_PASSWORD="${REDIS_PASSWORD:-redis_secure_password_change_me}" \
+    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+    REDIS_PASSWORD="${REDIS_PASSWORD}" \
     docker compose -p "hola-${CURRENT_SLOT}" -f "${SLOT_COMPOSE}" stop -t 15 2>/dev/null || true
   SLOT="${CURRENT_SLOT}" \
     HOST_PORT="${CURRENT_PORT}" \
     IMAGE_TAG="${CURRENT_IMAGE}" \
     APP_VERSION="${CURRENT_VERSION}" \
-    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN:-}" \
-    REDIS_PASSWORD="${REDIS_PASSWORD:-redis_secure_password_change_me}" \
+    SANDBOX_RUNNER_TOKEN="${SANDBOX_RUNNER_TOKEN}" \
+    REDIS_PASSWORD="${REDIS_PASSWORD}" \
     docker compose -p "hola-${CURRENT_SLOT}" -f "${SLOT_COMPOSE}" down --remove-orphans 2>/dev/null || true
   logok "Bad ${CURRENT_SLOT} slot stopped."
 else

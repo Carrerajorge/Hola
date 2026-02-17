@@ -13,6 +13,12 @@ on:
       app_digest:
         description: "App image digest"
         value: ${{ jobs.build.outputs.app_digest }}
+      sandbox_digest:
+        description: "Sandbox image digest"
+        value: ${{ jobs.build.outputs.sandbox_digest }}
+      ocr_digest:
+        description: "OCR image digest"
+        value: ${{ jobs.build.outputs.ocr_digest }}
 
 permissions:
   contents: read
@@ -30,6 +36,8 @@ jobs:
     outputs:
       image_tag: ${{ steps.meta.outputs.tag }}
       app_digest: ${{ steps.build_app.outputs.digest }}
+      sandbox_digest: ${{ steps.build_sandbox.outputs.digest }}
+      ocr_digest: ${{ steps.build_ocr.outputs.digest }}
 
     steps:
       - name: Checkout

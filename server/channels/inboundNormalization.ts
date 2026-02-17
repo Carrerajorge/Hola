@@ -215,9 +215,10 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
       const contactName = sanitizeMetadataText(contact?.profile?.name) || null;
 
       for (const m of messages) {
-        const providerMessageId = sanitizeIdentifierStrict(m?.id)
-          || `wa_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        if (!providerMessageId) continue;
+        const providerMessageId = sanitizeIdentifierStrict(m?.id);
+        if (!providerMessageId) {
+          continue;
+        }
 
         const senderId = sanitizeIdentifierStrict(m?.from);
         if (!senderId) continue;
@@ -363,8 +364,10 @@ export function normalizeMessengerMessages(payload: any): MessageEnvelope[] {
       const message = event?.message;
       if (!senderId || !recipientId || !message) continue;
 
-      const providerMessageId = sanitizeIdentifierStrict(message?.mid)
-        || `ms_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      const providerMessageId = sanitizeIdentifierStrict(message?.mid);
+      if (!providerMessageId) {
+        continue;
+      }
       const envelopeBase: MessageEnvelope = {
         providerMessageId,
         channel: "messenger",
@@ -481,10 +484,10 @@ export function normalizeWeChatMessage(rawXml: string, parsed: any): MessageEnve
   const msgType = sanitizeIdentifierStrict(parsed?.MsgType);
   const from = sanitizeIdentifierStrict(parsed?.FromUserName);
   const to = sanitizeIdentifierStrict(parsed?.ToUserName);
-  const msgId = sanitizeIdentifierStrict(parsed?.MsgId)
-    || `wc_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const msgId = sanitizeIdentifierStrict(parsed?.MsgId);
 
   if (!from || !to) return null;
+  if (!msgId) return null;
 
   const envelopeBase: MessageEnvelope = {
     providerMessageId: msgId,
@@ -578,9 +581,9 @@ export function normalizeTelegramMessages(payload: any): MessageEnvelope[] {
   const text = sanitizeTextForStorage(msg?.text);
   const caption = sanitizeMetadataText(msg?.caption);
   const chatId = sanitizeChatId(msg?.chat?.id);
-  const messageId = sanitizeIdentifierStrict(msg?.message_id) || `tg_${Date.now()}`;
+  const messageId = sanitizeIdentifierStrict(msg?.message_id);
   const from = sanitizeIdentifierStrict(msg?.from?.id);
-  if (!chatId || !from) return out;
+  if (!chatId || !from || !messageId) return out;
 
   const conversationAccountId = "default";
   const baseEnvelope: MessageEnvelope = {

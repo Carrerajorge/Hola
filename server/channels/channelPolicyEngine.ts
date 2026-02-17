@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import type { ChannelConversation } from "@shared/schema/channels";
 import type { ChannelRuntimeConfig } from "./runtimeConfig";
 import type { MessageEnvelope } from "./types";
@@ -15,6 +17,7 @@ export type ChannelPolicyDecision = {
   allowed: boolean;
   code: ChannelPolicyDecisionCode;
   replyText: string;
+  policyTraceId?: string;
   requiresTemplate?: boolean;
   requiresOwnerHandshake?: boolean;
   shouldRespond?: boolean;
@@ -207,7 +210,7 @@ function normalizeWindowRecoveryMessage(channel: MessageEnvelope["channel"]): st
     return "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.";
   }
 
-  return "Esta conversación está fuera de ventana. Pide al cliente que escriba de nuevo para reabrir el chat.";
+  return "Esta conversación de WeChat está fuera de ventana. El contacto debe escribir de nuevo y confirmar para reabrir el canal.";
 }
 
 function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string {
@@ -237,6 +240,11 @@ export type ChannelWindowState = {
   lastInboundAt?: string | null;
   lastOutboundAt?: string | null;
 };
+
+function buildPolicyTraceId(context: ChannelPolicyContext, code: ChannelPolicyDecisionCode): string {
+  const canonical = `${context.envelope.channel}|${context.envelope.senderId}|${context.envelope.providerMessageId}|${code}|${context.envelope.threadId}`;
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 24);
+}
 
 export function getConversationWindowState(conversation: ChannelConversation): ChannelWindowState {
   const metadata = getMetadataObject(conversation);
@@ -321,6 +329,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "invalid_payload",
         replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
       },
@@ -336,6 +345,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "invalid_payload",
         replyText: normalizePayloadErrorMessage(),
+        policyTraceId: buildPolicyTraceId(context, "invalid_payload"),
         requiresOwnerHandshake: false,
         shouldRespond: false,
       },
@@ -352,6 +362,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "blocked_sender",
         replyText: normalizeBlockedSenderMessage(),
+        policyTraceId: buildPolicyTraceId(context, "blocked_sender"),
         requiresOwnerHandshake: false,
         shouldRespond: false,
       },
@@ -366,6 +377,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "rate_limited",
         replyText: "Has enviado mensajes muy rápido. Espera un momento y vuelve a intentarlo.",
+        policyTraceId: buildPolicyTraceId(context, "rate_limited"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
         throttleUntilIso: rateControl.retryAfterIso,
@@ -396,6 +408,7 @@ export function evaluateChannelPolicy(
         allowed: false,
         code: "off_for_owner_only",
         replyText: normalizeOwnerBlockMessage(context.envelope.channel),
+        policyTraceId: buildPolicyTraceId(context, "off_for_owner_only"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
       },
@@ -411,6 +424,7 @@ export function evaluateChannelPolicy(
         code: "off_for_owner_only",
         replyText:
           "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
+        policyTraceId: buildPolicyTraceId(context, "off_for_owner_only"),
         requiresOwnerHandshake: true,
         shouldRespond: false,
       },
@@ -431,6 +445,7 @@ export function evaluateChannelPolicy(
         code: "outside_window",
         replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
         requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
+        policyTraceId: buildPolicyTraceId(context, "outside_window"),
         requiresOwnerHandshake: isOwner,
         shouldRespond: true,
       },
@@ -443,6 +458,7 @@ export function evaluateChannelPolicy(
       allowed: true,
       code: "ok",
       replyText: "",
+      policyTraceId: buildPolicyTraceId(context, "ok"),
       shouldRespond: true,
     },
   };

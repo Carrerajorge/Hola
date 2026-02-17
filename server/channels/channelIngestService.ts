@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { createHash } from "crypto";
 
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
@@ -64,6 +64,7 @@ type SendRequest = {
   runId: string;
   conversationKey: ConversationKey;
   senderId: string;
+  traceId: string;
 };
 
 type InFlightRunState = {
@@ -71,6 +72,7 @@ type InFlightRunState = {
   requestId: string;
   runId: string;
   channel: ExternalChannel;
+  traceId: string;
   startedAt: number;
 };
 
@@ -89,8 +91,8 @@ const MAX_ENVELOPES_PER_JOB = 12;
 const MAX_RATE_BUCKET_ENTRIES = 8_000;
 const MAX_MESSAGE_ID_ENTRIES = 120_000;
 const CONVERSATION_QUEUE_TIMEOUT_MS = 180_000;
-const SAFE_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
-const SAFE_REQUEST_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const SAFE_ID_RE = /^[A-Za-z0-9._:\-]+$/;
+const SAFE_REQUEST_ID_RE = /^[A-Za-z0-9._:\-]+$/;
 const DEFAULT_MEDIA_LABEL = {
   image: "[Imagen recibida]",
   audio: "[Audio recibido]",
@@ -102,6 +104,8 @@ const OUTBOUND_CIRCUIT_FAILURE_THRESHOLD = 5;
 const OUTBOUND_CIRCUIT_OPEN_MS = 60_000;
 const OUTBOUND_CIRCUIT_BASE_BACKOFF_MS = 2_000;
 const MAX_STREAM_CHUNK_LENGTH = 4_096;
+const MAX_CONVERSATION_QUEUES = 2_000;
+const EVENT_TRACE_ID_LENGTH = 24;
 
 const inFlightRunsByConversation = new Map<string, InFlightRunState>();
 const conversationQueues = new Map<string, Promise<void>>();
@@ -227,6 +231,15 @@ function sanitizeReceivedAt(value: unknown): string {
 
   const parsed = Date.parse(candidate);
   if (!Number.isFinite(parsed)) return nowIso();
+
+  const now = Date.now();
+  // Reject timestamps more than 5 minutes in the future or more than 7 days in the past
+  const MAX_FUTURE_MS = 5 * 60 * 1000;
+  const MAX_PAST_MS = 7 * 24 * 60 * 60 * 1000;
+  if (parsed > now + MAX_FUTURE_MS || parsed < now - MAX_PAST_MS) {
+    return nowIso();
+  }
+
   return new Date(parsed).toISOString();
 }
 
@@ -254,28 +267,14 @@ function buildConversationScopedRequestId(conversationKey: string, providerMessa
   return sanitizeRequestIdentifier(`${providerMessageId.slice(0, 24)}_${digest}`).slice(0, MAX_REQUEST_ID_LENGTH);
 }
 
-function buildDeterministicFallbackProviderMessageId(seedParts: unknown[]): string {
-  const seed = seedParts
-    .map((part) => normalizeIdentifier(part, MAX_ID_LENGTH))
-    .filter(Boolean)
-    .join("|");
+function buildEventTraceId(conversationKey: string, providerMessageId: string, requestId: string): string {
+  const canonical = `${conversationKey}|${providerMessageId}|${requestId}|${jobSalt()}`;
+  return createHash("sha256").update(canonical).digest("hex").slice(0, EVENT_TRACE_ID_LENGTH);
+}
 
-  if (!seed) {
-    return randomUUID();
-  }
-
-  const compact = seed
-    .normalize("NFKC")
-    .replace(/\s+/g, "")
-    .replace(/[^A-Za-z0-9._:@+\-]+/g, "")
-    .toLowerCase()
-    .slice(0, MAX_ID_LENGTH - 3);
-
-  if (!compact) {
-    return randomUUID();
-  }
-
-  return `fb_${compact}`.slice(0, MAX_ID_LENGTH);
+function jobSalt(): string {
+  const now = new Date();
+  return `${now.getUTCHours()}:${now.getUTCMinutes()}`;
 }
 
 function buildConversationWorkspaceId(account: ChannelAccount): string {
@@ -660,6 +659,7 @@ async function sendTextWithRetries(
         senderId: payload.senderId,
         runId: payload.runId,
         requestId: payload.requestId,
+        traceId: payload.traceId,
         reason: String((error as Error)?.message || error),
       });
 
@@ -723,6 +723,15 @@ function timeoutMsForChannel(channel: ExternalChannel): number {
 }
 
 async function safeQueue<T>(key: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  // Prevent unbounded growth of the conversation queue map
+  if (!conversationQueues.has(key) && conversationQueues.size >= MAX_CONVERSATION_QUEUES) {
+    Logger.warn("[Channels] conversation queue map at capacity, rejecting", {
+      key: key.slice(0, 40),
+      queueSize: conversationQueues.size,
+    });
+    throw new Error("Conversation queue at capacity");
+  }
+
   const previous = conversationQueues.get(key) || Promise.resolve();
   const queueAbort = new AbortController();
   const timeoutError = new Error("Conversation queue timeout");
@@ -777,6 +786,7 @@ async function abortPreviousRunForConversation(conversationKey: string): Promise
     channel: existing.channel,
     runId: existing.runId,
     requestId: existing.requestId,
+    traceId: existing.traceId,
   });
 
   try {
@@ -798,6 +808,7 @@ async function runOutboundDecision(
     assistantMessageId?: string;
     skipRunStatusUpdate?: boolean;
     abortSignal?: AbortSignal;
+    traceId?: string;
   },
 ): Promise<void> {
   if (options?.abortSignal?.aborted) {
@@ -810,6 +821,10 @@ async function runOutboundDecision(
   }
 
   const safeRunId = sanitizeRequestIdentifier(runId) || safeRequestId;
+  const safeTraceId = sanitizeRequestIdentifier(options?.traceId || safeRequestId);
+  if (!safeTraceId) {
+    throw new Error("Invalid outbound traceId");
+  }
   const safeAssistantContent = enforceSafeLimit(
     String(assistantContent ?? "")
       .normalize("NFKC")
@@ -824,6 +839,7 @@ async function runOutboundDecision(
     runId: safeRunId,
     conversationKey: context.envelope.conversationKey,
     senderId: context.envelope.threadId,
+    traceId: safeTraceId,
   };
 
   if (!safeAssistantContent) {
@@ -856,6 +872,7 @@ async function runOutboundDecision(
           requestId: safeRequestId,
           sourceChannel: context.jobChannel,
           conversationKey: context.envelope.conversationKey,
+          traceId: safeTraceId,
         },
       },
     ).catch(() => null);
@@ -871,6 +888,7 @@ async function runOutboundDecision(
     conversation: payload.conversationKey,
     channel: context.jobChannel,
     requestId: safeRequestId,
+    traceId: safeTraceId,
     userMessageId,
   });
 }
@@ -927,6 +945,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
   const messageId = safeMessageId;
   const conversationKey = serializeConversationKey(safeEnvelope.conversationKey);
+  const eventTraceId = buildEventTraceId(conversationKey, messageId, safeScopedRequestId);
   const scopedRequestId = buildConversationScopedRequestId(conversationKey, messageId);
   if (runAbort.signal.aborted) {
     Logger.warn("[Channels] inbound message skipped due to pre-aborted run", {
@@ -955,6 +974,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       messageId: safeScopedRequestId,
       channel: jobChannel,
       reason: "in_memory_dedupe_hit",
+      traceId: eventTraceId,
     });
     return;
   }
@@ -965,6 +985,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       messageId: safeScopedRequestId,
       channel: jobChannel,
       reason: "persistent_dedupe_hit",
+      traceId: eventTraceId,
     });
     return;
   }
@@ -995,6 +1016,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         "",
         safeScopedRequestId,
         {
+          traceId: eventTraceId,
           skipRunStatusUpdate: true,
           abortSignal: runAbort.signal,
         },
@@ -1018,6 +1040,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         "",
         safeScopedRequestId,
         {
+          traceId: eventTraceId,
           skipRunStatusUpdate: true,
           abortSignal: runAbort.signal,
         },
@@ -1055,6 +1078,8 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       channel: jobChannel,
       shouldRespond,
       senderId: safeEnvelope.senderId,
+      policyTraceId: policy.policyTraceId,
+      traceId: eventTraceId,
     });
 
     if (!shouldRespond) return;
@@ -1064,14 +1089,15 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         ...context,
         envelope: safeEnvelope,
       },
-      policy.replyText,
-      "",
-      safeScopedRequestId,
-      {
-        skipRunStatusUpdate: true,
-        abortSignal: runAbort.signal,
-      },
-    ).catch((error) => {
+        policy.replyText,
+        "",
+        safeScopedRequestId,
+        {
+          traceId: eventTraceId,
+          skipRunStatusUpdate: true,
+          abortSignal: runAbort.signal,
+        },
+      ).catch((error) => {
       Logger.warn("[Channels] policy-blocked response failed", {
         conversation: safeEnvelope.conversationKey,
         channel: jobChannel,
@@ -1096,6 +1122,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       conversationKey: safeEnvelope.conversationKey,
       receivedAt: safeEnvelope.receivedAt,
       messageType: safeEnvelope.messageType,
+      eventTraceId,
       sourceMetadata: asAttachmentFromEnvelope(safeEnvelope),
     },
   } as any;
@@ -1145,6 +1172,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     requestId: safeScopedRequestId,
     runId: safeRunId,
     channel: jobChannel,
+    traceId: eventTraceId,
     startedAt: Date.now(),
   });
 
@@ -1202,6 +1230,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
               output = enforceSafeLimit(output, MAX_ASSISTANT_MESSAGE_LENGTH);
               Logger.warn("[Channels] assistant output length clipped", {
                 runId,
+                traceId: eventTraceId,
                 conversation: safeEnvelope.conversationKey,
                 limit: MAX_ASSISTANT_MESSAGE_LENGTH,
               });
@@ -1234,6 +1263,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         requestId: safeScopedRequestId,
         sourceChannel: jobChannel,
         conversationKey: safeEnvelope.conversationKey,
+        traceId: eventTraceId,
       },
     });
 
@@ -1248,6 +1278,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       safeScopedRequestId,
       {
         assistantMessageId,
+        traceId: eventTraceId,
         abortSignal: runAbort.signal,
       },
     );
@@ -1259,6 +1290,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       conversation: safeEnvelope.conversationKey,
       channel: jobChannel,
       elapsedMs: Date.now() - start,
+      traceId: eventTraceId,
     });
   } catch (err) {
     const reason = String((err as Error)?.message || err);
@@ -1274,6 +1306,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
           error: reason,
           sourceChannel: jobChannel,
           aborted,
+          traceId: eventTraceId,
         },
       }).catch(() => null);
     }
@@ -1298,6 +1331,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
             runId: safeRunId,
             conversationKey: safeEnvelope.conversationKey,
             senderId: safeEnvelope.threadId,
+            traceId: eventTraceId,
           },
           0,
           runAbort.signal,
@@ -1306,6 +1340,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         Logger.error("[Channels] fallback send failed", {
           conversation: safeEnvelope.conversationKey,
           channel: jobChannel,
+          traceId: eventTraceId,
           error: String((sendError as Error)?.message || sendError),
         });
       }
@@ -1318,6 +1353,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       channel: jobChannel,
       error: reason,
       aborted,
+      traceId: eventTraceId,
     });
   } finally {
     unregisterInFlightRun(conversationKey, {
@@ -1348,23 +1384,18 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     const safeChannelKey = normalizeIdentifier(rawEnvelope.channelKey, MAX_ID_LENGTH);
     const safeThreadId = normalizeIdentifier(rawEnvelope.threadId, MAX_ID_LENGTH);
     const safeSenderId = normalizeIdentifier(rawEnvelope.senderId, MAX_ID_LENGTH);
-    const safeProviderMessageId =
-      normalizeIdentifier(rawEnvelope.providerMessageId, MAX_ID_LENGTH)
-      || buildDeterministicFallbackProviderMessageId([
-        job.channel,
-        rawEnvelope.channelKey,
-        rawEnvelope.threadId,
-        rawEnvelope.senderId,
-        rawEnvelope.receivedAt,
-        envelopeIndex,
-      ]);
+    const safeProviderMessageId = normalizeIdentifier(rawEnvelope.providerMessageId, MAX_ID_LENGTH);
+    const safeWorkspaceId = normalizeIdentifier(rawEnvelope.conversationKey?.workspaceId, MAX_WORKSPACE_ID_LENGTH) || "workspace:unknown";
 
-    if (!safeChannelKey || !safeThreadId || !safeSenderId) {
-      Logger.warn("[Channels] inbound envelope has invalid identifiers", {
+    if (!safeChannelKey || !safeThreadId || !safeSenderId || !safeProviderMessageId) {
+      Logger.error("[Channels] inbound envelope rejected due to missing mandatory identifiers", {
         channel: job.channel,
+        reason: "missing_mandatory_identifier",
+        envelopeIndex,
         threadId: rawEnvelope.threadId,
         channelKey: rawEnvelope.channelKey,
         senderId: rawEnvelope.senderId,
+        providerMessageId: rawEnvelope.providerMessageId,
       });
       continue;
     }
@@ -1380,7 +1411,7 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
       conversationKey: {
         ...rawEnvelope.conversationKey,
         channel: rawEnvelope.channel,
-        workspaceId: normalizeIdentifier(rawEnvelope.conversationKey?.workspaceId, MAX_WORKSPACE_ID_LENGTH) || "workspace:unknown",
+        workspaceId: safeWorkspaceId,
         channelAccountId: safeChannelKey,
         threadId: safeThreadId,
       },

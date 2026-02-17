@@ -85,6 +85,13 @@ const FORBIDDEN_HEADER_NAMES = new Set([
   "cookie",
   "set-cookie",
   "content-length",
+  "referer",
+  "origin",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+  "forwarded",
   "__proto__",
   "constructor",
   "prototype",
@@ -666,7 +673,7 @@ function hasForbiddenTemplateObjectKeyLiteral(raw: string): boolean {
   const keyPattern = /(^|[,{]\s*)\"((?:\\.|[^"\\])+)\"\s*:/g;
   let match: RegExpExecArray | null;
   while ((match = keyPattern.exec(raw)) !== null) {
-    const quotedKey = match[1];
+    const quotedKey = match[2];
     let decodedKey: string;
     try {
       decodedKey = JSON.parse(`"${quotedKey}"`);
@@ -756,8 +763,11 @@ function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), d
     }
 
     seen.add(raw);
-    const output: Record<string, unknown> = {};
+    const output: Record<string, unknown> = Object.create(null);
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (isForbiddenMappingKey(key)) {
+        continue;
+      }
       output[key] = sanitizeLogValue(value, seen, depth + 1);
     }
     return output;

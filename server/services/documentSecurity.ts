@@ -455,12 +455,27 @@ export type DocumentEventType =
   | "generate_start"
   | "generate_success"
   | "generate_failure"
+  | "generate_fallback"
   | "render_start"
   | "render_success"
   | "render_failure"
   | "validation_error"
   | "security_violation"
-  | "rate_limit_exceeded";
+  | "rate_limit_exceeded"
+  | "execute_code_start"
+  | "execute_code_success"
+  | "execute_code_failure"
+  | "plan_start"
+  | "plan_success"
+  | "plan_failure"
+  | "grammar_check_success"
+  | "grammar_check_failure"
+  | "translate_start"
+  | "translate_success"
+  | "translate_failure"
+  | "shared_start"
+  | "shared_success"
+  | "shared_failure";
 
 export interface DocumentAuditEvent {
   timestamp: string;

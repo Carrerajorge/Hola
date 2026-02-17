@@ -46,6 +46,7 @@ export interface CommandRequest {
   inDocker?: boolean; // Run in Docker container
   dockerImage?: string; // Docker image to use
   confirmDangerous?: boolean; // Bypass safety check with explicit confirmation
+  idempotencyKey?: string; // Optional idempotency control for retries
 }
 
 export interface CommandResult {
@@ -124,6 +125,10 @@ export interface TerminalSession {
   env: Record<string, string>;
   history: CommandResult[];
   activeProcesses: Map<string, ChildProcess | pty.IPty>;
+  commandWindowStart: number;
+  commandsInWindow: number;
+  activeCommandCount: number;
+  idempotentCommands: Map<string, { result: CommandResult; createdAt: number }>;
   createdAt: number;
   lastActivity: number;
 }
@@ -159,6 +164,15 @@ const SAFE_COMMAND_PREFIX_SET = new Set(SAFE_COMMAND_PREFIXES.map((command) => c
 const ENFORCE_COMMAND_ALLOWLIST =
   process.env.TERMINAL_ENFORCE_ALLOWLIST === "true" || process.env.NODE_ENV === "production";
 const ALLOW_DANGEROUS_CONFIRM_BYPASS = process.env.TERMINAL_ALLOW_DANGEROUS_CONFIRM === "true";
+
+function parsePositiveInt(value: string | undefined, fallback: number, minimum = 1): number {
+  const parsed = Number.parseInt(value || "", 10);
+  if (Number.isNaN(parsed) || parsed < minimum) {
+    return fallback;
+  }
+  return parsed;
+}
+
 const SESSION_TTL_MS = (() => {
   const rawValue = process.env.TERMINAL_SESSION_TTL_MS;
   if (rawValue === undefined) {
@@ -208,6 +222,11 @@ const FORBIDDEN_SESSION_ENV_KEYS = new Set([
 
 const MAX_ACTIVE_OUTPUT_BYTES = 1024 * 1024; // 1MB per command output cap
 const INFO_COMMAND_TIMEOUT_MS = 5_000;
+const MAX_COMMANDS_PER_WINDOW = parsePositiveInt(process.env.TERMINAL_MAX_COMMANDS_PER_WINDOW, 120, 1);
+const COMMAND_RATE_WINDOW_MS = parsePositiveInt(process.env.TERMINAL_COMMAND_WINDOW_MS, 60_000, 1_000);
+const MAX_ACTIVE_COMMANDS_PER_SESSION = parsePositiveInt(process.env.TERMINAL_MAX_ACTIVE_COMMANDS_PER_SESSION, 4, 1);
+const MAX_IDEMPOTENCY_TTL_MS = parsePositiveInt(process.env.TERMINAL_IDEMPOTENCY_TTL_MS, 5 * 60_000, 1_000);
+const MAX_SEARCH_PATTERN_LENGTH = 256;
 const ALLOWED_KILL_SIGNALS = new Set<NodeJS.Signals>([
   "SIGABRT",
   "SIGALRM",
@@ -225,6 +244,10 @@ type RunCommandForInfoResult = {
   stderr: string;
   exitCode: number | null;
 };
+
+type CommandSlotAcquisition =
+  | { ok: true; release: () => void }
+  | { ok: false; reason: string };
 
 function sanitizeIncomingEnv(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -442,6 +465,46 @@ function resolveExecutionTimeout(rawTimeout: number | undefined, fallbackMs: num
   return Math.min(600_000, Math.max(500, Math.floor(requestTimeout)));
 }
 
+function sanitizeIdempotencyKey(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("idempotencyKey must be a non-empty string");
+  }
+
+  const normalized = value.trim();
+  if (normalized.length < 8 || normalized.length > 128) {
+    throw new Error("idempotencyKey must be between 8 and 128 characters");
+  }
+
+  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) {
+    throw new Error("idempotencyKey contains invalid characters");
+  }
+
+  return normalized;
+}
+
+function buildDeterministicIdempotencyKey(prefix: string, seed: string): string {
+  const safePrefix = prefix.replace(/[^A-Za-z0-9._-]+/g, "_");
+  const digest = Buffer.from(`${seed}`).toString("base64url").slice(0, 80);
+  return `${safePrefix}:${digest}`;
+}
+
+function sanitizeSearchPattern(rawPattern: string): string {
+  const pattern = rawPattern.trim();
+  if (!pattern) {
+    throw new Error("pattern cannot be empty");
+  }
+  if (pattern.length > MAX_SEARCH_PATTERN_LENGTH) {
+    throw new Error(`pattern exceeds maximum length of ${MAX_SEARCH_PATTERN_LENGTH}`);
+  }
+  if (/[;\n\r\t\u0000]/.test(pattern) || pattern.includes("|") || pattern.includes("&") || pattern.includes("`")) {
+    throw new Error("pattern contains invalid characters");
+  }
+  return pattern;
+}
+
 function resolveSessionCwd(session: TerminalSession, rawCwd?: string): string {
   const target = (rawCwd ?? "").trim();
   const resolved = path.resolve(session.cwd, target || ".");
@@ -626,6 +689,59 @@ export class TerminalController extends EventEmitter {
     }
   }
 
+  private tryAcquireCommandSlot(session: TerminalSession): CommandSlotAcquisition {
+    const now = Date.now();
+    if (now - session.commandWindowStart >= COMMAND_RATE_WINDOW_MS) {
+      session.commandWindowStart = now;
+      session.commandsInWindow = 0;
+    }
+
+    if (session.commandsInWindow >= MAX_COMMANDS_PER_WINDOW) {
+      return { ok: false, reason: "Too many commands in this interval" };
+    }
+
+    if (session.activeCommandCount >= MAX_ACTIVE_COMMANDS_PER_SESSION) {
+      return { ok: false, reason: "Too many concurrent commands in session" };
+    }
+
+    session.commandsInWindow += 1;
+    session.activeCommandCount += 1;
+
+    let released = false;
+    return {
+      ok: true,
+      release: () => {
+        if (released) return;
+        released = true;
+        session.activeCommandCount = Math.max(0, session.activeCommandCount - 1);
+      },
+    };
+  }
+
+  private getCachedCommandResult(session: TerminalSession, key?: string): CommandResult | undefined {
+    if (!key) return undefined;
+    const entry = session.idempotentCommands.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.createdAt > MAX_IDEMPOTENCY_TTL_MS) {
+      session.idempotentCommands.delete(key);
+      return undefined;
+    }
+    return { ...entry.result };
+  }
+
+  private setCachedCommandResult(session: TerminalSession, key: string, result: CommandResult): void {
+    session.idempotentCommands.set(key, { result, createdAt: Date.now() });
+  }
+
+  private pruneExpiredIdempotentCommands(session: TerminalSession): void {
+    const now = Date.now();
+    for (const [key, entry] of session.idempotentCommands.entries()) {
+      if (now - entry.createdAt > MAX_IDEMPOTENCY_TTL_MS) {
+        session.idempotentCommands.delete(key);
+      }
+    }
+  }
+
   // ============================================
   // Session Management
   // ============================================
@@ -643,6 +759,7 @@ export class TerminalController extends EventEmitter {
     }
 
     session.lastActivity = now;
+    this.pruneExpiredIdempotentCommands(session);
     return session;
   }
 
@@ -667,6 +784,10 @@ export class TerminalController extends EventEmitter {
       env: { ...baseEnv, ...requestedEnv },
       history: [],
       activeProcesses: new Map(),
+      commandWindowStart: Date.now(),
+      commandsInWindow: 0,
+      activeCommandCount: 0,
+      idempotentCommands: new Map(),
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -715,12 +836,34 @@ export class TerminalController extends EventEmitter {
     const commandId = randomUUID();
     const startTime = Date.now();
 
+    let idempotencyKey: string | undefined;
+    try {
+      idempotencyKey = sanitizeIdempotencyKey(request.idempotencyKey);
+    } catch (error: any) {
+      return {
+        id: commandId,
+        command,
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid idempotencyKey: ${error.message}`,
+        duration: 0,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+    }
+
+    const cached = this.getCachedCommandResult(session, idempotencyKey);
+    if (cached) {
+      return cached;
+    }
+
     // Safety check
     const safetyResult = this.checkCommandSafety(command);
     const bypassSafety =
       Boolean(request.confirmDangerous) && ALLOW_DANGEROUS_CONFIRM_BYPASS;
     if (!safetyResult.safe && !bypassSafety) {
-      return {
+      const blockedResult: CommandResult = {
         id: commandId,
         command,
         exitCode: 1,
@@ -731,6 +874,10 @@ export class TerminalController extends EventEmitter {
         signal: null,
         success: false,
       };
+      if (idempotencyKey) {
+        this.setCachedCommandResult(session, idempotencyKey, blockedResult);
+      }
+      return blockedResult;
     }
 
     const normalizedRequest: CommandRequest = {
@@ -739,84 +886,86 @@ export class TerminalController extends EventEmitter {
       args,
     };
 
+    const fullCommand = buildCommandLine(command, args);
+    const executeFlow = async (): Promise<CommandResult> => {
     if (request.inDocker) {
-        return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
+      return this.executeDockerCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     if (request.interactive) {
-        return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
+      return this.executePtyCommand(sessionId, commandId, normalizedRequest, startTime);
     }
 
     // Standard execution
-    const fullCommand = buildCommandLine(command, args);
-
     // Handle cd command specially
     if (fullCommand.trim().startsWith("cd ")) {
-      const targetDir = fullCommand.trim().slice(3).trim().replace(/^["']|["']$/g, "");
-      let resolvedPath: string;
-      try {
-        resolvedPath = resolveSessionCwd(session, targetDir);
-      } catch (error: any) {
-        return {
-          id: commandId,
-          command: fullCommand,
-          exitCode: 1,
-          stdout: "",
-          stderr: error.message,
-          duration: Date.now() - startTime,
-          killed: false,
-          signal: null,
-          success: false,
-        };
-      }
-      if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
-        return {
-          id: commandId,
-          command: fullCommand,
-          exitCode: 1,
-          stdout: "",
-          stderr: "Cwd transition denied: outside session root",
-          duration: Date.now() - startTime,
-          killed: false,
-          signal: null,
-          success: false,
-        };
-      }
-
-      try {
-        await fs.access(resolvedPath);
-        const stat = await fs.stat(resolvedPath);
-        if (!stat.isDirectory()) {
-          throw new Error(`Not a directory: ${resolvedPath}`);
+      return (async () => {
+        const targetDir = fullCommand.trim().slice(3).trim().replace(/^["']|["']$/g, "");
+        let resolvedPath: string;
+        try {
+          resolvedPath = resolveSessionCwd(session, targetDir);
+        } catch (error: any) {
+          return {
+            id: commandId,
+            command: fullCommand,
+            exitCode: 1,
+            stdout: "",
+            stderr: error.message,
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: false,
+          };
         }
-        session.cwd = resolvedPath;
-        return {
-          id: commandId,
-          command: fullCommand,
-          exitCode: 0,
-          stdout: resolvedPath,
-          stderr: "",
-          duration: Date.now() - startTime,
-          killed: false,
-          signal: null,
-          success: true,
-        };
-      } catch (error: any) {
-        return {
-          id: commandId,
-          command: fullCommand,
-          exitCode: 1,
-          stdout: "",
-          stderr: error.message,
-          duration: Date.now() - startTime,
-          killed: false,
-          signal: null,
-          success: false,
-        };
-      }
+        if (!isPathInsideBase(session.baseCwd, resolvedPath)) {
+          return {
+            id: commandId,
+            command: fullCommand,
+            exitCode: 1,
+            stdout: "",
+            stderr: "Cwd transition denied: outside session root",
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: false,
+          };
+        }
+
+        try {
+          await fs.access(resolvedPath);
+          const stat = await fs.stat(resolvedPath);
+          if (!stat.isDirectory()) {
+            throw new Error(`Not a directory: ${resolvedPath}`);
+          }
+          session.cwd = resolvedPath;
+          return {
+            id: commandId,
+            command: fullCommand,
+            exitCode: 0,
+            stdout: resolvedPath,
+            stderr: "",
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: true,
+          };
+        } catch (error: any) {
+          return {
+            id: commandId,
+            command: fullCommand,
+            exitCode: 1,
+            stdout: "",
+            stderr: error.message,
+            duration: Date.now() - startTime,
+            killed: false,
+            signal: null,
+            success: false,
+          };
+        }
+      })();
     }
 
-    return new Promise((resolve) => {
+    return new Promise<CommandResult>((resolve) => {
       const shell = request.shell || "bash";
       const timeout = resolveExecutionTimeout(request.timeout, this.defaultTimeout);
 
@@ -924,6 +1073,39 @@ export class TerminalController extends EventEmitter {
         resolve(result);
       });
     });
+    };
+
+    const commandSlot = this.tryAcquireCommandSlot(session);
+    if (!commandSlot.ok) {
+      const reason = "reason" in commandSlot ? commandSlot.reason : "command slot unavailable";
+      const errorResult: CommandResult = {
+        id: commandId,
+        command: fullCommand,
+        exitCode: 1,
+        stdout: "",
+        stderr: `Command execution blocked: ${reason}`,
+        duration: 0,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+      if (idempotencyKey) {
+        this.setCachedCommandResult(session, idempotencyKey, errorResult);
+      }
+      return errorResult;
+    }
+
+    try {
+      const result = await executeFlow();
+      if (idempotencyKey) {
+        this.setCachedCommandResult(session, idempotencyKey, result);
+      }
+      return result;
+    } finally {
+      commandSlot.release();
+      this.pruneExpiredIdempotentCommands(session);
+      session.lastActivity = Date.now();
+    }
   }
 
   // ============================================
@@ -1228,11 +1410,17 @@ export class TerminalController extends EventEmitter {
         }
 
         case "search": {
-          const pattern = validateStringOrThrow(op.pattern || "*", "pattern");
+          const pattern = sanitizeSearchPattern(op.pattern || "*");
+          const sanitizedRecursive =
+            op.recursive === false ? ["-maxdepth", "1"] : [];
           const result = await this.executeCommand(sessionId, {
             command: "find",
-            args: [resolvedPath, "-name", pattern, "-type", "f"],
+            args: [resolvedPath, ...sanitizedRecursive, "-type", "f", "-name", pattern],
             timeout: 10_000,
+            idempotencyKey: buildDeterministicIdempotencyKey(
+              "search",
+              `${session.cwd}|${resolvedPath}|${pattern}|${op.recursive ? "1" : "0"}`
+            ),
           });
           if (!result.success) {
             return { success: false, error: result.stderr || result.stdout || "Search failed" };
@@ -1461,7 +1649,39 @@ export class TerminalController extends EventEmitter {
     args?: string[];
   }): Promise<CommandResult> {
     this.getSessionOrFail(sessionId);
+    const commandId = randomUUID();
+    const startTime = Date.now();
 
+    const normalizedLanguage = language.trim().toLowerCase();
+    const safeCode = validateTextPayload(code, MAX_FILE_OPERATION_BYTES, "code");
+    if (!safeCode.trim()) {
+      return {
+        id: commandId,
+        command: `script:${normalizedLanguage || "unknown"}`,
+        exitCode: 1,
+        stdout: "",
+        stderr: "code is empty",
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+    }
+    if (safeCode.includes("\u0000")) {
+      return {
+        id: commandId,
+        command: `script:${normalizedLanguage || "unknown"}`,
+        exitCode: 1,
+        stdout: "",
+        stderr: "code contains invalid characters",
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+    }
+
+    const timeout = options?.timeout ? resolveExecutionTimeout(options.timeout, 60_000) : 60_000;
     const tempDir = path.join(os.tmpdir(), "iliagpt-scripts");
     await fs.mkdir(tempDir, { recursive: true });
 
@@ -1480,21 +1700,39 @@ export class TerminalController extends EventEmitter {
       rust: { command: "rust" },
       php: { command: "php" },
     };
+    const interpreter = interpreters[normalizedLanguage];
+    const extension = extensions[normalizedLanguage];
 
-    const normalizedLanguage = language.toLowerCase();
-    const ext = extensions[normalizedLanguage] || "txt";
-    const interpreter = interpreters[normalizedLanguage] || { command: normalizedLanguage };
+    if (!interpreter || !extension) {
+      return {
+        id: commandId,
+        command: `script:${normalizedLanguage}`,
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unsupported script language: ${normalizedLanguage || "unknown"}`,
+        duration: Date.now() - startTime,
+        killed: false,
+        signal: null,
+        success: false,
+      };
+    }
+
+    const ext = extension;
     const scriptFile = path.join(tempDir, `script-${randomUUID().slice(0, 8)}.${ext}`);
     const scriptArgs = validateScriptArgs(options?.args);
 
-    await fs.writeFile(scriptFile, code);
+    await fs.writeFile(scriptFile, safeCode);
 
     try {
       const args = [scriptFile, ...scriptArgs];
       return await this.executeCommand(sessionId, {
         command: interpreter.command,
         args: interpreter.args ? [...interpreter.args, ...args] : args,
-        timeout: options?.timeout || 60000,
+        timeout,
+        idempotencyKey: buildDeterministicIdempotencyKey(
+          `script-${normalizedLanguage}`,
+          `${sessionId}|${normalizedLanguage}|${safeCode}|${JSON.stringify(scriptArgs)}|${timeout}`
+        ),
       });
     } finally {
       await fs.unlink(scriptFile).catch(() => {});

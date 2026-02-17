@@ -1,7 +1,8 @@
-import { Request, Response, Router } from "express";
+import { NextFunction, Request, Response, Router } from "express";
 import fs from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import multer from "multer";
 import {
   generateWordDocument,
   generateExcelDocument,
@@ -75,6 +76,32 @@ const IDEMPOTENCY_MAX_ENTRIES = 200;
 const IDEMPOTENCY_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._-]{8,128}$/;
 const CORRELATION_ID_RE = /^[A-Za-z0-9._-]{8,64}$/;
+const SHARE_UPLOAD_FIELD = "file";
+const SHARE_MAX_DOCUMENT_SIZE = 25 * 1024 * 1024;
+const SHARE_TTL_MS = 24 * 60 * 60 * 1000;
+const SHARE_ID_LENGTH = 8;
+const SHARE_ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
+const SHARE_ALLOWED_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+const SHARE_ALLOWED_EXTENSIONS = new Set([".docx", ".xlsx", ".pptx", ".pdf"]);
+const SHARE_DOCUMENT_TYPES = [
+  { extension: ".docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docType: "docx" },
+  { extension: ".pdf", mimeType: "application/pdf", docType: "pdf" },
+  { extension: ".xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", docType: "excel" },
+  { extension: ".pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", docType: "pptx" },
+] as const;
+type ShareDocumentType = (typeof SHARE_DOCUMENT_TYPES)[number]["docType"];
+const SHARE_UPLOAD_HANDLER = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: SHARE_MAX_DOCUMENT_SIZE,
+    files: 1,
+  },
+});
 
 const ALLOWED_LOCALES = new Set(["en", "es", "fr", "pt", "de"]);
 const PLAN_ALLOWED_COMMANDS = new Set([
@@ -220,6 +247,101 @@ function extractReplayHeaders(headers: Record<string, unknown>): Record<string, 
   return result;
 }
 
+const shareUploadHandler = (req: Request, res: Response, next: NextFunction): void => {
+  SHARE_UPLOAD_HANDLER.single(SHARE_UPLOAD_FIELD)(req, res, (error: unknown) => {
+    if (!error) {
+      return next();
+    }
+
+    const requestId = getCorrelationId(req as CorrelatedRequest);
+    const uploadError = error as { code?: string; message?: string };
+    let statusCode = 400;
+    let publicMessage = "Share upload validation failed";
+
+    if (uploadError.code === "LIMIT_FILE_SIZE") {
+      statusCode = 413;
+      publicMessage = "Uploaded document exceeds maximum allowed size";
+    } else if (uploadError.code === "LIMIT_FILE_COUNT" || uploadError.code === "LIMIT_UNEXPECTED_FILE") {
+      statusCode = 400;
+      publicMessage = "Invalid file upload payload";
+    }
+
+    logger.warn("Share upload failed in middleware", {
+      requestId,
+      errorCode: uploadError.code,
+      errorMessage: uploadError.message,
+    });
+
+    res.status(statusCode).json({
+      ...safeErrorResponseWithRequest(publicMessage, error, req as CorrelatedRequest),
+      errorCode: uploadError.code || "UPLOAD_ERROR",
+    });
+  });
+};
+
+function normalizeUploadedFileName(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+}
+
+function getUploadedFileExtension(fileName: string): string {
+  const index = fileName.lastIndexOf(".");
+  if (index < 0) {
+    return "";
+  }
+  return fileName.slice(index).toLowerCase();
+}
+
+function resolveSharedDocumentType(input: { mimeType?: string; fileName?: string; } | undefined): {
+  extension: string;
+  mimeType: string;
+  docType: ShareDocumentType;
+} | null {
+  if (!input) {
+    return null;
+  }
+
+  const normalizedMime = normalizeUploadedFileName(input.mimeType ?? "");
+  const normalizedFileName = normalizeUploadedFileName(input.fileName ?? "");
+  const extension = getUploadedFileExtension(normalizedFileName);
+
+  const byMime = SHARE_DOCUMENT_TYPES.find((entry) => entry.mimeType === normalizedMime);
+  const byExtension = SHARE_DOCUMENT_TYPES.find((entry) => entry.extension === extension);
+
+  if (!byMime && !byExtension) {
+    return null;
+  }
+
+  if (byMime && byExtension && byMime.docType !== byExtension.docType) {
+    return null;
+  }
+
+  const resolved = byMime ?? byExtension;
+  if (!resolved || !SHARE_ALLOWED_MIME_TYPES.has(resolved.mimeType) || !SHARE_ALLOWED_EXTENSIONS.has(resolved.extension)) {
+    return null;
+  }
+
+  return resolved;
+}
+
+function resolveSharedContentType(fileName: string): string {
+  const extension = getUploadedFileExtension(normalizeUploadedFileName(fileName));
+  const match = SHARE_DOCUMENT_TYPES.find((entry) => entry.extension === extension);
+  return match ? match.mimeType : "application/octet-stream";
+}
+
+function safeShareRequestMeta(req: CorrelatedRequest): { requestId: string; contentType: string | undefined } {
+  const contentTypeHeader = req.headers["content-type"];
+  const contentType = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
+
+  return {
+    requestId: getCorrelationId(req),
+    contentType,
+  };
+}
+
 function pruneIdempotencyStore(): void {
   const now = Date.now();
   for (const [key, entry] of idempotencyStore.entries()) {
@@ -350,6 +472,17 @@ function safeErrorResponse(publicMessage: string, error: unknown): { error: stri
     return { error: publicMessage };
   }
   return { error: publicMessage, details: sanitizeErrorMessage(error) };
+}
+
+function safeErrorResponseWithRequest(
+  publicMessage: string,
+  error: unknown,
+  req: CorrelatedRequest
+): { error: string; details?: string; requestId: string } {
+  return {
+    requestId: getCorrelationId(req),
+    ...safeErrorResponse(publicMessage, error),
+  };
 }
 
 function normalizeLocale(value: unknown): string {
@@ -2074,36 +2207,213 @@ Generate the command plan:`;
   // DOCUMENT SHARING (WITH TTL)
   // ============================================
 
-  router.post("/share", async (req, res) => {
+  router.post("/share", aiLimiter, shareUploadHandler, async (req, res) => {
     try {
-      const shareId = crypto.randomUUID().slice(0, 8);
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const shareMeta = safeShareRequestMeta(req);
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_start",
+        docType: "share",
+        details: {
+          requestId: shareMeta.requestId,
+        },
+      });
+      if (!shareMeta.contentType?.toLowerCase().startsWith("multipart/form-data")) {
+        return res.status(415).json(safeErrorResponseWithRequest("Unsupported media type", new Error("Expected multipart/form-data"), req));
+      }
+
+      const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+      if (!uploadedFile) {
+        return res.status(400).json(safeErrorResponseWithRequest("No file provided", new Error("Missing file"), req));
+      }
+
+      const resolvedType = resolveSharedDocumentType({
+        mimeType: uploadedFile.mimetype,
+        fileName: uploadedFile.originalname,
+      });
+      if (!resolvedType) {
+        return res.status(415).json(safeErrorResponseWithRequest("Unsupported document type", new Error("Validation failed"), req));
+      }
+
+      if (!uploadedFile.buffer.length) {
+        return res.status(400).json(safeErrorResponseWithRequest("Uploaded file is empty", new Error("Validation failed"), req));
+      }
+
+      if (uploadedFile.buffer.length > SHARE_MAX_DOCUMENT_SIZE) {
+        return res.status(413).json(safeErrorResponseWithRequest("Uploaded document exceeds size limit", new Error("Validation failed"), req));
+      }
+
+      const bufferCheck = validateBufferSize(uploadedFile.buffer, resolvedType.docType);
+      if (!bufferCheck.valid) {
+        return res.status(422).json(safeErrorResponseWithRequest("Shared document failed validation", new Error(bufferCheck.error || "Validation failed"), req));
+      }
+
+      const filename = sanitizeFilename(
+        uploadedFile.originalname || `shared_document${resolvedType.extension}`,
+        resolvedType.extension
+      );
+
+      const rawIdempotencyKey = req.get("Idempotency-Key");
+      const idempotencyKey = readIdempotencyKey(rawIdempotencyKey);
+      if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid Idempotency-Key header", new Error("Invalid idempotency key"), req));
+      }
+
+      const requestFingerprint = buildIdempotencyFingerprint({
+        mimeType: uploadedFile.mimetype,
+        fileName: filename,
+        size: uploadedFile.size,
+        checksum: createHash("sha256").update(uploadedFile.buffer).digest("hex"),
+      });
+
+      if (idempotencyKey) {
+        const cacheKey = getIdempotencyCacheKey("/share", idempotencyKey);
+        const replay = getIdempotencyReplay(cacheKey, requestFingerprint);
+        if (replay === "conflict") {
+          return res.status(409).json(safeErrorResponseWithRequest("Idempotency replay mismatch", new Error("Idempotency conflict"), req));
+        }
+        if (replay) {
+          return replayIdempotentResponse(res, replay);
+        }
+      }
+
+      const shareId = createHash("sha256")
+        .update(`${shareMeta.requestId}:${uploadedFile.size}:${uploadedFile.originalname || "document"}`)
+        .digest("hex")
+        .slice(0, SHARE_ID_LENGTH);
+      if (!SHARE_ID_RE.test(shareId)) {
+        return res.status(500).json(safeErrorResponseWithRequest("Unable to generate share id", new Error("Internal error"), req));
+      }
+
+      const stored = sharedDocumentStore.set(shareId, {
+        blob: uploadedFile.buffer,
+        filename,
+        createdBy: shareMeta.requestId,
+      }, SHARE_TTL_MS);
+      if (!stored) {
+        return res.status(429).json(safeErrorResponseWithRequest("Too many shared documents", new Error("Share store full"), req));
+      }
+
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
       const shareUrl = `${baseUrl}/api/documents/shared/${shareId}`;
+      const responsePayload = {
+        shareId,
+        shareUrl,
+        expiresIn: "24 hours",
+      };
 
-      // In production, store the document buffer with the ID via sharedDocumentStore
-      // const stored = sharedDocumentStore.set(shareId, { blob: buffer, filename: "doc.docx" });
-      // if (!stored) return res.status(429).json({ error: "Too many shared documents" });
+      if (idempotencyKey) {
+        const responseBody = Buffer.from(JSON.stringify(responsePayload));
+        storeIdempotentResponse(getIdempotencyCacheKey("/share", idempotencyKey), requestFingerprint, {
+          statusCode: 201,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: responseBody,
+        });
+      }
 
-      res.json({ shareUrl, expiresIn: "24 hours" });
+      logger.info("Document shared", {
+        requestId: shareMeta.requestId,
+        shareId,
+        fileName: filename,
+        size: uploadedFile.size,
+      });
+
+      const baseResponse = { ...responsePayload, requestId: shareMeta.requestId };
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_success",
+        docType: "share",
+        details: {
+          requestId: shareMeta.requestId,
+          shareId,
+          filename,
+          size: uploadedFile.size,
+        },
+      });
+      res.status(201).json(baseResponse);
     } catch (error: any) {
-      res.status(500).json(safeErrorResponse("Share failed", error));
+      logger.error("Share failed", {
+        requestId: getCorrelationId(req),
+        error: sanitizeErrorMessage(error),
+      });
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_failure",
+        docType: "share",
+        details: {
+          requestId: getCorrelationId(req),
+          error: sanitizeErrorMessage(error),
+        },
+      });
+      res.status(500).json(safeErrorResponseWithRequest("Share failed", error, req));
     }
   });
 
   router.get("/shared/:id", async (req, res) => {
     try {
-      const doc = sharedDocumentStore.get(req.params.id);
-      if (!doc) {
-        return res.status(404).json({ error: "Document not found or expired" });
+      const requestId = getCorrelationId(req);
+      const shareId = normalizeUploadedFileName(req.params.id);
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_start",
+        docType: "share",
+        details: {
+          requestId,
+          shareId,
+        },
+      });
+
+      if (!SHARE_ID_RE.test(shareId)) {
+        return res.status(400).json(safeErrorResponseWithRequest("Invalid share identifier", new Error("Invalid share id"), req));
       }
-      const filename = sanitizeFilename(doc.filename || "shared_document", ".docx");
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+      const doc = sharedDocumentStore.get(shareId);
+      if (!doc) {
+        logDocumentEvent({
+          timestamp: new Date().toISOString(),
+          event: "shared_failure",
+          docType: "share",
+          details: {
+            requestId,
+            shareId,
+            reason: "not_found_or_expired",
+          },
+        });
+        return res.status(404).json(safeErrorResponseWithRequest("Document not found or expired", new Error("Not found"), req));
+      }
+      const filename = sanitizeFilename(doc.filename || "shared_document", getUploadedFileExtension(doc.filename || ".docx"));
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_success",
+        docType: "share",
+        details: {
+          requestId,
+          shareId,
+          filename,
+          bytes: doc.blob.length,
+        },
+      });
+      res.setHeader("Content-Type", resolveSharedContentType(filename));
+      res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Disposition", safeContentDisposition(filename));
+      res.setHeader("X-Request-Id", requestId);
       res.send(doc.blob);
     } catch (error: any) {
-      res.status(500).json({ error: "Download failed" });
+      logDocumentEvent({
+        timestamp: new Date().toISOString(),
+        event: "shared_failure",
+        docType: "share",
+        details: {
+          requestId: getCorrelationId(req),
+          error: sanitizeErrorMessage(error),
+        },
+      });
+      res.status(500).json(safeErrorResponseWithRequest("Download failed", error, req));
     }
   });
+
 
   // Email endpoint (placeholder)
   router.post("/email", async (req, res) => {

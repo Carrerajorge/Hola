@@ -50,7 +50,11 @@ function validatePayloadHash(payloadHash: string): void {
   }
 }
 
-function normalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+function normalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): unknown {
+  if (depth > MAX_IDEMPOTENCY_NESTING_DEPTH) {
+    return "[max_depth_exceeded]";
+  }
+
   if (value === null || typeof value !== "object") {
     return value;
   }
@@ -65,14 +69,18 @@ function normalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet())
   seen.add(value as object);
 
   if (Array.isArray(value)) {
-    return value.map((entry) => normalizeForHash(entry, seen));
+    return value.map((entry) => normalizeForHash(entry, seen, depth + 1));
   }
 
   const source = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
   const keys = Object.keys(source).sort();
   for (const key of keys) {
-    output[key] = normalizeForHash(source[key], seen);
+    if (key === "__proto__" || key === "prototype" || key === "constructor") {
+      output[key] = "[redacted_proto_key]";
+      continue;
+    }
+    output[key] = normalizeForHash(source[key], seen, depth + 1);
   }
   return output;
 }
@@ -239,10 +247,23 @@ export async function checkIdempotencyKey(
         Date.now() - createdAt.getTime() >= STALE_PROCESSING_TTL_MS;
 
       if (isStaleProcessing) {
-        await db
-          .update(pareIdempotencyKeys)
-          .set({ status: "processing", expiresAt })
-          .where(eq(pareIdempotencyKeys.idempotencyKey, key));
+        // Atomic CAS: only reset if still in 'processing' state (prevents race with concurrent completion)
+        const casResult = await db.execute(sql`
+          UPDATE pare_idempotency_keys
+          SET status = 'processing', expires_at = ${expiresAt}
+          WHERE idempotency_key = ${key} AND status = 'processing'
+          RETURNING id
+        `);
+
+        if (!casResult.rowCount || casResult.rowCount === 0) {
+          // Another process already changed the status — re-check
+          logger.info("Idempotency stale CAS failed, re-checking", {
+            event: "IDEMPOTENCY_STALE_CAS_MISS",
+            key: obfuscateIdempotencyKey(key),
+            timestamp: new Date().toISOString(),
+          });
+          return { status: "processing" };
+        }
 
         logger.warn("Idempotency stale processing detected, forcing retry", {
           event: "IDEMPOTENCY_STALE_PROCESSING",
@@ -327,8 +348,8 @@ export async function failIdempotencyKey(
 ): Promise<void> {
   validateIdempotencyKey(key);
   const truncatedError =
-    typeof error === "string" && error.length > MAX_PAYLOAD_HASH_BYTES
-      ? `${error.slice(0, MAX_PAYLOAD_HASH_BYTES - 20)}...`
+    typeof error === "string" && error.length > MAX_RESPONSE_JSON_BYTES
+      ? `${error.slice(0, MAX_RESPONSE_JSON_BYTES - 20)}...`
       : error;
 
   try {

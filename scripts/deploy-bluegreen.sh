@@ -16,7 +16,7 @@ IFS=$'\n\t'
 #    DRY_RUN              — set to "true" for preflight only (no deploy)
 # ═══════════════════════════════════════════════════════════
 
-readonly SCRIPT_VERSION="3.1.0"
+readonly SCRIPT_VERSION="3.2.0"
 
 # ── Configuration ───────────────────────────────────────────
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/hola}"
@@ -42,6 +42,92 @@ readonly MIN_DISK_INODES_K=100
 IMAGE_TAG="${IMAGE_TAG:?IMAGE_TAG is required (e.g. sha-abc12345)}"
 APP_VERSION="${APP_VERSION:?APP_VERSION is required (e.g. abc12345)}"
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  echo "${value}"
+}
+
+validate_not_weak_default() {
+  local name="$1"
+  local value="$2"
+  local lowered
+  lowered="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+
+  case "${lowered}" in
+    *changeme*|*change_me*|*default*|*test*|*dev*|*example*|*password*|*secret*|*placeholder*|*todo*)
+      loge "Weak/default ${name} detected; update in .env.production."
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+validate_secret() {
+  local name="$1"
+  local value="$2"
+  local min_len="$3"
+  local trimmed
+  trimmed="$(trim "${value}")"
+
+  if [ -z "${trimmed}" ]; then
+    loge "${name} is missing in .env.production"
+    return 1
+  fi
+  if [ "${#trimmed}" -lt "${min_len}" ]; then
+    loge "${name} is too short for production use (min: ${min_len})"
+    return 1
+  fi
+  if printf '%s' "${trimmed}" | grep -Eq '[[:space:]]'; then
+    loge "${name} must not contain whitespace."
+    return 1
+  fi
+  if ! validate_not_weak_default "${name}" "${trimmed}"; then
+    return 1
+  fi
+  echo "${trimmed}"
+}
+
+load_env_value() {
+  local key="$1"
+  local file="$2"
+  local line
+  local value=""
+
+  line="$(grep -m1 -E "^${key}=" "${file}" 2>/dev/null || true)"
+  if [ -n "${line}" ]; then
+    value="${line#*=}"
+    value="${value%$'\r'}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    echo "${value}"
+    return 0
+  fi
+
+  echo ""
+}
+
+validate_image_inputs() {
+  local tag="$1"
+  local version="$2"
+
+  if [[ ! "${tag}" =~ ^sha-[0-9a-f]{8}$ ]]; then
+    loge "Invalid IMAGE_TAG format: ${tag}"
+    return 1
+  fi
+  if [[ ! "${version}" =~ ^[0-9a-f]{8}$ ]]; then
+    loge "Invalid APP_VERSION format: ${version}"
+    return 1
+  fi
+  if [ "sha-${version}" != "${tag}" ]; then
+    loge "IMAGE_TAG/APP_VERSION mismatch: tag ${tag} != sha-${version}"
+    return 1
+  fi
+}
+
 # ── Timing ──────────────────────────────────────────────────
 DEPLOY_START_EPOCH="$(date +%s)"
 
@@ -56,6 +142,55 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 logok(){ echo "[$(date '+%H:%M:%S')]   ✓ $*"; }
 logw() { echo "[$(date '+%H:%M:%S')]   ⚠ $*"; }
 loge() { echo "[$(date '+%H:%M:%S')]   ✗ $*" >&2; }
+
+validate_image_inputs "${IMAGE_TAG}" "${APP_VERSION}" || exit 1
+
+extract_manifest_digest() {
+  local image_ref="$1"
+  local digest
+
+  digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); m=d.get("manifests") or []; print((m[0].get("digest") if m else (d.get("digest") or d.get("config", {} ).get("digest", "")))')"
+  if [ "${digest}" = "None" ] || [ -z "${digest}" ]; then
+    echo ""
+  else
+    echo "${digest}"
+  fi
+}
+
+validate_image_digests() {
+  local expected_app="$1"
+  local expected_sandbox="$2"
+
+  if [ -n "${expected_app}" ]; then
+    local actual_app
+    actual_app="$(extract_manifest_digest "${REGISTRY}/iliagpt-app:${IMAGE_TAG}")"
+    if [ -z "${actual_app}" ]; then
+      loge "Unable to read digest for image ${REGISTRY}/iliagpt-app:${IMAGE_TAG}"
+      return 1
+    fi
+    if [ "${actual_app}" != "${expected_app}" ]; then
+      loge "App image digest mismatch: expected ${expected_app} got ${actual_app}"
+      return 1
+    fi
+    logok "App digest pinned: ${actual_app}"
+  fi
+
+  if [ -n "${expected_sandbox}" ]; then
+    local actual_sandbox
+    actual_sandbox="$(extract_manifest_digest "${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}")"
+    if [ -z "${actual_sandbox}" ]; then
+      loge "Unable to read digest for image ${REGISTRY}/iliagpt-sandbox:${IMAGE_TAG}"
+      return 1
+    fi
+    if [ "${actual_sandbox}" != "${expected_sandbox}" ]; then
+      loge "Sandbox image digest mismatch: expected ${expected_sandbox} got ${actual_sandbox}"
+      return 1
+    fi
+    logok "Sandbox digest pinned: ${actual_sandbox}"
+  fi
+
+  return 0
+}
 
 # ── Deploy lock (prevent concurrent deploys) ───────────────
 acquire_lock() {
@@ -197,23 +332,27 @@ logok ".env.production present"
 echo ""
 
 # ── Load secrets for compose variable expansion ────────────
-export SANDBOX_RUNNER_TOKEN="$(grep '^SANDBOX_RUNNER_TOKEN=' .env.production | head -n1 | cut -d= -f2- || true)"
-export REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env.production | head -n1 | cut -d= -f2- || true)"
+SANDBOX_RUNNER_TOKEN="$(load_env_value "SANDBOX_RUNNER_TOKEN" ".env.production" || true)"
+if ! SANDBOX_RUNNER_TOKEN="$(validate_secret "SANDBOX_RUNNER_TOKEN" "${SANDBOX_RUNNER_TOKEN}" 48)"; then
+  exit 1
+fi
+export SANDBOX_RUNNER_TOKEN
 
-if [ -z "${SANDBOX_RUNNER_TOKEN:-}" ]; then
-  log "SANDBOX_RUNNER_TOKEN missing; generating..."
-  export SANDBOX_RUNNER_TOKEN="$(openssl rand -hex 32)"
-  if grep -q '^SANDBOX_RUNNER_TOKEN=' .env.production; then
-    sed -i "s/^SANDBOX_RUNNER_TOKEN=.*/SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}/" .env.production
-  else
-    echo "SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN}" >> .env.production
+REDIS_PASSWORD="$(load_env_value "REDIS_PASSWORD" ".env.production" || true)"
+if ! REDIS_PASSWORD="$(validate_secret "REDIS_PASSWORD" "${REDIS_PASSWORD}" 20)"; then
+  exit 1
+fi
+export REDIS_PASSWORD
+
+if [ "${IMAGE_TAG}" != "${BUILD_IMAGE_TAG:-${IMAGE_TAG}}" ]; then
+  logw "Deploy tag does not match provided build artifact tag (${BUILD_IMAGE_TAG:-unknown}); skipping digest pinning."
+else
+  if ! validate_image_digests "${EXPECTED_APP_DIGEST:-}" "${EXPECTED_SANDBOX_DIGEST:-}"; then
+    exit 1
   fi
 fi
 
-if [ -z "${REDIS_PASSWORD:-}" ]; then
-  logw "REDIS_PASSWORD not set in .env.production — using default (unsafe for production!)"
-  export REDIS_PASSWORD="redis_secure_password_change_me"
-fi
+logok "Secrets loaded from .env.production"
 
 # ── Determine active/inactive slot ─────────────────────────
 if [ -f "${STATE_FILE}" ]; then

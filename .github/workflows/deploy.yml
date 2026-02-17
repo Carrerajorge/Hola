@@ -82,6 +82,74 @@ jobs:
             echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify images are present in GHCR (and digests when applicable)
+        id: image_manifest_check
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          EXPECTED_IMAGE_TAG: ${{ needs.build_images.outputs.image_tag }}
+          EXPECTED_APP_DIGEST: ${{ needs.build_images.outputs.app_digest }}
+          EXPECTED_SANDBOX_DIGEST: ${{ needs.build_images.outputs.sandbox_digest }}
+          EXPECTED_OCR_DIGEST: ${{ needs.build_images.outputs.ocr_digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${IMAGE_TAG}"
+          APP_IMAGE="ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}"
+          SANDBOX_IMAGE="ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}"
+          OCR_IMAGE="ghcr.io/carrerajorge/iliagpt-ocr:${IMAGE_TAG}"
+
+          if [ "${IMAGE_TAG}" != "${EXPECTED_IMAGE_TAG}" ]; then
+            echo "::warning::Manual image tag (${IMAGE_TAG}) does not match built tag (${EXPECTED_IMAGE_TAG}); skipping digest pinning."
+            EXPECTED_APP_DIGEST=""
+            EXPECTED_SANDBOX_DIGEST=""
+            EXPECTED_OCR_DIGEST=""
+          fi
+
+          extract_digest() {
+            local image_ref="$1"
+            local digest
+            digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); prints = (d.get("manifests") or [{}]); print((prints[0].get("digest") if prints else "") or d.get("digest", "") or d.get("config", {}).get("digest", ""));' )"
+            echo "${digest}"
+          }
+
+          verify_expected_digest() {
+            local label="$1"
+            local image_ref="$2"
+            local expected="$3"
+            if [ -z "${expected}" ]; then
+              echo "  ⚠️ No expected ${label} digest provided; skipping digest verification."
+              return 0
+            fi
+            local actual
+            actual="$(extract_digest "${image_ref}")"
+            if [ -z "${actual}" ]; then
+              echo "::error::Could not extract digest for ${label}: ${image_ref}"
+              exit 1
+            fi
+            if [ "${actual}" != "${expected}" ]; then
+              echo "::error::Digest mismatch for ${label}. expected=${expected} actual=${actual}"
+              exit 1
+            fi
+            echo "  ✓ ${label} digest pinned to ${actual}"
+          }
+
+          for pair in "${APP_IMAGE}" "${SANDBOX_IMAGE}" "${OCR_IMAGE}"; do
+            for i in $(seq 1 60); do
+              if docker manifest inspect "${pair}" > /dev/null 2>&1; then
+                echo "  ✓ Manifest available for ${pair}"
+                break
+              fi
+              if [ "${i}" -eq 40 ]; then
+                echo "::error::Manifest ${pair} not available in GHCR after retries."
+                exit 1
+              fi
+              sleep $(( i < 10 ? 3 : 5 ))
+            done
+          done
+
+          verify_expected_digest "app" "${APP_IMAGE}" "${EXPECTED_APP_DIGEST}"
+          verify_expected_digest "sandbox" "${SANDBOX_IMAGE}" "${EXPECTED_SANDBOX_DIGEST}"
+          verify_expected_digest "ocr" "${OCR_IMAGE}" "${EXPECTED_OCR_DIGEST}"
+
       - name: Setup SSH key
         run: |
           set -euo pipefail
@@ -106,7 +174,7 @@ jobs:
             for port in "${uniq_ports[@]}"; do
               echo "Trying ${VPS_USER}@${host}:${port}..."
               ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
                 echo "host=${host}" >> "$GITHUB_OUTPUT"
                 echo "port=${port}" >> "$GITHUB_OUTPUT"
                 echo "✓ Selected endpoint ${host}:${port}"
@@ -128,7 +196,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               break
             fi
             if [ "$attempt" -eq 3 ]; then
@@ -138,13 +206,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=no -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy
         run: |
           set -euo pipefail
           for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                bash scripts/deploy-bluegreen.sh"; then
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
@@ -159,7 +227,6 @@ jobs:
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
           echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
-          sleep $(( (i < 10 ? 3 : 5) ))
           for i in $(seq 1 20); do
             HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
             if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
@@ -261,22 +328,65 @@ jobs:
           echo "image_tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for Docker images in GHCR
+      - name: Verify images are present in GHCR and digest pinned
+        id: image_manifest_check
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          EXPECTED_APP_DIGEST: ${{ needs.build_images.outputs.app_digest }}
+          EXPECTED_SANDBOX_DIGEST: ${{ needs.build_images.outputs.sandbox_digest }}
+          EXPECTED_OCR_DIGEST: ${{ needs.build_images.outputs.ocr_digest }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.tag.outputs.image_tag }}"
-          echo "▸ Waiting for ghcr.io/carrerajorge/iliagpt-app:${TAG}..."
-          for i in $(seq 1 60); do
-            if docker manifest inspect "ghcr.io/carrerajorge/iliagpt-app:${TAG}" > /dev/null 2>&1; then
-              echo "  ✓ Image available after ${i} attempts"
-              break
+          IMAGE_TAG="${IMAGE_TAG}"
+          APP_IMAGE="ghcr.io/carrerajorge/iliagpt-app:${IMAGE_TAG}"
+          SANDBOX_IMAGE="ghcr.io/carrerajorge/iliagpt-sandbox:${IMAGE_TAG}"
+          OCR_IMAGE="ghcr.io/carrerajorge/iliagpt-ocr:${IMAGE_TAG}"
+
+          extract_digest() {
+            local image_ref="$1"
+            local digest
+            digest="$(docker manifest inspect "${image_ref}" | python3 -c 'import sys, json; d=json.load(sys.stdin); prints = (d.get("manifests") or [{}]); print((prints[0].get("digest") if prints else "") or d.get("digest", "") or d.get("config", {}).get("digest", ""));' )"
+            echo "${digest}"
+          }
+
+          verify_expected_digest() {
+            local label="$1"
+            local image_ref="$2"
+            local expected="$3"
+            if [ -z "${expected}" ]; then
+              echo "  ⚠️ No expected ${label} digest provided; skipping digest verification."
+              return 0
             fi
-            if [ "$i" -eq 40 ]; then
-              echo "✗ Images not available in GHCR after retries"
+            local actual
+            actual="$(extract_digest "${image_ref}")"
+            if [ -z "${actual}" ]; then
+              echo "::error::Could not extract digest for ${label}: ${image_ref}"
               exit 1
             fi
-            sleep $(( (i < 10 ? 3 : 5) ))
+            if [ "${actual}" != "${expected}" ]; then
+              echo "::error::Digest mismatch for ${label}. expected=${expected} actual=${actual}"
+              exit 1
+            fi
+            echo "  ✓ ${label} digest pinned to ${actual}"
+          }
+
+          for pair in "${APP_IMAGE}" "${SANDBOX_IMAGE}" "${OCR_IMAGE}"; do
+            for i in $(seq 1 60); do
+              if docker manifest inspect "${pair}" > /dev/null 2>&1; then
+                echo "  ✓ Manifest available for ${pair}"
+                break
+              fi
+              if [ "${i}" -eq 40 ]; then
+                echo "::error::Manifest ${pair} not available in GHCR after retries."
+                exit 1
+              fi
+              sleep $(( i < 10 ? 3 : 5 ))
+            done
           done
+
+          verify_expected_digest "app" "${APP_IMAGE}" "${EXPECTED_APP_DIGEST}"
+          verify_expected_digest "sandbox" "${SANDBOX_IMAGE}" "${EXPECTED_SANDBOX_DIGEST}"
+          verify_expected_digest "ocr" "${OCR_IMAGE}" "${EXPECTED_OCR_DIGEST}"
 
       - name: Deploy circuit breaker
         env:
@@ -314,7 +424,7 @@ jobs:
             for port in "${uniq_ports[@]}"; do
               echo "Trying ${VPS_USER}@${host}:${port}..."
               ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
-              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
                 echo "host=${host}" >> "$GITHUB_OUTPUT"
                 echo "port=${port}" >> "$GITHUB_OUTPUT"
                 echo "✓ Selected endpoint ${host}:${port}"
@@ -336,7 +446,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
               break
             fi
             if [ "$attempt" -eq 3 ]; then
@@ -346,13 +456,13 @@ jobs:
             sleep 3
           done
 
-          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=no -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=accept-new -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy
         run: |
           set -euo pipefail
           for attempt in 1 2; do
-            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                bash scripts/deploy-bluegreen.sh"; then
+            if ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ConnectionAttempts=3               -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}               "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null &&                cd ${{ env.DEPLOY_PATH }} &&                IMAGE_TAG='${{ steps.tag.outputs.image_tag }}'                APP_VERSION='${{ steps.tag.outputs.app_version }}'                BUILD_IMAGE_TAG='${{ needs.build_images.outputs.image_tag }}'                EXPECTED_APP_DIGEST='${{ needs.build_images.outputs.app_digest }}'                EXPECTED_SANDBOX_DIGEST='${{ needs.build_images.outputs.sandbox_digest }}'                EXPECTED_OCR_DIGEST='${{ needs.build_images.outputs.ocr_digest }}'                bash scripts/deploy-bluegreen.sh"; then
               break
             fi
             if [ "$attempt" -eq 2 ]; then
@@ -367,7 +477,6 @@ jobs:
           set -euo pipefail
           EXPECTED="${{ steps.tag.outputs.app_version }}"
           echo "▸ Verifying https://iliagpt.com (expecting version ${EXPECTED})..."
-          sleep $(( (i < 10 ? 3 : 5) ))
           for i in $(seq 1 20); do
             HEALTH_JSON="$(curl -sf --max-time 10 https://iliagpt.com/api/health 2>/dev/null || echo "{}")"
             if echo "${HEALTH_JSON}" | grep -q "\"version\":\"${EXPECTED}\""; then
