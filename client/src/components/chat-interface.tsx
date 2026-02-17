@@ -4629,6 +4629,10 @@ export function ChatInterface({
     streamingContentRef.current = "";
     setStreamingContent("");
 
+    // Track document attachments for analysis (declared here to avoid TDZ with later reassignment)
+    let hasDocumentAttachments = false;
+    let documentAttachmentsForAnalysis: any[] = [];
+
     // If there are pending uploads, wait for them before kicking off any backend work.
     // The user message is already visible (optimistic), so this doesn't block perceived responsiveness.
     if (hadPendingUploadsAtSubmit) {
@@ -4799,8 +4803,8 @@ export function ChatInterface({
     // onSendMessage calls useChats.addMessage which handles server request
 
 
-    let hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
-    let documentAttachmentsForAnalysis = attachments.filter((a: any) =>
+    hasDocumentAttachments = attachments.some((a: any) => isDocumentFile(a.mimeType || a.type, a.name, a.type));
+    documentAttachmentsForAnalysis = attachments.filter((a: any) =>
       isDocumentFile(a.mimeType || a.type, a.name, a.type)
     );
 
