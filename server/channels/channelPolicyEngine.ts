@@ -1,0 +1,280 @@
+import type { ChannelConversation } from "@shared/schema/channels";
+import type { ChannelRuntimeConfig } from "./runtimeConfig";
+import type { MessageEnvelope } from "./types";
+
+export type ChannelPolicyDecisionCode =
+  | "ok"
+  | "off_for_owner_only"
+  | "outside_window"
+  | "blocked_sender"
+  | "disabled"
+  | "invalid_payload";
+
+export type ChannelPolicyDecision = {
+  allowed: boolean;
+  code: ChannelPolicyDecisionCode;
+  replyText: string;
+  requiresTemplate?: boolean;
+  requiresOwnerHandshake?: boolean;
+};
+
+const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
+  whatsapp_cloud: 24 * 60 * 60 * 1000,
+  messenger: 24 * 60 * 60 * 1000,
+  wechat: 24 * 60 * 60 * 1000,
+  telegram: 0,
+};
+
+export function parseChannelPairingCodeFromMessage(text: string): string | null {
+  if (!text || typeof text !== "string") return null;
+  const normalized = text.trim();
+  if (!normalized) return null;
+
+  const directStart = /^\/(?:start|code)\s+([A-Z0-9]{6,})$/i.exec(normalized);
+  if (directStart) return directStart[1].toUpperCase();
+
+  const regexes = [
+    /^code\s*[:#]?\s*([A-Z0-9]{6,})$/i,
+    /^pair\s*[:#]?\s*([A-Z0-9]{6,})$/i,
+    /^alia\s+pair\s*[:#]?\s*([A-Z0-9]{6,})$/i,
+    /^token\s*[:#]?\s*([A-Z0-9]{6,})$/i,
+  ];
+
+  for (const re of regexes) {
+    const m = re.exec(normalized);
+    if (m) return m[1]?.toUpperCase() ?? null;
+  }
+
+  return null;
+}
+
+function parseDateMs(value: unknown): number {
+  if (typeof value !== "string") return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toStringSet(values: unknown): Set<string> {
+  if (!Array.isArray(values)) return new Set<string>();
+  return new Set(
+    values
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value.length > 0),
+  );
+}
+
+function getMetadataObject(conversation: ChannelConversation): Record<string, unknown> {
+  if (conversation && typeof conversation.metadata === "object" && conversation.metadata !== null) {
+    return conversation.metadata as Record<string, unknown>;
+  }
+  return {};
+}
+
+function getPolicyMap(conversation: ChannelConversation): Record<string, unknown> {
+  const metadata = getMetadataObject(conversation);
+  const raw = metadata.policy;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+function getIdentityOwnerIds(conversation: ChannelConversation): Set<string> {
+  const identity = getPolicyMap(conversation).ownerIdentity;
+  const result = new Set<string>();
+
+  if (identity && typeof identity === "object" && !Array.isArray(identity)) {
+    const direct = identity.ownerExternalId;
+    if (typeof direct === "string" && direct.trim()) {
+      result.add(direct.trim());
+    }
+    const owners = Array.isArray((identity as { owners?: unknown }).owners)
+      ? (identity as { owners?: unknown }).owners
+      : [];
+    for (const owner of owners) {
+      const normalized = String(owner ?? "").trim();
+      if (normalized) result.add(normalized);
+    }
+  }
+
+  return result;
+}
+
+function nowWithinWindow(channel: MessageEnvelope["channel"], lastTs: number, now: number): boolean {
+  const windowMs = CHANNEL_WINDOWS_MS[channel] ?? 0;
+  if (windowMs <= 0) return true;
+  if (!lastTs) return true;
+  return now - lastTs <= windowMs;
+}
+
+export type ChannelPolicyContext = {
+  conversation: ChannelConversation;
+  envelope: MessageEnvelope;
+  runtimeConfig: ChannelRuntimeConfig;
+  globalResponderEnabled: boolean;
+  senderIsOwner?: boolean;
+};
+
+export type ChannelWindowState = {
+  lastInboundAt?: string | null;
+  lastOutboundAt?: string | null;
+};
+
+export function getConversationWindowState(conversation: ChannelConversation): ChannelWindowState {
+  const metadata = getMetadataObject(conversation);
+  return {
+    lastInboundAt: typeof metadata.lastInboundAt === "string" ? metadata.lastInboundAt : null,
+    lastOutboundAt: typeof metadata.lastOutboundAt === "string" ? metadata.lastOutboundAt : null,
+  };
+}
+
+export function getConversationPolicy(conversation: ChannelConversation): {
+  autoResponderEnabled: boolean | null;
+  ownerOnly: boolean;
+  ownerExternalIds: string[];
+  rateLimitPerMinute: number;
+} {
+  const policy = getPolicyMap(conversation);
+
+  const autoResponderEnabled =
+    typeof policy.autoResponderEnabled === "boolean"
+      ? policy.autoResponderEnabled
+      : null;
+
+  const ownerOnly =
+    typeof policy.ownerOnly === "boolean"
+      ? policy.ownerOnly
+      : false;
+
+  const ownerExternalIds = toStringSet(policy.owner_external_ids);
+
+  const rate = Number(policy.rateLimitPerMinute);
+  const rateLimitPerMinute = Number.isFinite(rate) && rate > 0 ? Math.floor(rate) : 6;
+
+  return {
+    autoResponderEnabled,
+    ownerOnly,
+    ownerExternalIds: Array.from(ownerExternalIds),
+    rateLimitPerMinute,
+  };
+}
+
+function conversationOwnerCandidates(
+  runtimeConfig: ChannelRuntimeConfig,
+  conversation: ChannelConversation,
+): Set<string> {
+  const runtimeOwners = toStringSet(runtimeConfig.owner_external_ids);
+  const conversationPolicy = getPolicyMap(conversation);
+  const policyOwners = toStringSet(conversationPolicy.owner_external_ids);
+  const identityOwners = getIdentityOwnerIds(conversation);
+
+  return new Set<string>([...runtimeOwners, ...policyOwners, ...identityOwners]);
+}
+
+function normalizeWindowRecoveryMessage(channel: MessageEnvelope["channel"]): string {
+  if (channel === "whatsapp_cloud") {
+    return "La conversación de WhatsApp está fuera de la ventana activa (24h). Pide al usuario que reabra el chat y solo puedo responder con plantilla aprobada.";
+  }
+
+  if (channel === "messenger") {
+    return "Esta conversación de Messenger está fuera de la ventana activa. Usa un mensaje con etiqueta/OTN o plantilla aprobada para reabrir el chat.";
+  }
+
+  return "Esta conversación está fuera de ventana. Pide al cliente que escriba de nuevo para reabrir el chat.";
+}
+
+function normalizeOwnerBlockMessage(channel: MessageEnvelope["channel"]): string {
+  if (channel === "whatsapp_cloud") {
+    return "No puedo responder aquí ahora mismo. Envía el código de vinculación recibido desde la app para habilitar este canal.";
+  }
+  return "No se procesa este mensaje porque el auto-reply está desactivado para este chat.";
+}
+
+function normalizePayloadErrorMessage(): string {
+  return "No puedo continuar porque no se recibió un identificador válido del evento.";
+}
+
+function normalizeBlockedSenderMessage(): string {
+  return "Mensaje bloqueado por configuración de seguridad del canal.";
+}
+
+export function evaluateChannelPolicy(
+  context: ChannelPolicyContext,
+  windowState: ChannelWindowState,
+): ChannelPolicyDecision {
+  if (
+    !context.envelope.providerMessageId ||
+    !context.envelope.senderId ||
+    !context.envelope.channelKey ||
+    !context.envelope.threadId
+  ) {
+    return {
+      allowed: false,
+      code: "invalid_payload",
+      replyText: normalizePayloadErrorMessage(),
+      requiresOwnerHandshake: true,
+    };
+  }
+
+  const allowlist = toStringSet(context.runtimeConfig.allowlist);
+  if (allowlist.size > 0 && !allowlist.has(context.envelope.senderId)) {
+    return {
+      allowed: false,
+      code: "blocked_sender",
+      replyText: normalizeBlockedSenderMessage(),
+      requiresOwnerHandshake: false,
+    };
+  }
+
+  const conversationPolicy = getPolicyMap(context.conversation);
+  const ownerCandidates = conversationOwnerCandidates(context.runtimeConfig, context.conversation);
+  const isOwner = ownerCandidates.size > 0
+    ? ownerCandidates.has(context.envelope.senderId)
+    : Boolean(context.senderIsOwner);
+
+  const conversationPolicyEnabled =
+    typeof conversationPolicy.autoResponderEnabled === "boolean"
+      ? conversationPolicy.autoResponderEnabled
+      : context.globalResponderEnabled;
+
+  const ownerOnly =
+    typeof conversationPolicy.ownerOnly === "boolean"
+      ? conversationPolicy.ownerOnly
+      : Boolean(context.runtimeConfig.owner_only);
+
+  if (!conversationPolicyEnabled && !isOwner) {
+    return {
+      allowed: false,
+      code: "off_for_owner_only",
+      replyText: normalizeOwnerBlockMessage(context.envelope.channel),
+      requiresOwnerHandshake: true,
+    };
+  }
+
+  if (ownerOnly && !isOwner) {
+    return {
+      allowed: false,
+      code: "off_for_owner_only",
+      replyText: "Este chat está configurado para solo propietario. Envía el código del chat desde el panel para habilitar respuestas automáticas.",
+      requiresOwnerHandshake: true,
+    };
+  }
+
+  const latestTs = Math.max(
+    parseDateMs(windowState.lastInboundAt),
+    parseDateMs(windowState.lastOutboundAt),
+  );
+
+  if (!nowWithinWindow(context.envelope.channel, latestTs, Date.now())) {
+    return {
+      allowed: false,
+      code: "outside_window",
+      replyText: normalizeWindowRecoveryMessage(context.envelope.channel),
+      requiresTemplate: context.envelope.channel === "whatsapp_cloud" || context.envelope.channel === "messenger",
+      requiresOwnerHandshake: isOwner,
+    };
+  }
+
+  return {
+    allowed: true,
+    code: "ok",
+    replyText: "",
+  };
+}

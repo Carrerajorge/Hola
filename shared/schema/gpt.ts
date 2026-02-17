@@ -49,6 +49,54 @@ export const gptToolPermissionsSchema = z.object({
     actionsEnabled: z.boolean().default(true),
 });
 
+export const gptKnowledgeSourceSchema = z.object({
+    id: z.string().optional(),
+    name: z.string(),
+    type: z.enum(['file', 'repository', 'vector-store', 'url']).default('file'),
+    location: z.string(),
+    isPrimary: z.boolean().default(false),
+    metadata: z.record(z.string(), z.any()).default({}),
+});
+
+export const gptPolicySchema = z.object({
+    maxTokensOverride: z.number().optional(),
+    temperatureOverride: z.number().optional(),
+    contextWindow: z.number().optional(),
+    allowClientOverride: z.boolean().default(false),
+    enforceModel: z.boolean().default(false),
+    modelFallbacks: z.array(z.string()).default([]),
+    piiRedactionEnabled: z.boolean().default(true),
+    allowedDomains: z.array(z.string()).default([]),
+    workspaceOnly: z.boolean().default(false),
+});
+
+export const gptDefinitionSchema = z.object({
+    name: z.string().optional(),
+    description: z.string().optional(),
+    avatar: z.string().optional(),
+    model: z.string().default('grok-4-1-fast-non-reasoning'),
+    instructions: z.string(),
+    conversationStarters: z.array(z.string()).default([]),
+    capabilities: gptCapabilitiesSchema.default({
+        webBrowsing: false,
+        codeInterpreter: false,
+        imageGeneration: false,
+        fileUpload: false,
+        dataAnalysis: false,
+    }),
+    knowledgeSources: z.array(gptKnowledgeSourceSchema).default([]),
+    actions: z.array(z.string()).default([]),
+    policies: gptPolicySchema.default({
+        enforceModel: false,
+        modelFallbacks: [],
+        allowClientOverride: false,
+        piiRedactionEnabled: true,
+        allowedDomains: [],
+        workspaceOnly: false,
+    }),
+});
+export type GptDefinition = z.infer<typeof gptDefinitionSchema>;
+
 // Custom GPTs
 export const gpts = pgTable("gpts", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -63,6 +111,7 @@ export const gpts = pgTable("gpts", {
     temperature: text("temperature").default("0.7"),
     topP: text("top_p").default("1"),
     maxTokens: integer("max_tokens").default(4096),
+    definition: jsonb("definition").$type<z.infer<typeof gptDefinitionSchema>>(),
     welcomeMessage: text("welcome_message"),
     capabilities: jsonb("capabilities"), // { webBrowsing: boolean, codeInterpreter: boolean, imageGeneration: boolean }
     conversationStarters: jsonb("conversation_starters"), // array of starter prompts
@@ -84,6 +133,7 @@ export const insertGptSchema = createInsertSchema(gpts).extend({
     recommendedModel: z.string().optional(),
     runtimePolicy: gptRuntimePolicySchema.optional(),
     toolPermissions: gptToolPermissionsSchema.optional(),
+    definition: gptDefinitionSchema.optional(),
 });
 
 export type InsertGpt = z.infer<typeof insertGptSchema>;
@@ -98,6 +148,7 @@ export const gptVersions = pgTable("gpt_versions", {
     temperature: text("temperature").default("0.7"),
     topP: text("top_p").default("1"),
     maxTokens: integer("max_tokens").default(4096),
+    definitionSnapshot: jsonb("definition_snapshot").$type<z.infer<typeof gptDefinitionSchema>>(),
     changeNotes: text("change_notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     createdBy: varchar("created_by"),
@@ -137,6 +188,18 @@ export type InsertGptKnowledge = z.infer<typeof insertGptKnowledgeSchema>;
 export type GptKnowledge = typeof gptKnowledge.$inferSelect;
 
 // GPT Actions - custom API integrations for GPTs
+export const gptActionTypeSchema = z.enum(["api", "webhook", "function"]);
+export const gptActionHttpMethodSchema = z.enum(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]);
+export const gptActionAuthTypeSchema = z.enum(["none", "api_key", "oauth", "bearer", "basic", "custom"]);
+export const gptActionProviderStatusSchema = z.enum(["true", "false"]);
+export const gptActionParameterSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  type: z.enum(["string", "number", "boolean", "integer", "array", "object", "date"]).default("string"),
+  required: z.boolean().default(false),
+  description: z.string().max(255).optional(),
+}).strict();
+export const gptActionJsonSchema = z.record(z.string(), z.unknown());
+
 export const gptActions = pgTable("gpt_actions", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     gptId: varchar("gpt_id").notNull().references(() => gpts.id, { onDelete: "cascade" }),
@@ -148,6 +211,12 @@ export const gptActions = pgTable("gpt_actions", {
     headers: jsonb("headers"), // { "Authorization": "Bearer {{API_KEY}}", etc. }
     bodyTemplate: text("body_template"), // JSON template with {{variable}} placeholders
     responseMapping: jsonb("response_mapping"), // how to parse the response
+    openApiSpec: jsonb("open_api_spec"), // OpenAPI document or operation-level JSON schema
+    operationId: text("operation_id"),
+    requestSchema: jsonb("request_schema"), // JSON Schema to validate input
+    responseSchema: jsonb("response_schema"), // JSON Schema to validate output
+    domainAllowlist: jsonb("domain_allowlist"),
+    piiRedactionRules: jsonb("pii_redaction_rules"),
     authType: text("auth_type").default("none"), // none, api_key, oauth, bearer
     authConfig: jsonb("auth_config"), // encrypted auth configuration
     parameters: jsonb("parameters"), // [{ name, type, required, description }]
@@ -163,7 +232,57 @@ export const gptActions = pgTable("gpt_actions", {
     index("gpt_actions_type_idx").on(table.actionType),
 ]);
 
-export const insertGptActionSchema = createInsertSchema(gptActions);
+export const insertGptActionSchema = createInsertSchema(gptActions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+  lastUsedAt: true,
+}).extend({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(4096).optional(),
+  actionType: gptActionTypeSchema.default("api"),
+  httpMethod: gptActionHttpMethodSchema.default("GET"),
+  endpoint: z.string().trim().max(2048).url(),
+  headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  bodyTemplate: z.string().max(65536).optional(),
+  responseMapping: gptActionJsonSchema.optional(),
+  openApiSpec: gptActionJsonSchema.optional(),
+  requestSchema: gptActionJsonSchema.optional(),
+  responseSchema: gptActionJsonSchema.optional(),
+  domainAllowlist: z.array(z.string().trim().max(253)).default([]),
+  piiRedactionRules: z.record(z.string(), z.unknown()).default({}),
+  authType: gptActionAuthTypeSchema.default("none"),
+  authConfig: gptActionJsonSchema.optional(),
+  parameters: z.array(gptActionParameterSchema).default([]),
+  rateLimit: z.number().int().min(1).max(10_000).default(100),
+  timeout: z.number().int().min(250).max(120_000).default(30000),
+  isActive: gptActionProviderStatusSchema.default("true"),
+  operationId: z.string().trim().max(160).optional(),
+}).strict();
+
+export const gptActionCreateSchema = insertGptActionSchema.extend({
+  gptId: z.string().trim().min(1),
+}).strict();
+
+export const gptActionUpdateSchema = insertGptActionSchema.partial().omit({
+  gptId: true,
+}).strict();
+
+export const gptActionUseSchema = z.object({
+  conversationId: z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9._-]+$/),
+  userId: z.string().trim().max(120).optional(),
+  requestId: z.string().trim().min(1).max(140).optional(),
+  request: z.record(z.string(), z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).optional(),
+  headers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  timeoutMs: z.number().int().min(250).max(120_000).optional(),
+  idempotencyKey: z.string().trim().min(6).max(140).optional(),
+  maxRetries: z.number().int().min(0).max(10).optional(),
+}).strict();
+
+export type GptActionCreateInput = z.infer<typeof gptActionCreateSchema>;
+export type GptActionUpdateInput = z.infer<typeof gptActionUpdateSchema>;
 
 export type InsertGptAction = z.infer<typeof insertGptActionSchema>;
 export type GptAction = typeof gptActions.$inferSelect;

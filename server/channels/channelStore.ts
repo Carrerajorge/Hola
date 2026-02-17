@@ -91,6 +91,43 @@ export async function getChannelConversation(input: {
   return row ?? null;
 }
 
+export async function getChannelConversationForUser(input: {
+  userId: string;
+  channel: string;
+  channelKey: string;
+  externalConversationId: string;
+}): Promise<ChannelConversation | null> {
+  const [row] = await db
+    .select()
+    .from(channelConversations)
+    .where(
+      and(
+        eq(channelConversations.userId, input.userId),
+        eq(channelConversations.channel, input.channel),
+        eq(channelConversations.channelKey, input.channelKey),
+        eq(channelConversations.externalConversationId, input.externalConversationId),
+        eq(channelConversations.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
+}
+
+export async function getChannelConversationById(id: string): Promise<ChannelConversation | null> {
+  const [row] = await db.select().from(channelConversations).where(eq(channelConversations.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getChannelConversationByMetadata(input: {
+  userId: string;
+  channel: string;
+  channelKey: string;
+  externalConversationId: string;
+}): Promise<ChannelConversation | null> {
+  return getChannelConversation({ channel: input.channel, channelKey: input.channelKey, externalConversationId: input.externalConversationId });
+}
+
 export async function getOrCreateChannelConversation(input: {
   userId: string;
   channel: string;
@@ -106,8 +143,6 @@ export async function getOrCreateChannelConversation(input: {
   });
   if (existing) return existing;
 
-  // Create chat first, then bind it. If a race creates the conversation first,
-  // delete the orphaned chat (best-effort) and return the existing conversation.
   const chat = await storage.createChat({
     userId: input.userId,
     title: input.title,
@@ -131,11 +166,10 @@ export async function getOrCreateChannelConversation(input: {
   } catch (e) {
     if (!isUniqueViolation(e)) throw e;
 
-    // Best-effort cleanup.
     try {
       await db.delete(chats).where(eq(chats.id, chat.id));
     } catch {
-      // ignore
+      // ignore cleanup failure
     }
 
     const after = await getChannelConversation({
@@ -146,6 +180,152 @@ export async function getOrCreateChannelConversation(input: {
     if (!after) throw e;
     return after;
   }
+}
+
+export async function updateChannelConversationMetadata(
+  conversationId: string,
+  patch: Record<string, unknown>,
+): Promise<ChannelConversation | null> {
+  const now = new Date();
+  const [row] = await db
+    .update(channelConversations)
+    .set({
+      metadata: sql`COALESCE(${channelConversations.metadata}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`,
+      updatedAt: now,
+    })
+    .where(eq(channelConversations.id, conversationId))
+    .returning();
+
+  return row ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeMetadata(input: unknown): Record<string, unknown> {
+  return isRecord(input) ? (input as Record<string, unknown>) : {};
+}
+
+function mergeMetadataObjects(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+
+  for (const [key, value] of Object.entries(patch)) {
+    const current = merged[key];
+    if (isRecord(current) && isRecord(value)) {
+      merged[key] = mergeMetadataObjects(current, value);
+      continue;
+    }
+    merged[key] = value;
+  }
+
+  return merged;
+}
+
+export async function patchConversationMetadata(
+  conversationId: string,
+  patch: Record<string, unknown>,
+): Promise<ChannelConversation | null> {
+  const [row] = await db
+    .select()
+    .from(channelConversations)
+    .where(eq(channelConversations.id, conversationId))
+    .limit(1);
+
+  if (!row) return null;
+
+  const merged = mergeMetadataObjects(normalizeMetadata(row.metadata), patch);
+
+  const [updated] = await db
+    .update(channelConversations)
+    .set({
+      metadata: merged,
+      updatedAt: new Date(),
+    })
+    .where(eq(channelConversations.id, conversationId))
+    .returning();
+
+  return updated ?? null;
+}
+
+function mergeHistoryMetadata(existing: unknown, patch: Record<string, unknown>): Record<string, unknown> {
+  const existingObj =
+    existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {};
+  const history =
+    existingObj.history && typeof existingObj.history === "object"
+      ? (existingObj.history as Record<string, unknown>)
+      : {};
+
+  return {
+    ...existingObj,
+    ...patch,
+    history: {
+      ...history,
+      ...(patch.history as Record<string, unknown> | undefined),
+    },
+  };
+}
+
+export async function touchChannelConversationHeartbeat(
+  conversationId: string,
+  touch: { lastInboundAt?: string; lastOutboundAt?: string },
+): Promise<ChannelConversation | null> {
+  const [row] = await db
+    .select()
+    .from(channelConversations)
+    .where(eq(channelConversations.id, conversationId))
+    .limit(1);
+
+  if (!row) return null;
+
+  const merged = mergeHistoryMetadata(row.metadata, {
+    lastInboundAt: touch.lastInboundAt ?? row.metadata?.lastInboundAt,
+    lastOutboundAt: touch.lastOutboundAt ?? row.metadata?.lastOutboundAt,
+  } as Record<string, unknown>);
+
+  const [updated] = await db
+    .update(channelConversations)
+    .set({ metadata: merged, updatedAt: new Date() })
+    .where(eq(channelConversations.id, conversationId))
+    .returning();
+
+  return updated ?? null;
+}
+
+export async function setConversationPolicy(
+  conversationId: string,
+  policy: Record<string, unknown>,
+): Promise<ChannelConversation | null> {
+  return patchConversationMetadata(conversationId, {
+    policy: {
+      ...(await getConversationMetadata(conversationId)).policy,
+      ...policy,
+      updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export async function setConversationOwnerIdentity(
+  conversationId: string,
+  ownerIdentity: Record<string, unknown>,
+): Promise<ChannelConversation | null> {
+  return patchConversationMetadata(conversationId, {
+    ownerIdentity: {
+      ...normalizeMetadata((await getConversationMetadata(conversationId)).ownerIdentity),
+      ...ownerIdentity,
+      updatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+async function getConversationMetadata(conversationId: string): Promise<Record<string, any>> {
+  const [row] = await db
+    .select()
+    .from(channelConversations)
+    .where(eq(channelConversations.id, conversationId))
+    .limit(1);
+
+  return normalizeMetadata(row?.metadata);
 }
 
 export async function findWhatsAppCloudAccountByPhoneNumberId(
@@ -175,6 +355,20 @@ export async function findTelegramAccountByUserId(
       and(
         eq(integrationAccounts.providerId, "telegram"),
         eq(integrationAccounts.userId, userId),
+        eq(integrationAccounts.status, "active"),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function findAnyActiveTelegramAccount(): Promise<IntegrationAccount | null> {
+  const [row] = await db
+    .select()
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.providerId, "telegram"),
         eq(integrationAccounts.status, "active"),
       ),
     )
@@ -215,4 +409,3 @@ export async function findWeChatAccountByAppId(
     .limit(1);
   return row ?? null;
 }
-

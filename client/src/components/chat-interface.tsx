@@ -5299,27 +5299,11 @@ IMPORTANTE:
               chatLogger.debug("handleSubmit docTool", { selectedDocTool, isWordMode });
             }
 
-            const response = await fetch("/api/chat/stream", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                messages: finalChatHistory,
-                conversationId: chatId,
-                runId: streamRunContext.runId,
-                chatId: chatId,
-                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-                provider: selectedProvider,
-                model: selectedModel,
-                // Send selected doc tool for production mode activation
-                docTool: selectedDocTool || null
-              }),
-              signal: abortControllerRef.current?.signal
-            });
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-              throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
-            }
+            // NOTE: Previously there was a redundant raw `fetch("/api/chat/stream")` here
+            // that sent a duplicate request before `streamChat.stream()`. This caused:
+            //   1. Two concurrent LLM requests per message (double cost, double rate-limit usage)
+            //   2. The first response body was never consumed (SSE stream abandoned)
+            // Removed: the single `streamChat.stream()` call below handles everything.
 
             const firstImageDataUrl = imageDataUrls.length > 0 ? imageDataUrls[0] : undefined;
             const artifactTypeMap: Record<string, string> = { word: 'document', excel: 'spreadsheet', ppt: 'presentation', docx: 'document', xlsx: 'spreadsheet', pptx: 'presentation' };

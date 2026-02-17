@@ -30,10 +30,12 @@ import { isProductionIntent, handleProductionRequest, getDeliverables } from "..
 import type { z } from "zod";
 import { getUserId } from "../types/express";
 import { semanticMemoryStore } from "../memory/SemanticMemoryStore";
+import { type SkillScope } from "@shared/schema/skillPlatform";
 import { handleEmailChatRequest } from "../services/gmailChatIntegration";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { ensureUserRowExists } from "../lib/ensureUserRowExists";
 import { buildSkillSystemPromptSection, drizzleSkillStore, resolveSkillContextFromRequest } from "../services/skillContextResolver";
+import { getSkillPlatformService, type SkillExecutionResult } from "../services/skillPlatform";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
@@ -48,6 +50,110 @@ import { generateAndPersistChatTitle } from "../lib/chatTitleGenerator";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 const isDebugLogEnabled = process.env.DEBUG === "true";
+const MAX_STREAM_REQUEST_ID_LEN = 140;
+const MAX_STREAM_EVENT_PAYLOAD_BYTES = 4600;
+const MAX_STREAM_ATTACHMENT_NAME_LEN = 220;
+const MAX_STREAM_ATTACHMENT_MIME_LEN = 120;
+const MAX_STREAM_ATTACHMENT_SIZE = 200_000_000;
+const MAX_STREAM_SKILL_SCOPES = 12;
+const MAX_STREAM_SKILL_ATTACHMENTS = 12;
+const DEFAULT_STREAM_SKILL_SCOPES: SkillScope[] = ["storage.read", "files", "code_interpreter"];
+const VALID_STREAM_SCOPE_SET = new Set<SkillScope>([
+  "storage.read",
+  "storage.write",
+  "browser",
+  "email",
+  "database",
+  "external_network",
+  "code_interpreter",
+  "files",
+  "system",
+]);
+const STREAM_IDENTIFIER_RE = /^[a-zA-Z0-9._-]{1,140}$/;
+const STREAM_ATTACHMENT_NAME_RE = /^[^<>:\"/\\|?*\u0000-\u001f]{1,220}$/;
+const STREAM_MIME_RE = /^[a-zA-Z0-9][a-zA-Z0-9.+-\/]*/;
+
+function sanitizeStreamIdentifier(raw: unknown, fallbackPrefix = "stream_req"): string {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed && STREAM_IDENTIFIER_RE.test(trimmed)) return trimmed;
+  }
+  return `${fallbackPrefix}_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function sanitizeStreamText(value: unknown, maxLen: number): string {
+  if (typeof value !== "string") return "";
+  const safe = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  return safe.length > maxLen ? safe.slice(0, maxLen) : safe;
+}
+
+function sanitizeStreamAttachment(raw: unknown): {
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  storagePath?: string;
+  fileId?: string;
+  type?: string;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const name = sanitizeStreamText(source.name, MAX_STREAM_ATTACHMENT_NAME_LEN);
+  if (!name || !STREAM_ATTACHMENT_NAME_RE.test(name)) return null;
+  const mimeType = sanitizeStreamText(
+    source.mimeType || source.type,
+    MAX_STREAM_ATTACHMENT_MIME_LEN
+  );
+  if (mimeType && !STREAM_MIME_RE.test(mimeType)) return null;
+  const sizeValue = Number(source.size);
+  const size = Number.isFinite(sizeValue) && sizeValue >= 0 && sizeValue <= MAX_STREAM_ATTACHMENT_SIZE
+    ? Math.floor(sizeValue)
+    : undefined;
+  const type = sanitizeStreamText(source.type, MAX_STREAM_ATTACHMENT_MIME_LEN);
+  const id = sanitizeStreamText(source.id || source.fileId, 160);
+  const storagePath = sanitizeStreamText(source.storagePath, 255);
+  const fileId = sanitizeStreamText(source.fileId, 160);
+  return {
+    id: id || fileId || undefined,
+    name,
+    mimeType: mimeType || type || undefined,
+    size,
+    storagePath: storagePath || undefined,
+    fileId: fileId || undefined,
+    type: type || undefined,
+  };
+}
+
+function clampSsePayload<T>(payload: T, maxBytes: number = MAX_STREAM_EVENT_PAYLOAD_BYTES): T {
+  const text = JSON.stringify(payload);
+  if (text.length <= maxBytes) return payload;
+  const candidate: Record<string, unknown> = { ...(payload as Record<string, unknown>), truncated: true };
+  if (candidate.content && typeof candidate.content === "string") {
+    candidate.content = sanitizeStreamText(candidate.content, Math.max(256, maxBytes - 120));
+  }
+  if (candidate.message && typeof candidate.message === "string") {
+    candidate.message = sanitizeStreamText(candidate.message, 512);
+  }
+  if (candidate.details && typeof candidate.details === "string") {
+    candidate.details = sanitizeStreamText(candidate.details, 512);
+  }
+  if (candidate.error && typeof candidate.error === "string") {
+    candidate.error = sanitizeStreamText(candidate.error, 512);
+  }
+  return candidate as T;
+}
+
+function normalizeStreamSkillScopes(rawScopes: unknown): SkillScope[] {
+  if (!Array.isArray(rawScopes)) return [...DEFAULT_STREAM_SKILL_SCOPES];
+  const seen = new Set<SkillScope>();
+  for (const scope of rawScopes) {
+    if (typeof scope !== "string") continue;
+    if (!VALID_STREAM_SCOPE_SET.has(scope as SkillScope)) continue;
+    seen.add(scope as SkillScope);
+    if (seen.size >= MAX_STREAM_SKILL_SCOPES) break;
+  }
+  return seen.size ? Array.from(seen) : [...DEFAULT_STREAM_SKILL_SCOPES];
+}
 
 function writeSse(res: Response, event: string, data: object): boolean {
   try {
@@ -55,7 +161,22 @@ function writeSse(res: Response, event: string, data: object): boolean {
     const r = res as any;
     if (r.writableEnded || r.destroyed) return false;
 
-    const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    const payload = clampSsePayload(data);
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(payload);
+    } catch (serializationError) {
+      serialized = JSON.stringify(
+        clampSsePayload({
+          ...(payload as Record<string, unknown>),
+          serializationError: sanitizeStreamText(String(serializationError), 120),
+          truncated: true,
+        }, MAX_STREAM_EVENT_PAYLOAD_BYTES)
+      );
+    }
+    const chunk = `event: ${sanitizeStreamText(event, 120)}\ndata: ${serialized.length > MAX_STREAM_EVENT_PAYLOAD_BYTES
+      ? JSON.stringify(clampSsePayload(payload, MAX_STREAM_EVENT_PAYLOAD_BYTES))
+      : serialized}\n\n`;
     res.write(chunk);
     if (typeof (res as unknown as { flush: Function }).flush === 'function') {
       (res as unknown as { flush: Function }).flush();
@@ -309,8 +430,15 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      const normalizedChatAttachments = Array.isArray(attachments)
+        ? attachments
+          .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
+          .map(sanitizeStreamAttachment)
+          .filter((att): att is NonNullable<ReturnType<typeof sanitizeStreamAttachment>> => !!att)
+        : [];
+      const hasDocumentAttachments = normalizedChatAttachments.length > 0
+        ? normalizedChatAttachments.some((a) => isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
+        : false;
 
       if (hasDocumentAttachments) {
         console.log(`[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
@@ -321,13 +449,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       }
 
       let attachmentContext = "";
-      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const hasAttachments = normalizedChatAttachments.length > 0;
 
       if (hasAttachments) {
-        console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
+        console.log(`[Chat API] Processing ${normalizedChatAttachments.length} attachment(s)`);
         try {
           const extractedContents: { extracted: Awaited<ReturnType<typeof extractAttachmentContent>>; attachment: Attachment }[] = [];
-          for (const attachment of attachments as Attachment[]) {
+          for (const attachment of normalizedChatAttachments as Attachment[]) {
             const extracted = await extractAttachmentContent(attachment);
             extractedContents.push({ extracted, attachment });
           }
@@ -692,7 +820,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   });
 
   router.post("/chat/stream", async (req, res) => {
-    const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const requestId = sanitizeStreamIdentifier(req.headers["x-request-id"], `stream_${Date.now()}`);
     const streamStartMs = performance.now();
     const stageTimings: Record<string, number> = {};
     let firstTokenAtMs: number | null = null;
@@ -782,10 +910,13 @@ const cleanSkipRunStreamDedup = (): void => {
         lastImageBase64,
         lastImageId,
         skillId,
-        skill
+        skill,
+        skillScopes
       } = req.body;
       let latencyMode: LatencyMode = ['fast', 'deep', 'auto'].includes(rawLatencyMode) ? rawLatencyMode : 'auto';
       const effectiveUserId = getOrCreateSecureUserId(req);
+
+      const parsedSkillScopes = normalizeStreamSkillScopes(skillScopes);
 
       if (isDebugLogEnabled) {
         // DEBUG: Log attachments received from frontend
@@ -829,11 +960,11 @@ const cleanSkipRunStreamDedup = (): void => {
 
       const clientRequestId =
         typeof rawClientRequestId === "string" && rawClientRequestId.trim().length > 0
-          ? rawClientRequestId.trim()
+          ? sanitizeStreamText(rawClientRequestId, MAX_STREAM_REQUEST_ID_LEN)
           : undefined;
       const userRequestId =
         typeof rawUserRequestId === "string" && rawUserRequestId.trim().length > 0
-          ? rawUserRequestId.trim()
+          ? sanitizeStreamText(rawUserRequestId, MAX_STREAM_REQUEST_ID_LEN)
           : undefined;
       const latestUserForRun = [...clientMessages].reverse().find((m: any) => m?.role === "user");
       const latestUserTextForRun =
@@ -843,16 +974,9 @@ const cleanSkipRunStreamDedup = (): void => {
       const sanitizedRunAttachments =
         attachments && Array.isArray(attachments)
           ? attachments
-              .map((att: any) => ({
-                id: att?.id || att?.fileId,
-                fileId: att?.fileId,
-                name: att?.name,
-                type: att?.type,
-                mimeType: att?.mimeType || att?.type,
-                size: att?.size,
-                storagePath: att?.storagePath,
-              }))
-              .filter((att: any) => !!att.name)
+              .slice(0, MAX_STREAM_SKILL_ATTACHMENTS)
+              .map(sanitizeStreamAttachment)
+              .filter((att) => !!att?.name)
           : null;
 
       // Claim run as early as possible (before any expensive routing/search work).
@@ -1015,7 +1139,7 @@ const cleanSkipRunStreamDedup = (): void => {
           : undefined
       ) as any;
 
-      const hasAnyAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const hasAnyAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0;
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : String(lastUserMsg?.content || '');
       const earlyQuestionClassification = questionClassifier.classifyQuestion(userQuery || "");
@@ -1073,6 +1197,155 @@ const cleanSkipRunStreamDedup = (): void => {
         });
       }
 
+      let fullContent = "";
+      let lastAckSequence = -1;
+      let agentLoopHandled = false;
+      let shouldRunModel = true;
+      let skillSeedForModel = "";
+      let skillExecutionResult: SkillExecutionResult | null = null;
+
+      const effectiveSkillRunId = claimedRun?.id || sanitizeStreamText(runId, MAX_STREAM_REQUEST_ID_LEN) || requestId;
+      const emitSkillTrace = (trace: { stage: string; status: string; message: string; details?: Record<string, unknown> }) => {
+        if (isConnectionClosed) {
+          return;
+        }
+        writeSse(res, 'skill_trace', {
+          requestId,
+          runId: effectiveSkillRunId,
+          ...trace,
+          timestamp: new Date().toISOString(),
+        });
+      };
+
+      const emitSkillChunk = (payload: {
+        stage: string;
+        status: string;
+        source: string;
+        skill?: string | null;
+        content: string;
+        isFallback?: boolean;
+      }) => {
+        if (isConnectionClosed) {
+          return;
+        }
+        const safePayload = {
+          ...payload,
+          content: sanitizeStreamText(payload.content, MAX_STREAM_EVENT_PAYLOAD_BYTES - 1200),
+        };
+        lastAckSequence += 1;
+        writeSse(res, 'skill_chunk', {
+          requestId,
+          runId: effectiveSkillRunId,
+          sequenceId: lastAckSequence,
+          timestamp: Date.now(),
+          ...safePayload,
+        });
+      };
+
+      const skillTimeoutMs = 12000;
+      const normalizedUserQuery = typeof userQuery === "string" ? userQuery.trim() : "";
+      if (normalizedUserQuery && !isConnectionClosed) {
+        emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_started', details: { hasAttachments: hasAnyAttachments } });
+        try {
+          const executeSkillPromise = getSkillPlatformService().executeFromMessage({
+            requestId,
+            conversationId,
+            runId: effectiveSkillRunId,
+            userId: effectiveUserId,
+            userMessage: normalizedUserQuery,
+            attachments: Array.isArray(sanitizedRunAttachments) ? sanitizedRunAttachments : [],
+            allowedScopes: parsedSkillScopes,
+            autoCreate: true,
+            maxRetries: 1,
+            emitTrace: emitSkillTrace,
+            now: new Date(),
+          });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Skill execution timeout after ${skillTimeoutMs}ms`)), skillTimeoutMs);
+          });
+
+          skillExecutionResult = await Promise.race([executeSkillPromise, timeoutPromise]);
+          emitSkillTrace({ stage: 'planner', status: 'ok', message: 'skill_router_finished', details: { status: skillExecutionResult.status, continueWithModel: skillExecutionResult.continueWithModel } });
+
+          const seed = typeof skillExecutionResult.outputText === "string" ? skillExecutionResult.outputText.trim() : "";
+          if (seed) {
+            fullContent = seed;
+            markFirstToken();
+            emitSkillChunk({
+              stage: 'execution',
+              status: skillExecutionResult.status,
+              source: skillExecutionResult.autoCreated ? 'auto' : 'catalog',
+              skill: skillExecutionResult.selectedSkill?.slug || null,
+              content: seed,
+            });
+          }
+
+          if (skillExecutionResult.status === "partial" && skillExecutionResult.continueWithModel) {
+            shouldRunModel = true;
+            skillSeedForModel = seed;
+          } else {
+            shouldRunModel = skillExecutionResult.continueWithModel !== false;
+          }
+
+          if (skillExecutionResult.status === 'blocked' || skillExecutionResult.status === 'failed') {
+            writeSse(res, 'skill_blocked', {
+              requestId,
+              runId: effectiveSkillRunId,
+              status: skillExecutionResult.status,
+              code: skillExecutionResult.error?.code || 'SKILL_BLOCKED',
+              message: skillExecutionResult.error?.message || skillExecutionResult.fallbackText || 'Skill no disponible en este momento',
+              requiresConfirmation: skillExecutionResult.requiresConfirmation,
+              blockedScopes: skillExecutionResult.policyBreached?.blockedScopes || [],
+              timestamp: Date.now(),
+            });
+          }
+
+          if (!seed && skillExecutionResult.fallbackText) {
+            fullContent = skillExecutionResult.fallbackText;
+            emitSkillChunk({
+              stage: 'fallback',
+              status: skillExecutionResult.status,
+              source: 'fallback',
+              content: skillExecutionResult.fallbackText,
+              isFallback: true,
+            });
+            if (skillExecutionResult.continueWithModel) {
+              skillSeedForModel = skillExecutionResult.fallbackText;
+            }
+            markFirstToken();
+          }
+        } catch (skillError: any) {
+          emitSkillTrace({ stage: 'factory', status: 'error', message: 'skill_router_error', details: { error: skillError?.message || String(skillError) } });
+          writeSse(res, 'skill_blocked', {
+            requestId,
+            runId: effectiveSkillRunId,
+            status: 'failed',
+            code: 'SKILL_ROUTER_ERROR',
+            message: 'No fue posible usar el enrutador de Skills, se usa fallback al modelo.',
+            timestamp: Date.now(),
+          });
+          skillExecutionResult = {
+            status: 'failed',
+            continueWithModel: true,
+            outputText: '',
+            autoCreated: false,
+            requiresConfirmation: false,
+            traces: [],
+            fallbackText: 'No fue posible usar el enrutador de Skills, se usa fallback al modelo.',
+            error: {
+              code: 'SKILL_ROUTER_ERROR',
+              message: skillError?.message || 'No se pudo ejecutar el router de Skills',
+              retryable: true,
+            },
+            output: undefined,
+            policyBreached: undefined,
+            selectedSkill: undefined,
+          };
+        }
+      }
+
+      const skipSkillShortcuts = !!skillExecutionResult && skillExecutionResult.status !== 'skipped';
+
       // Ultra-fast path for greetings: avoid expensive intent routing, context hydration,
       // and LLM calls entirely.
       if (
@@ -1081,7 +1354,8 @@ const cleanSkipRunStreamDedup = (): void => {
         !docTool &&
         !forceWebSearch &&
         !webSearchAuto &&
-        !isConnectionClosed
+        !isConnectionClosed &&
+        !skipSkillShortcuts
       ) {
         const isThanks = /\b(gracias|muchas\s+gracias|te\s+agradezco)\b/i.test(userQuery);
         const content = isThanks
@@ -1121,7 +1395,8 @@ const cleanSkipRunStreamDedup = (): void => {
         !gptId &&
         !session_id &&
         clientMessages.length <= 2 &&
-        !isConnectionClosed
+        !isConnectionClosed &&
+        !skipSkillShortcuts
       ) {
         try {
           const answerFirstPrompt = answerFirstEnforcer.generateAnswerFirstSystemPrompt(userQuery, false);
@@ -1336,8 +1611,9 @@ const cleanSkipRunStreamDedup = (): void => {
       }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
-      const hasDocumentAttachments = attachments && Array.isArray(attachments) &&
-        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      const hasDocumentAttachments = sanitizedRunAttachments && sanitizedRunAttachments.length > 0
+        ? sanitizedRunAttachments.some((a) => isDocumentAttachment(a.mimeType || a.type || "", a.name || "", a.type || a.mimeType || ""))
+        : false;
 
       if (hasDocumentAttachments) {
         console.log(`[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
@@ -1451,14 +1727,28 @@ const cleanSkipRunStreamDedup = (): void => {
       // Resolve storagePaths for all attachments first (before PARE routing)
       // This ensures PARE has valid paths for routing decisions
       const resolvedAttachments: any[] = [];
-      if (attachments && Array.isArray(attachments)) {
-        for (const att of attachments) {
-          const resolved = { ...att };
+      if (sanitizedRunAttachments && sanitizedRunAttachments.length > 0) {
+        for (const att of sanitizedRunAttachments) {
+          const resolved = { ...att } as Record<string, unknown>;
           if (!resolved.storagePath && resolved.fileId) {
-            const fileRecord = await storage.getFile(resolved.fileId);
+            const fileRecord = await storage.getFile(String(resolved.fileId));
             if (fileRecord && fileRecord.storagePath) {
               resolved.storagePath = fileRecord.storagePath;
-              console.log(`[Stream] Pre-resolved storagePath for ${resolved.name}: ${resolved.storagePath}`);
+              console.log(`[Stream] Pre-resolved storagePath for ${String(resolved.name || "unknown")}: ${resolved.storagePath}`);
+            }
+          }
+          resolvedAttachments.push(resolved);
+        }
+      } else if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments.slice(0, MAX_STREAM_SKILL_ATTACHMENTS)) {
+          const normalized = sanitizeStreamAttachment(att);
+          if (!normalized || !normalized.name) continue;
+          const resolved = { ...normalized } as Record<string, unknown>;
+          if (!resolved.storagePath && resolved.fileId) {
+            const fileRecord = await storage.getFile(String(resolved.fileId));
+            if (fileRecord && fileRecord.storagePath) {
+              resolved.storagePath = fileRecord.storagePath;
+              console.log(`[Stream] Pre-resolved storagePath for ${String(resolved.name || "unknown")}: ${resolved.storagePath}`);
             }
           }
           resolvedAttachments.push(resolved);
@@ -1903,6 +2193,11 @@ const cleanSkipRunStreamDedup = (): void => {
 
       let systemContent = answerFirstPrompt.fullPrompt;
 
+      if (shouldRunModel && skillSeedForModel) {
+        systemContent += `\n\n[CONTEXTO SKILL] Ya existe una respuesta parcial: "${skillSeedForModel.slice(0, 2200)}".\n` +
+          "Continúa desde ese punto, evitando repetir contenido ya emitido por la Skill, y completa sólo lo faltante con precisión.";
+      }
+
       if (hasAttachments && attachmentContext && batchResult) {
         // Build citation format instructions based on document types
         const citationFormats = batchResult.stats
@@ -2328,14 +2623,10 @@ ${attachmentContext}`;
         });
       }
 
-      let fullContent = "";
-      let lastAckSequence = -1;
-      let agentLoopHandled = false;
-
       // ── AGENT LOOP INTERCEPT ──────────────────────────────────
       // For web_automation intent, route through the agent executor which has
       // tools like browse_and_act (Playwright), web_search, fetch_url
-      if (unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
+      if (shouldRunModel && unifiedContext?.isAgenticMode && unifiedContext.requestSpec.intent === "web_automation") {
         console.log(`[Stream] 🤖 WEB AUTOMATION: routing through executeAgentLoop with browse_and_act tool`);
         try {
           const agentMessages = [
@@ -2386,10 +2677,14 @@ ${attachmentContext}`;
         }
       }
 
-      if (!agentLoopHandled) {
+      if (shouldRunModel && !agentLoopHandled) {
       const modelStreamStageStart = performance.now();
+      const modelMessages = [systemMessage, ...formattedMessages] as any[];
+      if (skillSeedForModel) {
+        modelMessages.push({ role: "assistant", content: skillSeedForModel });
+      }
       const streamGenerator = llmGateway.streamChat(
-        [systemMessage, ...formattedMessages],
+        modelMessages,
         {
           userId: userId || conversationId || "anonymous",
           requestId,
@@ -2417,7 +2712,7 @@ ${attachmentContext}`;
           markFirstToken();
         }
         fullContent += chunk.content;
-        lastAckSequence = chunk.sequenceId;
+        lastAckSequence = Math.max(lastAckSequence, chunk.sequenceId);
 
         // Update run's lastSeq for deduplication on reconnect
         if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
@@ -2456,7 +2751,9 @@ ${attachmentContext}`;
       // If upstream agentic pipeline produced no content, don't leave the UI hanging.
       // Emit a fallback chunk so clients can render something, and persist it.
       if (!fullContent.trim()) {
-        const fallbackContent = "Lo siento, el modo agente no pudo generar una respuesta esta vez. Intenta de nuevo o desactiva el modo agente para esta pregunta.";
+        const fallbackContent = shouldRunModel
+          ? "Lo siento, el modo agente no pudo generar una respuesta esta vez. Intenta de nuevo o desactiva el modo agente para esta pregunta."
+          : "No se pudo completar la respuesta con skills. Reintenta o reformula la consulta.";
         fullContent = fallbackContent;
 
         if (!isConnectionClosed) {
@@ -2516,6 +2813,7 @@ ${attachmentContext}`;
 
       const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
       const finalTimings = reportTimings("completed");
+      const finalSequenceCount = fullContent.trim() && lastAckSequence < 0 ? 1 : Math.max(0, lastAckSequence + 1);
 
       if (!isConnectionClosed) {
         if (unifiedContext?.isAgenticMode) {
@@ -2547,7 +2845,7 @@ ${attachmentContext}`;
           assistantMessageId,
           latencyMode,
           latencyLane: resolvedLane,
-          totalSequences: lastAckSequence + 1,
+          totalSequences: finalSequenceCount,
           contentLength: fullContent.length,
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
@@ -2562,7 +2860,7 @@ ${attachmentContext}`;
           summary: fullContent.slice(0, 200),
           durationMs,
           phase: 'completed',
-          metadata: { contentLength: fullContent.length, sequences: lastAckSequence + 1 }
+          metadata: { contentLength: fullContent.length, sequences: finalSequenceCount }
         }).catch(() => { });
       }
 

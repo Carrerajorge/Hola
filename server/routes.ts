@@ -136,6 +136,7 @@ import { createTerminalControlRouter, terminalClients } from "./routes/terminalC
 import { createWorkflowRouter } from "./routes/workflowRouter";
 import { createDeviceControlRouter } from "./routes/deviceControlRouter";
 import openClawRouter from "./routes/openClawRouter";
+import { createSkillPlatformRouter } from "./routes/skillPlatformRouter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -705,9 +706,10 @@ export async function registerRoutes(
   });
   app.use("/api/ai", aiExcelRouter);
   app.use("/api/power", powerRouter);
-  app.use("/api/agents", multiAgentRouter);
-  app.use("/api/errors", errorRouter);
-  app.use("/api/spreadsheet", createSpreadsheetRouter());
+    app.use("/api/agents", multiAgentRouter);
+    app.use("/api/errors", errorRouter);
+    app.use("/api/spreadsheet", createSpreadsheetRouter());
+    app.use("/api/skill-platform", createSkillPlatformRouter());
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api/orchestrator", createOrchestratorRouter());

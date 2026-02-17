@@ -262,6 +262,10 @@ export const globalLimiter = async (req: Request, res: Response, next: NextFunct
 
 export const authLimiter = async (req: Request, res: Response, next: NextFunction) => {
   if (isExemptPath(req)) return next();
+  // Google OAuth redirects/callbacks should not be blocked — users can trigger
+  // multiple redirects during normal sign-in flows and 429 locks them out.
+  const url = req.originalUrl || req.url;
+  if (url.startsWith("/api/auth/google") || url.startsWith("/auth/google")) return next();
   await consumeLimiter(() => rateLimiterAuth, req, res, next);
 };
 

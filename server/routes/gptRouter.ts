@@ -1,6 +1,194 @@
 import { Router, Request } from "express";
 import { storage } from "../storage";
 import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { createGptActionRuntime, normalizeGptActionRequestPayload } from "../services/gptActionRuntime";
+import { gptActionCreateSchema, gptActionUpdateSchema, gptActionUseSchema } from "@shared/schema/gpt";
+
+const DEFAULT_GPT_MODEL = "grok-4-1-fast-non-reasoning";
+const DEFAULT_GPT_KNOWLEDGE_SOURCES: Array<Record<string, any>> = [];
+const DEFAULT_GPT_ACTIONS: string[] = [];
+
+function asRecord(value: unknown): Record<string, any> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : null;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asNumber(value: unknown, fallback?: number): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return fallback;
+}
+
+function asStringArray(value: unknown, fallback: string[] = []): string[] {
+  if (!Array.isArray(value)) return fallback;
+  return value.filter((item) => typeof item === "string");
+}
+
+function normalizeCapabilities(value: unknown) {
+  const source = asRecord(value) || {};
+  return {
+    webBrowsing: asBoolean(source.webBrowsing, false),
+    codeInterpreter: asBoolean(source.codeInterpreter, false),
+    imageGeneration: asBoolean(source.imageGeneration, false),
+    fileUpload: asBoolean(source.fileUpload, false),
+    dataAnalysis: asBoolean(source.dataAnalysis, false),
+  };
+}
+
+function normalizeRuntimePolicy(value: unknown) {
+  const source = asRecord(value) || {};
+  return {
+    enforceModel: asBoolean(source.enforceModel, false),
+    modelFallbacks: asStringArray(source.modelFallbacks),
+    maxTokensOverride: asNumber(source.maxTokensOverride),
+    temperatureOverride: asNumber(source.temperatureOverride),
+    allowClientOverride: asBoolean(source.allowClientOverride, false),
+    piiRedactionEnabled: asBoolean(source.piiRedactionEnabled, true),
+    allowedDomains: asStringArray(source.allowedDomains),
+    workspaceOnly: asBoolean(source.workspaceOnly, false),
+  };
+}
+
+function normalizeToolPermissions(value: unknown) {
+  const source = asRecord(value) || {};
+  return {
+    mode: source.mode === "denylist" ? "denylist" : "allowlist",
+    tools: asStringArray(source.tools),
+    actionsEnabled: asBoolean(source.actionsEnabled, true),
+  };
+}
+
+function definitionFromRequest(body: any) {
+  const definitionBody = asRecord(body?.definition) || {};
+  const instructions = asString(definitionBody.instructions) || asString(body.instructions) || asString(body.systemPrompt);
+  const capabilities = asRecord(body.capabilities) || asRecord(definitionBody.capabilities);
+  const policies = asRecord(body.policies) || asRecord(definitionBody.policies);
+  const knowledgeSources = Array.isArray(definitionBody.knowledgeSources) ? definitionBody.knowledgeSources : (Array.isArray(body.knowledgeSources) ? body.knowledgeSources : undefined);
+  const actions = Array.isArray(definitionBody.actions) ? definitionBody.actions : (Array.isArray(body.actions) ? body.actions : undefined);
+
+  return {
+    name: asString(definitionBody.name) || asString(body.name),
+    description: asString(definitionBody.description) || asString(body.description),
+    avatar: asString(definitionBody.avatar) || asString(body.avatar),
+    model: asString(definitionBody.model) || asString(body.model),
+    instructions: instructions !== undefined ? instructions : undefined,
+    conversationStarters: Array.isArray(definitionBody.conversationStarters)
+      ? definitionBody.conversationStarters
+      : (Array.isArray(body.conversationStarters) ? body.conversationStarters : undefined),
+    capabilities: capabilities ? normalizeCapabilities(capabilities) : undefined,
+    knowledgeSources: Array.isArray(knowledgeSources) ? knowledgeSources : undefined,
+    actions: Array.isArray(actions) ? actions : undefined,
+    policies: policies ? normalizeRuntimePolicy(policies) : undefined,
+  };
+}
+
+function normalizeDefinitionFromLegacyGpt(gpt: any) {
+  const base = asRecord(gpt.definition) || {};
+  return {
+    name: asString(gpt.name) || "",
+    description: asString(gpt.description),
+    avatar: asString(gpt.avatar),
+    model: asString(base.model) || asString(gpt.recommendedModel) || DEFAULT_GPT_MODEL,
+    instructions: asString(base.instructions) || asString(gpt.systemPrompt) || "",
+    conversationStarters: asStringArray(base.conversationStarters || gpt.conversationStarters, []),
+    capabilities: normalizeCapabilities(base.capabilities || gpt.capabilities),
+    knowledgeSources: Array.isArray(base.knowledgeSources) ? base.knowledgeSources : DEFAULT_GPT_KNOWLEDGE_SOURCES,
+    actions: Array.isArray(base.actions) ? base.actions : DEFAULT_GPT_ACTIONS,
+    policies: normalizeRuntimePolicy(base.policies || {}),
+    piiRedactionEnabled: asBoolean((asRecord(base.policies) || {}).piiRedactionEnabled, true),
+  };
+}
+
+function mergeDefinitions(base: any, patch: any) {
+  const next: any = { ...base, ...patch };
+  if (patch && typeof patch.capabilities === "object") {
+    next.capabilities = { ...base.capabilities, ...patch.capabilities };
+  }
+  if (patch && typeof patch.policies === "object") {
+    next.policies = { ...base.policies, ...patch.policies };
+  }
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "conversationStarters")) {
+    next.conversationStarters = Array.isArray(patch.conversationStarters) ? patch.conversationStarters : [];
+  }
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "knowledgeSources")) {
+    next.knowledgeSources = Array.isArray(patch.knowledgeSources) ? patch.knowledgeSources : [];
+  }
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "actions")) {
+    next.actions = Array.isArray(patch.actions) ? patch.actions : [];
+  }
+  return next;
+}
+
+function getRuntimePolicyPayload(policies: any) {
+  return {
+    enforceModel: asBoolean(policies.enforceModel, false),
+    modelFallbacks: asStringArray(policies.modelFallbacks),
+    maxTokensOverride: asNumber(policies.maxTokensOverride),
+    temperatureOverride: asNumber(policies.temperatureOverride),
+    allowClientOverride: asBoolean(policies.allowClientOverride, false),
+  };
+}
+
+function getActionExecutionHttpStatus(result: {
+  success: boolean;
+  status?: string;
+  error?: {
+    code?: string;
+    retryable?: boolean;
+    retryAfter?: number;
+  };
+}): number {
+  if (result.success) {
+    return 200;
+  }
+
+  const code = result.error?.code || "";
+  if (code === "idempotency_conflict" || code === "idempotency_in_progress") {
+    return 409;
+  }
+  if (code === "rate_limited") {
+    return 429;
+  }
+  if (code === "validation_error") {
+    return 400;
+  }
+  if (code === "auth_error") {
+    return 401;
+  }
+  if (code === "action_inactive" || code === "security_blocked") {
+    return 403;
+  }
+  if (code === "timeout") {
+    return 408;
+  }
+  if (result.status === "validation_error") {
+    return 400;
+  }
+  if (result.error?.retryable) {
+    return 503;
+  }
+  return 500;
+}
 
 async function canEditGpt(req: Request, gptId: string): Promise<{ allowed: boolean; gpt: any | null; error?: string }> {
   const gpt = await storage.getGpt(gptId);
@@ -116,14 +304,34 @@ export function createGptRouter() {
         visibility, systemPrompt, temperature, topP, maxTokens,
         welcomeMessage, capabilities, conversationStarters, isPublished
       } = req.body;
+      const payload = definitionFromRequest(req.body);
+      const gptDefinition = normalizeDefinitionFromLegacyGpt({
+        name,
+        description,
+        avatar,
+        recommendedModel: DEFAULT_GPT_MODEL,
+        systemPrompt,
+        conversationStarters,
+        capabilities,
+        definition: {
+          conversationStarters,
+          capabilities,
+          actions: [],
+        },
+      });
+      const finalDefinition = {
+        ...gptDefinition,
+        ...payload,
+      };
+      const canonicalName = finalDefinition.name || name;
 
       // Get authenticated user ID
       const session = req.session as any;
       const userId = (req as any).user?.claims?.sub || (req as any).user?.id || session?.authUserId;
       const creatorId = userId || null;
 
-      if (!name || !slug || !systemPrompt) {
-        return res.status(400).json({ error: "name, slug, and systemPrompt are required" });
+      if (!canonicalName || !slug || !finalDefinition.instructions) {
+        return res.status(400).json({ error: "name, slug, and systemPrompt/instructions are required" });
       }
 
       const existing = await storage.getGptBySlug(slug);
@@ -132,20 +340,23 @@ export function createGptRouter() {
       }
 
       const gpt = await storage.createGpt({
-        name,
+        name: canonicalName,
         slug,
-        description: description || null,
-        avatar: avatar || null,
+        description: finalDefinition.description || description || null,
+        avatar: finalDefinition.avatar || avatar || null,
         categoryId: categoryId || null,
         creatorId: creatorId,
         visibility: visibility || "private",
-        systemPrompt,
+        systemPrompt: finalDefinition.instructions,
         temperature: temperature || "0.7",
         topP: topP || "1",
-        maxTokens: maxTokens || 4096,
+        maxTokens: asNumber(maxTokens, 4096),
         welcomeMessage: welcomeMessage || null,
-        capabilities: capabilities || null,
-        conversationStarters: conversationStarters || null,
+        capabilities: finalDefinition.capabilities,
+        conversationStarters: finalDefinition.conversationStarters || [],
+        recommendedModel: finalDefinition.model || DEFAULT_GPT_MODEL,
+        runtimePolicy: getRuntimePolicyPayload(finalDefinition.policies),
+        toolPermissions: normalizeToolPermissions(req.body.toolPermissions),
         isPublished: isPublished || "false",
         version: 1
       });
@@ -153,15 +364,20 @@ export function createGptRouter() {
       await storage.createGptVersion({
         gptId: gpt.id,
         versionNumber: 1,
-        systemPrompt,
+        systemPrompt: finalDefinition.instructions,
         temperature: temperature || "0.7",
         topP: topP || "1",
-        maxTokens: maxTokens || 4096,
+        maxTokens: asNumber(maxTokens, 4096),
+        definitionSnapshot: finalDefinition,
         changeNotes: "Initial version",
         createdBy: creatorId || null
       });
 
-      res.json(gpt);
+      const response = {
+        ...gpt,
+        definition: finalDefinition
+      };
+      res.json(response);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -190,17 +406,64 @@ export function createGptRouter() {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
 
-      const updates = req.body;
+      const currentGpt = await storage.getGpt(req.params.id);
+      if (!currentGpt) {
+        return res.status(404).json({ error: "GPT not found" });
+      }
+
+      const requestPayload = definitionFromRequest(req.body);
+      const mergedDefinition = mergeDefinitions(normalizeDefinitionFromLegacyGpt(currentGpt), requestPayload);
+      const nextRuntimePolicy = getRuntimePolicyPayload(mergedDefinition.policies);
+      const latestVersion = (await storage.getLatestGptVersion(req.params.id))?.versionNumber ?? 0;
+      const requestedSlug = asString(req.body.slug);
+      const nextSlug = requestedSlug && requestedSlug !== currentGpt.slug ? requestedSlug : currentGpt.slug;
+
+      const nextVersionNumber = latestVersion ? latestVersion + 1 : 1;
+      const requestedTemperature = asNumber(req.body.temperature, parseFloat(currentGpt.temperature || "0.7"));
+      const requestedTopP = asNumber(req.body.topP, parseFloat(currentGpt.topP || "1"));
+      const requestedMaxTokens = asNumber(req.body.maxTokens, currentGpt.maxTokens ?? 4096);
+      const existingToolPermissions = normalizeToolPermissions(req.body.toolPermissions ?? currentGpt.toolPermissions);
+
+      const updatePayload = {
+        slug: nextSlug,
+        name: mergedDefinition.name,
+        description: mergedDefinition.description ?? null,
+        avatar: mergedDefinition.avatar ?? null,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        capabilities: mergedDefinition.capabilities,
+        conversationStarters: mergedDefinition.conversationStarters || [],
+        version: nextVersionNumber,
+        runtimePolicy: nextRuntimePolicy,
+        toolPermissions: existingToolPermissions,
+        recommendedModel: mergedDefinition.model || currentGpt.recommendedModel || DEFAULT_GPT_MODEL,
+        definition: mergedDefinition,
+      };
 
       // Check for slug collision if slug is being updated
-      if (updates.slug) {
-        const existing = await storage.getGptBySlug(updates.slug);
+      if (req.body.slug && req.body.slug !== currentGpt.slug) {
+        const existing = await storage.getGptBySlug(req.body.slug);
         if (existing && existing.id !== req.params.id) {
           return res.status(409).json({ error: "Ya existe un GPT con este nombre/slug. Por favor elige otro nombre." });
         }
       }
 
-      const updatedGpt = await storage.updateGpt(req.params.id, updates);
+      const updatedGpt = await storage.updateGpt(req.params.id, updatePayload as any);
+
+      await storage.createGptVersion({
+        gptId: req.params.id,
+        versionNumber: nextVersionNumber,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        definitionSnapshot: mergedDefinition,
+        changeNotes: req.body.changeNotes || "Updated GPT configuration",
+        createdBy: (req as any).user?.claims?.sub || (req as any).user?.id || (req.session as any)?.authUserId || null,
+      });
+
       res.json(updatedGpt);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -241,35 +504,137 @@ export function createGptRouter() {
 
   router.post("/gpts/:id/versions", async (req, res) => {
     try {
-      const { systemPrompt, temperature, topP, maxTokens, changeNotes, createdBy } = req.body;
-
-      if (!systemPrompt) {
-        return res.status(400).json({ error: "systemPrompt is required" });
+      const {
+        systemPrompt,
+        temperature,
+        topP,
+        maxTokens,
+        changeNotes,
+        createdBy,
+        ...rest
+      } = req.body;
+      const currentGpt = await storage.getGpt(req.params.id);
+      if (!currentGpt) {
+        return res.status(404).json({ error: "GPT not found" });
       }
 
+      const requestPayload = definitionFromRequest({ ...rest, systemPrompt });
+      const mergedDefinition = mergeDefinitions(normalizeDefinitionFromLegacyGpt(currentGpt), requestPayload);
+      const nextRuntimePolicy = getRuntimePolicyPayload(mergedDefinition.policies);
+
       const latestVersion = await storage.getLatestGptVersion(req.params.id);
-      const newVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
+      const nextVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
+      const requestedTemperature = asNumber(temperature, parseFloat(currentGpt.temperature || "0.7"));
+      const requestedTopP = asNumber(topP, parseFloat(currentGpt.topP || "1"));
+      const requestedMaxTokens = asNumber(maxTokens, currentGpt.maxTokens ?? 4096);
 
       const version = await storage.createGptVersion({
         gptId: req.params.id,
-        versionNumber: newVersionNumber,
-        systemPrompt,
-        temperature: temperature || "0.7",
-        topP: topP || "1",
-        maxTokens: maxTokens || 4096,
-        changeNotes: changeNotes || null,
+        versionNumber: nextVersionNumber,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        definitionSnapshot: mergedDefinition,
+        changeNotes: changeNotes || "Added version snapshot",
         createdBy: createdBy || null
       });
 
       await storage.updateGpt(req.params.id, {
-        version: newVersionNumber,
-        systemPrompt,
-        temperature: temperature || "0.7",
-        topP: topP || "1",
-        maxTokens: maxTokens || 4096
+        version: nextVersionNumber,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        definition: mergedDefinition,
+        capabilities: mergedDefinition.capabilities,
+        conversationStarters: mergedDefinition.conversationStarters || [],
+        runtimePolicy: nextRuntimePolicy,
+        recommendedModel: mergedDefinition.model || currentGpt.recommendedModel || DEFAULT_GPT_MODEL,
+        toolPermissions: normalizeToolPermissions(req.body.toolPermissions || currentGpt.toolPermissions),
       });
 
       res.json(version);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/gpts/:id/versions/:versionNumber/activate", async (req, res) => {
+    try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+
+      const versionNumber = parseInt(req.params.versionNumber, 10);
+      if (!Number.isFinite(versionNumber) || versionNumber <= 0) {
+        return res.status(400).json({ error: "Invalid versionNumber" });
+      }
+
+      const currentGpt = await storage.getGpt(req.params.id);
+      if (!currentGpt) {
+        return res.status(404).json({ error: "GPT not found" });
+      }
+
+      const targetVersion = await storage.getGptVersionByNumber(req.params.id, versionNumber);
+      if (!targetVersion) {
+        return res.status(404).json({ error: "Version not found" });
+      }
+
+      const currentDefinition = normalizeDefinitionFromLegacyGpt(currentGpt);
+      const targetSnapshot = targetVersion.definitionSnapshot
+        ? {
+          ...(asRecord(currentDefinition) || {}),
+          ...(asRecord(targetVersion.definitionSnapshot) || {}),
+        }
+        : {
+          ...currentDefinition,
+          instructions: targetVersion.systemPrompt || currentDefinition.instructions,
+        };
+      const mergedDefinition = normalizeDefinitionFromLegacyGpt({
+        ...currentGpt,
+        definition: targetSnapshot,
+      });
+
+      const requestedTemperature = asNumber(targetVersion.temperature, parseFloat(currentGpt.temperature || "0.7"));
+      const requestedTopP = asNumber(targetVersion.topP, parseFloat(currentGpt.topP || "1"));
+      const requestedMaxTokens = asNumber(targetVersion.maxTokens, currentGpt.maxTokens ?? 4096);
+      const nextRuntimePolicy = getRuntimePolicyPayload(mergedDefinition.policies);
+      const latestVersion = await storage.getLatestGptVersion(req.params.id);
+      const nextVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
+      const actorId = (req as any).user?.claims?.sub || (req as any).user?.id || (req.session as any)?.authUserId || null;
+
+      const activatedVersion = await storage.createGptVersion({
+        gptId: req.params.id,
+        versionNumber: nextVersionNumber,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        definitionSnapshot: mergedDefinition,
+        changeNotes: `Rollback to version ${versionNumber}`,
+        createdBy: actorId
+      });
+
+      const updatedGpt = await storage.updateGpt(req.params.id, {
+        version: nextVersionNumber,
+        systemPrompt: mergedDefinition.instructions,
+        temperature: `${requestedTemperature ?? 0.7}`,
+        topP: `${requestedTopP ?? 1}`,
+        maxTokens: requestedMaxTokens,
+        definition: mergedDefinition,
+        capabilities: mergedDefinition.capabilities,
+        conversationStarters: mergedDefinition.conversationStarters || [],
+        runtimePolicy: nextRuntimePolicy,
+        recommendedModel: mergedDefinition.model || currentGpt.recommendedModel || DEFAULT_GPT_MODEL,
+        toolPermissions: normalizeToolPermissions(currentGpt.toolPermissions),
+      });
+
+      res.json({
+        version: activatedVersion,
+        gpt: updatedGpt
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -365,33 +730,19 @@ export function createGptRouter() {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
 
-      const {
-        name, description, actionType, httpMethod, endpoint,
-        headers, bodyTemplate, responseMapping, authType, authConfig,
-        parameters, rateLimit, timeout
-      } = req.body;
+      const validation = gptActionCreateSchema.safeParse({
+        ...req.body,
+        gptId: req.params.id,
+      });
 
-      if (!name || !endpoint) {
-        return res.status(400).json({ error: "name and endpoint are required" });
+      if (!validation.success) {
+        return res.status(400).json({
+          error: "Invalid action payload",
+          details: validation.error.issues,
+        });
       }
 
-      const action = await storage.createGptAction({
-        gptId: req.params.id,
-        name,
-        description: description || null,
-        actionType: actionType || "api",
-        httpMethod: httpMethod || "GET",
-        endpoint,
-        headers: headers || null,
-        bodyTemplate: bodyTemplate || null,
-        responseMapping: responseMapping || null,
-        authType: authType || "none",
-        authConfig: authConfig || null,
-        parameters: parameters || null,
-        rateLimit: rateLimit || 100,
-        timeout: timeout || 30000,
-        isActive: "true"
-      });
+      const action = await storage.createGptAction(validation.data);
       res.json(action);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -405,12 +756,25 @@ export function createGptRouter() {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
 
-      const updates = req.body;
-      const action = await storage.updateGptAction(req.params.actionId, updates);
+      const action = await storage.getGptActionByIdAndGpt(req.params.actionId, req.params.id);
       if (!action) {
         return res.status(404).json({ error: "Action not found" });
       }
-      res.json(action);
+
+      const validation = gptActionUpdateSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: "Invalid action update payload",
+          details: validation.error.issues,
+        });
+      }
+
+      const updatedAction = await storage.updateGptAction(req.params.actionId, validation.data);
+      if (!updatedAction) {
+        return res.status(404).json({ error: "Action not found" });
+      }
+      res.json(updatedAction);
+      return;
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -423,6 +787,11 @@ export function createGptRouter() {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
 
+      const action = await storage.getGptActionByIdAndGpt(req.params.actionId, req.params.id);
+      if (!action) {
+        return res.status(404).json({ error: "Action not found" });
+      }
+
       await storage.deleteGptAction(req.params.actionId);
       res.json({ success: true });
     } catch (error: any) {
@@ -432,12 +801,49 @@ export function createGptRouter() {
 
   router.post("/gpts/:id/actions/:actionId/use", async (req, res) => {
     try {
-      await storage.incrementGptActionUsage(req.params.actionId);
-      res.json({ success: true });
+      const validation = gptActionUseSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({
+          error: "Invalid action use payload",
+          details: validation.error.issues,
+        });
+      }
+
+      const action = await storage.getGptActionByIdAndGpt(req.params.actionId, req.params.id);
+      if (!action) {
+        return res.status(404).json({ error: "Action not found" });
+      }
+
+      const runtime = createGptActionRuntime();
+      const execution = await runtime.execute({
+        action,
+        gptId: req.params.id,
+        conversationId: validation.data.conversationId,
+        request: normalizeGptActionRequestPayload({
+          request: validation.data.request,
+          input: validation.data.input,
+        } as Record<string, unknown>),
+        userId: validation.data.userId || getOrCreateSecureUserId(req),
+        requestId: validation.data.requestId,
+        headers: validation.data.headers,
+        timeoutMs: validation.data.timeoutMs,
+        maxRetries: validation.data.maxRetries,
+        idempotencyKey: validation.data.idempotencyKey,
+      });
+
+      const httpStatus = getActionExecutionHttpStatus(execution);
+      const retryAfter = (execution.error as { retryAfter?: number } | undefined)?.retryAfter;
+      if (typeof retryAfter === "number" && retryAfter > 0) {
+        res.setHeader("Retry-After", Math.max(1, Math.ceil(retryAfter)).toString());
+      }
+
+      return res.status(httpStatus).json(execution);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // GPT Actions routes
 
   router.get("/gpts/:id/about", async (req, res) => {
     try {

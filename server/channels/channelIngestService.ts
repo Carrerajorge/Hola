@@ -1,866 +1,841 @@
-import { and, eq } from "drizzle-orm";
-import { env } from "../config/env";
-import { db } from "../db";
-import { Logger } from "../lib/logger";
-import { storage } from "../storage";
-import { chatMessages } from "@shared/schema";
-import type { ChannelIngestJob } from "./types";
+import { randomUUID } from "crypto";
+
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+
+import type { ChannelIngestJob, ConversationKey, ExternalChannel, MessageEnvelope } from "./types";
+import {
+  normalizeMessengerMessages,
+  normalizeTelegramMessages,
+  normalizeWhatsAppMessages,
+  normalizeWeChatMessage,
+  withConversationKeyDefaults,
+} from "./inboundNormalization";
+import {
+  evaluateChannelPolicy,
+  getConversationWindowState,
+  parseChannelPairingCodeFromMessage,
+} from "./channelPolicyEngine";
 import {
   consumeChannelPairingCode,
-  getChannelConversation,
-  getOrCreateChannelConversation,
-  findWhatsAppCloudAccountByPhoneNumberId,
+  findAnyActiveTelegramAccount,
   findMessengerAccountByPageId,
-  findWeChatAccountByAppId,
   findTelegramAccountByUserId,
+  findWeChatAccountByAppId,
+  findWhatsAppCloudAccountByPhoneNumberId,
+  getOrCreateChannelConversation,
+  patchConversationMetadata,
+  setConversationOwnerIdentity,
+  touchChannelConversationHeartbeat,
 } from "./channelStore";
-import { telegramSendMessage, telegramSendDocument } from "./telegram/telegramApi";
-import { sendWhatsAppCloudText, sendWhatsAppCloudDocument } from "./whatsappCloud/whatsappCloudApi";
-import { evaluateWhatsAppPolicy } from "./whatsappCloud/whatsappPolicy";
-import { messengerSendText, messengerSendDocument } from "./messenger/messengerApi";
-import { evaluateMessengerPolicy } from "./messenger/messengerPolicy";
-import { wechatSendText, wechatSendDocument, parseWeChatXml } from "./wechat/wechatApi";
-import { evaluateWeChatPolicy } from "./wechat/wechatPolicy";
-import { createUnifiedRun, executeUnifiedChat } from "../agent/unifiedChatHandler";
-import { normalizeMessengerMessages, normalizeWeChatMessage, normalizeWhatsAppMessages } from "./inboundNormalization";
-import { buildResponseStyleSystemPrompt, isSenderAllowedByPolicy, resolveRuntimeConfig } from "./runtimeConfig";
-import { MemorySseResponse } from "../integrations/whatsappWebAutoReply";
-import type { Response } from "express";
-import fs from "fs/promises";
-import path from "path";
+import { parseWeChatXml, wechatSendDocument, wechatSendText } from "./wechat/wechatApi";
+import { sendWhatsAppCloudDocument, sendWhatsAppCloudText } from "./whatsappCloud/whatsappCloudApi";
+import { messengerSendDocument, messengerSendText } from "./messenger/messengerApi";
+import { telegramSendDocument, telegramSendMessage } from "./telegram/telegramApi";
+import { buildResponseStyleSystemPrompt, resolveRuntimeConfig } from "./runtimeConfig";
+import type { MessageRecord } from "../../shared/schema/chat";
+import { Logger } from "../lib/logger";
+import { llmGateway } from "../lib/llmGateway";
+import { storage } from "../storage";
 
-function isUniqueViolation(err: unknown): boolean {
-  return (err as any)?.code === "23505";
-}
-
-async function getChatMessageByRequestId(requestId: string) {
-  const [row] = await db.select().from(chatMessages).where(eq(chatMessages.requestId, requestId)).limit(1);
-  return row ?? null;
-}
-
-async function getAssistantForUserMessage(userMessageId: string) {
-  const [row] = await db
-    .select()
-    .from(chatMessages)
-    .where(and(eq(chatMessages.userMessageId, userMessageId), eq(chatMessages.role, "assistant")))
-    .limit(1);
-  return row ?? null;
-}
-
-async function upsertUserMessage(input: {
-  chatId: string;
-  requestId: string;
-  content: string;
-  metadata: Record<string, unknown>;
-}) {
-  try {
-    return await storage.createChatMessage({
-      chatId: input.chatId,
-      role: "user",
-      content: input.content,
-      requestId: input.requestId,
-      status: "done",
-      metadata: input.metadata,
-    });
-  } catch (e) {
-    if (!isUniqueViolation(e)) throw e;
-    const existing = await getChatMessageByRequestId(input.requestId);
-    if (!existing) throw e;
-    return existing;
-  }
-}
-
-async function upsertAssistantMessage(input: {
-  chatId: string;
-  requestId: string;
-  content: string;
-  userMessageId: string;
-  metadata: Record<string, unknown>;
-}) {
-  try {
-    return await storage.createChatMessage({
-      chatId: input.chatId,
-      role: "assistant",
-      content: input.content,
-      requestId: input.requestId,
-      userMessageId: input.userMessageId,
-      status: "done",
-      metadata: input.metadata,
-    });
-  } catch (e) {
-    if (!isUniqueViolation(e)) throw e;
-    const existing = await getChatMessageByRequestId(input.requestId);
-    if (!existing) throw e;
-    return existing;
-  }
-}
-
-function telegramDisplayName(from: any, fallback: string): string {
-  const name = [from?.first_name, from?.last_name].filter(Boolean).join(" ").trim();
-  return name || from?.username || fallback;
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
-
-/**
- * Shared helper: runs the LLM pipeline and returns the assistant text + MemorySseResponse.
- * Eliminates duplication across the 4 channel handlers.
- */
-async function runChannelLlm(input: {
-  channel: string;
-  messages: Array<{ role: "system" | "user"; content: string }>;
-  chatId: string;
+type ChannelAccount = {
+  id: string;
   userId: string;
-  msgPrefix: string;
-  fallbackText: string;
-  timeoutMs?: number;
-}): Promise<{ assistantText: string; memRes: MemorySseResponse }> {
-  const memRes = new MemorySseResponse();
-  let assistantText = "";
-  try {
-    const unifiedContext = await createUnifiedRun({
-      messages: input.messages,
-      chatId: input.chatId,
-      userId: input.userId,
-      messageId: `${input.msgPrefix}_${Date.now()}`,
-    });
-    await withTimeout(
-      executeUnifiedChat(
-        unifiedContext,
-        {
-          messages: input.messages,
-          chatId: input.chatId,
-          userId: input.userId,
-          messageId: `${input.msgPrefix}_${Date.now()}`,
-        },
-        memRes as any as Response,
-      ),
-      input.timeoutMs ?? 120_000,
-      `${input.channel} AI`,
-    );
-    assistantText = memRes.chunks
-      .filter((c: any) => c.event === "chunk" && typeof c.data?.content === "string")
-      .map((c: any) => c.data.content)
-      .join("")
-      .trim();
-  } catch (err) {
-    Logger.error(`[${input.channel}] LLM processing failed`, {
-      chatId: input.chatId,
-      userId: input.userId,
-      err,
-    });
-    assistantText = input.fallbackText;
-  }
-  return { assistantText: assistantText || input.fallbackText, memRes };
-}
-
-const ARTIFACT_MIME_MAP: Record<string, string> = {
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  ".pdf": "application/pdf",
+  accessToken: string | null;
+  metadata: Record<string, unknown> | null;
 };
 
-async function sendChannelArtifacts(
-  memRes: MemorySseResponse,
-  channel: "telegram" | "whatsapp_cloud" | "messenger" | "wechat",
-  recipientId: string,
-  opts?: {
-    phoneNumberId?: string;
-    accessToken?: string;
-    appId?: string;
-    appSecret?: string;
-  },
-): Promise<void> {
-  const artifactEvents = memRes.chunks.filter(
-    (c: any) => c.event === "artifacts" && c.data?.artifacts,
-  );
-  for (const evt of artifactEvents) {
-    const artifacts: Array<{ type?: string; url?: string; name?: string }> =
-      (evt as any).data.artifacts || [];
-    for (const artifact of artifacts) {
-      if (!artifact.name) continue;
-      const filePath = path.join(process.cwd(), "generated_artifacts", artifact.name);
-      try {
-        const fileBuffer = await fs.readFile(filePath);
-        const ext = path.extname(artifact.name).toLowerCase();
-        const mimetype = ARTIFACT_MIME_MAP[ext] || "application/octet-stream";
-        if (channel === "telegram") {
-          await telegramSendDocument(recipientId, fileBuffer, artifact.name, mimetype);
-        } else if (channel === "whatsapp_cloud" && opts?.phoneNumberId && opts?.accessToken) {
-          await sendWhatsAppCloudDocument({
-            phoneNumberId: opts.phoneNumberId,
-            to: recipientId,
-            fileBuffer,
-            fileName: artifact.name,
-            mimeType: mimetype,
-            accessToken: opts.accessToken,
-          });
-        } else if (channel === "messenger" && opts?.accessToken) {
-          await messengerSendDocument({
-            recipientId,
-            fileBuffer,
-            fileName: artifact.name,
-            mimeType: mimetype,
-            accessToken: opts.accessToken,
-          });
-        } else if (channel === "wechat" && opts?.appId && opts?.appSecret) {
-          await wechatSendDocument({
-            openId: recipientId,
-            fileBuffer,
-            fileName: artifact.name,
-            mimeType: mimetype,
-            appId: opts.appId,
-            appSecret: opts.appSecret,
-          });
-        }
-      } catch (fileErr: any) {
-        Logger.error(
-          `[${channel}] Failed to send artifact "${artifact.name}"`,
-          fileErr?.message || fileErr,
-        );
-      }
-    }
-  }
+type InboundProcessingContext = {
+  jobChannel: ExternalChannel;
+  envelope: MessageEnvelope;
+  account: ChannelAccount;
+  conversation: Awaited<ReturnType<typeof getOrCreateChannelConversation>>;
+  runtimeConfig: ReturnType<typeof resolveRuntimeConfig>;
+};
+
+type SendRequest = {
+  text: string;
+  requestId: string;
+  runId: string;
+  conversationKey: ConversationKey;
+  senderId: string;
+};
+
+const RUN_QUEUE_MAX_HISTORY = 60;
+const MAX_STREAM_CONTEXT = 80;
+const ORCHESTRATION_TIMEOUT_MS = 120_000;
+const SEND_RETRY_ATTEMPTS = 2;
+const SEND_RETRY_BACKOFF_MS = 750;
+const PROVIDER_ID_FALLBACK_KEY = "unknown";
+const DEFAULT_MEDIA_LABEL = {
+  image: "[Imagen recibida]",
+  audio: "[Audio recibido]",
+  document: "[Documento recibido]",
+};
+
+const inFlightRunsByConversation = new Map<string, AbortController>();
+const conversationQueues = new Map<string, Promise<void>>();
+const seenProviderMessageIds = new Map<string, number>();
+
+function serializeConversationKey(conversationKey: ConversationKey): string {
+  return [conversationKey.workspaceId, conversationKey.channel, conversationKey.channelAccountId, conversationKey.threadId]
+    .map((value) => String(value ?? "").replace(/\|/g, "_"))
+    .join("|");
 }
 
-const inboundMessageDedupe = new Map<string, number>();
-const senderRateWindow = new Map<string, number[]>();
-const DEDUPE_TTL_MS = 10 * 60 * 1000;
+function isUniqueViolation(err: unknown): boolean {
+  return String((err as any)?.code || "") === "23505";
+}
 
-function isDuplicateInbound(key: string): boolean {
-  const now = Date.now();
-  for (const [k, ts] of inboundMessageDedupe.entries()) {
-    if (now - ts > DEDUPE_TTL_MS) inboundMessageDedupe.delete(k);
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function toCleanText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function normalizeTextPayload(value: string): string {
+  const trimmed = toCleanText(value);
+  return trimmed.length > 0 ? trimmed : "";
+}
+
+function buildConversationWorkspaceId(account: ChannelAccount): string {
+  return `workspace:${account.userId}`;
+}
+
+function envelopeFromRaw(raw: ChannelIngestJob, channel: ExternalChannel): MessageEnvelope[] {
+  if (channel === "whatsapp_cloud") {
+    return normalizeWhatsAppMessages((raw as any).payload);
   }
-  if (inboundMessageDedupe.has(key)) return true;
-  inboundMessageDedupe.set(key, now);
+
+  if (channel === "messenger") {
+    return normalizeMessengerMessages((raw as any).payload);
+  }
+
+  if (channel === "wechat") {
+    const parsed = parseWeChatXml(toCleanText((raw as any).payload));
+    const message = parsed ? normalizeWeChatMessage(toCleanText((raw as any).payload), parsed) : null;
+    return message ? [message] : [];
+  }
+
+  // telegram
+  return normalizeTelegramMessages((raw as any).update);
+}
+
+function isAllowedToQueue(providerMessageId: string): boolean {
+  const lastSeen = seenProviderMessageIds.get(providerMessageId) || 0;
+  if (!lastSeen) {
+    seenProviderMessageIds.set(providerMessageId, Date.now());
+    return true;
+  }
   return false;
 }
 
-function isRateLimited(senderKey: string, limitPerMinute: number): boolean {
+function pruneMessageIdLedger(ttlMs = 5 * 60 * 1000): void {
   const now = Date.now();
-  const windowStart = now - 60_000;
-  const bucket = (senderRateWindow.get(senderKey) ?? []).filter((t) => t >= windowStart);
-  bucket.push(now);
-  senderRateWindow.set(senderKey, bucket);
-  return bucket.length > limitPerMinute;
+  for (const [id, seenAt] of seenProviderMessageIds.entries()) {
+    if (now - seenAt > ttlMs) seenProviderMessageIds.delete(id);
+  }
 }
 
-function parseTelegramStartCode(text: string): string | null {
-  const trimmed = text.trim();
-  const first = trimmed.split(/\s+/)[0] || "";
-  const cmd = first.split("@")[0] || "";
-  if (cmd !== "/start") return null;
-  const rest = trimmed.slice(first.length).trim();
-  return rest || null;
-}
+async function resolveChannelAccount(channel: ExternalChannel, envelope: MessageEnvelope): Promise<ChannelAccount | null> {
+  if (channel === "whatsapp_cloud") {
+    const account = await findWhatsAppCloudAccountByPhoneNumberId(envelope.channelKey);
+    if (!account) return null;
+    return {
+      id: account.id,
+      userId: account.userId,
+      accessToken: account.accessToken,
+      metadata: account.metadata as Record<string, unknown> | null,
+    };
+  }
 
-type TelegramInbound = {
-  tgChatId: string;
-  tgMessageId: string;
-  updateId: string | null;
-  text: string;
-  from: any | null;
-};
+  if (channel === "messenger") {
+    const account = await findMessengerAccountByPageId(envelope.channelKey);
+    if (!account) return null;
+    return {
+      id: account.id,
+      userId: account.userId,
+      accessToken: account.accessToken,
+      metadata: account.metadata as Record<string, unknown> | null,
+    };
+  }
 
-function extractTelegramInbound(update: any): TelegramInbound | null {
-  const msg = update?.message;
-  const text = msg?.text;
-  const chatId = msg?.chat?.id;
-  const messageId = msg?.message_id;
-  if (text == null || chatId == null || messageId == null) return null;
-  if (typeof text !== "string") return null;
+  if (channel === "wechat") {
+    const appId = toCleanText((envelope.metadata as any)?.appId) || envelope.channelKey;
+    const account = await findWeChatAccountByAppId(appId);
+    if (!account) return null;
+    return {
+      id: account.id,
+      userId: account.userId,
+      accessToken: account.accessToken,
+      metadata: account.metadata as Record<string, unknown> | null,
+    };
+  }
+
+  // telegram
+  const accountByThread = await findTelegramAccountByUserId(envelope.channelKey || envelope.senderId);
+  if (accountByThread) {
+    return {
+      id: accountByThread.id,
+      userId: accountByThread.userId,
+      accessToken: accountByThread.accessToken,
+      metadata: accountByThread.metadata as Record<string, unknown> | null,
+    };
+  }
+
+  const anyAccount = await findAnyActiveTelegramAccount();
+  if (!anyAccount) return null;
   return {
-    tgChatId: String(chatId),
-    tgMessageId: String(messageId),
-    updateId: update?.update_id != null ? String(update.update_id) : null,
-    text,
-    from: msg?.from ?? null,
+    id: anyAccount.id,
+    userId: anyAccount.userId,
+    accessToken: anyAccount.accessToken,
+    metadata: anyAccount.metadata as Record<string, unknown> | null,
   };
 }
 
-async function handleTelegram(updateUnknown: unknown): Promise<void> {
-  const inbound = extractTelegramInbound(updateUnknown as any);
-  if (!inbound) return;
+function buildIncomingTextForHistory(envelope: MessageEnvelope): string {
+  const text = normalizeTextPayload(envelope.text);
+  if (text) return text;
 
-  const startCode = parseTelegramStartCode(inbound.text);
-  if (startCode) {
-    const consumed = await consumeChannelPairingCode({
-      channel: "telegram",
-      code: startCode,
-      consumedByExternalId: inbound.tgChatId,
-    });
+  const media = envelope.media;
+  if (!media) return "[Mensaje sin texto]";
 
-    if (!consumed) {
-      await telegramSendMessage(inbound.tgChatId, "Codigo invalido o expirado. Genera uno nuevo en la web y vuelve a intentarlo.");
-      return;
-    }
-
-    const existing = await getChannelConversation({
-      channel: "telegram",
-      channelKey: "default",
-      externalConversationId: inbound.tgChatId,
-    });
-
-    if (existing && existing.userId !== consumed.userId) {
-      await telegramSendMessage(inbound.tgChatId, "Este chat ya esta vinculado a otra cuenta. Si necesitas cambiarlo, desvincula primero desde la web.");
-      return;
-    }
-
-    await getOrCreateChannelConversation({
-      userId: consumed.userId,
-      channel: "telegram",
-      channelKey: "default",
-      externalConversationId: inbound.tgChatId,
-      title: `Telegram: ${telegramDisplayName(inbound.from, inbound.tgChatId)}`,
-      metadata: {
-        telegram: {
-          chatId: inbound.tgChatId,
-          fromId: inbound.from?.id != null ? String(inbound.from.id) : null,
-          username: inbound.from?.username ?? null,
-        },
-      },
-    });
-
-    await telegramSendMessage(inbound.tgChatId, "✅ Listo. Tu cuenta quedo vinculada. Ya puedes escribir aqui.");
-    return;
+  if (media.providerAssetId || media.url || media.fileName) {
+    const kind = envelope.messageType;
+    const label = DEFAULT_MEDIA_LABEL[kind as keyof typeof DEFAULT_MEDIA_LABEL] || "[Archivo recibido]";
+    const details: string[] = [label];
+    if (media.fileName) details.push(`nombre=${media.fileName}`);
+    if (media.mimeType) details.push(`mime=${media.mimeType}`);
+    return details.join(" ");
   }
 
-  const convo = await getChannelConversation({
-    channel: "telegram",
-    channelKey: "default",
-    externalConversationId: inbound.tgChatId,
-  });
-
-  if (!convo) {
-    await telegramSendMessage(
-      inbound.tgChatId,
-      `Este bot no esta vinculado a tu cuenta. Entra a ${env.BASE_URL} y genera un codigo, luego envia /start <CODIGO>.`,
-    );
-    return;
-  }
-
-  const senderId = inbound.from?.id != null ? String(inbound.from.id) : inbound.tgChatId;
-  const providerMessageId = inbound.tgMessageId;
-  if (isDuplicateInbound(`telegram:default:${providerMessageId}`)) return;
-
-  const telegramAccount = await findTelegramAccountByUserId(convo.userId);
-  const runtimeConfig = resolveRuntimeConfig(telegramAccount?.metadata);
-  if (!runtimeConfig.responder_enabled) return;
-  if (!isSenderAllowedByPolicy(runtimeConfig, senderId)) return;
-  if (isRateLimited(`telegram:${senderId}`, runtimeConfig.rate_limit_per_minute)) return;
-
-  const requestId = `telegram:${inbound.tgChatId}:${providerMessageId}`;
-  const userMsg = await upsertUserMessage({
-    chatId: convo.chatId,
-    requestId,
-    content: inbound.text,
-    metadata: {
-      channel: "telegram",
-      channelKey: "default",
-      externalConversationId: inbound.tgChatId,
-      messageType: "text",
-      telegram: {
-        updateId: inbound.updateId,
-        messageId: providerMessageId,
-        fromId: senderId,
-        username: inbound.from?.username ?? null,
-      },
-    },
-  });
-
-  const already = await getAssistantForUserMessage(userMsg.id);
-  if (already) return;
-
-  const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "Telegram");
-  const messages = [
-    ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
-    { role: "user" as const, content: inbound.text },
-  ];
-
-  const { assistantText, memRes } = await runChannelLlm({
-    channel: "Telegram",
-    messages,
-    chatId: convo.chatId,
-    userId: convo.userId,
-    msgPrefix: "tg_msg",
-    fallbackText: "Ahora mismo no puedo responder. Intenta de nuevo en unos minutos.",
-  });
-
-  const assistantRequestId = `telegram:assistant:${inbound.tgChatId}:${inbound.tgMessageId}`;
-
-  await upsertAssistantMessage({
-    chatId: convo.chatId,
-    requestId: assistantRequestId,
-    content: assistantText,
-    userMessageId: userMsg.id,
-    metadata: {
-      channel: "telegram",
-      replyTo: requestId,
-    },
-  });
-
-  try {
-    await telegramSendMessage(inbound.tgChatId, assistantText);
-  } catch (err) {
-    Logger.error("[Telegram] Failed to send reply", err);
-  }
-
-  // Send generated artifacts (documents) if any
-  try {
-    await sendChannelArtifacts(memRes, "telegram", inbound.tgChatId);
-  } catch (err) {
-    Logger.error("[Telegram] Failed to send artifacts", err);
-  }
+  return "[Mensaje recibido]";
 }
 
-async function handleWhatsAppCloud(payloadUnknown: unknown): Promise<void> {
-  const inbounds = normalizeWhatsAppMessages(payloadUnknown as any);
-  if (inbounds.length === 0) return;
+function buildMessageAttachments(envelope: MessageEnvelope) {
+  if (!envelope.media) return [] as Array<Record<string, unknown>>;
 
-  for (const inbound of inbounds) {
-    const account = await findWhatsAppCloudAccountByPhoneNumberId(inbound.phoneNumberId);
-    const userId = account?.userId || env.WHATSAPP_CLOUD_DEFAULT_USER_ID || null;
-    const accessToken = account?.accessToken || env.WHATSAPP_CLOUD_ACCESS_TOKEN || null;
+  return [{
+    type: envelope.messageType,
+    mediaProviderId: envelope.media.providerAssetId || null,
+    fileName: envelope.media.fileName || null,
+    mimeType: envelope.media.mimeType || null,
+    url: envelope.media.url || null,
+    raw: envelope.media.raw || null,
+    sourceChannel: envelope.channel,
+    messageId: envelope.providerMessageId,
+  }];
+}
 
-    if (!userId) {
-      Logger.warn("[WhatsAppCloud] No owner user configured for phone_number_id", {
-        phoneNumberId: inbound.phoneNumberId,
-        from: inbound.senderId,
-      });
-      continue;
-    }
+function withConversationDefaults(conversation: { userId: string }, envelope: MessageEnvelope): MessageEnvelope {
+  return withConversationKeyDefaults(
+    envelope,
+    buildConversationWorkspaceId({ id: "", userId: conversation.userId, accessToken: null, metadata: null }),
+    envelope.channelKey || PROVIDER_ID_FALLBACK_KEY,
+    envelope.threadId || envelope.senderId,
+  );
+}
 
-    const runtimeConfig = resolveRuntimeConfig(account?.metadata);
-    if (!runtimeConfig.responder_enabled) continue;
-    if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) continue;
-    if (isDuplicateInbound(`whatsapp_cloud:${inbound.phoneNumberId}:${inbound.providerMessageId}`)) continue;
-    if (isRateLimited(`whatsapp_cloud:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) continue;
+function mergeRuntimeConfig(
+  accountMetadata: Record<string, unknown> | null | undefined,
+  conversationMetadata: Record<string, unknown> | null | undefined,
+) {
+  return {
+    ...resolveRuntimeConfig(accountMetadata ?? null),
+    ...resolveRuntimeConfig(conversationMetadata ?? null),
+  };
+}
 
-    const convo = await getOrCreateChannelConversation({
-      userId,
-      channel: "whatsapp_cloud",
-      channelKey: inbound.phoneNumberId,
-      externalConversationId: inbound.senderId,
-      title: `WhatsApp: ${inbound.contactName ? inbound.contactName : inbound.senderId}`,
-      metadata: {
-        whatsapp: {
-          phoneNumberId: inbound.phoneNumberId,
-          from: inbound.senderId,
-        },
-      },
-    });
+function asAttachmentFromEnvelope(envelope: MessageEnvelope): { name?: string; contentType?: string; url?: string } | null {
+  if (!envelope.media) return null;
+  return {
+    name: envelope.media.fileName || undefined,
+    contentType: envelope.media.mimeType || undefined,
+    url: envelope.media.url || undefined,
+  };
+}
 
-    const requestId = `whatsapp_cloud:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
-    const userMsg = await upsertUserMessage({
-      chatId: convo.chatId,
-      requestId,
-      content: inbound.text,
-      metadata: {
-        channel: "whatsapp_cloud",
-        channelKey: inbound.phoneNumberId,
-        externalConversationId: inbound.senderId,
-        messageType: inbound.messageType,
-        whatsapp: {
-          phoneNumberId: inbound.phoneNumberId,
-          messageId: inbound.providerMessageId,
-          from: inbound.senderId,
-          contactName: inbound.contactName,
-        },
-      },
-    });
+async function sendTextWithRetries(
+  channel: ExternalChannel,
+  account: ChannelAccount,
+  conversation: InboundProcessingContext["conversation"],
+  envelope: MessageEnvelope,
+  payload: SendRequest,
+  maxRetries = SEND_RETRY_ATTEMPTS,
+): Promise<void> {
+  let attempt = 0;
 
-    const already = await getAssistantForUserMessage(userMsg.id);
-    if (already) continue;
-
-    const decision = evaluateWhatsAppPolicy(inbound.text, { baseUrl: env.BASE_URL });
-
-    if (!decision.allowed) {
-      const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
-      await upsertAssistantMessage({
-        chatId: convo.chatId,
-        requestId: assistantRequestId,
-        content: decision.reply,
-        userMessageId: userMsg.id,
-        metadata: {
-          channel: "whatsapp_cloud",
-          policy: { allowed: false, reason: decision.reason },
-          replyTo: requestId,
-        },
-      });
-
-      if (accessToken) {
-        try {
-          await sendWhatsAppCloudText({
-            phoneNumberId: inbound.phoneNumberId,
-            to: inbound.senderId,
-            text: decision.reply,
-            accessToken,
-          });
-        } catch (err) {
-          Logger.error("[WhatsAppCloud] Failed to send policy reply", err);
-        }
-      }
-      continue;
-    }
-
-    const baseSystemPrompt =
-      "Eres un asistente de un negocio atendiendo por WhatsApp. " +
-      "Tu alcance es: reservas, soporte y seguimiento. " +
-      "Responde breve y pide solo los datos minimos necesarios. " +
-      "No ofrezcas acciones fuera de esos flujos.";
-
-    const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "WhatsApp");
-    const messages = [
-      { role: "system" as const, content: baseSystemPrompt },
-      ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
-      { role: "user" as const, content: inbound.text },
-    ];
-
-    const { assistantText, memRes } = await runChannelLlm({
-      channel: "WhatsAppCloud",
-      messages,
-      chatId: convo.chatId,
-      userId: convo.userId,
-      msgPrefix: "wa_msg",
-      fallbackText: "Ahora mismo no puedo atender tu solicitud. Intenta de nuevo en unos minutos.",
-    });
-
-    const assistantRequestId = `whatsapp_cloud:assistant:${inbound.phoneNumberId}:${inbound.providerMessageId}`;
-
-    await upsertAssistantMessage({
-      chatId: convo.chatId,
-      requestId: assistantRequestId,
-      content: assistantText,
-      userMessageId: userMsg.id,
-      metadata: {
-        channel: "whatsapp_cloud",
-        policy: { allowed: true, category: decision.category },
-        replyTo: requestId,
-      },
-    });
-
-    if (accessToken) {
-      try {
+  while (true) {
+    try {
+      if (channel === "whatsapp_cloud") {
         await sendWhatsAppCloudText({
-          phoneNumberId: inbound.phoneNumberId,
-          to: inbound.senderId,
-          text: assistantText,
-          accessToken,
+          phoneNumberId: conversation.channelAccountId,
+          to: envelope.threadId,
+          text: payload.text,
+          accessToken: account.accessToken || "",
         });
-      } catch (err) {
-        Logger.error("[WhatsAppCloud] Failed to send reply", err);
+        return;
       }
 
-      try {
-        await sendChannelArtifacts(memRes, "whatsapp_cloud", inbound.senderId, {
-          phoneNumberId: inbound.phoneNumberId,
-          accessToken,
-        });
-      } catch (err) {
-        Logger.error("[WhatsAppCloud] Failed to send artifacts", err);
+      if (channel === "telegram") {
+        await telegramSendMessage(envelope.threadId, payload.text);
+        return;
       }
-    }
-  }
-}
 
-// ── Messenger ─────────────────────────────────────────────────────
-
-async function handleMessenger(payloadUnknown: unknown): Promise<void> {
-  const inbounds = normalizeMessengerMessages(payloadUnknown as any);
-  if (inbounds.length === 0) return;
-
-  for (const inbound of inbounds) {
-    const account = await findMessengerAccountByPageId(inbound.recipientId || "");
-    const userId = account?.userId || env.MESSENGER_DEFAULT_USER_ID || null;
-    const accessToken = account?.accessToken || env.MESSENGER_PAGE_ACCESS_TOKEN || null;
-
-    if (!userId || !inbound.recipientId) {
-      Logger.warn("[Messenger] No owner user configured for page", { pageId: inbound.recipientId, senderId: inbound.senderId });
-      continue;
-    }
-
-    const runtimeConfig = resolveRuntimeConfig(account?.metadata);
-    if (!runtimeConfig.responder_enabled) continue;
-    if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) continue;
-    if (isDuplicateInbound(`messenger:${inbound.recipientId}:${inbound.providerMessageId}`)) continue;
-    if (isRateLimited(`messenger:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) continue;
-
-    const convo = await getOrCreateChannelConversation({
-      userId,
-      channel: "messenger",
-      channelKey: inbound.recipientId,
-      externalConversationId: inbound.senderId,
-      title: `Messenger: ${inbound.senderId}`,
-      metadata: { messenger: { pageId: inbound.recipientId, senderId: inbound.senderId } },
-    });
-
-    const requestId = `messenger:${inbound.recipientId}:${inbound.providerMessageId}`;
-    const userMsg = await upsertUserMessage({
-      chatId: convo.chatId,
-      requestId,
-      content: inbound.text,
-      metadata: {
-        channel: "messenger",
-        channelKey: inbound.recipientId,
-        externalConversationId: inbound.senderId,
-        messageType: inbound.messageType,
-        messenger: { messageId: inbound.providerMessageId, senderId: inbound.senderId },
-      },
-    });
-
-    const already = await getAssistantForUserMessage(userMsg.id);
-    if (already) continue;
-
-    const decision = evaluateMessengerPolicy(inbound.text);
-    if (!decision.allowed) {
-      const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
-      await upsertAssistantMessage({
-        chatId: convo.chatId,
-        requestId: assistantRequestId,
-        content: decision.reply,
-        userMessageId: userMsg.id,
-        metadata: { channel: "messenger", policy: { allowed: false, reason: decision.reason }, replyTo: requestId },
-      });
-      if (accessToken) {
-        try {
-          await messengerSendText({ recipientId: inbound.senderId, text: decision.reply, accessToken });
-        } catch (err) {
-          Logger.error("[Messenger] Failed to send policy reply", err);
+      if (channel === "messenger") {
+        if (!account.accessToken) {
+          throw new Error("Missing Messenger access token");
         }
+        await messengerSendText({
+          recipientId: envelope.threadId,
+          text: payload.text,
+          accessToken: account.accessToken,
+        });
+        return;
       }
-      continue;
-    }
 
-    const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "Messenger");
-    const messages = [
-      ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
-      { role: "user" as const, content: inbound.text },
-    ];
+      if (channel === "wechat") {
+        const appSecret = toCleanText(account.accessToken || "");
+        const appId = toCleanText((conversation.metadata as any)?.appId as string) || conversation.channelKey;
+        if (!appId || !appSecret) {
+          throw new Error("Missing WeChat credentials");
+        }
 
-    const { assistantText, memRes } = await runChannelLlm({
-      channel: "Messenger",
-      messages,
-      chatId: convo.chatId,
-      userId: convo.userId,
-      msgPrefix: "msngr_msg",
-      fallbackText: "No puedo responder en este momento. Intenta de nuevo más tarde.",
-    });
-
-    const assistantRequestId = `messenger:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
-
-    await upsertAssistantMessage({
-      chatId: convo.chatId,
-      requestId: assistantRequestId,
-      content: assistantText,
-      userMessageId: userMsg.id,
-      metadata: { channel: "messenger", replyTo: requestId },
-    });
-
-    if (accessToken) {
-      try {
-        await messengerSendText({ recipientId: inbound.senderId, text: assistantText, accessToken });
-      } catch (err) {
-        Logger.error("[Messenger] Failed to send reply", err);
-      }
-      try {
-        await sendChannelArtifacts(memRes, "messenger", inbound.senderId, { accessToken });
-      } catch (err) {
-        Logger.error("[Messenger] Failed to send artifacts", err);
-      }
-    }
-  }
-}
-
-// ── WeChat ────────────────────────────────────────────────────────
-
-type WeChatParsed = {
-  toUserName: string;
-  fromUserName: string;
-  msgType: string;
-  createTime: number;
-  event?: string;
-  eventKey?: string;
-};
-
-function parseWeChatPayload(payloadUnknown: unknown): WeChatParsed | null {
-  const raw = typeof payloadUnknown === "string" ? payloadUnknown : null;
-  if (!raw) return null;
-  const parsed = parseWeChatXml(raw);
-  if (!parsed) return null;
-  return {
-    toUserName: parsed.ToUserName || "",
-    fromUserName: parsed.FromUserName || "",
-    msgType: parsed.MsgType || "",
-    createTime: parseInt(parsed.CreateTime || "0", 10),
-    event: parsed.Event || undefined,
-    eventKey: parsed.EventKey || undefined,
-  };
-}
-
-async function handleWeChat(payloadUnknown: unknown): Promise<void> {
-  // Handle subscribe events (new followers) with a welcome message
-  const wechatEvent = parseWeChatPayload(payloadUnknown);
-  if (wechatEvent && wechatEvent.msgType === "event" && wechatEvent.event?.toLowerCase() === "subscribe") {
-    const appId = env.WECHAT_APP_ID || null;
-    const appSecret = env.WECHAT_APP_SECRET || null;
-    if (appId && appSecret) {
-      try {
         await wechatSendText({
-          openId: wechatEvent.fromUserName,
-          text: "欢迎关注！我是ILIAGPT智能助手，有任何问题请直接发消息给我。\n\nBienvenido! Soy ILIAGPT, tu asistente inteligente. Envíame un mensaje para comenzar.",
+          openId: envelope.threadId,
+          text: payload.text,
           appId,
           appSecret,
         });
-      } catch (err) {
-        Logger.error("[WeChat] Failed to send welcome message", err);
+        return;
       }
+
+      throw new Error(`Unsupported channel '${channel}'`);
+    } catch (error: unknown) {
+      attempt += 1;
+      Logger.warn(`[Channels] outbound send failed (attempt ${attempt}/${maxRetries + 1})`, {
+        conversation: payload.conversationKey,
+        channel,
+        senderId: payload.senderId,
+        runId: payload.runId,
+        requestId: payload.requestId,
+        reason: String((error as Error)?.message || error),
+      });
+
+      if (attempt > maxRetries) throw error;
+
+      await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS * attempt));
     }
-    return;
+  }
+}
+
+function mapToLlmMessages(
+  history: MessageRecord[],
+  userContent: string,
+  stylePrompt: string | null,
+): ChatCompletionMessageParam[] {
+  const mapped: ChatCompletionMessageParam[] = [];
+
+  if (stylePrompt) {
+    mapped.push({ role: "system", content: stylePrompt });
   }
 
-  const raw = typeof payloadUnknown === "string" ? payloadUnknown : null;
-  if (!raw) return;
-  const parsed = parseWeChatXml(raw);
-  const inbound = parsed ? normalizeWeChatMessage(raw, parsed) : null;
-  if (!inbound) return;
-
-  const appId = env.WECHAT_APP_ID || null;
-  const appSecret = env.WECHAT_APP_SECRET || null;
-  const account = appId ? await findWeChatAccountByAppId(appId) : null;
-  const userId = account?.userId || env.WECHAT_DEFAULT_USER_ID || null;
-
-  if (!userId || !inbound.recipientId) {
-    Logger.warn("[WeChat] No owner user configured", { appId, senderId: inbound.senderId });
-    return;
+  const bounded = history.slice(-MAX_STREAM_CONTEXT);
+  for (const message of bounded) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    if (!message.content) continue;
+    mapped.push({ role: message.role, content: message.content });
   }
 
-  const runtimeConfig = resolveRuntimeConfig(account?.metadata);
-  if (!runtimeConfig.responder_enabled) return;
-  if (!isSenderAllowedByPolicy(runtimeConfig, inbound.senderId)) return;
-  if (isDuplicateInbound(`wechat:${inbound.recipientId}:${inbound.providerMessageId}`)) return;
-  if (isRateLimited(`wechat:${inbound.senderId}`, runtimeConfig.rate_limit_per_minute)) return;
+  mapped.push({ role: "user", content: userContent });
 
-  const convo = await getOrCreateChannelConversation({
-    userId,
-    channel: "wechat",
-    channelKey: appId || "default",
-    externalConversationId: inbound.senderId,
-    title: `WeChat: ${inbound.senderId}`,
-    metadata: { wechat: { toUserName: inbound.recipientId, fromUserName: inbound.senderId } },
-  });
+  return mapped;
+}
 
-  const requestId = `wechat:${inbound.recipientId}:${inbound.providerMessageId}`;
-  const userMsg = await upsertUserMessage({
-    chatId: convo.chatId,
-    requestId,
-    content: inbound.text,
-    metadata: {
-      channel: "wechat",
-      channelKey: appId || "default",
-      externalConversationId: inbound.senderId,
-      messageType: inbound.messageType,
-      wechat: { msgId: inbound.providerMessageId, fromUserName: inbound.senderId },
-    },
-  });
-
-  const already = await getAssistantForUserMessage(userMsg.id);
-  if (already) return;
-
-  const decision = evaluateWeChatPolicy(inbound.text);
-  if (!decision.allowed) {
-    const assistantRequestId = `wechat:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
-    await upsertAssistantMessage({
-      chatId: convo.chatId,
-      requestId: assistantRequestId,
-      content: decision.reply,
-      userMessageId: userMsg.id,
-      metadata: { channel: "wechat", policy: { allowed: false, reason: decision.reason }, replyTo: requestId },
+async function createRunForMessage(
+  chatId: string,
+  requestId: string,
+  userMessageId: string,
+) {
+  try {
+    return await storage.createChatRun({
+      chatId,
+      clientRequestId: requestId,
+      userMessageId,
+      status: "pending",
     });
-    if (appId && appSecret) {
-      try {
-        await wechatSendText({ openId: inbound.senderId, text: decision.reply, appId, appSecret });
-      } catch (err) {
-        Logger.error("[WeChat] Failed to send policy reply", err);
-      }
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
     }
+
+    const fallback = await storage.getChatRunByClientRequestId(chatId, requestId);
+    if (fallback) return fallback;
+    throw error;
+  }
+}
+
+function timeoutMsForChannel(channel: ExternalChannel): number {
+  if (channel === "telegram") return 90_000;
+  return ORCHESTRATION_TIMEOUT_MS;
+}
+
+async function safeQueue<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = conversationQueues.get(key) || Promise.resolve();
+  const wrapped = previous
+    .catch((error) => {
+      Logger.warn(`[Channels] previous job for conversation failed: ${String(error?.message || error)}`);
+    })
+    .then(async () => task());
+
+  conversationQueues.set(
+    key,
+    wrapped.catch(() => undefined) as Promise<void>,
+  );
+
+  try {
+    return await wrapped;
+  } finally {
+    if (conversationQueues.get(key) === wrapped) {
+      conversationQueues.delete(key);
+    }
+  }
+}
+
+async function abortPreviousRunForConversation(conversationKey: string): Promise<void> {
+  const existing = inFlightRunsByConversation.get(conversationKey);
+  if (!existing) return;
+  try {
+    existing.abort();
+  } catch (error) {
+    // best effort
+  } finally {
+    inFlightRunsByConversation.delete(conversationKey);
+  }
+}
+
+async function runOutboundDecision(
+  context: InboundProcessingContext,
+  assistantContent: string,
+  userMessageId: string,
+  runId: string,
+): Promise<void> {
+  const messageKey = sanitizeRequestIdentifier(runId);
+  const requestId = messageKey;
+  const payload: SendRequest = {
+    text: assistantContent,
+    requestId,
+    runId,
+    conversationKey: context.envelope.conversationKey,
+    senderId: context.envelope.threadId,
+  };
+
+  await sendTextWithRetries(context.jobChannel, context.account, context.conversation, context.envelope, payload);
+
+  await touchChannelConversationHeartbeat(context.conversation.id, {
+    lastOutboundAt: nowIso(),
+    lastInboundAt: nowIso(),
+  });
+
+  await storage.updateChatMessageContent(payload.requestId, assistantContent, {
+    status: "done",
+    content: assistantContent,
+  } as any);
+
+  await storage.updateChatRunStatus(runId, "done").catch(() => null);
+  await storage.updateChatRunLastSeq(runId, 0).catch(() => null);
+
+  Logger.info("[Channels] outbound completed", {
+    runId,
+    conversation: payload.conversationKey,
+    channel: context.jobChannel,
+    requestId,
+    userMessageId,
+  });
+}
+
+function sanitizeRequestIdentifier(value: string): string {
+  return String(value || "").trim().slice(0, 120);
+}
+
+async function processAllowedMessage(context: InboundProcessingContext): Promise<void> {
+  const { envelope, account, conversation, runtimeConfig, jobChannel } = context;
+
+  const messageId = envelope.providerMessageId;
+  const conversationKey = serializeConversationKey(envelope.conversationKey);
+
+  pruneMessageIdLedger();
+  if (!messageId || !envelope.senderId || !envelope.threadId || !envelope.channelKey) {
+    Logger.warn("[Channels] inbound message missing required IDs", {
+      conversation: envelope.conversationKey,
+      senderId: envelope.senderId,
+      threadId: envelope.threadId,
+      channelKey: envelope.channelKey,
+      providerMessageId: messageId,
+    });
     return;
   }
 
-  const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, "WeChat");
-  const messages = [
-    ...(stylePrompt ? [{ role: "system" as const, content: stylePrompt }] : []),
-    { role: "user" as const, content: inbound.text },
-  ];
-
-  const { assistantText, memRes } = await runChannelLlm({
-    channel: "WeChat",
-    messages,
-    chatId: convo.chatId,
-    userId: convo.userId,
-    msgPrefix: "wc_msg",
-    fallbackText: "暂时无法回复，请稍后再试。",
-  });
-
-  const assistantRequestId = `wechat:assistant:${inbound.recipientId}:${inbound.providerMessageId}`;
-
-  await upsertAssistantMessage({
-    chatId: convo.chatId,
-    requestId: assistantRequestId,
-    content: assistantText,
-    userMessageId: userMsg.id,
-    metadata: { channel: "wechat", replyTo: requestId },
-  });
-
-  if (appId && appSecret) {
-    try {
-      await wechatSendText({ openId: inbound.senderId, text: assistantText, appId, appSecret });
-    } catch (err) {
-      Logger.error("[WeChat] Failed to send reply", err);
+  if (!isAllowedToQueue(messageId)) {
+    const existing = await storage.findMessageByRequestId(messageId);
+    if (existing) {
+      Logger.info("[Channels] Duplicate inbound message ignored", {
+        conversation: envelope.conversationKey,
+        messageId,
+        channel: jobChannel,
+      });
+      return;
     }
-    try {
-      await sendChannelArtifacts(memRes, "wechat", inbound.senderId, { appId, appSecret });
-    } catch (err) {
-      Logger.error("[WeChat] Failed to send artifacts", err);
+  }
+
+  const existingMessage = await storage.findMessageByRequestId(messageId);
+  if (existingMessage) {
+    Logger.info("[Channels] Duplicate inbound message ignored", {
+      conversation: envelope.conversationKey,
+      messageId,
+      channel: jobChannel,
+    });
+    return;
+  }
+
+  const pairingCode = parseChannelPairingCodeFromMessage(envelope.text || "");
+  if (pairingCode) {
+    const consumed = await consumeChannelPairingCode({
+      channel: jobChannel,
+      code: pairingCode,
+      consumedByExternalId: envelope.senderId,
+    });
+
+    if (consumed?.userId) {
+      await setConversationOwnerIdentity(conversation.id, {
+        ownerExternalId: envelope.senderId,
+        owners: [envelope.senderId],
+        linkedAt: nowIso(),
+      });
+
+      const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
+      await runOutboundDecision({
+        ...context,
+        jobChannel,
+        envelope,
+        account,
+        conversation,
+        runtimeConfig,
+      }, ackText, "", sanitizeRequestIdentifier(messageId));
+      return;
     }
+
+    await runOutboundDecision({
+      ...context,
+      jobChannel,
+      envelope,
+      account,
+      conversation,
+      runtimeConfig,
+    }, "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.", "", sanitizeRequestIdentifier(messageId));
+    return;
+  }
+
+  const policyContext = {
+    conversation,
+    envelope,
+    runtimeConfig,
+    globalResponderEnabled: runtimeConfig.responder_enabled,
+  };
+
+  const policy = evaluateChannelPolicy(policyContext, getConversationWindowState(conversation));
+  if (!policy.allowed) {
+    await runOutboundDecision({
+      ...context,
+      jobChannel,
+      envelope,
+      account,
+      conversation,
+      runtimeConfig,
+    }, policy.replyText, "", sanitizeRequestIdentifier(messageId));
+    return;
+  }
+
+  const userMessagePayload = {
+    chatId: conversation.chatId,
+    role: "user",
+    content: buildIncomingTextForHistory(envelope),
+    status: "done",
+    requestId: messageId,
+    attachments: buildMessageAttachments(envelope),
+    metadata: {
+      runSource: "channel_ingest",
+      providerMessageId: messageId,
+      channel: envelope.channel,
+      threadId: envelope.threadId,
+      conversationKey: envelope.conversationKey,
+      receivedAt: envelope.receivedAt,
+      messageType: envelope.messageType,
+      sourceMetadata: asAttachmentFromEnvelope(envelope),
+    },
+  } as any;
+
+  const userMessage = await storage.createChatMessage(userMessagePayload);
+  const run = await createRunForMessage(conversation.chatId, messageId, userMessage.id);
+  if (!run) {
+    Logger.error("[Channels] could not create chat run", {
+      messageId,
+      conversation: envelope.conversationKey,
+      channel: jobChannel,
+    });
+    return;
+  }
+
+  const claimedRun = await storage.claimPendingRun(conversation.chatId, messageId);
+  if (!claimedRun) {
+    const current = await storage.getChatRunByClientRequestId(conversation.chatId, messageId);
+    if (!current || current.status === "processing" || current.status === "done") {
+      Logger.info("[Channels] run already claimed or done, skipping", {
+        messageId,
+        runId: current?.id,
+        status: current?.status,
+      });
+      return;
+    }
+  }
+
+  const activeRun = claimedRun ?? run;
+  const runId = activeRun.id;
+  const runAbort = new AbortController();
+  inFlightRunsByConversation.set(conversationKey, runAbort);
+  const safeRunId = sanitizeRequestIdentifier(runId);
+  let assistantMessageId: string | null = null;
+
+  const start = Date.now();
+
+  try {
+    const attachmentForPrompt = buildIncomingTextForHistory(envelope);
+
+    const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, jobChannel);
+    const historicalMessages = (await storage.getChatMessages(conversation.chatId, { orderBy: "asc", limit: MAX_STREAM_CONTEXT }))
+      .slice(-RUN_QUEUE_MAX_HISTORY)
+      .filter((msg) => msg.role === "user" || msg.role === "assistant");
+
+    const llmMessages = mapToLlmMessages(historicalMessages, attachmentForPrompt, stylePrompt);
+
+    const assistantPlaceholder = await storage.createChatMessage({
+      chatId: conversation.chatId,
+      role: "assistant",
+      content: "",
+      status: "pending",
+      runId,
+      userMessageId: userMessage.id,
+      requestId: `${safeRunId}:assistant`,
+    });
+    assistantMessageId = assistantPlaceholder.id;
+
+    await storage.updateChatRunAssistantMessage(runId, assistantMessageId);
+
+    let output = "";
+    let lastSeq = -1;
+    const stream = llmGateway.streamChat(llmMessages, {
+      userId: conversation.userId || account.userId,
+      requestId: runId,
+      timeout: timeoutMsForChannel(jobChannel),
+      maxTokens: 1500,
+    });
+
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error("Channel orchestration timeout"));
+      }, timeoutMsForChannel(jobChannel) + 10_000);
+    });
+
+    try {
+      await Promise.race([
+        (async () => {
+          for await (const chunk of stream) {
+            if (runAbort.signal.aborted) {
+              throw new Error("Run aborted due to new message in same conversation");
+            }
+
+            output += chunk.content;
+            lastSeq = chunk.sequenceId;
+            if (lastSeq > -1) {
+              await storage.updateChatRunLastSeq(runId, lastSeq).catch(() => null);
+            }
+          }
+        })(),
+        timeout,
+      ]);
+    } catch (streamError) {
+      throw streamError;
+    }
+
+    if (!output.trim()) {
+      output = "No pude redactar una respuesta en este momento. Reintenta en unos segundos.";
+    }
+
+    await storage.updateChatMessageContent(assistantMessageId, output, {
+      status: "done",
+      metadata: {
+        runId,
+        requestId: messageId,
+        sourceChannel: jobChannel,
+        conversationKey: envelope.conversationKey,
+      },
+    });
+
+    await storage.updateChatRunStatus(runId, "done");
+
+    await sendTextWithRetries(
+      jobChannel,
+      account,
+      conversation,
+      envelope,
+      {
+        text: output,
+        requestId: messageId,
+        runId,
+        conversationKey: envelope.conversationKey,
+        senderId: envelope.threadId,
+      },
+      SEND_RETRY_ATTEMPTS,
+    );
+
+    await touchChannelConversationHeartbeat(conversation.id, {
+      lastOutboundAt: nowIso(),
+    });
+
+    Logger.info("[Channels] message processed", {
+      runId,
+      conversation: envelope.conversationKey,
+      channel: jobChannel,
+      elapsedMs: Date.now() - start,
+    });
+  } catch (err) {
+    const reason = String((err as Error)?.message || err);
+    const fallback = "No puedo responder ahora. Reintenta en unos minutos.";
+
+    if (assistantMessageId) {
+      await storage.updateChatMessageContent(assistantMessageId, fallback, {
+        status: "failed",
+        metadata: {
+          runId,
+          requestId: messageId,
+          error: reason,
+          sourceChannel: jobChannel,
+        },
+      }).catch(() => null);
+    }
+
+    await storage.updateChatRunStatus(runId, "failed", reason).catch(() => null);
+    await patchConversationMetadata(conversation.id, {
+      lastError: reason,
+      lastErrorAt: nowIso(),
+      lastRunId: runId,
+    }).catch(() => null);
+
+    try {
+      await sendTextWithRetries(
+        jobChannel,
+        account,
+        conversation,
+        envelope,
+        {
+          text: fallback,
+          requestId: messageId,
+          runId,
+          conversationKey: envelope.conversationKey,
+          senderId: envelope.threadId,
+        },
+        0,
+      );
+    } catch (sendError) {
+      Logger.error("[Channels] fallback send failed", {
+        conversation: envelope.conversationKey,
+        channel: jobChannel,
+        error: String((sendError as Error)?.message || sendError),
+      });
+    }
+
+    Logger.error("[Channels] failed to process inbound message", {
+      messageId,
+      runId,
+      conversation: envelope.conversationKey,
+      channel: jobChannel,
+      error: reason,
+    });
+  } finally {
+    inFlightRunsByConversation.delete(conversationKey);
+    await touchChannelConversationHeartbeat(conversation.id, { lastInboundAt: envelope.receivedAt || nowIso() }).catch(() => null);
   }
 }
 
 export async function processChannelIngestJob(job: ChannelIngestJob): Promise<void> {
-  const receivedAt = job.receivedAt || new Date().toISOString();
-  try {
-    if (job.channel === "telegram") {
-      await handleTelegram(job.update);
-      return;
+  const envelopes = envelopeFromRaw(job, job.channel);
+  if (!envelopes.length) {
+    Logger.warn(`[Channels] no normalized envelopes`, { channel: job.channel });
+    return;
+  }
+
+  for (const rawEnvelope of envelopes) {
+    const account = await resolveChannelAccount(job.channel, rawEnvelope);
+    if (!account) {
+      Logger.warn(`[Channels] account not found`, {
+        channel: job.channel,
+        threadId: rawEnvelope.threadId,
+        channelKey: rawEnvelope.channelKey,
+      });
+      continue;
     }
-    if (job.channel === "whatsapp_cloud") {
-      await handleWhatsAppCloud(job.payload);
-      return;
-    }
-    if (job.channel === "messenger") {
-      await handleMessenger(job.payload);
-      return;
-    }
-    if (job.channel === "wechat") {
-      await handleWeChat(job.payload);
-      return;
-    }
-    Logger.warn("[Channels] Unknown ingest job channel", { receivedAt, channel: (job as any)?.channel });
-  } catch (err) {
-    const extra: Record<string, unknown> = { receivedAt, channel: (job as any)?.channel };
-    if (job.channel === "telegram") extra.updateId = (job.update as any)?.update_id;
-    if (job.channel === "whatsapp_cloud") extra.entryCount = Array.isArray((job.payload as any)?.entry) ? (job.payload as any).entry.length : 0;
-    if (job.channel === "messenger") extra.entryCount = Array.isArray((job.payload as any)?.entry) ? (job.payload as any).entry.length : 0;
-    Logger.error("[Channels] Ingest job failed", { ...extra, err });
-    throw err;
+
+    let envelope = withConversationDefaults(account, rawEnvelope);
+    const workspaceId = buildConversationWorkspaceId(account);
+    envelope = withConversationKeyDefaults(envelope, workspaceId, envelope.channelKey, envelope.threadId);
+
+    const conversation = await getOrCreateChannelConversation({
+      userId: account.userId,
+      channel: envelope.channel,
+      channelKey: envelope.channelKey,
+      externalConversationId: envelope.threadId,
+      title: `Canal ${envelope.channel}: ${envelope.threadId}`,
+      metadata: {
+        runtime: {
+          ...(resolveRuntimeConfig(account.metadata).responder_enabled !== undefined
+            ? { responder_enabled: resolveRuntimeConfig(account.metadata).responder_enabled }
+            : {}),
+          ...(resolveRuntimeConfig(account.metadata).owner_only !== undefined
+            ? { owner_only: resolveRuntimeConfig(account.metadata).owner_only }
+            : {}),
+        },
+        createdVia: "inbound",
+        channelAccountId: envelope.channelKey,
+      },
+    });
+
+    const mergedRuntimeConfig = mergeRuntimeConfig(account.metadata, conversation.metadata as Record<string, unknown> | null);
+
+    const context: InboundProcessingContext = {
+      jobChannel: job.channel,
+      envelope,
+      account,
+      conversation,
+      runtimeConfig: mergedRuntimeConfig,
+    };
+
+    const queueKey = serializeConversationKey(envelope.conversationKey);
+    await safeQueue(queueKey, async () => {
+      await abortPreviousRunForConversation(queueKey);
+
+      const runAbort = inFlightRunsByConversation.get(queueKey) || new AbortController();
+      inFlightRunsByConversation.set(queueKey, runAbort);
+
+      await processAllowedMessage(context);
+    }).catch((error) => {
+      Logger.error("[Channels] conversation queue processing error", {
+        error: String(error?.message || error),
+        channel: job.channel,
+        conversation: envelope.conversationKey,
+      });
+    });
   }
 }
+

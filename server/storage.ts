@@ -180,6 +180,7 @@ export interface IStorage {
   createGptVersion(version: InsertGptVersion): Promise<GptVersion>;
   getGptVersions(gptId: string): Promise<GptVersion[]>;
   getLatestGptVersion(gptId: string): Promise<GptVersion | undefined>;
+  getGptVersionByNumber(gptId: string, versionNumber: number): Promise<GptVersion | undefined>;
   // GPT Knowledge operations
   createGptKnowledge(knowledge: InsertGptKnowledge): Promise<GptKnowledge>;
   getGptKnowledge(gptId: string): Promise<GptKnowledge[]>;
@@ -190,6 +191,7 @@ export interface IStorage {
   createGptAction(action: InsertGptAction): Promise<GptAction>;
   getGptActions(gptId: string): Promise<GptAction[]>;
   getGptActionById(id: string): Promise<GptAction | undefined>;
+  getGptActionByIdAndGpt(actionId: string, gptId: string): Promise<GptAction | undefined>;
   updateGptAction(id: string, updates: Partial<InsertGptAction>): Promise<GptAction | undefined>;
   deleteGptAction(id: string): Promise<void>;
   incrementGptActionUsage(id: string): Promise<void>;
@@ -1161,6 +1163,13 @@ export class MemStorage implements IStorage {
     return result;
   }
 
+  async getGptVersionByNumber(gptId: string, versionNumber: number): Promise<GptVersion | undefined> {
+    const [result] = await dbRead.select().from(gptVersions)
+      .where(and(eq(gptVersions.gptId, gptId), eq(gptVersions.versionNumber, versionNumber)))
+      .limit(1);
+    return result;
+  }
+
   // GPT Knowledge operations
   async createGptKnowledge(knowledge: InsertGptKnowledge): Promise<GptKnowledge> {
     const [result] = await db.insert(gptKnowledge).values(knowledge).returning();
@@ -1204,6 +1213,12 @@ export class MemStorage implements IStorage {
 
   async getGptActionById(id: string): Promise<GptAction | undefined> {
     const [result] = await dbRead.select().from(gptActions).where(eq(gptActions.id, id));
+    return result;
+  }
+
+  async getGptActionByIdAndGpt(actionId: string, gptId: string): Promise<GptAction | undefined> {
+    const [result] = await dbRead.select().from(gptActions)
+      .where(and(eq(gptActions.id, actionId), eq(gptActions.gptId, gptId)));
     return result;
   }
 
