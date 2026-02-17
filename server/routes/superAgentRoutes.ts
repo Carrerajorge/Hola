@@ -681,6 +681,151 @@ router.get("/runs/:runId/status", async (req: Request, res: Response) => {
   });
 });
 
+
+
+const FanoutPlanSchema = z.object({
+  objective: z.string().min(3).max(2000),
+  shards: z.number().int().min(1).max(10000),
+  shard_prompt_template: z.string().min(3).max(4000),
+  max_concurrency: z.number().int().min(1).max(500).optional(),
+  max_iterations_per_shard: z.number().int().min(1).max(5).optional(),
+});
+
+const FanoutExecuteSchema = FanoutPlanSchema.extend({
+  execute: z.boolean().optional(),
+});
+
+function renderShardPrompt(template: string, shardIndex: number, totalShards: number, objective: string): string {
+  return template
+    .replaceAll('{{shard_index}}', String(shardIndex))
+    .replaceAll('{{total_shards}}', String(totalShards))
+    .replaceAll('{{objective}}', objective);
+}
+
+async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+
+  async function worker() {
+    while (true) {
+      const idx = next++;
+      if (idx >= tasks.length) return;
+      results[idx] = await tasks[idx]();
+    }
+  }
+
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * POST /api/super/fanout/plan
+ * Creates a high-scale sharding plan (up to 10k shards) without execution.
+ */
+router.post('/super/fanout/plan', async (req: Request, res: Response) => {
+  try {
+    const input = FanoutPlanSchema.parse(req.body);
+    const desired = input.max_concurrency ?? 128;
+    const effectiveConcurrency = Math.max(1, Math.min(desired, 256));
+
+    const samplePrompts: string[] = [];
+    const sampleSize = Math.min(3, input.shards);
+    for (let i = 1; i <= sampleSize; i++) {
+      samplePrompts.push(renderShardPrompt(input.shard_prompt_template, i, input.shards, input.objective));
+    }
+
+    return res.json({
+      success: true,
+      mode: 'plan',
+      objective: input.objective,
+      shards: input.shards,
+      strategy: {
+        execution: 'bounded-concurrency-fanout',
+        effectiveConcurrency,
+        maxIterationsPerShard: input.max_iterations_per_shard ?? 1,
+        aggregation: 'collect-final-events-and-errors',
+      },
+      samplePrompts,
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/super/fanout/execute
+ * Executes many shard prompts with bounded concurrency.
+ * Safety caps: concurrency <= 256, shard_count <= 10k.
+ */
+router.post('/super/fanout/execute', async (req: Request, res: Response) => {
+  try {
+    const input = FanoutExecuteSchema.parse(req.body);
+    const desired = input.max_concurrency ?? 64;
+    const effectiveConcurrency = Math.max(1, Math.min(desired, 256));
+    const maxIterationsPerShard = input.max_iterations_per_shard ?? 1;
+
+    const startedAt = Date.now();
+    let completed = 0;
+    let failed = 0;
+
+    const tasks = Array.from({ length: input.shards }, (_, idx) => async () => {
+      const shardNumber = idx + 1;
+      const prompt = renderShardPrompt(input.shard_prompt_template, shardNumber, input.shards, input.objective);
+      const runId = `fanout_${randomUUID()}`;
+      const sessionId = `fanout_s_${randomUUID()}`;
+
+      const agent = createSuperAgent(sessionId, {
+        maxIterations: maxIterationsPerShard,
+        emitHeartbeat: false,
+        enforceContract: false,
+      });
+
+      return new Promise<{ shard: number; runId: string; success: boolean; error?: string }>((resolve) => {
+        let done = false;
+
+        const finish = (result: { shard: number; runId: string; success: boolean; error?: string }) => {
+          if (done) return;
+          done = true;
+          if (result.success) completed += 1;
+          else failed += 1;
+          resolve(result);
+        };
+
+        agent.on('sse', (event: SSEEvent) => {
+          if (event.event_type === 'final') finish({ shard: shardNumber, runId, success: true });
+          if (event.event_type === 'error') {
+            const data = (event.data || {}) as any;
+            finish({ shard: shardNumber, runId, success: false, error: data?.message || 'unknown_error' });
+          }
+        });
+
+        agent.execute(prompt).then(() => {
+          finish({ shard: shardNumber, runId, success: true });
+        }).catch((err: any) => {
+          finish({ shard: shardNumber, runId, success: false, error: err?.message || 'execution_failed' });
+        });
+      });
+    });
+
+    const results = await runWithConcurrency(tasks, effectiveConcurrency);
+
+    return res.json({
+      success: true,
+      objective: input.objective,
+      shards: input.shards,
+      concurrency: effectiveConcurrency,
+      maxIterationsPerShard,
+      completed,
+      failed,
+      durationMs: Date.now() - startedAt,
+      successRate: input.shards > 0 ? Number(((completed / input.shards) * 100).toFixed(2)) : 0,
+      failures: results.filter(r => !r.success).slice(0, 100),
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
 router.get("/super/health", async (req: Request, res: Response) => {
   let redisOk = false;
 
