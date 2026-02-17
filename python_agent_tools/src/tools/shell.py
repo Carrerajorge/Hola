@@ -269,14 +269,14 @@ class SecureCommandExecutor:
         if not valid:
             return False, None, error, None
         try:
-                proc = await asyncio.create_subprocess_exec(
-                    "/usr/bin/wc",
-                    *clean_args,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=safe_cwd,
-                    env=SecureCommandExecutor.SHELL_ENV
-                )
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/wc",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env=SecureCommandExecutor.SHELL_ENV
+            )
             return await SecureCommandExecutor._execute_process(proc, timeout)
         except (FileNotFoundError, PermissionError, OSError) as e:
             return False, None, str(e), None

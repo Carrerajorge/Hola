@@ -157,8 +157,8 @@ Best practices:
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the browser agent's main loop."""
-            self.state = AgentState.EXECUTING
-            context = context or {}
+        self.state = AgentState.EXECUTING
+        context = context or {}
         
         url = context.get("url", "")
         

@@ -546,6 +546,9 @@ jobs:
           for pattern in "Hola_wt_*" "Hola" "iliagpt_skills_push"; do
             for d in /src/${pattern}; do
               [ -d "${d}" ] || continue
+              # Trivy path matching can vary between relative and absolute forms.
+              # Provide both to guarantee skips in CI runners.
+              EXTRA_SKIP_DIRS+=(--skip-dirs "${d}")
               EXTRA_SKIP_DIRS+=(--skip-dirs "${d#/src/}")
             done
           done
