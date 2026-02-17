@@ -2881,8 +2881,12 @@ export function ChatInterface({
             "Content-Type": "application/json",
             "X-Upload-Id": uploadId,
           };
+          const multipartHeaders: Record<string, string> = {
+            "X-Upload-Id": uploadId,
+          };
           if (stableConversationId) {
             uploadHeaders["X-Conversation-Id"] = stableConversationId;
+            multipartHeaders["X-Conversation-Id"] = stableConversationId;
           }
 
           const safeJson = async (res: Response): Promise<any> => {
@@ -2923,7 +2927,7 @@ export function ChatInterface({
 
               const spreadsheetRes = await apiFetch('/api/spreadsheet/upload', {
                 method: 'POST',
-                headers: uploadHeaders,
+                headers: multipartHeaders,
                 body: formData,
               });
 
