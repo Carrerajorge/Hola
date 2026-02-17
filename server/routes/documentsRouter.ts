@@ -26,6 +26,7 @@ import { llmGateway } from "../lib/llmGateway";
 import { generateAgentToolsExcel } from "../lib/agentToolsGenerator";
 import { executeDocxCode } from "../services/docxCodeGenerator";
 import { requireNetworkAccessEnabled } from "../middleware/networkAccessGuard";
+import { aiLimiter } from "../middleware/rateLimiter";
 import {
   sanitizeFilename,
   safeContentDisposition,
@@ -58,6 +59,9 @@ const DOC_BODY_LIMIT = "1mb";
 
 // Maximum code length for execute-code endpoint
 const MAX_EXECUTE_CODE_LENGTH = 50 * 1024;
+const MAX_DOC_TITLE_LENGTH = 500;
+const MAX_DOCUMENT_ID_LENGTH = 128;
+const SAFE_DOCUMENT_ID = /^[a-zA-Z0-9._-]{1,128}$/;
 
 /** Whether to expose detailed error messages in API responses */
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -79,6 +83,46 @@ function normalizeObject(value: unknown): Record<string, unknown> | undefined {
   }
 
   return value as Record<string, unknown>;
+}
+
+type TextFieldValidationOptions = {
+  field: string;
+  maxLength: number;
+  required?: boolean;
+  trim?: boolean;
+};
+
+function readTextField(value: unknown, options: TextFieldValidationOptions): {
+  value?: string;
+  error?: string;
+} {
+  if (value === undefined || value === null) {
+    if (options.required) {
+      return { error: `${options.field} is required` };
+    }
+    return {};
+  }
+
+  if (typeof value !== "string") {
+    return { error: `${options.field} must be a string` };
+  }
+
+  const sanitized = value.normalize("NFKC").replace(/\0/g, "");
+  const candidate = options.trim ? sanitized.trim() : sanitized;
+
+  if (options.required && candidate.length === 0) {
+    return { error: `${options.field} cannot be empty` };
+  }
+
+  if (candidate.length > options.maxLength) {
+    return { error: `${options.field} exceeds maximum length of ${options.maxLength}` };
+  }
+
+  return { value: candidate };
+}
+
+function isSafeDocumentId(value: unknown): value is string {
+  return typeof value === "string" && value.length <= MAX_DOCUMENT_ID_LENGTH && SAFE_DOCUMENT_ID.test(value);
 }
 
 function normalizeTheme(value: unknown): { id?: string; name?: string; tokens?: Record<string, unknown> } | undefined {
@@ -256,23 +300,42 @@ export function createDocumentsRouter() {
   // SIMPLE DOCUMENT GENERATION
   // ============================================
 
-  router.post("/generate", async (req, res) => {
+  router.post("/generate", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
-      const { type, title, content } = req.body;
+      const type = typeof req.body?.type === "string" ? req.body.type.trim().toLowerCase() : "";
+      const safeTitleResult = readTextField(req.body?.title, {
+        field: "title",
+        maxLength: MAX_DOC_TITLE_LENGTH,
+        required: true,
+        trim: true,
+      });
+      const safeContentResult = readTextField(req.body?.content, {
+        field: "content",
+        maxLength: MAX_DOC_BODY_SIZE,
+        required: true,
+      });
 
-      if (!type || title === undefined || title === null || content === undefined || content === null) {
+      if (!type) {
         return res.status(400).json({ error: "type, title, and content are required" });
       }
+
+      if (safeTitleResult.error) {
+        return res.status(400).json({ error: safeTitleResult.error });
+      }
+
+      if (safeContentResult.error) {
+        return res.status(400).json({ error: safeContentResult.error });
+      }
+
+      const safeTitle = safeTitleResult.value!;
+      const safeContent = safeContentResult.value!;
 
       // Validate type
       if (!["word", "excel", "ppt"].includes(type)) {
         return res.status(400).json({ error: "Invalid document type. Use 'word', 'excel', or 'ppt'" });
       }
-
-      const safeTitle = typeof title === "string" ? title.substring(0, 500) : `${title}`.substring(0, 500);
-      const safeContent = typeof content === "string" ? content.substring(0, MAX_DOC_BODY_SIZE) : `${content}`.substring(0, MAX_DOC_BODY_SIZE);
       const runnerLocale = typeof req.body?.locale === "string" && req.body.locale.length > 0 ? req.body.locale : "es";
       const useToolRunner = process.env.DISABLE_TOOL_RUNNER !== "true";
       const designTokens = normalizeObject(req.body?.designTokens);
@@ -281,10 +344,6 @@ export function createDocumentsRouter() {
       const runnerOptions = normalizeObject(req.body?.options);
       const runnerDocumentType = type === "word" ? "docx" : type === "excel" ? "xlsx" : "pptx";
       let toolRunnerReport: ToolRunnerReport | undefined;
-
-      if (safeTitle.trim().length === 0) {
-        return res.status(400).json({ error: "title cannot be empty" });
-      }
 
       // Acquire concurrency slot
       const acquired = await docConcurrencyLimiter.acquire();
@@ -577,6 +636,10 @@ export function createDocumentsRouter() {
 
   router.get("/templates/:id", async (req, res) => {
     try {
+      if (!isSafeDocumentId(req.params.id)) {
+        return res.status(400).json({ error: "Invalid template id" });
+      }
+
       const template = getTemplateById(req.params.id);
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
@@ -592,7 +655,7 @@ export function createDocumentsRouter() {
   // DOCUMENT RENDER (TEMPLATE-BASED)
   // ============================================
 
-  router.post("/render", async (req, res) => {
+  router.post("/render", aiLimiter, async (req, res) => {
     try {
       const parseResult = DocumentRenderRequestSchema.safeParse(req.body);
 
@@ -644,6 +707,10 @@ export function createDocumentsRouter() {
 
   router.get("/reports/:id", async (req, res) => {
     try {
+      if (!isSafeDocumentId(req.params.id)) {
+        return res.status(400).json({ error: "Invalid report id" });
+      }
+
       const document = getGeneratedDocument(req.params.id);
 
       if (!document) {
@@ -666,6 +733,10 @@ export function createDocumentsRouter() {
 
   router.get("/:id", async (req, res) => {
     try {
+      if (!isSafeDocumentId(req.params.id)) {
+        return res.status(400).json({ error: "Invalid document id" });
+      }
+
       const document = getGeneratedDocument(req.params.id);
 
       if (!document) {
@@ -686,7 +757,7 @@ export function createDocumentsRouter() {
   // RENDER FROM SPEC (EXCEL)
   // ============================================
 
-  router.post("/render/excel", async (req, res) => {
+  router.post("/render/excel", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -740,7 +811,7 @@ export function createDocumentsRouter() {
   // RENDER FROM SPEC (WORD)
   // ============================================
 
-  router.post("/render/word", async (req, res) => {
+  router.post("/render/word", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -794,7 +865,7 @@ export function createDocumentsRouter() {
   // LLM-DRIVEN GENERATION (EXCEL)
   // ============================================
 
-  router.post("/generate/excel", async (req, res) => {
+  router.post("/generate/excel", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -885,7 +956,7 @@ export function createDocumentsRouter() {
   // LLM-DRIVEN GENERATION (WORD)
   // ============================================
 
-  router.post("/generate/word", async (req, res) => {
+  router.post("/generate/word", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -976,7 +1047,7 @@ export function createDocumentsRouter() {
   // LLM-DRIVEN GENERATION (CV)
   // ============================================
 
-  router.post("/generate/cv", async (req, res) => {
+  router.post("/generate/cv", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -1049,7 +1120,7 @@ export function createDocumentsRouter() {
   // LLM-DRIVEN GENERATION (REPORT)
   // ============================================
 
-  router.post("/generate/report", async (req, res) => {
+  router.post("/generate/report", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -1121,7 +1192,7 @@ export function createDocumentsRouter() {
   // LLM-DRIVEN GENERATION (LETTER)
   // ============================================
 
-  router.post("/generate/letter", async (req, res) => {
+  router.post("/generate/letter", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -1193,7 +1264,7 @@ export function createDocumentsRouter() {
   // RENDER CV FROM SPEC
   // ============================================
 
-  router.post("/render/cv", async (req, res) => {
+  router.post("/render/cv", aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -1248,28 +1319,21 @@ export function createDocumentsRouter() {
   // EXECUTE USER CODE (SANDBOXED)
   // ============================================
 
-  router.post("/execute-code", requireNetworkAccessEnabled(), async (req, res) => {
+  router.post("/execute-code", requireNetworkAccessEnabled(), aiLimiter, async (req, res) => {
     const startTime = Date.now();
 
     try {
-      const { code } = req.body;
+      const codeResult = readTextField(req.body?.code, {
+        field: "code",
+        maxLength: MAX_EXECUTE_CODE_LENGTH,
+        required: true,
+      });
 
-      if (!code || typeof code !== "string") {
-        return res.status(400).json({ error: "Code is required" });
+      if (codeResult.error) {
+        return res.status(400).json({ error: codeResult.error });
       }
 
-      // Enforce code length limit
-      if (code.length > MAX_EXECUTE_CODE_LENGTH) {
-        logDocumentEvent({
-          timestamp: new Date().toISOString(),
-          event: "security_violation",
-          docType: "docx-code",
-          details: { reason: "code_too_long", codeLength: code.length },
-        });
-        return res.status(400).json({
-          error: `Code exceeds maximum length of ${MAX_EXECUTE_CODE_LENGTH / 1024}KB`,
-        });
-      }
+      const code = codeResult.value!;
 
       const acquired = await docConcurrencyLimiter.acquire();
       if (!acquired) {
