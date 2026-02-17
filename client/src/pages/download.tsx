@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, Download, Apple, Monitor, Chrome, Check } from "lucide-react";
+import { ChevronLeft, Bell, Apple, Monitor, Chrome, Check } from "lucide-react";
 
 export default function DownloadPage() {
   const [, setLocation] = useLocation();
@@ -12,9 +12,7 @@ export default function DownloadPage() {
       version: "v2.1.0",
       size: "98 MB",
       requirements: "macOS 11+",
-      available: true,
-      downloadUrl: "/releases/ILIAGPT-macOS-v2.1.0.dmg",
-      filename: "ILIAGPT-macOS-v2.1.0.dmg",
+      available: false,
     },
     {
       icon: Monitor,
@@ -22,9 +20,7 @@ export default function DownloadPage() {
       version: "v2.1.0",
       size: "112 MB",
       requirements: "Windows 10+",
-      available: true,
-      downloadUrl: "/releases/ILIAGPT-Windows-v2.1.0.exe",
-      filename: "ILIAGPT-Windows-v2.1.0.exe",
+      available: false,
     },
     {
       icon: Chrome,
@@ -32,19 +28,17 @@ export default function DownloadPage() {
       version: "v1.5.0",
       size: "2 MB",
       requirements: "Chrome 90+",
-      available: true,
-      downloadUrl: "/releases/ILIAGPT-Chrome-Extension-v1.5.0.zip",
-      filename: "ILIAGPT-Chrome-Extension-v1.5.0.zip",
+      available: false,
     },
   ];
 
   const features = [
-    "Descarga inmediata sin pasos extra",
-    "Instalación limpia y rápida",
+    "Publicación de instaladores verificados",
+    "Firmas y artefactos oficiales",
     "Compatibilidad validada por versión",
-    "Actualizaciones directas desde ILIAGPT",
-    "Experiencia optimizada para rendimiento",
-    "Entrega segura de artefactos oficiales",
+    "Canal de versiones transparente",
+    "Entrega segura y trazable",
+    "Sin enlaces rotos ni descargas engañosas",
   ];
 
   return (
@@ -64,14 +58,15 @@ export default function DownloadPage() {
         <div className="w-full max-w-5xl space-y-12">
           <section className="text-center fade-in-up">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-700 text-xs font-medium text-zinc-200 mb-6 shadow-sm">
-              <Download className="h-3 w-3" />
-              <span>Builds oficiales</span>
+              <Bell className="h-3 w-3" />
+              <span>Estado de lanzamiento</span>
             </div>
             <h1 className="text-4xl md:text-6xl font-black tracking-tight mb-6 text-white leading-[1.05]">
-              Descarga <span className="text-cyan-400">ILIAGPT</span>
+              Descargas <span className="text-cyan-400">próximamente</span>
             </h1>
             <p className="text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-              Versiones listas para instalar. Profesional, minimalista y directo a producción.
+              Estamos preparando instaladores oficiales para macOS, Windows y Chrome.
+              Publicaremos descargas reales y verificadas en esta misma página.
             </p>
           </section>
 
@@ -85,15 +80,9 @@ export default function DownloadPage() {
                   <div className="inline-flex p-3 rounded-xl border border-zinc-700 bg-zinc-950 text-zinc-100">
                     <platform.icon className="h-6 w-6" />
                   </div>
-                  {platform.available ? (
-                    <span className="mt-1 inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-                      Disponible
-                    </span>
-                  ) : (
-                    <span className="mt-1 inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-400">
-                      Próximamente
-                    </span>
-                  )}
+                  <span className="mt-1 inline-flex items-center rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-400">
+                    Próximamente
+                  </span>
                 </div>
 
                 <h3 className="text-xl font-semibold text-zinc-100 mb-1 transition-colors group-hover:text-cyan-400">
@@ -103,11 +92,9 @@ export default function DownloadPage() {
                   {platform.version} • {platform.size} • {platform.requirements}
                 </p>
 
-                <Button asChild className="w-full rounded-full bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-bold">
-                  <a href={platform.downloadUrl} download={platform.filename}>
-                    <Download className="h-4 w-4 mr-2" />
-                    Descargar
-                  </a>
+                <Button disabled className="w-full rounded-full bg-zinc-700 text-zinc-300 font-bold cursor-not-allowed">
+                  <Bell className="h-4 w-4 mr-2" />
+                  Pronto disponible
                 </Button>
               </div>
             ))}
@@ -116,8 +103,8 @@ export default function DownloadPage() {
           <section className="rounded-3xl p-8 md:p-12 border border-zinc-800 bg-zinc-900/60 fade-in-up fade-in-up-delay-2">
             <div className="grid gap-10 md:grid-cols-2 md:items-center">
               <div>
-                <h2 className="text-2xl font-semibold text-zinc-100 mb-2 tracking-tight">¿Qué obtienes?</h2>
-                <p className="text-sm text-zinc-400 mb-6">Instaladores directos, sin ruido y con enfoque en velocidad.</p>
+                <h2 className="text-2xl font-semibold text-zinc-100 mb-2 tracking-tight">Compromiso de calidad</h2>
+                <p className="text-sm text-zinc-400 mb-6">Solo publicaremos instaladores oficiales, íntegros y verificables.</p>
                 <ul className="space-y-3">
                   {features.map((feature) => (
                     <li key={feature} className="flex items-center gap-3 text-zinc-200">
@@ -133,7 +120,7 @@ export default function DownloadPage() {
               <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold text-cyan-400">ILIAGPT</div>
-                  <div className="text-xs text-zinc-500">Release channel</div>
+                  <div className="text-xs text-zinc-500">Canal de release</div>
                 </div>
                 <div className="mt-6 space-y-4">
                   <div className="h-3 w-5/6 rounded-full bg-zinc-800" />
@@ -145,7 +132,7 @@ export default function DownloadPage() {
           </section>
 
           <section className="text-center fade-in-up fade-in-up-delay-3">
-            <p className="text-zinc-400 mb-4">¿Prefieres usar la versión web?</p>
+            <p className="text-zinc-400 mb-4">Mientras tanto puedes seguir usando la versión web.</p>
             <Button
               variant="outline"
               className="rounded-full text-zinc-100 border-zinc-600 hover:bg-zinc-800"
