@@ -3,6 +3,8 @@
 from typing import Any, Dict, List, Optional
 from .base_agent import BaseAgent, AgentConfig, AgentResult, AgentState
 import structlog
+from pathlib import Path
+import tempfile
 
 
 class DocumentAgentConfig(AgentConfig):
@@ -83,7 +85,7 @@ Best practices:
             "context": {"content": content, "template": template}
         })
         
-        output_path = f"/tmp/document.{format}"
+        output_path = str(Path(tempfile.gettempdir()) / f"document.{format}")
         
         write_result = await self.execute_tool("file_write", {
             "path": output_path,
@@ -196,7 +198,7 @@ Best practices:
             return {"action": "convert", "result": result}
         elif "merge" in task.lower():
             paths = context.get("paths", [])
-            output = context.get("output_path", "/tmp/merged.docx")
+            output = context.get("output_path", str(Path(tempfile.gettempdir()) / "merged.docx"))
             result = await self.merge_documents(paths, output)
             return {"action": "merge", "result": result}
         elif "table" in task.lower():
