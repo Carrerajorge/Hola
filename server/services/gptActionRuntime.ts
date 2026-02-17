@@ -49,9 +49,12 @@ const MAX_RESPONSE_ARRAY_LENGTH = 1_024;
 const MAX_REQUEST_STRING_BYTES = 8_192;
 const MAX_RESPONSE_STRING_BYTES = 32_768;
 const MAX_SAFE_STRUCTURE_KEY_BYTES = 64;
+const SAFE_DOMAIN_LABEL_RE = /^(?:xn--)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const FORBIDDEN_STRUCTURE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const MAX_DOMAIN_ALLOWLIST_ENTRIES = 40;
 const MAX_DOMAIN_ALLOWLIST_ITEM_BYTES = 255;
+const MAX_DOMAIN_LABEL_LENGTH = 63;
+const MAX_DOMAIN_LABELS = 127;
 const MAX_TOTAL_HEADER_BYTES = 16_384;
 const ALLOWED_RESPONSE_MIME_PREFIXES = ["application/json", "text/", "application/problem+"];
 const MAX_HEADER_VALUE_BYTES = 2_048;
@@ -482,6 +485,15 @@ function sanitizeResponsePayload(input: unknown): unknown {
   });
 }
 
+function sanitizeRequestBodyPayload(input: unknown): unknown {
+  return sanitizeStructuredValue(input, "request.body", {
+    maxDepth: MAX_REQUEST_DEPTH,
+    maxObjectKeys: MAX_REQUEST_OBJECT_KEYS,
+    maxArrayLength: MAX_REQUEST_ARRAY_LENGTH,
+    maxStringBytes: MAX_REQUEST_STRING_BYTES,
+  });
+}
+
 function isAllowedResponseMimeType(value: string | null | undefined): boolean {
   const normalized = normalizeContentType(value);
   if (!normalized) {
@@ -836,6 +848,14 @@ function normalizeEndpoint(endpoint: string): string {
   if (trimmed.includes("\u0000")) {
     throw toFetchError("Invalid endpoint characters", "validation_error", false);
   }
+  if (/%(?![0-9a-fA-F]{2})/.test(trimmed)) {
+    throw toFetchError("Invalid percent-encoded endpoint", "validation_error", false);
+  }
+  try {
+    decodeURIComponent(trimmed);
+  } catch {
+    throw toFetchError("Invalid percent-encoding in endpoint", "validation_error", false);
+  }
 
   let parsed: URL;
   try {
@@ -848,8 +868,25 @@ function normalizeEndpoint(endpoint: string): string {
     throw toFetchError("Endpoint credentials are not allowed", "security_blocked", false);
   }
 
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(parsed.pathname);
+  } catch {
+    throw toFetchError("Invalid endpoint path encoding", "validation_error", false);
+  }
+  if (decodedPath.split("/").includes("..")) {
+    throw toFetchError("Endpoint path traversal is not allowed", "validation_error", false);
+  }
+
   if (!/^https?:$/.test(parsed.protocol)) {
     throw toFetchError("Only http/https endpoints are allowed", "security_blocked", false);
+  }
+
+  if (parsed.port) {
+    const port = Number.parseInt(parsed.port, 10);
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      throw toFetchError("Invalid endpoint port", "validation_error", false);
+    }
   }
 
   let canonicalHost: string;
@@ -890,14 +927,34 @@ function normalizeDomainPattern(raw: string): string {
     throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
   }
 
-  const hasWildcard = trimmed.startsWith("*.") && trimmed.length > 2;
-  const candidate = hasWildcard ? trimmed.slice(2) : trimmed;
+  if (/\s/.test(trimmed)) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
 
+  const wildcardCount = (trimmed.match(/\*/g) || []).length;
+  if (wildcardCount > 1) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const hasWildcard = trimmed.startsWith("*.") && trimmed.length > 2;
+  if (trimmed.includes("*") && !hasWildcard) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const candidate = hasWildcard ? trimmed.slice(2) : trimmed;
   if (!candidate) {
     throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
   }
 
-  if (candidate.includes("/") || candidate.includes("?") || candidate.includes("#")) {
+  if (candidate.includes("/") || candidate.includes("?") || candidate.includes("#") || candidate.includes("\\") || candidate.includes(":")) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (candidate.includes("*")) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (candidate.startsWith(".") || candidate.endsWith(".") || candidate.includes("..")) {
     throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
   }
 
@@ -912,12 +969,50 @@ function normalizeDomainPattern(raw: string): string {
     throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
   }
 
-  const sanitized = normalized.toLowerCase();
+  const canonical = normalized.endsWith(".") ? normalized.slice(0, -1) : normalized;
+  if (!canonical) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const labels = canonical.split(".");
+  if (labels.length === 0 || labels.length > MAX_DOMAIN_LABELS) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (hasWildcard && labels.length < 2) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (!labels.every(isValidDomainLabel)) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  const sanitized = canonical.toLowerCase();
   return hasWildcard ? `*.${sanitized}` : sanitized;
 }
 
+function isValidDomainLabel(label: string): boolean {
+  if (!label || label.length > MAX_DOMAIN_LABEL_LENGTH) {
+    return false;
+  }
+
+  if (label.startsWith("-") || label.endsWith("-")) {
+    return false;
+  }
+
+  return SAFE_DOMAIN_LABEL_RE.test(label);
+}
+
 function checkDomainAllowlist(urlValue: string, allowlist: unknown): void {
-  if (!Array.isArray(allowlist) || allowlist.length === 0) {
+  if (allowlist === undefined || allowlist === null) {
+    return;
+  }
+
+  if (!Array.isArray(allowlist)) {
+    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  }
+
+  if (allowlist.length === 0) {
     return;
   }
 
@@ -938,12 +1033,20 @@ function checkDomainAllowlist(urlValue: string, allowlist: unknown): void {
   } catch {
     throw toFetchError("Invalid endpoint hostname", "validation_error", false);
   }
+  hostname = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname;
 
-  if (!allowlist.every((raw) => typeof raw === "string")) {
-    throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+  const normalizedAllowlist = Array.from(
+    new Set((allowlist as string[]).map((raw) => {
+      if (typeof raw !== "string") {
+        throw toFetchError("Invalid domain allowlist entry", "validation_error", false);
+      }
+      return normalizeDomainPattern(raw);
+    }))
+  );
+
+  if (normalizedAllowlist.length === 0) {
+    return;
   }
-
-  const normalizedAllowlist = (allowlist as string[]).map((raw) => normalizeDomainPattern(raw));
 
   const allowed = normalizedAllowlist.some((candidate) => {
     if (candidate.startsWith("*.") && candidate.length > 2) {
@@ -971,19 +1074,17 @@ function normalizeEndpointHeaders(actionHeaders: unknown, requestHeaders: Record
   output["content-type"] = "application/json";
   let headerBytes = Buffer.byteLength("content-type", "utf8") + Buffer.byteLength("application/json", "utf8");
 
-  const source = {
-    ...(typeof actionHeaders === "object" && actionHeaders !== null && !Array.isArray(actionHeaders)
-      ? actionHeaders as Record<string, unknown>
-      : {}),
-    ...requestHeaders,
-  };
+  const sourceEntries = [
+    ...toSafeHeaderEntries(actionHeaders),
+    ...toSafeHeaderEntries(requestHeaders),
+  ];
 
-  if (Object.keys(source).length > MAX_HEADERS) {
+  if (sourceEntries.length > MAX_HEADERS) {
     throw toFetchError("Too many request headers configured", "validation_error", false);
   }
 
   let validHeaderCount = 1;
-  for (const [name, rawValue] of Object.entries(source)) {
+  for (const [name, rawValue] of sourceEntries) {
     if (typeof rawValue !== "string" && typeof rawValue !== "number" && typeof rawValue !== "boolean") {
       throw toFetchError(`Unsupported header value type for ${name}`, "validation_error", false);
     }
@@ -1012,6 +1113,29 @@ function normalizeEndpointHeaders(actionHeaders: unknown, requestHeaders: Record
   return sanitized;
 }
 
+function toSafeHeaderEntries(headers: unknown): Array<[string, string | number | boolean]> {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    return [];
+  }
+
+  const values = headers as Record<string, unknown>;
+  const entries: Array<[string, string | number | boolean]> = [];
+  for (const name of Object.getOwnPropertyNames(values)) {
+    const descriptor = Object.getOwnPropertyDescriptor(values, name);
+    if (!descriptor || !("value" in descriptor)) {
+      throw toFetchError(`Unsupported header value type for ${name}`, "validation_error", false);
+    }
+
+    const rawValue = descriptor.value;
+    if (typeof rawValue !== "string" && typeof rawValue !== "number" && typeof rawValue !== "boolean") {
+      throw toFetchError(`Unsupported header value type for ${name}`, "validation_error", false);
+    }
+    entries.push([name, rawValue]);
+  }
+
+  return entries;
+}
+
 function applyAuthHeaders(
   actionAuthType: string,
   authConfig: Record<string, unknown> | null,
@@ -1023,8 +1147,9 @@ function applyAuthHeaders(
 
   const output = { ...headers };
   const config = (authConfig && typeof authConfig === "object") ? authConfig as Record<string, unknown> : {};
+  const normalizedAuthType = actionAuthType.trim().toLowerCase();
 
-  if (actionAuthType === "api_key") {
+  if (normalizedAuthType === "api_key") {
     const candidate = config.apiKey || config.key || config.token || config.value;
     if (!candidate || typeof candidate !== "string" || !candidate.trim()) {
       throw toFetchError("api_key auth requires a valid api key", "auth_error", false);
@@ -1035,30 +1160,31 @@ function applyAuthHeaders(
     if (!headerName) {
       throw toFetchError("Invalid api-key header name", "auth_error", false);
     }
-    output[headerName] = candidate.trim();
+    output[headerName] = sanitizeHeaderValue(candidate);
     return output;
   }
 
-  if (actionAuthType === "bearer") {
+  if (normalizedAuthType === "bearer") {
     const token = config.bearerToken || config.accessToken || config.token;
     if (!token || typeof token !== "string" || !token.trim()) {
       throw toFetchError("bearer auth requires a valid token", "auth_error", false);
     }
-    output.Authorization = `Bearer ${token.trim()}`;
+    output.Authorization = `Bearer ${sanitizeHeaderValue(token)}`;
     return output;
   }
 
-  if (actionAuthType === "basic") {
+  if (normalizedAuthType === "basic") {
     const username = typeof config.username === "string" ? config.username : "";
     const password = typeof config.password === "string" ? config.password : "";
     if (!username || !password) {
       throw toFetchError("basic auth requires username and password", "auth_error", false);
     }
-    output.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    const combined = sanitizeHeaderValue(`${username}:${password}`);
+    output.Authorization = `Basic ${sanitizeHeaderValue(Buffer.from(combined).toString("base64"))}`;
     return output;
   }
 
-  if (actionAuthType === "custom") {
+  if (normalizedAuthType === "custom") {
     if (typeof config.headerName === "string" && typeof config.headerValue === "string") {
       const customHeaderName = sanitizeHeaderName(config.headerName);
       if (customHeaderName) {
@@ -1068,16 +1194,20 @@ function applyAuthHeaders(
     return output;
   }
 
-  if (actionAuthType === "oauth") {
+  if (normalizedAuthType === "oauth") {
     const oauthToken = config.accessToken || config.token || config.bearerToken;
     if (!oauthToken || typeof oauthToken !== "string") {
       throw toFetchError("oauth auth requires access token", "auth_error", false);
     }
-    output.Authorization = `Bearer ${oauthToken.trim()}`;
+    output.Authorization = `Bearer ${sanitizeHeaderValue(oauthToken)}`;
     return output;
   }
 
-  return output;
+  if (normalizedAuthType === "none" || normalizedAuthType === "") {
+    return output;
+  }
+
+  throw toFetchError(`Unsupported auth type: ${actionAuthType}`, "auth_error", false);
 }
 
 function clampRetryLimit(actionRateLimit: unknown, maxRetries = DEFAULT_FETCH_RETRY_LIMIT): number {
@@ -1324,6 +1454,7 @@ export class GptActionRuntime {
       };
 
       const requestBody = this.buildRequestBody(action, safeRequestPayload, contextForTemplate);
+      const safeRequestBody = sanitizeRequestBodyPayload(requestBody);
       const headers = this.buildHeaders(action, payload.headers || {});
 
       const maxRetries = clampRetryLimit(payload.maxRetries, DEFAULT_FETCH_RETRY_LIMIT);
@@ -1350,7 +1481,7 @@ export class GptActionRuntime {
 
       const executionResult = await this.executeWithRetries(
         payload,
-        { action, actionId, gptId, requestId, headers, requestBody, method, endpoint, timeoutMs: endpointTimeout },
+        { action, actionId, gptId, requestId, headers, requestBody: safeRequestBody, method, endpoint, timeoutMs: endpointTimeout },
         breaker,
         isStructuredResponseSchema(action.responseSchema),
         maxRetries,
@@ -1419,6 +1550,7 @@ export class GptActionRuntime {
         const statusCode = result.data.status;
         const responsePayload = result.data.body;
         const responseContentType = result.data.contentType;
+        const mappedData = mapResponse(responsePayload, action.responseMapping);
 
         if (isStructuredResponseSchema(action.responseSchema) && !isAllowedResponseMimeType(responseContentType)) {
           return this.createFailureResult(
@@ -1434,7 +1566,7 @@ export class GptActionRuntime {
             false,
             idempotencyKey,
             undefined,
-            responsePayload
+            mappedData
           );
         }
 
@@ -1460,7 +1592,6 @@ export class GptActionRuntime {
           }
         }
 
-        const mappedData = mapResponse(responsePayload, action.responseMapping);
         const piiRules = normalizePiiKeys(action.piiRedactionRules);
         const redactedMapped = redactSensitiveFields(mappedData, piiRules);
         const redactedRaw = redactSensitiveFields(responsePayload, piiRules);
@@ -1572,6 +1703,7 @@ export class GptActionRuntime {
       const responseInit: RequestInit = {
         method,
         headers,
+        redirect: "manual",
         signal: controller.signal,
       };
 
@@ -1597,6 +1729,18 @@ export class GptActionRuntime {
       const contentType = response.headers.get("content-type");
       const durationMs = this.now() - started;
       clearTimeout(timeoutId);
+
+      if (response.status < 100 || response.status > 599) {
+        throw this.makeNetworkError(`Execution failed with invalid status ${response.status}`, "execution_error", false);
+      }
+
+      if (response.status >= 300 && response.status < 400) {
+        throw this.makeNetworkError(
+          `Execution returned redirect status ${response.status}`,
+          "execution_not_retryable",
+          false
+        );
+      }
 
       const text = await this.readResponseBodySafe(response, MAX_FETCH_RESPONSE_BYTES);
       const rawBody = this.safeParseResponseBody(text, enforceResponseLimits);
@@ -1624,7 +1768,7 @@ export class GptActionRuntime {
       };
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error && typeof error === "object" && (error as { code?: string }).code === "validation_error") {
+      if (error && typeof error === "object" && typeof (error as { code?: string }).code === "string") {
         throw error as Error & { code: string; retryable: boolean; retryAfter?: number };
       }
       if (error instanceof Error && (error.name === "AbortError" || error.message.includes("aborted"))) {
@@ -2085,6 +2229,10 @@ function inferExecutionErrorCode(message: string): string {
   }
 
   if (/\b(?:status|code)\s*4\d\d\b/.test(normalized)) {
+    return "execution_error";
+  }
+
+  if (/\b(?:status|code)\s*3\d\d\b/.test(normalized)) {
     return "execution_error";
   }
 

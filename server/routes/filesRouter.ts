@@ -1,4 +1,4 @@
-import { Router, type Request } from "express";
+import { Router, type Request, type Response } from "express";
 import { storage } from "../storage";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "../objectStorage";
 import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, HTTP_HEADERS, LIMITS } from "../lib/constants";
@@ -97,6 +97,7 @@ const UPLOAD_RATE_WINDOW_MS = 60 * 1000;
 const UPLOAD_RATE_BLOCK_MS = 30 * 1000;
 const LOCAL_UPLOAD_INTENTS_TTL_MS = 10 * 60 * 1000;
 const MAX_LOCAL_UPLOAD_INTENTS = Number(process.env.MAX_LOCAL_UPLOAD_INTENTS || 5000);
+const MAX_LOCAL_UPLOAD_BYTES = Math.max(LIMITS.MAX_FILE_SIZE_BYTES, FILE_UPLOAD_CONFIG.CHUNK_SIZE_BYTES);
 
 const UPLOAD_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_IDEMPOTENCY_ENTRIES = 2000;
@@ -250,12 +251,18 @@ function registerLocalUploadIntent(objectId: string, actorId: string, storagePat
 
   const now = Date.now();
   for (const [id, intent] of localUploadIntents) {
-    if (intent.expiresAt <= now || id < objectId) {
+    if (intent.expiresAt <= now) {
       localUploadIntents.delete(id);
     }
     if (localUploadIntents.size <= MAX_LOCAL_UPLOAD_INTENTS) {
       break;
     }
+  }
+
+  if (localUploadIntents.size > MAX_LOCAL_UPLOAD_INTENTS) {
+    const excess = localUploadIntents.size - MAX_LOCAL_UPLOAD_INTENTS;
+    const keys = Array.from(localUploadIntents.keys()).slice(0, excess);
+    keys.forEach((key) => localUploadIntents.delete(key));
   }
 }
 
@@ -273,6 +280,10 @@ function clearLocalUploadIntents(prefix: string): void {
       localUploadIntents.delete(key);
     }
   }
+}
+
+function clearLocalUploadIntent(objectId: string): void {
+  localUploadIntents.delete(objectId);
 }
 
 // Periodic cleanup of stale multipart sessions to prevent memory leaks
@@ -325,24 +336,26 @@ function getUploadId(req: Request, bodyUploadId?: unknown): string | null {
   return null;
 }
 
-function isStatelessAuthRequest(req: Request): boolean {
-  const authHeader = req.headers.authorization;
-  return (typeof authHeader === "string" && authHeader.startsWith("Bearer ilgpt_"))
-    || typeof (req as any).apiKey !== "undefined";
-}
-
-function getUploadActorId(req: Request): string {
-  if (isStatelessAuthRequest(req)) {
-    return "__stateless_upload__";
-  }
-  return getOrCreateSecureUserId(req);
-}
-
 function getConversationId(req: Request, bodyConversationId?: unknown): string | null {
   const headerConversationId = sanitizeConversationId(extractHeader(req, HEADER_CONVERSATION_ID));
   if (headerConversationId) return headerConversationId;
   if (typeof bodyConversationId === "string") return sanitizeConversationId(bodyConversationId);
   return null;
+}
+
+function sanitizeStoragePath(rawStoragePath: string | undefined): string | null {
+  if (!rawStoragePath || typeof rawStoragePath !== "string") return null;
+
+  const trimmed = rawStoragePath.trim();
+  if (trimmed.length > 2048) return null;
+  if (!trimmed.startsWith("/objects/")) return null;
+  if (trimmed.includes("\0") || trimmed.includes("%00")) return null;
+  if (trimmed.includes("..") || trimmed.includes("\\") || trimmed.includes("//")) return null;
+
+  const normalized = path.posix.normalize(trimmed);
+  if (!normalized.startsWith("/objects/")) return null;
+  if (normalized.includes("..")) return null;
+  return normalized;
 }
 
 function buildRegistrationFingerprint(name: string, type: string, size: number, storagePath: string): string {
@@ -896,6 +909,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/upload", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
@@ -962,6 +979,7 @@ export function createFilesRouter() {
 
         const objectId = uploadId || crypto.randomUUID();
         const storagePath = `/objects/uploads/${objectId}`;
+        registerLocalUploadIntent(objectId, actorId, storagePath);
         const fallbackResponse: { uploadURL: string; storagePath: string; uploadId?: string; localFallback: true } = {
           uploadURL: `/api/local-upload/${objectId}`,
           storagePath,
@@ -1006,6 +1024,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/create", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const { fileName: rawFileName, mimeType, fileSize: rawFileSize, totalChunks: rawTotalChunks } = req.body as {
         fileName?: unknown;
         mimeType?: unknown;
@@ -1027,10 +1049,10 @@ export function createFilesRouter() {
         return res.status(400).json({ error: "Invalid conversationId format" });
       }
 
-      if (!fileName || !safeMimeType || !Number.isFinite(fileSize) || !Number.isInteger(totalChunks)) {
+      if (!fileName || !safeMimeType || !Number.isFinite(fileSize) || !Number.isInteger(fileSize) || !Number.isInteger(totalChunks)) {
         return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
       }
-      if (fileSize <= 0 || totalChunks <= 0) {
+      if (fileSize <= 0 || totalChunks <= 0 || totalChunks > MAX_MULTIPART_CHUNKS) {
         return res.status(400).json({ error: "Missing or invalid required fields: fileName, mimeType, fileSize, totalChunks" });
       }
 
@@ -1107,6 +1129,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/sign-part", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const { uploadId: rawUploadId, partNumber } = req.body;
       const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
       const actorId = getUploadActorId(req);
@@ -1130,10 +1156,15 @@ export function createFilesRouter() {
       if (partNumberValue < 1 || partNumberValue > session.totalChunks) {
         return res.status(400).json({ error: `Invalid part number. Must be between 1 and ${session.totalChunks}` });
       }
+      if (partNumberValue > MAX_MULTIPART_CHUNKS) {
+        return res.status(400).json({ error: `Invalid part number. Must be between 1 and ${Math.min(session.totalChunks, MAX_MULTIPART_CHUNKS)}` });
+      }
 
       // Local fallback: return a local upload URL for each part
       if (session.bucketName === "__local__") {
-        const signedUrl = `/api/local-upload/${uploadId}_part_${partNumberValue}`;
+        const partObjectId = `${uploadId}_part_${partNumberValue}`;
+        registerLocalUploadIntent(partObjectId, actorId, `${session.storagePath}_part_${partNumberValue}`);
+        const signedUrl = `/api/local-upload/${partObjectId}`;
         return res.json({ signedUrl });
       }
 
@@ -1156,6 +1187,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/complete", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const { uploadId: rawUploadId, parts: rawParts, conversationId: rawConversationId } = req.body as {
         uploadId?: unknown;
         parts?: unknown;
@@ -1175,7 +1210,7 @@ export function createFilesRouter() {
           const partNumber = Number(part?.partNumber);
           return Number.isFinite(partNumber) && Number.isInteger(partNumber) ? partNumber : NaN;
         })
-        .filter((partNumber) => partNumber > 0);
+        .filter((partNumber) => partNumber > 0 && partNumber <= MAX_MULTIPART_CHUNKS);
 
       if (normalizedParts.length === 0) {
         return res.status(400).json({ error: "Invalid or missing part list" });
@@ -1228,6 +1263,15 @@ export function createFilesRouter() {
       let completionResponse: { success: true; storagePath: string; fileId: string } | null = null;
 
       if (isLocalFallback) {
+        for (const partNumber of parts) {
+          const partObjectId = `${uploadId}_part_${partNumber}`;
+          const partIntent = consumeLocalUploadIntent(partObjectId, actorId);
+          if (!partIntent || partIntent.storagePath !== `${session.storagePath}_part_${partNumber}`) {
+            multipartCompletionCache.delete(completionKey);
+            return res.status(403).json({ error: `Unauthorized or stale multipart part: ${partNumber}` });
+          }
+        }
+
         // Local fallback: concatenate part files into a single file
         const fs = await import("fs");
         const pathMod = await import("path");
@@ -1273,6 +1317,7 @@ export function createFilesRouter() {
             // Ignore cleanup errors
           }
         }
+        clearLocalUploadIntents(`${uploadId}_part_`);
 
         const storagePath = `/objects/uploads/${finalObjectId}`;
 
@@ -1362,6 +1407,7 @@ export function createFilesRouter() {
         return res.status(500).json({ error: "Multipart completion failed" });
       }
 
+      clearLocalUploadIntents(`${uploadId}_part_`);
       multipartSessions.delete(uploadId);
       multipartCompletionCache.set(completionKey, {
         createdAt: Date.now(),
@@ -1388,6 +1434,10 @@ export function createFilesRouter() {
 
   router.post("/api/objects/multipart/abort", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const { uploadId: rawUploadId } = req.body;
       const uploadId = sanitizeUploadId(typeof rawUploadId === "string" ? rawUploadId : undefined);
       const actorId = getUploadActorId(req);
@@ -1421,6 +1471,7 @@ export function createFilesRouter() {
             // Ignore cleanup errors
           }
         }
+        clearLocalUploadIntents(`${uploadId}_part_`);
       } else {
         const { bucketName } = parseObjectPath(session.basePath);
         const bucket = objectStorageClient.bucket(bucketName);
@@ -1460,6 +1511,10 @@ export function createFilesRouter() {
 
   router.post("/api/files/import-url", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const actorId = getUploadActorId(req);
       const { url } = req.body as { url?: unknown };
       if (!url || typeof url !== "string") {
@@ -1620,6 +1675,10 @@ export function createFilesRouter() {
 
   router.post("/api/files/quick", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
@@ -1654,14 +1713,14 @@ export function createFilesRouter() {
       const name = sanitizeFilename(rawName.trim());
       const type = stripContentType(rawType) || rawType.trim().toLowerCase();
       const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
-      const storagePath = rawStoragePath.trim();
+      const storagePath = sanitizeStoragePath(rawStoragePath.trim());
 
       if (!name) return res.status(400).json({ error: "Invalid file name" });
       if (!type) return res.status(400).json({ error: "Invalid file type" });
       if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
       if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
 
-      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
+      if (!storagePath) {
         return res.status(400).json({ error: "Invalid storagePath" });
       }
 
@@ -1731,6 +1790,10 @@ export function createFilesRouter() {
 
   router.post("/api/files", async (req, res) => {
     try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
+
       const actorId = getUploadActorId(req);
       const rawUploadId = req.body?.uploadId;
       const rawConversationId = req.body?.conversationId;
@@ -1764,15 +1827,13 @@ export function createFilesRouter() {
       const name = sanitizeFilename(rawName.trim());
       const type = stripContentType(rawType) || rawType.trim().toLowerCase();
       const size = typeof rawSize === "number" ? rawSize : Number(rawSize);
-      const storagePath = rawStoragePath.trim();
+      const storagePath = sanitizeStoragePath(rawStoragePath.trim()) || "";
 
       if (!name) return res.status(400).json({ error: "Invalid file name" });
       if (!type) return res.status(400).json({ error: "Invalid file type" });
       if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "Invalid file size" });
+      if (!storagePath) return res.status(400).json({ error: "Invalid storagePath" });
       if (size > LIMITS.MAX_FILE_SIZE_BYTES) return res.status(413).json({ error: "File too large" });
-      if (!storagePath.startsWith("/objects/") || storagePath.includes("..")) {
-        return res.status(400).json({ error: "Invalid storagePath" });
-      }
 
       if (!ALLOWED_MIME_TYPES.includes(type as any)) {
         return res.status(400).json({ error: `Unsupported file type: ${type}` });
@@ -1928,61 +1989,89 @@ export function createFilesRouter() {
   });
 
   // Local file upload handler (development fallback)
-	  router.put("/api/local-upload/:objectId", async (req, res) => {
-	    try {
-	      const { objectId } = req.params;
+  router.put("/api/local-upload/:objectId", async (req, res) => {
+    try {
+      if (!enforceUploadRateLimit(req, res)) {
+        return;
+      }
 
-	      // Security: validate objectId to prevent path traversal
-	      if (!isValidObjectId(objectId)) {
-	        return res.status(400).json({ error: "Invalid object ID" });
-	      }
+      const actorId = getUploadActorId(req);
+      const { objectId } = req.params;
+      const contentLength = parseInt(req.headers["content-length"] || "0", 10);
 
-	      const fsSync = await import("fs");
-	      const pathMod = await import("path");
+      // Security: validate objectId to prevent path traversal
+      if (!isValidObjectId(objectId)) {
+        return res.status(400).json({ error: "Invalid object ID" });
+      }
+
+      const intent = consumeLocalUploadIntent(objectId, actorId);
+      if (!intent) {
+        return res.status(403).json({ error: "Upload intent missing or expired" });
+      }
+
+      if (Number.isFinite(contentLength) && contentLength > MAX_LOCAL_UPLOAD_BYTES) {
+        return res.status(413).json({ error: "File too large" });
+      }
+
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
 
       const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
       if (!fsSync.default.existsSync(UPLOADS_DIR)) {
         fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
 
-	      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
-	      // Security: ensure resolved path stays within uploads directory
-	      const resolvedPath = pathMod.default.resolve(filePath);
-	      const uploadsDir = pathMod.default.resolve(UPLOADS_DIR);
-	      if (!resolvedPath.startsWith(uploadsDir + pathMod.default.sep) && resolvedPath !== uploadsDir) {
-	        console.warn(`[Security] Path traversal attempt: ${objectId}`);
-	        return res.status(400).json({ error: "Invalid path" });
-	      }
-
-	      const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
-
-      const contentLength = parseInt(req.headers['content-length'] || '0');
-      if (contentLength > MAX_SIZE) {
-        return res.status(413).json({ error: "File too large" });
+      const filePath = pathMod.default.resolve(UPLOADS_DIR, objectId);
+      // Security: ensure resolved path stays within uploads directory
+      const resolvedPath = pathMod.default.resolve(filePath);
+      const uploadsDir = pathMod.default.resolve(UPLOADS_DIR);
+      if (!resolvedPath.startsWith(uploadsDir + pathMod.default.sep) && resolvedPath !== uploadsDir) {
+        console.warn(`[Security] Path traversal attempt: ${objectId}`);
+        clearLocalUploadIntent(objectId);
+        return res.status(400).json({ error: "Invalid path" });
       }
 
       const writeStream = fsSync.default.createWriteStream(filePath);
       let receivedBytes = 0;
+      const cleanupLocalUpload = () => {
+        clearLocalUploadIntent(objectId);
+        try {
+          fsSync.default.unlinkSync(filePath);
+        } catch {
+          // Best-effort cleanup.
+        }
+      };
 
       req.pipe(writeStream);
 
       req.on("data", (chunk: Buffer) => {
         receivedBytes += chunk.length;
-        if (receivedBytes > MAX_SIZE) {
+        if (receivedBytes > MAX_LOCAL_UPLOAD_BYTES) {
           writeStream.destroy();
-          try { fsSync.default.unlinkSync(filePath); } catch { /* cleanup best-effort */ }
+          cleanupLocalUpload();
           req.destroy(new Error("File limit exceeded"));
         }
       });
 
       writeStream.on("finish", async () => {
+        // Prevent indefinite reuse of a single intent after the upload completes.
+        clearLocalUploadIntent(objectId);
         console.log(`[LocalStorage] File uploaded: ${objectId} (${receivedBytes} bytes)`);
         // Security: don't leak filesystem paths in response
-        res.status(200).json({ success: true, size: receivedBytes });
+        res.status(200).json({ success: true, size: receivedBytes, storagePath: intent.storagePath });
+      });
+
+      req.on("aborted", () => {
+        cleanupLocalUpload();
+      });
+
+      req.on("error", () => {
+        cleanupLocalUpload();
       });
 
       writeStream.on("error", (error: Error) => {
         console.error("Upload stream error:", error);
+        cleanupLocalUpload();
         if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
       });
     } catch (error: any) {

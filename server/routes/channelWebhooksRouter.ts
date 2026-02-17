@@ -14,17 +14,229 @@ import {
 import express from "express";
 
 const MAX_WEBHOOK_PAYLOAD_BYTES = 128 * 1024;
+const MAX_WEBHOOK_QUERY_BYTES = 2048;
+const MAX_WEBHOOK_QUERY_PAIRS = 80;
+const MAX_WEBHOOK_QUERY_KEY_LENGTH = 128;
+const MAX_WEBHOOK_QUERY_VALUE_LENGTH = 1024;
+const MAX_WEBHOOK_HEADER_COUNT = 80;
+const MAX_WEBHOOK_HEADER_NAME_LENGTH = 96;
+const MAX_WEBHOOK_HEADER_VALUE_LENGTH = 1024;
+const MAX_WEBHOOK_PATH_LENGTH = 256;
+const MAX_WEBHOOK_CONTENT_TYPE_LENGTH = 128;
 const WEBHOOK_MAX_AGE_MS = 6 * 60 * 1000;
 const WEBHOOK_REPLAY_TTL_MS = 10 * 60 * 1000;
 const WEBHOOK_REPLAY_MAX_ENTRIES = 2000;
+
+const ALLOWED_JSON_WEBHOOK_CONTENT_TYPES = new Set(["application/json"]);
+const ALLOWED_XML_WEBHOOK_CONTENT_TYPES = new Set(["text/xml", "application/xml"]);
+
 const webhookReplayCache = new Map<string, number>();
 const REQUIRE_WEBHOOK_SECRETS = env.NODE_ENV === "production";
+
+type WebhookBoundaryFailure = {
+  status: number;
+  code: string;
+  reason?: string;
+};
+
+type WebhookBoundaryResult =
+  | { ok: true; rawBody: Buffer }
+  | { ok: false; failure: WebhookBoundaryFailure };
+
+function hasControlCharacters(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function normalizeWebhookText(raw: unknown, maxLength: number, allowEmpty = false): string | null {
+  if (typeof raw === "number" || typeof raw === "boolean") {
+    raw = String(raw);
+  }
+  if (typeof raw !== "string") return null;
+
+  const normalized = raw.normalize("NFKC").trim();
+  if (!allowEmpty && normalized.length === 0) return null;
+  if (normalized.length > maxLength) return null;
+  if (hasControlCharacters(normalized)) return null;
+  return normalized;
+}
+
+function normalizeContentType(raw: unknown): string | null {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim().toLowerCase();
+    if (trimmed.length === 0 || trimmed.length > MAX_WEBHOOK_CONTENT_TYPE_LENGTH) return null;
+    if (hasControlCharacters(trimmed)) return null;
+    return trimmed.split(";")[0]?.trim() ?? null;
+  }
+
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      const normalized = normalizeContentType(value);
+      if (normalized) return normalized;
+    }
+  }
+
+  return null;
+}
+
+function extractQueryPairs(query: Request["query"]): Array<[string, string]> {
+  const entries = Object.entries(query ?? {});
+  const pairs: Array<[string, string]> = [];
+
+  const pushValue = (name: string, value: unknown): void => {
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (pairs.length >= MAX_WEBHOOK_QUERY_PAIRS) return;
+        if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+          const sanitizedName = sanitizeQueryKey(name);
+          const sanitizedValue = normalizeWebhookText(item, MAX_WEBHOOK_QUERY_VALUE_LENGTH);
+          if (!sanitizedName || !sanitizedValue) return;
+          pairs.push([sanitizedName, sanitizedValue]);
+        }
+      }
+      return;
+    }
+
+    if (pairs.length >= MAX_WEBHOOK_QUERY_PAIRS) return;
+    const sanitizedName = sanitizeQueryKey(name);
+    const sanitizedValue = normalizeWebhookText(value, MAX_WEBHOOK_QUERY_VALUE_LENGTH);
+    if (!sanitizedName || !sanitizedValue) return;
+    pairs.push([sanitizedName, sanitizedValue]);
+  };
+
+  for (const [rawName, rawValue] of entries) {
+    if (pairs.length >= MAX_WEBHOOK_QUERY_PAIRS) break;
+    if (!sanitizeQueryKey(rawName)) return [];
+    pushValue(rawName, rawValue);
+  }
+
+  return pairs;
+}
+
+function sanitizeQueryKey(rawName: string): string | null {
+  return normalizeWebhookText(rawName, MAX_WEBHOOK_QUERY_KEY_LENGTH);
+}
+
+function validateWebhookQueryBoundary(req: Request): WebhookBoundaryFailure | null {
+  const queryString = req.url.includes("?") ? req.url.substring(req.url.indexOf("?") + 1) : "";
+  if (queryString.length > MAX_WEBHOOK_QUERY_BYTES) {
+    return { status: 414, code: "query_too_long" };
+  }
+
+  const entries = Object.entries(req.query ?? {});
+  if (entries.length > MAX_WEBHOOK_QUERY_PAIRS) {
+    return { status: 400, code: "query_too_many_params" };
+  }
+
+  for (const [rawName, rawValue] of entries) {
+    const name = normalizeWebhookText(rawName, MAX_WEBHOOK_QUERY_KEY_LENGTH);
+    if (!name) {
+      return { status: 400, code: "invalid_query_name" };
+    }
+
+    if (Array.isArray(rawValue)) {
+      if (rawValue.length > MAX_WEBHOOK_QUERY_PAIRS) {
+        return { status: 400, code: "query_too_many_values" };
+      }
+      for (const item of rawValue) {
+        if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+          const value = normalizeWebhookText(item, MAX_WEBHOOK_QUERY_VALUE_LENGTH);
+          if (!value) return { status: 400, code: "invalid_query_value" };
+          continue;
+        }
+        return { status: 400, code: "invalid_query_value" };
+      }
+      continue;
+    }
+
+    if (typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
+      const value = normalizeWebhookText(rawValue, MAX_WEBHOOK_QUERY_VALUE_LENGTH);
+      if (!value && rawValue !== "" && rawValue !== 0) {
+        return { status: 400, code: "invalid_query_value" };
+      }
+      continue;
+    }
+
+    return { status: 400, code: "invalid_query_value" };
+  }
+
+  return null;
+}
+
+function validateWebhookHeadersBoundary(req: Request): WebhookBoundaryFailure | null {
+  const headers = Object.entries(req.headers);
+  if (headers.length > MAX_WEBHOOK_HEADER_COUNT) {
+    return { status: 431, code: "too_many_headers" };
+  }
+
+  for (const [name, rawValue] of headers) {
+    const headerName = normalizeWebhookText(name, MAX_WEBHOOK_HEADER_NAME_LENGTH, true);
+    if (!headerName) return { status: 400, code: "invalid_header_name" };
+
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      const headerValue = normalizeWebhookText(
+        typeof value === "string" ? value : String(value),
+        MAX_WEBHOOK_HEADER_VALUE_LENGTH,
+        true,
+      );
+      if (!headerValue) return { status: 400, code: "invalid_header_value" };
+    }
+  }
+
+  return null;
+}
+
+function validateWebhookCommonBoundary(req: Request): WebhookBoundaryFailure | null {
+  if (typeof req.path !== "string" || req.path.length > MAX_WEBHOOK_PATH_LENGTH) {
+    return { status: 400, code: "invalid_path" };
+  }
+  const queryFailure = validateWebhookQueryBoundary(req);
+  if (queryFailure) return queryFailure;
+  return validateWebhookHeadersBoundary(req);
+}
+
+function validateWebhookPostBoundary(req: Request, allowedContentTypes: ReadonlySet<string>): WebhookBoundaryResult {
+  const commonFailure = validateWebhookCommonBoundary(req);
+  if (commonFailure) return { ok: false, failure: commonFailure };
+
+  const contentType = normalizeContentType(req.headers["content-type"]);
+  if (!contentType || !allowedContentTypes.has(contentType)) {
+    return { ok: false, failure: { status: 415, code: "unsupported_media_type" } };
+  }
+
+  const rawBody = getRawBodyBuffer(req);
+  if (!rawBody) return { ok: false, failure: { status: 400, code: "invalid_payload" } };
+  if (rawBody.length > MAX_WEBHOOK_PAYLOAD_BYTES) return { ok: false, failure: { status: 413, code: "payload_too_large" } };
+
+  return { ok: true, rawBody };
+}
+
+function validateWebhookGetBoundary(req: Request): WebhookBoundaryFailure | null {
+  return validateWebhookCommonBoundary(req);
+}
+
+function rejectWebhookBoundary(res: Response, channel: string, req: Request, failure: WebhookBoundaryFailure) {
+  Logger.warn("[Webhooks] Boundary validation rejected", {
+    channel,
+    path: req.path,
+    status: failure.status,
+    code: failure.code,
+    reason: failure.reason,
+  });
+  return res.status(failure.status).send(failure.code);
+}
 
 function parseWebhookQueryTimestamp(raw: unknown): number | null {
   if (typeof raw !== "string") {
     return null;
   }
-  const normalized = raw.trim();
+  const normalized = normalizeWebhookText(raw, 13, true);
   if (!normalized) {
     return null;
   }
@@ -39,34 +251,24 @@ function normalizeWebhookTimestamp(value: number | null): number | null {
 
 function normalizeReplayProviderKey(req: Request): string {
   const telegramToken = req.headers["x-telegram-bot-api-secret-token"];
-  if (typeof telegramToken === "string" && telegramToken.trim()) return telegramToken.trim();
+  const normalizedTelegramToken = normalizeWebhookText(telegramToken, 512);
+  if (normalizedTelegramToken) return normalizedTelegramToken;
 
   const hubSig256 = req.headers["x-hub-signature-256"];
-  if (typeof hubSig256 === "string" && hubSig256.trim()) return hubSig256.trim();
+  const normalizedHubSig256 = normalizeWebhookText(hubSig256, 512);
+  if (normalizedHubSig256) return normalizedHubSig256;
 
   const hubSig = req.headers["x-hub-signature"];
-  if (typeof hubSig === "string" && hubSig.trim()) return hubSig.trim();
+  const normalizedHubSig = normalizeWebhookText(hubSig, 512);
+  if (normalizedHubSig) return normalizedHubSig;
 
   return "";
 }
 
 function normalizeReplayQueryFingerprint(req: Request): string {
-  const normalized: Array<[string, string]> = [];
-  for (const [rawName, rawValue] of Object.entries(req.query)) {
-    const name = String(rawName);
-    if (rawValue === undefined || rawValue === null) {
-      continue;
-    }
-
-    if (Array.isArray(rawValue)) {
-      for (const item of rawValue) {
-        if (item === undefined || item === null) continue;
-        normalized.push([name, String(item)]);
-      }
-      continue;
-    }
-
-    normalized.push([name, String(rawValue)]);
+  const normalized = extractQueryPairs(req.query);
+  if (normalized.length > MAX_WEBHOOK_QUERY_PAIRS) {
+    normalized.length = MAX_WEBHOOK_QUERY_PAIRS;
   }
 
   normalized.sort(([aName, aValue], [bName, bValue]) => {
@@ -97,15 +299,8 @@ function pruneWebhookReplayCache(nowMs: number): void {
 }
 
 function buildWebhookReplayKey(channel: string, req: Request): string {
-  const body = (() => {
-    if (typeof req.body === "string") return req.body;
-    if (Buffer.isBuffer(req.body as any)) return (req.body as any).toString("utf8");
-    try {
-      return JSON.stringify(req.body || {});
-    } catch {
-      return "";
-    }
-  })();
+  const rawBody = getRawBodyBuffer(req);
+  const body = rawBody ? rawBody.toString("utf8") : "";
 
   const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
   const queryHash = crypto.createHash("sha256")
@@ -129,21 +324,20 @@ function isTimestampFreshOrMissing(timestampMs: number | null): boolean {
   return isWebhookTimestampFresh(timestampMs, { maxSkewMs: WEBHOOK_MAX_AGE_MS });
 }
 
-function getRawBodyBuffer(req: Request): Buffer {
+function getRawBodyBuffer(req: Request): Buffer | null {
   const raw = (req as any).rawBody;
   if (Buffer.isBuffer(raw)) return raw;
   if (typeof raw === "string") return Buffer.from(raw);
-  // Fallback: re-stringify parsed body (won't match signature, but avoids crashes).
+  if (typeof req.body === "string") return Buffer.from(req.body);
+  if (req.body == null) return null;
   try {
-    return Buffer.from(JSON.stringify(req.body ?? {}));
+    if (typeof req.body === "object" || Array.isArray(req.body) || typeof req.body === "number" || typeof req.body === "boolean") {
+      return Buffer.from(JSON.stringify(req.body));
+    }
   } catch {
-    return Buffer.from("");
+    return null;
   }
-}
-
-function hasTooLargePayload(req: Request): boolean {
-  if (getRawBodyBuffer(req).length > MAX_WEBHOOK_PAYLOAD_BYTES) return true;
-  return false;
+  return null;
 }
 
 function getWebhookTimestampFromRequest(channel: "telegram" | "whatsapp_cloud" | "messenger" | "wechat", req: Request): number | null {
@@ -164,19 +358,22 @@ export function createChannelWebhooksRouter(): Router {
   // Telegram webhook: setWebhook(url, secret_token) makes Telegram include:
   // X-Telegram-Bot-Api-Secret-Token header on each request.
   router.post("/telegram", async (req: Request, res: Response) => {
+    const boundary = validateWebhookPostBoundary(req, ALLOWED_JSON_WEBHOOK_CONTENT_TYPES);
+    if (!boundary.ok) {
+      return rejectWebhookBoundary(res, "telegram", req, boundary.failure);
+    }
+
     try {
       if (isWebhookReplay("telegram", req)) {
         return res.status(200).send("ok");
-      }
-
-      if (hasTooLargePayload(req)) {
-        return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("telegram", req);
       if (!isTimestampFreshOrMissing(eventTimestamp)) {
         return res.status(200).send("stale");
       }
+
+      if (req.body == null) return res.status(400).send("invalid_payload");
 
       const ok = verifyTelegramSecretToken({
         providedToken: req.header("x-telegram-bot-api-secret-token") || undefined,
@@ -200,14 +397,19 @@ export function createChannelWebhooksRouter(): Router {
 
   // WhatsApp Cloud webhook verification (Meta)
   router.get("/whatsapp", (req: Request, res: Response) => {
+    const boundary = validateWebhookGetBoundary(req);
+    if (boundary) return rejectWebhookBoundary(res, "whatsapp_cloud", req, boundary);
+
     const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
     if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
       return res.status(403).send("stale");
     }
 
-    const mode = String(req.query["hub.mode"] || "");
-    const token = String(req.query["hub.verify_token"] || "");
-    const challenge = String(req.query["hub.challenge"] || "");
+    const mode = normalizeWebhookText(req.query["hub.mode"], 64);
+    const token = normalizeWebhookText(req.query["hub.verify_token"], 512);
+    const challenge = normalizeWebhookText(req.query["hub.challenge"], 4096, true);
+
+    if (!mode || !token || !challenge) return res.status(400).send("invalid_request");
 
     if (mode === "subscribe" && env.WHATSAPP_VERIFY_TOKEN && token === env.WHATSAPP_VERIFY_TOKEN) {
       return res.status(200).send(challenge);
@@ -216,13 +418,14 @@ export function createChannelWebhooksRouter(): Router {
   });
 
   router.post("/whatsapp", async (req: Request, res: Response) => {
+    const boundary = validateWebhookPostBoundary(req, ALLOWED_JSON_WEBHOOK_CONTENT_TYPES);
+    if (!boundary.ok) {
+      return rejectWebhookBoundary(res, "whatsapp_cloud", req, boundary.failure);
+    }
+
     try {
       if (isWebhookReplay("whatsapp_cloud", req)) {
         return res.status(200).send("ok");
-      }
-
-      if (hasTooLargePayload(req)) {
-        return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("whatsapp_cloud", req);
@@ -230,9 +433,11 @@ export function createChannelWebhooksRouter(): Router {
         return res.status(200).send("stale");
       }
 
+      if (req.body == null) return res.status(400).send("invalid_payload");
+
       const sig = req.header("x-hub-signature-256") || undefined;
       const ok = verifyWhatsAppSignature256({
-        rawBody: getRawBodyBuffer(req),
+        rawBody: boundary.rawBody,
         headerSignature: sig,
         appSecret: env.WHATSAPP_APP_SECRET,
         requireSecret: REQUIRE_WEBHOOK_SECRETS,
@@ -254,14 +459,19 @@ export function createChannelWebhooksRouter(): Router {
 
   // Messenger webhook verification (Meta — same pattern as WhatsApp)
   router.get("/messenger", (req: Request, res: Response) => {
+    const boundary = validateWebhookGetBoundary(req);
+    if (boundary) return rejectWebhookBoundary(res, "messenger", req, boundary);
+
     const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
     if (eventTimestamp && !isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
       return res.status(403).send("stale");
     }
 
-    const mode = String(req.query["hub.mode"] || "");
-    const token = String(req.query["hub.verify_token"] || "");
-    const challenge = String(req.query["hub.challenge"] || "");
+    const mode = normalizeWebhookText(req.query["hub.mode"], 64);
+    const token = normalizeWebhookText(req.query["hub.verify_token"], 512);
+    const challenge = normalizeWebhookText(req.query["hub.challenge"], 4096, true);
+
+    if (!mode || !token || !challenge) return res.status(400).send("invalid_request");
 
     if (mode === "subscribe" && env.MESSENGER_VERIFY_TOKEN && token === env.MESSENGER_VERIFY_TOKEN) {
       return res.status(200).send(challenge);
@@ -270,13 +480,14 @@ export function createChannelWebhooksRouter(): Router {
   });
 
   router.post("/messenger", async (req: Request, res: Response) => {
+    const boundary = validateWebhookPostBoundary(req, ALLOWED_JSON_WEBHOOK_CONTENT_TYPES);
+    if (!boundary.ok) {
+      return rejectWebhookBoundary(res, "messenger", req, boundary.failure);
+    }
+
     try {
       if (isWebhookReplay("messenger", req)) {
         return res.status(200).send("ok");
-      }
-
-      if (hasTooLargePayload(req)) {
-        return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("messenger", req);
@@ -284,9 +495,11 @@ export function createChannelWebhooksRouter(): Router {
         return res.status(200).send("stale");
       }
 
+      if (req.body == null) return res.status(400).send("invalid_payload");
+
       const sig = req.header("x-hub-signature-256") || undefined;
       const ok = verifyMessengerSignature256({
-        rawBody: getRawBodyBuffer(req),
+        rawBody: boundary.rawBody,
         headerSignature: sig,
         appSecret: env.MESSENGER_APP_SECRET,
         requireSecret: REQUIRE_WEBHOOK_SECRETS,
@@ -308,31 +521,49 @@ export function createChannelWebhooksRouter(): Router {
 
   // WeChat webhook verification (SHA1 signature, echo echostr)
   router.get("/wechat", (req: Request, res: Response) => {
+    const boundary = validateWebhookGetBoundary(req);
+    if (boundary) return rejectWebhookBoundary(res, "wechat", req, boundary);
+
     const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
     if (!isWebhookTimestampFresh(eventTimestamp, { maxSkewMs: WEBHOOK_MAX_AGE_MS })) {
       return res.status(403).send("stale");
     }
 
+    const signature = normalizeWebhookText(req.query.signature, 512);
+    const timestamp = normalizeWebhookText(req.query.timestamp, 32);
+    const nonce = normalizeWebhookText(req.query.nonce, 128);
+    const echostr = normalizeWebhookText(req.query.echostr, 2048);
+    if (!signature || !timestamp || !nonce || !echostr) {
+      return res.status(400).send("invalid_request");
+    }
+
     const ok = verifyWeChatSignature({
-      signature: typeof req.query.signature === "string" ? req.query.signature : undefined,
-      timestamp: typeof req.query.timestamp === "string" ? req.query.timestamp : undefined,
-      nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
+      signature,
+      timestamp,
+      nonce,
       token: env.WECHAT_TOKEN,
       requireSecret: REQUIRE_WEBHOOK_SECRETS,
     });
     if (!ok) return res.status(403).send("forbidden");
-    return res.status(200).send(String(req.query.echostr || ""));
+    return res.status(200).send(echostr);
   });
 
   // WeChat inbound messages (XML body)
-  router.post("/wechat", express.text({ type: ["text/xml", "application/xml"] }), async (req: Request, res: Response) => {
+  router.post(
+    "/wechat",
+    express.text({
+      type: ["text/xml", "application/xml", "application/xml; charset=utf-8", "text/xml; charset=utf-8"],
+      limit: MAX_WEBHOOK_PAYLOAD_BYTES,
+    }),
+    async (req: Request, res: Response) => {
+    const boundary = validateWebhookPostBoundary(req, ALLOWED_XML_WEBHOOK_CONTENT_TYPES);
+    if (!boundary.ok) {
+      return rejectWebhookBoundary(res, "wechat", req, boundary.failure);
+    }
+
     try {
       if (isWebhookReplay("wechat", req)) {
         return res.status(200).send("success");
-      }
-
-      if (req.headers["content-length"] && Number(req.headers["content-length"]) > MAX_WEBHOOK_PAYLOAD_BYTES) {
-        return res.status(413).send("payload_too_large");
       }
 
       const eventTimestamp = getWebhookTimestampFromRequest("wechat", req);
@@ -340,10 +571,17 @@ export function createChannelWebhooksRouter(): Router {
         return res.status(200).send("stale");
       }
 
+      const signature = normalizeWebhookText(req.query.signature, 512);
+      const timestamp = normalizeWebhookText(req.query.timestamp, 32);
+      const nonce = normalizeWebhookText(req.query.nonce, 128);
+      if (!signature || !timestamp || !nonce) {
+        return res.status(400).send("invalid_request");
+      }
+
       const ok = verifyWeChatSignature({
-        signature: typeof req.query.signature === "string" ? req.query.signature : undefined,
-        timestamp: typeof req.query.timestamp === "string" ? req.query.timestamp : undefined,
-        nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
+        signature,
+        timestamp,
+        nonce,
         token: env.WECHAT_TOKEN,
         requireSecret: REQUIRE_WEBHOOK_SECRETS,
       });
@@ -351,6 +589,7 @@ export function createChannelWebhooksRouter(): Router {
 
       // WeChat sends XML; body is a string after express.text() middleware
       const rawXml = typeof req.body === "string" ? req.body : "";
+      if (!rawXml) return res.status(400).send("invalid_payload");
 
       await submitChannelIngest({
         channel: "wechat",

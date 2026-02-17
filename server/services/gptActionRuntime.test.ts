@@ -563,6 +563,36 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.error?.message).toContain("Invalid domain allowlist entry");
     });
 
+    it("rejects non-array domain allowlist entries", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const action = {
+        id: "action-12a",
+        name: "action-test-12a",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        domainAllowlist: "example.com" as any,
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Invalid domain allowlist entry");
+    });
+
     it("rejects malformed wildcard allowlist expressions", async () => {
       const runtime = new GptActionRuntime({
         fetch: async () =>
@@ -634,6 +664,10 @@ describe("gptActionRuntime shared helpers", () => {
 
       const headers = Object.create(null) as Record<string, unknown>;
       headers.__proto__ = "danger";
+      Object.defineProperty(headers, "constructor", {
+        value: "bad",
+        enumerable: true,
+      });
       headers["x-safe"] = "ok";
 
       const action = {
@@ -655,6 +689,44 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe("validation_error");
       expect(result.error?.message).toContain("Unsupported header name");
+    });
+
+    it("rejects non-data header values during header normalization", async () => {
+      const runtime = new GptActionRuntime({
+        fetch: async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      });
+
+      const headers: Record<string, unknown> = {};
+      Object.defineProperty(headers, "x-break", {
+        enumerable: true,
+        get() {
+          return "broken";
+        },
+      });
+
+      const action = {
+        id: "action-14b",
+        name: "action-test-14b",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "GET",
+        headers,
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Unsupported header value type");
     });
 
     it("rejects oversized aggregated headers", async () => {
@@ -689,6 +761,41 @@ describe("gptActionRuntime shared helpers", () => {
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe("validation_error");
       expect(result.error?.message).toContain("Request headers are too large");
+    });
+
+    it("rejects malformed body template payloads before outbound call", async () => {
+      let called = false;
+      const runtime = new GptActionRuntime({
+        fetch: async () => {
+          called = true;
+          return new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+
+      const action = {
+        id: "action-body-template",
+        name: "action-test-body",
+        endpoint: "https://example.com/api",
+        isActive: "true",
+        httpMethod: "POST",
+        bodyTemplate: JSON.stringify({ safe: "ok", "__proto__": "bad" }),
+      } as any;
+
+      const result = await runtime.execute({
+        action,
+        gptId: "gpt-1",
+        conversationId: "conv-1",
+        request: {},
+      });
+
+      expect(called).toBe(false);
+      expect(result.success).toBe(false);
+      expect(result.status).toBe("validation_error");
+      expect(result.error?.code).toBe("validation_error");
+      expect(result.error?.message).toContain("Forbidden object key");
     });
     it("rejects deeply nested requests before making outbound call", async () => {
       let called = false;
