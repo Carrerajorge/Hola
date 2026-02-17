@@ -49,8 +49,11 @@ export function requestLoggerMiddleware(
 
   const context: CorrelationContext = {
     traceId,
+    requestId: traceId,
     startTime,
     userId: (req as any).user?.id,
+    workspaceId: (req as any).user?.workspaceId
+      ?? (typeof req.headers["x-workspace-id"] === "string" ? req.headers["x-workspace-id"] : undefined),
   };
 
   runWithContext(context, () => {

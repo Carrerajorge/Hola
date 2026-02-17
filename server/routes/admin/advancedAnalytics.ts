@@ -205,54 +205,56 @@ advancedAnalyticsRouter.get("/user-journey", async (req, res) => {
 advancedAnalyticsRouter.get("/revenue", async (req, res) => {
   try {
     const { period = "30d" } = req.query;
-    const intervalMap: Record<string, string> = {
-      "7d": "7 days",
-      "30d": "30 days",
-      "90d": "90 days",
-      "1y": "365 days"
+    // Map period to number of days (strictly validated — no sql.raw)
+    const daysMap: Record<string, number> = {
+      "7d": 7,
+      "30d": 30,
+      "90d": 90,
+      "1y": 365,
     };
-    const interval = intervalMap[period as string] || "30 days";
+    const days = daysMap[period as string] || 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const [totals, daily, byPlan] = await Promise.all([
-      // Total revenue
-      db.execute(sql.raw(`
-        SELECT 
+      // Total revenue — parameterised
+      db.execute(sql`
+        SELECT
           SUM(amount::numeric) as total_revenue,
           COUNT(*) as total_transactions,
           AVG(amount::numeric) as avg_transaction
         FROM payments
-        WHERE status = 'completed' AND created_at > NOW() - INTERVAL '${interval}'
-      `)),
-      // Daily revenue
-      db.execute(sql.raw(`
-        SELECT 
+        WHERE status = 'completed' AND created_at > ${since}
+      `),
+      // Daily revenue — parameterised
+      db.execute(sql`
+        SELECT
           DATE(created_at) as date,
           SUM(amount::numeric) as revenue,
           COUNT(*) as transactions
         FROM payments
-        WHERE status = 'completed' AND created_at > NOW() - INTERVAL '${interval}'
+        WHERE status = 'completed' AND created_at > ${since}
         GROUP BY DATE(created_at)
         ORDER BY date
-      `)),
-      // Revenue by plan
-      db.execute(sql.raw(`
-        SELECT 
+      `),
+      // Revenue by plan — parameterised
+      db.execute(sql`
+        SELECT
           COALESCE(description, 'unknown') as plan,
           SUM(amount::numeric) as revenue,
           COUNT(*) as transactions
         FROM payments
-        WHERE status = 'completed' AND created_at > NOW() - INTERVAL '${interval}'
+        WHERE status = 'completed' AND created_at > ${since}
         GROUP BY description
-      `))
+      `),
     ]);
 
     res.json({
       summary: totals.rows?.[0] || { total_revenue: 0, total_transactions: 0, avg_transaction: 0 },
       daily: daily.rows || [],
-      byPlan: byPlan.rows || []
+      byPlan: byPlan.rows || [],
     });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Failed to fetch revenue analytics" });
   }
 });
 

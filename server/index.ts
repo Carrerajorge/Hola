@@ -22,9 +22,14 @@ import { requestBoundaryGuard } from "./middleware/requestBoundary";
 import { correlationIdMiddleware } from "./middleware/correlationId";
 
 import { authLimiter, billingLimiter, globalLimiter } from "./middleware/rateLimiter";
+import { responseBudget } from "./middleware/responseBudget";
+import { abuseDetection, stopAbuseDetectionCleanup } from "./middleware/abuseDetection";
+import { requestIntegrity, stopIntegrityCleanup } from "./middleware/requestIntegrity";
+import { hostValidation } from "./middleware/hostValidation";
+import { hardenServer } from "./middleware/socketHardening";
 
 import { runCleanup } from "./lib/cleanup";
-import { drainConnections, startHealthChecks, stopHealthChecks, verifyDatabaseConnection } from "./db";
+import { db, drainConnections, startHealthChecks, stopHealthChecks, verifyDatabaseConnection } from "./db";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { Logger } from "./lib/logger";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
@@ -34,6 +39,7 @@ import { getTracingMetrics, initTracing, shutdownTracing } from "./lib/tracing";
 import { seedProductionData } from "./seed-production";
 import { startAggregator } from "./services/analyticsAggregator";
 import { startChatScheduleRunner } from "./services/chatScheduleRunner";
+import { startTelemetryPipeline } from "./telemetry/pipeline";
 
 import { registerAuthRoutes, setupAuth } from "./replit_integrations/auth";
 import { getUserId } from "./types/express";
@@ -45,11 +51,38 @@ const app = express();
 app.set("trust proxy", 1); // Trust first proxy (critical for rate limiting behind load balancers)
 const httpServer = createServer(app);
 
+function clampConfigNumber(value: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+
+const stopSocketHardening = hardenServer(httpServer, {
+  headersTimeout: Number(process.env.SOCKET_HEADERS_TIMEOUT_MS) || 10_000,
+  keepAliveTimeout: Number(process.env.SOCKET_KEEP_ALIVE_TIMEOUT_MS) || 65_000,
+  requestTimeout: Number(process.env.SOCKET_REQUEST_TIMEOUT_MS) || 120_000,
+  maxConnectionsPerIP: Number(process.env.SOCKET_MAX_CONNECTIONS_PER_IP) || 100,
+  minBytesPerSecond: Number(process.env.SOCKET_MIN_BYTES_PER_SEC) || 100,
+  cleanupIntervalMs: Number(process.env.SOCKET_CLEANUP_INTERVAL_MS) || 60_000,
+});
+
+const telemetryPipelineController = startTelemetryPipeline({
+  db,
+  batchSize: clampConfigNumber(process.env.TELEMETRY_BATCH_SIZE, 100, 5, 5_000),
+  flushIntervalMs: clampConfigNumber(process.env.TELEMETRY_FLUSH_INTERVAL_MS, 2_000, 200, 60_000),
+  maxQueueSize: clampConfigNumber(process.env.TELEMETRY_MAX_QUEUE_SIZE, 5_000, 200, 200_000),
+});
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
 }
+
+// DNS rebinding protection — must be very early, before any routing
+app.use(hostValidation());
 
 // Request logger middleware with correlation context - must go first
 app.use(correlationIdMiddleware);
@@ -117,6 +150,10 @@ app.use(express.urlencoded({ extended: false, limit: '1mb', parameterLimit: 1000
 
 // API hardening boundary: path/query/payload validation and canonicalization
 app.use("/api", requestBoundaryGuard);
+app.use("/api", requestIntegrity());
+
+// Response time budget: tracks latency and logs overruns (observability layer)
+app.use("/api", responseBudget());
 
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
@@ -158,6 +195,10 @@ export function log(message: string, source = "express") {
     // Setup Full-Text Search
     const { setupFts } = await import("./lib/fts");
     await setupFts();
+
+    // Initialize CQRS admin projection (subscribes to auth events, refreshes materialized view)
+    const { initAdminProjection } = await import("./services/adminProjection");
+    initAdminProjection();
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }
@@ -224,6 +265,9 @@ export function log(message: string, source = "express") {
   app.use("/api/checkout", billingLimiter);
   app.use("/api/billing", billingLimiter);
   app.use("/api/stripe", billingLimiter);
+
+  // Behavioral abuse detection (anomaly scoring, complementary to rate limiter)
+  app.use("/api", abuseDetection());
 
   // Idempotency for mutations
   app.use("/api", idempotency);
@@ -307,6 +351,23 @@ export function log(message: string, source = "express") {
       log("OpenTelemetry tracing shutdown complete");
     });
 
+    // Register security middleware cleanup
+    registerCleanup(async () => {
+      stopAbuseDetectionCleanup();
+      stopIntegrityCleanup();
+      log("Security middleware cleanup complete");
+    });
+
+    registerCleanup(async () => {
+      await telemetryPipelineController.stop();
+      log("Telemetry pipeline cleanup complete");
+    });
+
+    registerCleanup(async () => {
+      stopSocketHardening();
+      log("Socket hardening cleanup complete");
+    });
+
     // Schedule Daily Cleanup (24h)
     setInterval(() => {
         runCleanup().catch(err => log(`[Cleanup Error] ${err.message}`));
@@ -338,8 +399,4 @@ export function log(message: string, source = "express") {
       }, 1500);
     }
   });
-
-  // Hardened Server Timeouts (Slowloris Protection)
-  server.headersTimeout = 60000; // 60s
-  server.keepAliveTimeout = 65000; // 65s larger than headersTimeout
 })();

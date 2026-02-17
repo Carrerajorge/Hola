@@ -93,6 +93,7 @@ vi.mock("../../lib/logger", () => ({
     info: loggerInfoMock,
     warn: loggerWarnMock,
     error: loggerErrorMock,
+    debug: vi.fn(),
   },
 }));
 
@@ -150,6 +151,10 @@ function makeWhatsAppPayload(sender = "51999999999", messageId = "wamid.1", body
 describe("channel ingest runtime controls (whatsapp cloud)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset mockReturnValue overrides from prior tests (clearAllMocks doesn't do this)
+    evaluateChannelPolicyMocked.mockImplementation(() => ({
+      ok: true, data: { allowed: true, code: "allowed", shouldRespond: true },
+    }));
     streamChatMock.mockImplementation(async function* () {
       yield { content: "Respuesta de prueba desde test", sequenceId: 1 };
     });

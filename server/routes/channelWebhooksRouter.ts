@@ -465,7 +465,10 @@ export function createChannelWebhooksRouter(): Router {
 
     if (!mode || !token || !challenge) return res.status(400).send("invalid_request");
 
-    if (mode === "subscribe" && env.WHATSAPP_VERIFY_TOKEN && token === env.WHATSAPP_VERIFY_TOKEN) {
+    // Security: use timing-safe comparison to prevent token brute-force via timing analysis
+    if (mode === "subscribe" && env.WHATSAPP_VERIFY_TOKEN && token &&
+        token.length === env.WHATSAPP_VERIFY_TOKEN.length &&
+        crypto.timingSafeEqual(Buffer.from(token), Buffer.from(env.WHATSAPP_VERIFY_TOKEN))) {
       return res.status(200).send(challenge);
     }
     return res.status(403).send("forbidden");
@@ -531,7 +534,10 @@ export function createChannelWebhooksRouter(): Router {
 
     if (!mode || !token || !challenge) return res.status(400).send("invalid_request");
 
-    if (mode === "subscribe" && env.MESSENGER_VERIFY_TOKEN && token === env.MESSENGER_VERIFY_TOKEN) {
+    // Security: use timing-safe comparison to prevent token brute-force via timing analysis
+    if (mode === "subscribe" && env.MESSENGER_VERIFY_TOKEN && token &&
+        token.length === env.MESSENGER_VERIFY_TOKEN.length &&
+        crypto.timingSafeEqual(Buffer.from(token), Buffer.from(env.MESSENGER_VERIFY_TOKEN))) {
       return res.status(200).send(challenge);
     }
     return res.status(403).send("forbidden");
