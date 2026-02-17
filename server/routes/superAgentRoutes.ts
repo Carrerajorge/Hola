@@ -688,6 +688,8 @@ const FANOUT_MAX_CONCURRENCY = 256;
 const FANOUT_MAX_TOTAL_EXECUTIONS = 20_000;
 const FANOUT_SHARD_TIMEOUT_MS = 120_000;
 const FANOUT_MAX_ACTIVE_RUNS = 8;
+const FANOUT_MAX_FAILURES_REPORTED = 100;
+const FANOUT_RETENTION_MS = 60 * 60 * 1000;
 
 type FanoutRunStatus = {
   runId: string;
@@ -740,6 +742,31 @@ function validateFanoutBudget(shards: number, maxIterationsPerShard: number, res
   return true;
 }
 
+
+function validateShardTemplate(template: string): { valid: boolean; error?: string } {
+  const hasShardIndex = template.includes("{{shard_index}}");
+  const hasTotalShards = template.includes("{{total_shards}}");
+  const hasObjective = template.includes("{{objective}}");
+  if (!hasShardIndex || !hasTotalShards || !hasObjective) {
+    return {
+      valid: false,
+      error: "shard_prompt_template must include {{shard_index}}, {{total_shards}}, and {{objective}} placeholders",
+    };
+  }
+  return { valid: true };
+}
+
+function evictOldFanoutRuns() {
+  const now = Date.now();
+  for (const [id, run] of fanoutRunState.entries()) {
+    const finishedAt = run.finishedAt || run.startedAt;
+    if (now - finishedAt > FANOUT_RETENTION_MS) {
+      fanoutRunState.delete(id);
+      fanoutAbortControllers.delete(id);
+    }
+  }
+}
+
 function renderShardPrompt(template: string, shardIndex: number, totalShards: number, objective: string): string {
   return template
     .replaceAll('{{shard_index}}', String(shardIndex))
@@ -782,12 +809,15 @@ async function runShardWithTimeout<T>(task: Promise<T>, timeoutMs: number): Prom
 router.post('/super/fanout/plan', async (req: Request, res: Response) => {
   try {
     if (!requireFanoutAuth(req, res)) return;
+    evictOldFanoutRuns();
     const input = FanoutPlanSchema.parse(req.body);
     const desired = input.max_concurrency ?? 128;
     const effectiveConcurrency = Math.max(1, Math.min(desired, FANOUT_MAX_CONCURRENCY));
     const maxIterationsPerShard = input.max_iterations_per_shard ?? 1;
 
     if (!validateFanoutBudget(input.shards, maxIterationsPerShard, res)) return;
+    const tmpl = validateShardTemplate(input.shard_prompt_template);
+    if (!tmpl.valid) return res.status(400).json({ error: tmpl.error, code: 'FANOUT_TEMPLATE_INVALID' });
 
     const samplePrompts: string[] = [];
     const sampleSize = Math.min(3, input.shards);
@@ -834,12 +864,15 @@ router.post('/super/fanout/:runId/cancel', async (req: Request, res: Response) =
 router.post('/super/fanout/execute', async (req: Request, res: Response) => {
   try {
     if (!requireFanoutAuth(req, res)) return;
+    evictOldFanoutRuns();
     const input = FanoutExecuteSchema.parse(req.body);
     const desired = input.max_concurrency ?? 64;
     const effectiveConcurrency = Math.max(1, Math.min(desired, FANOUT_MAX_CONCURRENCY));
     const maxIterationsPerShard = input.max_iterations_per_shard ?? 1;
 
     if (!validateFanoutBudget(input.shards, maxIterationsPerShard, res)) return;
+    const tmpl = validateShardTemplate(input.shard_prompt_template);
+    if (!tmpl.valid) return res.status(400).json({ error: tmpl.error, code: 'FANOUT_TEMPLATE_INVALID' });
     if (fanoutAbortControllers.size >= FANOUT_MAX_ACTIVE_RUNS) {
       return res.status(429).json({ error: 'Too many active fanout runs', code: 'FANOUT_QUEUE_FULL' });
     }
@@ -938,12 +971,21 @@ router.post('/super/fanout/execute', async (req: Request, res: Response) => {
       status: state.status,
       durationMs: state.durationMs,
       successRate: input.shards > 0 ? Number(((completed / input.shards) * 100).toFixed(2)) : 0,
-      failures: results.filter(r => !r.success).slice(0, 100),
+      failures: results.filter(r => !r.success).slice(0, FANOUT_MAX_FAILURES_REPORTED),
     });
   } catch (error: any) {
     return res.status(400).json({ error: error.message });
   }
 });
+
+router.get('/super/fanout/runs', async (_req: Request, res: Response) => {
+  evictOldFanoutRuns();
+  const runs = Array.from(fanoutRunState.values())
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .slice(0, 200);
+  return res.json({ count: runs.length, runs });
+});
+
 router.get("/super/health", async (req: Request, res: Response) => {
   let redisOk = false;
 
