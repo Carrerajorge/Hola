@@ -3,6 +3,7 @@ import { createLogger } from "./structuredLogger";
 import { recordConnectorUsage } from "./connectorMetrics";
 
 const logger = createLogger("tenant-circuit-breaker");
+const LEGACY_TENANT_ID = "__legacy__";
 
 // ===== Types =====
 export enum CircuitState {
@@ -33,10 +34,18 @@ export interface CircuitStats {
   provider: string;
 }
 
+export interface CircuitBreakerStateTransition {
+  tenantId: string;
+  provider: string;
+  fromState: CircuitState;
+  toState: CircuitState;
+  failures?: number;
+}
+
 export interface CircuitBreakerEvents {
-  circuit_opened: { tenantId: string; provider: string; failures: number };
-  circuit_closed: { tenantId: string; provider: string };
-  circuit_half_open: { tenantId: string; provider: string };
+  circuit_opened: CircuitBreakerStateTransition & { failures: number };
+  circuit_closed: CircuitBreakerStateTransition;
+  circuit_half_open: CircuitBreakerStateTransition;
 }
 
 // ===== Configuration Defaults =====
@@ -72,6 +81,80 @@ class CircuitBreakerEventEmitter extends EventEmitter {
 }
 
 export const circuitBreakerEvents = new CircuitBreakerEventEmitter();
+circuitBreakerEvents.setMaxListeners(1000);
+
+type LegacyStateObserver = (fromState: CircuitState, toState: CircuitState) => void;
+
+const legacyStateObserverRegistry = new Map<string, Set<LegacyStateObserver>>();
+let isLegacyStateRouterInstalled = false;
+
+function getLegacyStateObserverKey(tenantId: string, provider: string): string {
+  return `${tenantId}:${provider}`;
+}
+
+function ensureLegacyStateRouter(): void {
+  if (isLegacyStateRouterInstalled) return;
+
+  const dispatchStateTransition = (transition: CircuitBreakerStateTransition) => {
+    const observers = legacyStateObserverRegistry.get(
+      getLegacyStateObserverKey(transition.tenantId, transition.provider)
+    );
+    if (!observers || observers.size === 0) return;
+
+    for (const observer of observers) {
+      try {
+        observer(transition.fromState, transition.toState);
+      } catch (err) {
+        logger.error("Failed to notify legacy state observer", {
+          tenantId: transition.tenantId,
+          provider: transition.provider,
+          fromState: transition.fromState,
+          toState: transition.toState,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
+
+  circuitBreakerEvents.on("circuit_opened", (payload) => {
+    dispatchStateTransition(payload);
+  });
+  circuitBreakerEvents.on("circuit_closed", (payload) => {
+    dispatchStateTransition(payload);
+  });
+  circuitBreakerEvents.on("circuit_half_open", (payload) => {
+    dispatchStateTransition(payload);
+  });
+
+  isLegacyStateRouterInstalled = true;
+}
+
+function registerLegacyStateObserver(
+  tenantId: string,
+  provider: string,
+  observer: LegacyStateObserver
+): () => void {
+  ensureLegacyStateRouter();
+
+  const key = getLegacyStateObserverKey(tenantId, provider);
+  let observers = legacyStateObserverRegistry.get(key);
+  if (!observers) {
+    observers = new Set();
+    legacyStateObserverRegistry.set(key, observers);
+  }
+
+  observers.add(observer);
+
+  return () => {
+    const currentObservers = legacyStateObserverRegistry.get(key);
+    if (!currentObservers) return;
+
+    currentObservers.delete(observer);
+    if (currentObservers.size === 0) {
+      legacyStateObserverRegistry.delete(key);
+    }
+  };
+}
 
 // ===== Error Class =====
 export class CircuitBreakerOpenError extends Error {
@@ -223,6 +306,8 @@ export class TenantCircuitBreaker {
       circuitBreakerEvents.emit("circuit_opened", {
         tenantId: this.tenantId,
         provider: this.provider,
+        fromState: oldState,
+        toState: newState,
         failures: this.failures,
       });
       logger.warn(`Circuit OPENED`, {
@@ -236,6 +321,8 @@ export class TenantCircuitBreaker {
       circuitBreakerEvents.emit("circuit_half_open", {
         tenantId: this.tenantId,
         provider: this.provider,
+        fromState: oldState,
+        toState: newState,
       });
       logger.info(`Circuit HALF_OPEN`, {
         tenantId: this.tenantId,
@@ -249,6 +336,8 @@ export class TenantCircuitBreaker {
       circuitBreakerEvents.emit("circuit_closed", {
         tenantId: this.tenantId,
         provider: this.provider,
+        fromState: oldState,
+        toState: newState,
       });
       logger.info(`Circuit CLOSED`, {
         tenantId: this.tenantId,
@@ -647,6 +736,7 @@ function calculateRetryDelay(attempt: number, baseDelay: number): number {
 
 export class ServiceCircuitBreaker<T = any> {
   private breaker: TenantCircuitBreaker;
+  private unregisterLegacyStateObserver?: () => void;
   private config: Required<Omit<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">> &
     Pick<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">;
   private metrics: {
@@ -681,22 +771,15 @@ export class ServiceCircuitBreaker<T = any> {
       resetTimeout: 300000,
     });
 
-    // Register state change listener
-    circuitBreakerEvents.on("circuit_opened", (data) => {
-      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.(CircuitState.CLOSED, CircuitState.OPEN);
-      }
-    });
-    circuitBreakerEvents.on("circuit_closed", (data) => {
-      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.(CircuitState.HALF_OPEN, CircuitState.CLOSED);
-      }
-    });
-    circuitBreakerEvents.on("circuit_half_open", (data) => {
-      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.(CircuitState.OPEN, CircuitState.HALF_OPEN);
-      }
-    });
+    if (this.config.onStateChange) {
+      this.unregisterLegacyStateObserver = registerLegacyStateObserver(
+        LEGACY_TENANT_ID,
+        this.config.name,
+        (fromState, toState) => {
+          this.config.onStateChange?.(fromState, toState);
+        }
+      );
+    }
 
     this.metrics = {
       totalCalls: 0,
@@ -841,6 +924,11 @@ export class ServiceCircuitBreaker<T = any> {
   reset(): void {
     this.breaker.reset();
     logger.info(`Circuit breaker reset: ${this.config.name}`);
+  }
+
+  destroy(): void {
+    this.unregisterLegacyStateObserver?.();
+    this.unregisterLegacyStateObserver = undefined;
   }
 }
 
