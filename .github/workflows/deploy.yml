@@ -81,51 +81,70 @@ jobs:
             echo "app_version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Preflight target host
-        run: |
-          set -euo pipefail
-          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
-          DNS_IP="$(dig +short iliagpt.com | tail -n1 | tr -d '\n')"
-          echo "▸ iliagpt.com resolves to: ${DNS_IP}"
-          echo "▸ Checking TCP connectivity to ${{ env.VPS_HOST }}:${{ env.VPS_PORT }}..."
-          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
-
       - name: Setup SSH key
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          exit 1
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
+          nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Sync deploy scripts to VPS
         run: |
           set -euo pipefail
-          scp -i ~/.ssh/deploy_key -P ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            docker-compose.infra.yml \
-            docker-compose.slot.yml \
-            nginx.conf \
-            scripts/deploy-bluegreen.sh \
-            scripts/rollback-bluegreen.sh \
-            scripts/health-dashboard.sh \
-            scripts/vps-bootstrap-bluegreen.sh \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
-            "mkdir -p ${{ env.DEPLOY_PATH }}/scripts && \
-             cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          for attempt in 1 2 3; do
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to sync deploy scripts after 3 attempts"
+              exit 1
+            fi
+            sleep 3
+          done
+
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=no -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
             -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
              cd ${{ env.DEPLOY_PATH }} && \
              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
@@ -243,48 +262,70 @@ jobs:
             sleep 5
           done
 
-      - name: Preflight target host
-        run: |
-          set -euo pipefail
-          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.VPS_PORT }}"
-          nc -vz -w 5 "${{ env.VPS_HOST }}" "${{ env.VPS_PORT }}" || echo "⚠️ TCP probe failed (continuing)"
-
       - name: Setup SSH key
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${{ env.VPS_PORT }} -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Resolve reachable deploy endpoint
+        id: target
+        run: |
+          set -euo pipefail
+          DEFAULT_HOST="69.62.98.126"
+          HOSTS=()
+          if [ -n "${{ secrets.VPS_HOST }}" ]; then HOSTS+=("${{ secrets.VPS_HOST }}"); fi
+          HOSTS+=("${VPS_HOST}" "${DEFAULT_HOST}")
+          PORTS=("${VPS_PORT}" "8022" "22" "2222")
+
+          mapfile -t uniq_hosts < <(printf "%s\n" "${HOSTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+          mapfile -t uniq_ports < <(printf "%s\n" "${PORTS[@]}" | awk 'NF' | awk '!seen[$0]++')
+
+          for host in "${uniq_hosts[@]}"; do
+            for port in "${uniq_ports[@]}"; do
+              echo "Trying ${VPS_USER}@${host}:${port}..."
+              ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+              if ssh -i ~/.ssh/deploy_key -4 -p "$port"                 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=8                 "${VPS_USER}@${host}" "echo ok" >/dev/null 2>&1; then
+                echo "host=${host}" >> "$GITHUB_OUTPUT"
+                echo "port=${port}" >> "$GITHUB_OUTPUT"
+                echo "✓ Selected endpoint ${host}:${port}"
+                exit 0
+              fi
+            done
+          done
+
+          echo "::error::No reachable VPS endpoint found (hosts: ${uniq_hosts[*]} | ports: ${uniq_ports[*]})"
+          exit 1
+
+      - name: Preflight target host
+        run: |
+          set -euo pipefail
+          echo "▸ Deploy target: ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ steps.target.outputs.port }}"
+          nc -vz -w 5 "${{ steps.target.outputs.host }}" "${{ steps.target.outputs.port }}" || echo "⚠️ TCP probe failed (continuing to SSH)"
 
       - name: Sync deploy scripts to VPS
         run: |
           set -euo pipefail
-          scp -i ~/.ssh/deploy_key -P ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            docker-compose.infra.yml \
-            docker-compose.slot.yml \
-            nginx.conf \
-            scripts/deploy-bluegreen.sh \
-            scripts/rollback-bluegreen.sh \
-            scripts/health-dashboard.sh \
-            scripts/vps-bootstrap-bluegreen.sh \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }}:${{ env.DEPLOY_PATH }}/
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
-            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
-            "mkdir -p ${{ env.DEPLOY_PATH }}/scripts && \
-             cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true && \
-             chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
+          for attempt in 1 2 3; do
+            if scp -i ~/.ssh/deploy_key -P ${{ steps.target.outputs.port }}               -o StrictHostKeyChecking=no -o ConnectTimeout=12               docker-compose.infra.yml               docker-compose.slot.yml               nginx.conf               scripts/deploy-bluegreen.sh               scripts/rollback-bluegreen.sh               scripts/health-dashboard.sh               scripts/vps-bootstrap-bluegreen.sh               ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}:${{ env.DEPLOY_PATH }}/; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to sync deploy scripts after 3 attempts"
+              exit 1
+            fi
+            sleep 3
+          done
+
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }}             -o StrictHostKeyChecking=no -o ConnectTimeout=12             ${{ env.VPS_USER }}@${{ steps.target.outputs.host }}             "mkdir -p ${{ env.DEPLOY_PATH }}/scripts &&              cp ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/rollback-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/health-dashboard.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              cp ${{ env.DEPLOY_PATH }}/vps-bootstrap-bluegreen.sh ${{ env.DEPLOY_PATH }}/scripts/ 2>/dev/null || true &&              chmod +x ${{ env.DEPLOY_PATH }}/scripts/*.sh ${{ env.DEPLOY_PATH }}/deploy-bluegreen.sh 2>/dev/null || true"
 
       - name: Run blue-green deploy
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} \
+          ssh -i ~/.ssh/deploy_key -p ${{ steps.target.outputs.port }} \
             -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ConnectionAttempts=3 \
             -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o TCPKeepAlive=yes \
-            ${{ env.VPS_USER }}@${{ env.VPS_HOST }} \
+            ${{ env.VPS_USER }}@${{ steps.target.outputs.host }} \
             "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null && \
              cd ${{ env.DEPLOY_PATH }} && \
              IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
