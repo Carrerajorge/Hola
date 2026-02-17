@@ -258,6 +258,19 @@ if [ -L "$DEPLOY_PATH" ]; then
 fi
 cd "$DEPLOY_PATH"
 
+if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
+  echo "✗ VPS repo has local uncommitted changes. Refusing deploy."
+  git status --short || true
+  exit 1
+fi
+
+if [ -f .git/gc.log ]; then
+  echo "⚠ Detected stale .git/gc.log on VPS, performing safe git housekeeping..."
+  rm -f .git/gc.log || true
+  git reflog expire --all --expire=now >/dev/null 2>&1 || true
+  git gc --prune=now >/dev/null 2>&1 || true
+fi
+
 echo "▸ Pulling latest code (${DEPLOY_BRANCH})..."
 if ! git fetch origin "${DEPLOY_BRANCH}"; then
   echo "✗ Failed to fetch ${DEPLOY_BRANCH} from origin"
