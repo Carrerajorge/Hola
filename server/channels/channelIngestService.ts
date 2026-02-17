@@ -55,6 +55,7 @@ type InboundProcessingContext = {
   account: ChannelAccount;
   conversation: Awaited<ReturnType<typeof getOrCreateChannelConversation>>;
   runtimeConfig: ReturnType<typeof resolveRuntimeConfig>;
+  runAbort?: AbortController;
 };
 
 type SendRequest = {
@@ -65,6 +66,14 @@ type SendRequest = {
   senderId: string;
 };
 
+type InFlightRunState = {
+  runAbort: AbortController;
+  requestId: string;
+  runId: string;
+  channel: ExternalChannel;
+  startedAt: number;
+};
+
 const RUN_QUEUE_MAX_HISTORY = 60;
 const MAX_STREAM_CONTEXT = 80;
 const ORCHESTRATION_TIMEOUT_MS = 120_000;
@@ -72,22 +81,78 @@ const SEND_RETRY_ATTEMPTS = 2;
 const SEND_RETRY_BACKOFF_MS = 750;
 const PROVIDER_ID_FALLBACK_KEY = "unknown";
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_OUTBOUND_TEXT_LENGTH = 8_000;
 const MAX_ID_LENGTH = 256;
 const MAX_REQUEST_ID_LENGTH = 120;
 const MAX_WORKSPACE_ID_LENGTH = 200;
 const MAX_ENVELOPES_PER_JOB = 12;
 const MAX_RATE_BUCKET_ENTRIES = 8_000;
 const MAX_MESSAGE_ID_ENTRIES = 120_000;
+const CONVERSATION_QUEUE_TIMEOUT_MS = 180_000;
+const SAFE_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+const SAFE_REQUEST_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
 const DEFAULT_MEDIA_LABEL = {
   image: "[Imagen recibida]",
   audio: "[Audio recibido]",
   document: "[Documento recibido]",
 };
+const MAX_ASSISTANT_MESSAGE_LENGTH = 16_000;
+const ABORT_REASON_PREFIX = "Run aborted";
+const OUTBOUND_CIRCUIT_FAILURE_THRESHOLD = 5;
+const OUTBOUND_CIRCUIT_OPEN_MS = 60_000;
+const OUTBOUND_CIRCUIT_BASE_BACKOFF_MS = 2_000;
+const MAX_STREAM_CHUNK_LENGTH = 4_096;
 
-const inFlightRunsByConversation = new Map<string, AbortController>();
+const inFlightRunsByConversation = new Map<string, InFlightRunState>();
 const conversationQueues = new Map<string, Promise<void>>();
 const seenProviderMessageIdsByConversation = new Map<string, number>();
 const conversationRateBuckets = new Map<string, { startedAt: number; count: number }>();
+const outboundCircuitState = new Map<ExternalChannel, { failures: number; openedUntil?: number; lastFailureAt: number }>();
+
+function isOutboundCircuitOpen(channel: ExternalChannel): boolean {
+  const state = outboundCircuitState.get(channel);
+  if (!state?.openedUntil) return false;
+
+  const now = Date.now();
+  if (now >= state.openedUntil) {
+    outboundCircuitState.delete(channel);
+    return false;
+  }
+
+  return true;
+}
+
+function markOutboundCircuitSuccess(channel: ExternalChannel): void {
+  outboundCircuitState.delete(channel);
+}
+
+function markOutboundCircuitFailure(channel: ExternalChannel, reason: string): void {
+  const state = outboundCircuitState.get(channel) || { failures: 0, lastFailureAt: 0 };
+  const next = {
+    failures: state.failures + 1,
+    lastFailureAt: Date.now(),
+  };
+
+  if (next.failures >= OUTBOUND_CIRCUIT_FAILURE_THRESHOLD) {
+    next.openedUntil = Date.now() + OUTBOUND_CIRCUIT_OPEN_MS;
+    Logger.warn("[Channels] outbound circuit opened", {
+      channel,
+      failures: next.failures,
+      reason,
+      reopenAt: new Date(next.openedUntil).toISOString(),
+    });
+  }
+
+  outboundCircuitState.set(channel, next);
+}
+
+function computeOutboundBackoff(attempt: number, jitterLimit = 250): number {
+  const attemptMultiplier = Math.min(attempt, 6);
+  const exponential = SEND_RETRY_BACKOFF_MS * Math.pow(2, attemptMultiplier);
+  const jitter = Math.floor(Math.random() * jitterLimit);
+  const max = Math.min(OUTBOUND_CIRCUIT_BASE_BACKOFF_MS * 20, exponential + jitter);
+  return max;
+}
 
 function isAllowedByRateLimit(conversationKey: string, perMinute: number): { allowed: boolean; retryAfterMs?: number } {
   if (!perMinute || perMinute <= 0) return { allowed: true };
@@ -147,6 +212,7 @@ function normalizeIdentifier(value: unknown, maxLength = MAX_ID_LENGTH): string 
     .trim();
 
   if (!normalized || normalized.length > maxLength) return null;
+  if (!SAFE_ID_RE.test(normalized)) return null;
   return normalized;
 }
 
@@ -201,7 +267,7 @@ function buildDeterministicFallbackProviderMessageId(seedParts: unknown[]): stri
   const compact = seed
     .normalize("NFKC")
     .replace(/\s+/g, "")
-    .replace(/[^A-Za-z0-9._:-]+/g, "")
+    .replace(/[^A-Za-z0-9._:@+\-]+/g, "")
     .toLowerCase()
     .slice(0, MAX_ID_LENGTH - 3);
 
@@ -406,6 +472,94 @@ function asAttachmentFromEnvelope(envelope: MessageEnvelope): { name?: string; c
   };
 }
 
+function isAbortSignalActive(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  const rawMessage = String((error as Error)?.message || error || "").toLowerCase();
+  return rawMessage.includes("aborted") || rawMessage.includes("abort");
+}
+
+function registerInFlightRun(
+  conversationKey: string,
+  state: InFlightRunState,
+): void {
+  inFlightRunsByConversation.set(conversationKey, state);
+}
+
+function unregisterInFlightRun(conversationKey: string, state: Pick<InFlightRunState, "requestId" | "runId">): void {
+  const current = inFlightRunsByConversation.get(conversationKey);
+  if (!current) return;
+
+  if (current.requestId === state.requestId && current.runId === state.runId) {
+    inFlightRunsByConversation.delete(conversationKey);
+  }
+}
+
+function enforceSafeLimit(value: string, limit: number): string {
+  if (!Number.isFinite(limit) || limit <= 0) return value;
+  return value.slice(0, limit);
+}
+
+function sanitizeStreamChunk(value: string, limit = MAX_STREAM_CHUNK_LENGTH): string {
+  return enforceSafeLimit(
+    value
+      .normalize("NFKC")
+      .replace(/\u0000/g, "")
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, "")
+      .replace(/[\u202A-\u202E\u2066-\u2069]/g, ""),
+    limit,
+  );
+}
+
+function waitForAbortSignal(signal?: AbortSignal): Promise<never> {
+  if (!signal) {
+    return new Promise<never>(() => {});
+  }
+
+  return new Promise<never>((_, reject) => {
+    if (signal.aborted) {
+      reject(new Error(ABORT_REASON_PREFIX));
+      return;
+    }
+
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error(ABORT_REASON_PREFIX));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function sleepWithAbort(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+
+      reject(new Error(ABORT_REASON_PREFIX));
+    };
+
+    const timer = setTimeout(() => {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+
+      resolve();
+    }, delayMs);
+
+    if (!signal) return;
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function sendTextWithRetries(
   channel: ExternalChannel,
   account: ChannelAccount,
@@ -413,56 +567,92 @@ async function sendTextWithRetries(
   envelope: MessageEnvelope,
   payload: SendRequest,
   maxRetries = SEND_RETRY_ATTEMPTS,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
+  if (abortSignal?.aborted) {
+    throw new Error("Run aborted before send");
+  }
+  const normalizedText = enforceSafeLimit(payload.text, MAX_OUTBOUND_TEXT_LENGTH);
+  const safeRecipient = normalizeIdentifier(envelope.threadId, MAX_ID_LENGTH);
+  const safeChannelAccount = normalizeIdentifier(conversation.channelAccountId, MAX_ID_LENGTH);
+  if (!safeRecipient || !safeChannelAccount || !normalizedText) {
+    throw new Error("Invalid outbound envelope metadata");
+  }
+
+  if (isOutboundCircuitOpen(channel)) {
+    throw new Error(`Outbound circuit open for ${channel}`);
+  }
+
   let attempt = 0;
 
   while (true) {
     try {
+      let sender: (() => Promise<void>) | null = null;
+
       if (channel === "whatsapp_cloud") {
-        await sendWhatsAppCloudText({
-          phoneNumberId: conversation.channelAccountId,
-          to: envelope.threadId,
-          text: payload.text,
-          accessToken: account.accessToken || "",
-        });
-        return;
+        sender = async () => {
+          await sendWhatsAppCloudText({
+            phoneNumberId: safeChannelAccount,
+            to: safeRecipient,
+            text: normalizedText,
+            accessToken: account.accessToken || "",
+          });
+        };
       }
 
       if (channel === "telegram") {
-        await telegramSendMessage(envelope.threadId, payload.text);
-        return;
+        sender = async () => {
+          await telegramSendMessage(safeRecipient, normalizedText);
+        };
       }
 
       if (channel === "messenger") {
-        if (!account.accessToken) {
-          throw new Error("Missing Messenger access token");
-        }
-        await messengerSendText({
-          recipientId: envelope.threadId,
-          text: payload.text,
-          accessToken: account.accessToken,
-        });
-        return;
+        sender = async () => {
+          if (!account.accessToken) {
+            throw new Error("Missing Messenger access token");
+          }
+          await messengerSendText({
+            recipientId: safeRecipient,
+            text: normalizedText,
+            accessToken: account.accessToken,
+          });
+        };
       }
 
       if (channel === "wechat") {
-        const appSecret = toCleanText(account.accessToken || "");
-        const appId = toCleanText((conversation.metadata as any)?.appId as string) || conversation.channelKey;
-        if (!appId || !appSecret) {
-          throw new Error("Missing WeChat credentials");
-        }
+        sender = async () => {
+          const appSecret = toCleanText(account.accessToken || "");
+          const appId = toCleanText((conversation.metadata as any)?.appId as string) || conversation.channelKey;
+          if (!appId || !appSecret) {
+            throw new Error("Missing WeChat credentials");
+          }
 
-        await wechatSendText({
-          openId: envelope.threadId,
-          text: payload.text,
-          appId,
-          appSecret,
-        });
-        return;
+          await wechatSendText({
+            openId: safeRecipient,
+            text: normalizedText,
+            appId,
+            appSecret,
+          });
+        };
       }
 
-      throw new Error(`Unsupported channel '${channel}'`);
+      if (!sender) {
+        throw new Error(`Unsupported channel '${channel}'`);
+      }
+
+      await sender();
+      markOutboundCircuitSuccess(channel);
+      return;
     } catch (error: unknown) {
+      if (abortSignal?.aborted) {
+        throw new Error("Run aborted before retry");
+      }
+      if (isAbortSignalActive(error, abortSignal)) {
+        throw error;
+      }
+
+      markOutboundCircuitFailure(channel, String((error as Error)?.message || error));
+
       attempt += 1;
       Logger.warn(`[Channels] outbound send failed (attempt ${attempt}/${maxRetries + 1})`, {
         conversation: payload.conversationKey,
@@ -475,7 +665,8 @@ async function sendTextWithRetries(
 
       if (attempt > maxRetries) throw error;
 
-      await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS * attempt));
+      const backoffMs = computeOutboundBackoff(attempt);
+      await sleepWithAbort(backoffMs, abortSignal);
     }
   }
 }
@@ -531,13 +722,37 @@ function timeoutMsForChannel(channel: ExternalChannel): number {
   return ORCHESTRATION_TIMEOUT_MS;
 }
 
-async function safeQueue<T>(key: string, task: () => Promise<T>): Promise<T> {
+async function safeQueue<T>(key: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const previous = conversationQueues.get(key) || Promise.resolve();
+  const queueAbort = new AbortController();
+  const timeoutError = new Error("Conversation queue timeout");
   const wrapped = previous
     .catch((error) => {
       Logger.warn(`[Channels] previous job for conversation failed: ${String(error?.message || error)}`);
     })
-    .then(async () => task());
+    .then(async () => {
+      return await new Promise<T>((resolve, reject) => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const onAbort = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          queueAbort.signal.removeEventListener("abort", onAbort);
+          reject(timeoutError);
+        };
+
+        timeoutId = setTimeout(() => {
+          queueAbort.abort(timeoutError);
+        }, CONVERSATION_QUEUE_TIMEOUT_MS);
+        queueAbort.signal.addEventListener("abort", onAbort, { once: true });
+
+        task(queueAbort.signal)
+          .then(resolve)
+          .catch(reject)
+          .finally(() => {
+            if (timeoutId) clearTimeout(timeoutId);
+            queueAbort.signal.removeEventListener("abort", onAbort);
+          });
+      });
+    });
 
   conversationQueues.set(
     key,
@@ -556,8 +771,16 @@ async function safeQueue<T>(key: string, task: () => Promise<T>): Promise<T> {
 async function abortPreviousRunForConversation(conversationKey: string): Promise<void> {
   const existing = inFlightRunsByConversation.get(conversationKey);
   if (!existing) return;
+
+  Logger.warn("[Channels] aborting in-flight run for conversation", {
+    conversation: conversationKey,
+    channel: existing.channel,
+    runId: existing.runId,
+    requestId: existing.requestId,
+  });
+
   try {
-    existing.abort();
+    existing.runAbort.abort("Superseded by newer inbound message");
   } catch (error) {
     // best effort
   } finally {
@@ -570,52 +793,106 @@ async function runOutboundDecision(
   assistantContent: string,
   userMessageId: string,
   runId: string,
+  requestId: string,
+  options?: {
+    assistantMessageId?: string;
+    skipRunStatusUpdate?: boolean;
+    abortSignal?: AbortSignal;
+  },
 ): Promise<void> {
-  const messageKey = sanitizeRequestIdentifier(runId);
-  const requestId = messageKey;
+  if (options?.abortSignal?.aborted) {
+    throw new Error(ABORT_REASON_PREFIX);
+  }
+
+  const safeRequestId = sanitizeRequestIdentifier(requestId);
+  if (!safeRequestId) {
+    throw new Error("Invalid outbound requestId");
+  }
+
+  const safeRunId = sanitizeRequestIdentifier(runId) || safeRequestId;
+  const safeAssistantContent = enforceSafeLimit(
+    String(assistantContent ?? "")
+      .normalize("NFKC")
+      .replace(/[\x00-\x1f\x7f]/g, "")
+      .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
+      .trim(),
+    MAX_OUTBOUND_TEXT_LENGTH,
+  );
   const payload: SendRequest = {
-    text: assistantContent,
-    requestId,
-    runId,
+    text: safeAssistantContent,
+    requestId: safeRequestId,
+    runId: safeRunId,
     conversationKey: context.envelope.conversationKey,
     senderId: context.envelope.threadId,
   };
 
-  await sendTextWithRetries(context.jobChannel, context.account, context.conversation, context.envelope, payload);
+  if (!safeAssistantContent) {
+    throw new Error("Outbound content empty after sanitization");
+  }
+
+  await sendTextWithRetries(
+    context.jobChannel,
+    context.account,
+    context.conversation,
+    context.envelope,
+    payload,
+    SEND_RETRY_ATTEMPTS,
+    options?.abortSignal,
+  );
 
   await touchChannelConversationHeartbeat(context.conversation.id, {
     lastOutboundAt: nowIso(),
     lastInboundAt: nowIso(),
   });
 
-  await storage.updateChatMessageContent(payload.requestId, assistantContent, {
-    status: "done",
-    content: assistantContent,
-  } as any);
+  if (options?.assistantMessageId) {
+    await storage.updateChatMessageContent(
+      options.assistantMessageId,
+      safeAssistantContent,
+      {
+        status: "done",
+        metadata: {
+          runId: safeRunId,
+          requestId: safeRequestId,
+          sourceChannel: context.jobChannel,
+          conversationKey: context.envelope.conversationKey,
+        },
+      },
+    ).catch(() => null);
+  }
 
-  await storage.updateChatRunStatus(runId, "done").catch(() => null);
-  await storage.updateChatRunLastSeq(runId, 0).catch(() => null);
+  if (!options?.skipRunStatusUpdate && safeRunId) {
+    await storage.updateChatRunStatus(safeRunId, "done").catch(() => null);
+    await storage.updateChatRunLastSeq(safeRunId, 0).catch(() => null);
+  }
 
   Logger.info("[Channels] outbound completed", {
-    runId,
+    runId: safeRunId || "control-plane",
     conversation: payload.conversationKey,
     channel: context.jobChannel,
-    requestId,
+    requestId: safeRequestId,
     userMessageId,
   });
 }
 
 function sanitizeRequestIdentifier(value: string): string {
-  return String(value || "")
+  const normalized = String(value || "")
     .normalize("NFKC")
     .replace(/\u0000/g, "")
     .replace(/[\x00-\x1f\x7f]/g, "")
     .trim()
     .slice(0, MAX_REQUEST_ID_LENGTH);
+
+  if (!normalized || !SAFE_REQUEST_ID_RE.test(normalized)) {
+    return "";
+  }
+
+  return normalized;
 }
 
 async function processAllowedMessage(context: InboundProcessingContext): Promise<void> {
   const { envelope, account, conversation, runtimeConfig, jobChannel } = context;
+  const runAbort = context.runAbort ?? new AbortController();
 
   const safeMessageId = normalizeIdentifier(envelope.providerMessageId, MAX_ID_LENGTH);
   const safeSenderId = normalizeIdentifier(envelope.senderId, MAX_ID_LENGTH);
@@ -651,28 +928,43 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   const messageId = safeMessageId;
   const conversationKey = serializeConversationKey(safeEnvelope.conversationKey);
   const scopedRequestId = buildConversationScopedRequestId(conversationKey, messageId);
-
+  if (runAbort.signal.aborted) {
+    Logger.warn("[Channels] inbound message skipped due to pre-aborted run", {
+      conversation: envelope.conversationKey,
+      channel: jobChannel,
+    });
+    return;
+  }
+  const safeScopedRequestId = sanitizeRequestIdentifier(scopedRequestId);
+  if (!safeScopedRequestId) {
+    Logger.warn("[Channels] inbound message rejected due to malformed request id", {
+      conversation: safeEnvelope.conversationKey,
+      providerMessageId: safeMessageId,
+      runKey: conversationKey,
+    });
+    return;
+  }
   pruneMessageIdLedger();
   pruneRateBuckets();
 
-  if (!isAllowedToQueue(conversationKey, messageId)) {
-    const existing = await storage.findMessageByRequestId(scopedRequestId);
-    if (existing) {
-      Logger.info("[Channels] Duplicate inbound message ignored", {
-        conversation: safeEnvelope.conversationKey,
-        messageId: scopedRequestId,
-        channel: jobChannel,
-      });
-      return;
-    }
+  const isQueueAllowed = isAllowedToQueue(conversationKey, messageId);
+  const existingMessage = await storage.findMessageByRequestId(safeScopedRequestId);
+  if (!isQueueAllowed) {
+    Logger.info("[Channels] Duplicate inbound message ignored", {
+      conversation: safeEnvelope.conversationKey,
+      messageId: safeScopedRequestId,
+      channel: jobChannel,
+      reason: "in_memory_dedupe_hit",
+    });
+    return;
   }
 
-  const existingMessage = await storage.findMessageByRequestId(scopedRequestId);
   if (existingMessage) {
     Logger.info("[Channels] Duplicate inbound message ignored", {
       conversation: safeEnvelope.conversationKey,
-      messageId: scopedRequestId,
+      messageId: safeScopedRequestId,
       channel: jobChannel,
+      reason: "persistent_dedupe_hit",
     });
     return;
   }
@@ -693,32 +985,55 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
       });
 
       const ackText = `✅ Handshake confirmado. Tu cuenta está vinculada para este chat (${jobChannel}).`;
-      await runOutboundDecision({
-        ...context,
-        jobChannel,
-        envelope: safeEnvelope,
-        account,
-        conversation,
-        runtimeConfig,
-      }, ackText, "", sanitizeRequestIdentifier(scopedRequestId));
+      await runOutboundDecision(
+        {
+          ...context,
+          envelope: safeEnvelope,
+        },
+        ackText,
+        "",
+        "",
+        safeScopedRequestId,
+        {
+          skipRunStatusUpdate: true,
+          abortSignal: runAbort.signal,
+        },
+      ).catch((error) => {
+        Logger.warn("[Channels] pairing confirmation response failed", {
+          conversation: safeEnvelope.conversationKey,
+          channel: jobChannel,
+          reason: String((error as Error)?.message || error),
+        });
+      });
       return;
     }
 
-    await runOutboundDecision({
-      ...context,
-      jobChannel,
-      envelope: safeEnvelope,
-      account,
-      conversation,
-      runtimeConfig,
-    }, "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.", "", sanitizeRequestIdentifier(scopedRequestId));
+      await runOutboundDecision(
+        {
+          ...context,
+          envelope: safeEnvelope,
+        },
+        "❌ Código no válido o caducado. Solicita un nuevo QR/código de vinculación.",
+        "",
+        "",
+        safeScopedRequestId,
+        {
+          skipRunStatusUpdate: true,
+          abortSignal: runAbort.signal,
+        },
+      ).catch((error) => {
+      Logger.warn("[Channels] pairing error response failed", {
+        conversation: safeEnvelope.conversationKey,
+        channel: jobChannel,
+        reason: String((error as Error)?.message || error),
+      });
+    });
     return;
   }
 
   const policyConfig = getConversationPolicy(conversation);
-  const rateControl = isAllowedByRateLimit(serializeConversationKey(safeEnvelope.conversationKey), policyConfig.rateLimitPerMinute);
-
-      const policyContext = {
+  const rateControl = isAllowedByRateLimit(conversationKey, policyConfig.rateLimitPerMinute);
+  const policyContext = {
     conversation,
     envelope: safeEnvelope,
     runtimeConfig,
@@ -735,7 +1050,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     const shouldRespond = policy.shouldRespond !== false;
     Logger.warn("[Channels] inbound message blocked by policy", {
       conversation: safeEnvelope.conversationKey,
-      messageId: scopedRequestId,
+      messageId: safeScopedRequestId,
       policyCode: policy.code,
       channel: jobChannel,
       shouldRespond,
@@ -747,16 +1062,22 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     await runOutboundDecision(
       {
         ...context,
-        jobChannel,
         envelope: safeEnvelope,
-        account,
-        conversation,
-        runtimeConfig,
       },
       policy.replyText,
       "",
-      sanitizeRequestIdentifier(scopedRequestId),
-    );
+      safeScopedRequestId,
+      {
+        skipRunStatusUpdate: true,
+        abortSignal: runAbort.signal,
+      },
+    ).catch((error) => {
+      Logger.warn("[Channels] policy-blocked response failed", {
+        conversation: safeEnvelope.conversationKey,
+        channel: jobChannel,
+        reason: String((error as Error)?.message || error),
+      });
+    });
     return;
   }
 
@@ -765,7 +1086,7 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
     role: "user",
     content: buildIncomingTextForHistory(safeEnvelope),
     status: "done",
-    requestId: scopedRequestId,
+    requestId: safeScopedRequestId,
     attachments: buildMessageAttachments(safeEnvelope),
     metadata: {
       runSource: "channel_ingest",
@@ -780,22 +1101,22 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
   } as any;
 
   const userMessage = await storage.createChatMessage(userMessagePayload);
-  const run = await createRunForMessage(conversation.chatId, scopedRequestId, userMessage.id);
+  const run = await createRunForMessage(conversation.chatId, safeScopedRequestId, userMessage.id);
   if (!run) {
     Logger.error("[Channels] could not create chat run", {
-      messageId: scopedRequestId,
+      messageId: safeScopedRequestId,
       conversation: safeEnvelope.conversationKey,
       channel: jobChannel,
     });
     return;
   }
 
-  const claimedRun = await storage.claimPendingRun(conversation.chatId, scopedRequestId);
+  const claimedRun = await storage.claimPendingRun(conversation.chatId, safeScopedRequestId);
   if (!claimedRun) {
-    const current = await storage.getChatRunByClientRequestId(conversation.chatId, scopedRequestId);
+    const current = await storage.getChatRunByClientRequestId(conversation.chatId, safeScopedRequestId);
     if (current && (current.status === "processing" || current.status === "done")) {
       Logger.info("[Channels] run already claimed or done, skipping", {
-        messageId: scopedRequestId,
+        messageId: safeScopedRequestId,
         runId: current?.id,
         status: current?.status,
       });
@@ -805,49 +1126,62 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
 
   const activeRun = claimedRun ?? run;
   const runId = activeRun.id;
-  const runAbort = new AbortController();
-  inFlightRunsByConversation.set(conversationKey, runAbort);
   const safeRunId = sanitizeRequestIdentifier(runId);
-  let assistantMessageId: string | null = null;
+  if (!safeRunId) {
+    Logger.error("[Channels] invalid runId generated", {
+      conversation: safeEnvelope.conversationKey,
+      runId: activeRun.id,
+      messageId: safeScopedRequestId,
+    });
+    await storage.updateChatRunStatus(runId, "failed", "Invalid runId").catch(() => null);
+    return;
+  }
 
+  let assistantMessageId: string | null = null;
   const start = Date.now();
 
-  try {
-    const attachmentForPrompt = buildIncomingTextForHistory(safeEnvelope);
+  registerInFlightRun(conversationKey, {
+    runAbort,
+    requestId: safeScopedRequestId,
+    runId: safeRunId,
+    channel: jobChannel,
+    startedAt: Date.now(),
+  });
 
+  try {
+    const userPromptText = buildIncomingTextForHistory(safeEnvelope);
     const stylePrompt = buildResponseStyleSystemPrompt(runtimeConfig, safeEnvelope.channel);
     const historicalMessages = (await storage.getChatMessages(conversation.chatId, { orderBy: "asc", limit: MAX_STREAM_CONTEXT }))
       .slice(-RUN_QUEUE_MAX_HISTORY)
       .filter((msg) => msg.role === "user" || msg.role === "assistant");
 
-    const llmMessages = mapToLlmMessages(historicalMessages, attachmentForPrompt, stylePrompt);
+    const llmMessages = mapToLlmMessages(historicalMessages, userPromptText, stylePrompt);
 
     const assistantPlaceholder = await storage.createChatMessage({
       chatId: conversation.chatId,
       role: "assistant",
       content: "",
       status: "pending",
-      runId,
+      runId: safeRunId,
       userMessageId: userMessage.id,
       requestId: `${safeRunId}:assistant`,
     });
     assistantMessageId = assistantPlaceholder.id;
-
-    await storage.updateChatRunAssistantMessage(runId, assistantMessageId);
+    await storage.updateChatRunAssistantMessage(safeRunId, assistantMessageId);
 
     let output = "";
     let lastSeq = -1;
     const stream = llmGateway.streamChat(llmMessages, {
       userId: conversation.userId || account.userId,
-      requestId: runId,
+      requestId: safeRunId,
       timeout: timeoutMsForChannel(jobChannel),
       maxTokens: 1500,
     });
-
+    const orchestrationTimeoutMs = timeoutMsForChannel(jobChannel) + 10_000;
     const timeout = new Promise<never>((_, reject) => {
       setTimeout(() => {
         reject(new Error("Channel orchestration timeout"));
-      }, timeoutMsForChannel(jobChannel) + 10_000);
+      }, orchestrationTimeoutMs);
     });
 
     try {
@@ -855,118 +1189,141 @@ async function processAllowedMessage(context: InboundProcessingContext): Promise
         (async () => {
           for await (const chunk of stream) {
             if (runAbort.signal.aborted) {
-              throw new Error("Run aborted due to new message in same conversation");
+              throw new Error(ABORT_REASON_PREFIX);
             }
 
-            output += chunk.content;
+            const chunkText = typeof chunk.content === "string" ? sanitizeStreamChunk(chunk.content) : "";
+
+            if (chunkText) {
+              output += chunkText;
+            }
+
+            if (output.length > MAX_ASSISTANT_MESSAGE_LENGTH) {
+              output = enforceSafeLimit(output, MAX_ASSISTANT_MESSAGE_LENGTH);
+              Logger.warn("[Channels] assistant output length clipped", {
+                runId,
+                conversation: safeEnvelope.conversationKey,
+                limit: MAX_ASSISTANT_MESSAGE_LENGTH,
+              });
+              break;
+            }
+
             lastSeq = chunk.sequenceId;
             if (lastSeq > -1) {
-              await storage.updateChatRunLastSeq(runId, lastSeq).catch(() => null);
+              await storage.updateChatRunLastSeq(safeRunId, lastSeq).catch(() => null);
             }
           }
         })(),
         timeout,
+        waitForAbortSignal(runAbort.signal),
       ]);
     } catch (streamError) {
       throw streamError;
     }
 
-    if (!output.trim()) {
-      output = "No pude redactar una respuesta en este momento. Reintenta en unos segundos.";
+    if (runAbort.signal.aborted) {
+      throw new Error(ABORT_REASON_PREFIX);
     }
 
-    await storage.updateChatMessageContent(assistantMessageId, output, {
+    const finalOutput = output.trim() || "No pude redactar una respuesta en este momento. Reintenta en unos segundos.";
+
+    await storage.updateChatMessageContent(assistantMessageId, finalOutput, {
       status: "done",
       metadata: {
         runId,
-        requestId: scopedRequestId,
+        requestId: safeScopedRequestId,
         sourceChannel: jobChannel,
         conversationKey: safeEnvelope.conversationKey,
       },
     });
 
-    await storage.updateChatRunStatus(runId, "done");
-
-    await sendTextWithRetries(
-      jobChannel,
-      account,
-      conversation,
-      safeEnvelope,
+    await runOutboundDecision(
       {
-        text: output,
-        requestId: scopedRequestId,
-        runId,
-        conversationKey: safeEnvelope.conversationKey,
-        senderId: safeEnvelope.threadId,
+        ...context,
+        envelope: safeEnvelope,
       },
-      SEND_RETRY_ATTEMPTS,
+      finalOutput,
+      userMessage.id,
+      safeRunId,
+      safeScopedRequestId,
+      {
+        assistantMessageId,
+        abortSignal: runAbort.signal,
+      },
     );
 
-    await touchChannelConversationHeartbeat(conversation.id, {
-      lastOutboundAt: nowIso(),
-    });
+    await touchChannelConversationHeartbeat(conversation.id, { lastOutboundAt: nowIso() });
 
     Logger.info("[Channels] message processed", {
-      runId,
+      runId: safeRunId,
       conversation: safeEnvelope.conversationKey,
       channel: jobChannel,
       elapsedMs: Date.now() - start,
     });
   } catch (err) {
     const reason = String((err as Error)?.message || err);
+    const aborted = isAbortSignalActive(err, runAbort.signal);
     const fallback = "No puedo responder ahora. Reintenta en unos minutos.";
 
     if (assistantMessageId) {
-      await storage.updateChatMessageContent(assistantMessageId, fallback, {
+      await storage.updateChatMessageContent(assistantMessageId, aborted ? "[Flujo cancelado por mensaje nuevo]" : fallback, {
         status: "failed",
         metadata: {
           runId,
-          requestId: scopedRequestId,
+          requestId: safeScopedRequestId,
           error: reason,
           sourceChannel: jobChannel,
+          aborted,
         },
       }).catch(() => null);
     }
 
-    await storage.updateChatRunStatus(runId, "failed", reason).catch(() => null);
+    await storage.updateChatRunStatus(safeRunId, "failed", reason).catch(() => null);
     await patchConversationMetadata(conversation.id, {
       lastError: reason,
       lastErrorAt: nowIso(),
-      lastRunId: runId,
+      lastRunId: safeRunId,
     }).catch(() => null);
 
-    try {
-      await sendTextWithRetries(
-        jobChannel,
-        account,
-        conversation,
-        safeEnvelope,
-        {
-          text: fallback,
-          requestId: scopedRequestId,
-          runId,
-          conversationKey: safeEnvelope.conversationKey,
-          senderId: safeEnvelope.threadId,
-        },
-        0,
-      );
-    } catch (sendError) {
-      Logger.error("[Channels] fallback send failed", {
-        conversation: safeEnvelope.conversationKey,
-        channel: jobChannel,
-        error: String((sendError as Error)?.message || sendError),
-      });
+    if (!aborted) {
+      try {
+        await sendTextWithRetries(
+          jobChannel,
+          account,
+          conversation,
+          safeEnvelope,
+          {
+            text: fallback,
+            requestId: safeScopedRequestId,
+            runId: safeRunId,
+            conversationKey: safeEnvelope.conversationKey,
+            senderId: safeEnvelope.threadId,
+          },
+          0,
+          runAbort.signal,
+        );
+      } catch (sendError) {
+        Logger.error("[Channels] fallback send failed", {
+          conversation: safeEnvelope.conversationKey,
+          channel: jobChannel,
+          error: String((sendError as Error)?.message || sendError),
+        });
+      }
     }
 
-    Logger.error("[Channels] failed to process inbound message", {
-      messageId: scopedRequestId,
-      runId,
+    Logger[aborted ? "warn" : "error"]("[Channels] failed to process inbound message", {
+      messageId: safeScopedRequestId,
+      runId: safeRunId,
       conversation: safeEnvelope.conversationKey,
       channel: jobChannel,
       error: reason,
+      aborted,
     });
   } finally {
-    inFlightRunsByConversation.delete(conversationKey);
+    unregisterInFlightRun(conversationKey, {
+      requestId: safeScopedRequestId,
+      runId: safeRunId,
+    });
     await touchChannelConversationHeartbeat(conversation.id, { lastInboundAt: safeEnvelope.receivedAt || nowIso() }).catch(() => null);
   }
 }
@@ -1067,13 +1424,21 @@ export async function processChannelIngestJob(job: ChannelIngestJob): Promise<vo
     };
 
     const queueKey = serializeConversationKey(envelope.conversationKey);
-    await safeQueue(queueKey, async () => {
-      await abortPreviousRunForConversation(queueKey);
+    await abortPreviousRunForConversation(queueKey);
 
-      const runAbort = inFlightRunsByConversation.get(queueKey) || new AbortController();
-      inFlightRunsByConversation.set(queueKey, runAbort);
+    await safeQueue(queueKey, async (queueSignal) => {
+      const runAbort = new AbortController();
+      const onQueueAbort = (): void => {
+        runAbort.abort(queueSignal.reason as any);
+      };
+      queueSignal.addEventListener("abort", onQueueAbort, { once: true });
+      context.runAbort = runAbort;
 
-      await processAllowedMessage(context);
+      try {
+        await processAllowedMessage(context);
+      } finally {
+        queueSignal.removeEventListener("abort", onQueueAbort);
+      }
     }).catch((error) => {
       Logger.error("[Channels] conversation queue processing error", {
         error: String(error?.message || error),

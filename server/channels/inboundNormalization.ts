@@ -7,7 +7,14 @@ const MAX_IDENTIFIER_TEXT_LENGTH = 120;
 const MAX_METADATA_TEXT_LENGTH = 280;
 const MAX_MEDIA_URL_LENGTH = 2_048;
 const MAX_CHANNEL_PAYLOAD_LENGTH = 10_000;
+const MAX_ARRAY_LENGTH = 1_200;
 const MAX_CHAT_ID_LENGTH = 160;
+const MAX_TEXT_MESSAGE_LENGTH = 3_000;
+const SAFE_HOSTNAME_LENGTH = 255;
+const MAX_OBJECT_KEYS = 320;
+const MAX_TIMESTAMP_FUTURE_MS = 15 * 60_000;
+const MAX_BIDI_CHARS = /[\u202A-\u202E\u2066-\u2069]/g;
+const MAX_CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
 
 const ALLOWED_MIME_TYPES: Record<MessageEnvelope["messageType"], ReadonlySet<string>> = {
   text: new Set([]),
@@ -29,7 +36,45 @@ const ALLOWED_MIME_TYPES: Record<MessageEnvelope["messageType"], ReadonlySet<str
 };
 
 const ALLOWED_CHANNEL_SCHEME = /^https?:$/i;
-const SAFE_ID_RE = /^[A-Za-z0-9._:-]+$/;
+const SAFE_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+
+function isIpV4InRange(hostname: string, prefix: string): boolean {
+  return hostname.startsWith(prefix);
+}
+
+function isIpV4Private(hostname: string): boolean {
+  return (
+    hostname === "127.0.0.1" ||
+    hostname.startsWith("10.") ||
+    isIpV4InRange(hostname, "172.16.") ||
+    isIpV4InRange(hostname, "172.17.") ||
+    isIpV4InRange(hostname, "172.18.") ||
+    isIpV4InRange(hostname, "172.19.") ||
+    isIpV4InRange(hostname, "172.20.") ||
+    isIpV4InRange(hostname, "172.21.") ||
+    isIpV4InRange(hostname, "172.22.") ||
+    isIpV4InRange(hostname, "172.23.") ||
+    isIpV4InRange(hostname, "172.24.") ||
+    isIpV4InRange(hostname, "172.25.") ||
+    isIpV4InRange(hostname, "172.26.") ||
+    isIpV4InRange(hostname, "172.27.") ||
+    isIpV4InRange(hostname, "172.28.") ||
+    isIpV4InRange(hostname, "172.29.") ||
+    isIpV4InRange(hostname, "172.30.") ||
+    isIpV4InRange(hostname, "172.31.") ||
+    isIpV4InRange(hostname, "192.168.") ||
+    isIpV4InRange(hostname, "169.254.") ||
+    hostname === "::1" ||
+    hostname === "0.0.0.0" ||
+    hostname.endsWith(".local") ||
+    hostname === "localhost"
+  );
+}
+
+function isUrlHostUnsafe(parsedUrl: URL): boolean {
+  const host = parsedUrl.hostname.toLowerCase();
+  return host.length > SAFE_HOSTNAME_LENGTH || isIpV4Private(host);
+}
 
 export type NormalizedInboundMessage = {
   providerMessageId: string;
@@ -43,9 +88,8 @@ export type NormalizedInboundMessage = {
 function normalizeText(value: unknown): string {
   return String(value ?? "")
     .normalize("NFKC")
-    .replace(/\u202E/g, "")
-    .replace(/\x00/g, "")
-    .replace(/[\u0001-\u001f\u007f]/g, "")
+    .replace(MAX_BIDI_CHARS, "")
+    .replace(MAX_CONTROL_CHARS, "")
     .trim()
     .slice(0, MAX_TEXT_LENGTH);
 }
@@ -74,7 +118,11 @@ function sanitizeIdentifierStrict(value: unknown): string {
   const cleaned = sanitizeIdentifier(value);
   if (!cleaned) return "";
   if (SAFE_ID_RE.test(cleaned)) return cleaned;
-  return cleaned.replace(/[^A-Za-z0-9._:-]+/g, "").slice(0, MAX_ID_LENGTH);
+  return cleaned.replace(/[^A-Za-z0-9._:@+\-]+/g, "").slice(0, MAX_ID_LENGTH);
+}
+
+function normalizeTextMessage(value: unknown, limit = MAX_TEXT_MESSAGE_LENGTH): string {
+  return normalizeText(value).replace(MAX_BIDI_CHARS, "").replace(MAX_CONTROL_CHARS, "").slice(0, limit);
 }
 
 function sanitizeOptionalText(value: unknown): string {
@@ -103,6 +151,8 @@ function sanitizeMediaUrl(value: unknown): string | undefined {
   try {
     const parsed = new URL(normalized);
     if (!ALLOWED_CHANNEL_SCHEME.test(parsed.protocol)) return undefined;
+    if (isUrlHostUnsafe(parsed)) return undefined;
+    if (parsed.pathname.length + (parsed.search?.length || 0) > MAX_MEDIA_URL_LENGTH) return undefined;
     return `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}`;
   } catch {
     return undefined;
@@ -123,7 +173,8 @@ function normalizeIncomingPayload<T>(value: unknown): T | null {
     return value.length > MAX_CHANNEL_PAYLOAD_LENGTH ? null : (value as T);
   }
   if (typeof value !== "object" || value === null) return null;
-  if (Array.isArray(value)) return value.length > MAX_CHANNEL_PAYLOAD_LENGTH ? null : (value as T);
+  if (Array.isArray(value)) return value.length > MAX_ARRAY_LENGTH ? null : (value as T);
+  if (Object.keys(value).length > MAX_OBJECT_KEYS) return null;
   return value as T;
 }
 
@@ -131,6 +182,10 @@ function parseTimestamp(raw: any): string {
   const n = Number.parseInt(String(raw ?? ""), 10);
   if (Number.isFinite(n) && n > 0) {
     const ms = n < 1e12 ? n * 1000 : n;
+    const now = Date.now();
+    if (ms - now > MAX_TIMESTAMP_FUTURE_MS) {
+      return new Date(now).toISOString();
+    }
     return new Date(ms).toISOString();
   }
   return new Date().toISOString();
@@ -193,8 +248,8 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
           },
         };
 
-        if (m?.type === "text") {
-          const text = sanitizeTextForStorage(m?.text?.body);
+      if (m?.type === "text") {
+          const text = normalizeTextMessage(m?.text?.body);
           if (!text) continue;
           out.push({ ...envelopeBase, text, messageType: "text" });
           continue;
@@ -279,7 +334,7 @@ export function normalizeWhatsAppMessages(payload: any): Array<MessageEnvelope> 
         if (!fallback) continue;
         out.push({
           ...envelopeBase,
-          text: fallback,
+          text: normalizeTextMessage(fallback),
           messageType: "text",
         });
       }
@@ -334,14 +389,14 @@ export function normalizeMessengerMessages(payload: any): MessageEnvelope[] {
       };
 
       if (typeof message?.text === "string") {
-        const text = sanitizeTextForStorage(message.text);
+        const text = normalizeTextMessage(message.text);
         if (!text) continue;
         out.push({ ...envelopeBase, text, messageType: "text" });
         continue;
       }
 
       if (message?.text?.body) {
-        const text = sanitizeTextForStorage(message.text.body);
+        const text = normalizeTextMessage(message.text.body);
         if (!text) continue;
         out.push({ ...envelopeBase, text, messageType: "text" });
         continue;
@@ -457,8 +512,8 @@ export function normalizeWeChatMessage(rawXml: string, parsed: any): MessageEnve
     },
   };
 
-  if (msgType === "text") {
-    const text = sanitizeTextForStorage(parsed?.Content);
+    if (msgType === "text") {
+    const text = normalizeTextMessage(parsed?.Content);
     if (!text) return null;
     return { ...envelopeBase, text };
   }

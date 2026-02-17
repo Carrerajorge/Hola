@@ -42,21 +42,41 @@ const CHANNEL_WINDOWS_MS: Record<MessageEnvelope["channel"], number> = {
 };
 const MAX_RATE_LIMIT_PER_MINUTE = 120;
 const MAX_IDENTITY_LIST_SIZE = 64;
+const MAX_IDENTITY_TEXT_LENGTH = 120;
+const MAX_POLICY_ID_TEXT_LENGTH = 160;
+const MAX_PAIRING_CODE_LENGTH = 16;
+const MAX_OWNER_SET_SIZE = 128;
+const SAFE_CHANNEL_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
+
+function normalizeIdentity(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .slice(0, MAX_IDENTITY_TEXT_LENGTH);
+}
+
+function normalizeIdentityStrict(value: unknown, maxLength = MAX_POLICY_ID_TEXT_LENGTH): string {
+  const normalized = normalizeIdentity(value, maxLength);
+  if (!normalized || !SAFE_CHANNEL_ID_RE.test(normalized)) return "";
+  return normalized;
+}
 
 export function parseChannelPairingCodeFromMessage(text: string): string | null {
   if (!text || typeof text !== "string") return null;
-  const normalized = text.trim();
-  if (normalized.length > 256) return null;
+  const normalized = text.normalize("NFKC").toUpperCase().trim();
+  if (normalized.length > MAX_PAIRING_CODE_LENGTH) return null;
   if (!normalized) return null;
 
-  const directStart = /^\/(?:start|code)\s+([A-Z0-9]{6,})$/i.exec(normalized);
+  const directStart = /^\/(?:start|code)\s+([A-Z0-9]{6,12})$/i.exec(normalized);
   if (directStart) return directStart[1].toUpperCase();
 
   const regexes = [
-    /^code\s*[:#]?\s*([A-Z0-9]{6,})$/i,
-    /^pair\s*[:#]?\s*([A-Z0-9]{6,})$/i,
-    /^alia\s+pair\s*[:#]?\s*([A-Z0-9]{6,})$/i,
-    /^token\s*[:#]?\s*([A-Z0-9]{6,})$/i,
+    /^code\s*[:#]?\s*([A-Z0-9]{6,12})$/i,
+    /^pair\s*[:#]?\s*([A-Z0-9]{6,12})$/i,
+    /^alia\s+pair\s*[:#]?\s*([A-Z0-9]{6,12})$/i,
+    /^token\s*[:#]?\s*([A-Z0-9]{6,12})$/i,
   ];
 
   for (const re of regexes) {
@@ -68,8 +88,16 @@ export function parseChannelPairingCodeFromMessage(text: string): string | null 
 }
 
 function parseDateMs(value: unknown): number {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return 0;
+    const ms = value < 1e12 ? value * 1000 : value;
+    return ms > 0 ? ms : 0;
+  }
+
   if (typeof value !== "string") return 0;
-  const parsed = Date.parse(value);
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const parsed = Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -79,13 +107,13 @@ function toStringSet(values: unknown): Set<string> {
     return new Set(
       values
         .slice(0, MAX_IDENTITY_LIST_SIZE)
-        .map((value) => String(value ?? "").trim())
+        .map((value) => normalizeIdentity(value, MAX_IDENTITY_TEXT_LENGTH))
         .filter((value) => value.length > 0),
     );
   }
   return new Set(
     values
-      .map((value) => String(value ?? "").trim())
+      .map((value) => normalizeIdentity(value, MAX_IDENTITY_TEXT_LENGTH))
       .filter((value) => value.length > 0),
   );
 }
@@ -98,8 +126,13 @@ function addOwnerIdCandidate(target: Set<string>, value: unknown): void {
     return;
   }
 
-  const candidate = String(value ?? "").trim();
+  const candidate = normalizeIdentityStrict(value);
   if (candidate.length > 0) target.add(candidate);
+}
+
+function collectOwnerExternalIds(values: unknown): Set<string> {
+  if (!Array.isArray(values)) return new Set<string>();
+  return new Set(values.slice(0, MAX_OWNER_SET_SIZE).map((value) => normalizeIdentityStrict(value)).filter(Boolean));
 }
 
 function addOwnerIdCandidatesFromObject(target: Set<string>, value: unknown): void {
@@ -150,11 +183,16 @@ function conversationOwnerCandidates(
   runtimeConfig: ChannelRuntimeConfig,
   conversation: ChannelConversation,
 ): Set<string> {
-  const out = new Set<string>(toStringSet(runtimeConfig.owner_external_ids));
+  const out = new Set<string>(Array.from(toStringSet(runtimeConfig.owner_external_ids)).map((value) => normalizeIdentityStrict(value)));
   addOwnerIdCandidate(out, getPolicyMap(conversation).owner_external_ids);
+  addOwnerIdCandidate(out, runtimeConfig.owner_external_ids);
+  for (const value of collectOwnerExternalIds(runtimeConfig.owner_external_ids)) {
+    out.add(value);
+  }
 
   for (const owner of getConversationOwnerIds(conversation)) {
-    out.add(owner);
+    const normalized = normalizeIdentityStrict(owner);
+    if (normalized) out.add(normalized);
   }
 
   return out;
@@ -232,8 +270,12 @@ export function getConversationPolicy(conversation: ChannelConversation): {
         ? policy.owner_only
         : false;
 
-  const ownerExternalIds = toStringSet(
-    policy.owner_external_ids ?? policy.ownerExternalIds ?? policy.owner_ids ?? policy.owners ?? policy.ownerExternalIds,
+  const ownerExternalIds = collectOwnerExternalIds(
+    policy.owner_external_ids ??
+      policy.ownerExternalIds ??
+      policy.owner_ids ??
+      policy.owners ??
+      policy.ownerExternalIds,
   );
 
   const rate = Number(
@@ -285,8 +327,24 @@ export function evaluateChannelPolicy(
     };
   }
 
+  const normalizedSender = normalizeIdentityStrict(context.envelope.senderId);
+  if (!normalizedSender) {
+    return {
+      ok: false,
+      error: "invalid_payload",
+      data: {
+        allowed: false,
+        code: "invalid_payload",
+        replyText: normalizePayloadErrorMessage(),
+        requiresOwnerHandshake: false,
+        shouldRespond: false,
+      },
+    };
+  }
+
   const allowlist = toStringSet(context.runtimeConfig.allowlist);
-  if (allowlist.size > 0 && !allowlist.has(context.envelope.senderId)) {
+  const normalizedAllowlist = new Set(Array.from(allowlist).map((value) => normalizeIdentityStrict(value)));
+  if (normalizedAllowlist.size > 0 && !normalizedAllowlist.has(normalizedSender)) {
     return {
       ok: false,
       error: "blocked_sender",
@@ -318,18 +376,17 @@ export function evaluateChannelPolicy(
   const conversationPolicy = getPolicyMap(context.conversation);
   const ownerCandidates = conversationOwnerCandidates(context.runtimeConfig, context.conversation);
   const isOwner = ownerCandidates.size > 0
-    ? ownerCandidates.has(context.envelope.senderId)
+    ? ownerCandidates.has(normalizedSender)
     : Boolean(context.senderIsOwner);
+
+  const ownerOnly = typeof conversationPolicy.ownerOnly === "boolean"
+    ? conversationPolicy.ownerOnly
+    : Boolean(context.runtimeConfig.owner_only);
 
   const conversationPolicyEnabled =
     typeof conversationPolicy.autoResponderEnabled === "boolean"
       ? conversationPolicy.autoResponderEnabled
       : context.globalResponderEnabled;
-
-  const ownerOnly =
-    typeof conversationPolicy.ownerOnly === "boolean"
-      ? conversationPolicy.ownerOnly
-      : Boolean(context.runtimeConfig.owner_only);
 
   if (!conversationPolicyEnabled && !isOwner) {
     return {

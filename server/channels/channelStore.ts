@@ -13,6 +13,9 @@ import {
 
 const pairingAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const makePairingCode = customAlphabet(pairingAlphabet, 8);
+const MAX_OWNER_IDENTITY_VALUE_LENGTH = 120;
+const MAX_POLICY_ARRAY_LENGTH = 64;
+const SAFE_OWNER_ID_RE = /^[A-Za-z0-9._:@+\-]+$/;
 
 function isUniqueViolation(err: unknown): boolean {
   const code = (err as any)?.code;
@@ -207,13 +210,39 @@ function normalizeMetadata(input: unknown): Record<string, unknown> {
   return isRecord(input) ? (input as Record<string, unknown>) : {};
 }
 
+function normalizeOwnerIdentityCollection(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return Array.from(new Set(
+    values
+      .slice(0, MAX_POLICY_ARRAY_LENGTH)
+      .map((value) => normalizeOwnerIdentityValue(value))
+      .filter(Boolean),
+  ));
+}
+
 function toStringSet(values: unknown): Set<string> {
   if (!Array.isArray(values)) return new Set<string>();
   return new Set(
     values
-      .map((value) => String(value ?? "").trim())
-      .filter((value) => value.length > 0),
+      .slice(0, MAX_POLICY_ARRAY_LENGTH)
+      .map((value) => normalizeOwnerIdentityValue(value))
+      .filter(Boolean),
   );
+}
+
+function normalizeOwnerIdentityValue(value: unknown): string {
+  const normalized = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\u0000/g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+    .slice(0, MAX_OWNER_IDENTITY_VALUE_LENGTH);
+
+  if (!normalized || !SAFE_OWNER_ID_RE.test(normalized)) {
+    return "";
+  }
+
+  return normalized;
 }
 
 function mergeMetadataObjects(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
@@ -324,22 +353,44 @@ export async function setConversationOwnerIdentity(
     ...ownerIdentity,
     updatedAt: new Date().toISOString(),
   };
-  const ownerIds = new Set<string>();
-  const ownerCandidates = [
-    ownerIdentityPatch.ownerExternalId,
-    ownerIdentityPatch.ownerId,
+
+  const ownerIdCandidates = [
     ownerIdentityPatch.owner_external_ids,
     ownerIdentityPatch.owners,
+    ownerIdentityPatch.ownerIds,
+    ownerIdentityPatch.owner_ids,
+  ];
+  const normalizedOwnerIdentityPatch = {
+    ...ownerIdentityPatch,
+    ownerExternalId: normalizeOwnerIdentityValue(ownerIdentityPatch.ownerExternalId),
+    ownerId: normalizeOwnerIdentityValue(ownerIdentityPatch.ownerId),
+    consumedByExternalId: normalizeOwnerIdentityValue(ownerIdentityPatch.consumedByExternalId),
+    owner_external_ids: normalizeOwnerIdentityCollection(ownerIdentityPatch.owner_external_ids),
+    owners: normalizeOwnerIdentityCollection(ownerIdentityPatch.owners),
+    ownerIds: normalizeOwnerIdentityCollection(ownerIdentityPatch.ownerIds),
+    owner_ids: normalizeOwnerIdentityCollection(ownerIdentityPatch.owner_ids),
+  };
+
+  const ownerIds = new Set<string>();
+  const ownerCandidates = [
+    normalizedOwnerIdentityPatch.ownerExternalId,
+    normalizedOwnerIdentityPatch.ownerId,
+    normalizedOwnerIdentityPatch.owner_external_ids,
+    normalizedOwnerIdentityPatch.owners,
+    normalizedOwnerIdentityPatch.ownerIds,
+    normalizedOwnerIdentityPatch.owner_ids,
+    ownerIdentityPatch.ownerExternalId,
+    ownerIdentityPatch.ownerId,
   ];
   for (const candidate of ownerCandidates) {
     if (Array.isArray(candidate)) {
       for (const item of candidate) {
-        const normalized = String(item ?? "").trim();
+        const normalized = normalizeOwnerIdentityValue(item);
         if (normalized) ownerIds.add(normalized);
       }
       continue;
     }
-    const normalized = String(candidate ?? "").trim();
+    const normalized = normalizeOwnerIdentityValue(candidate);
     if (normalized) ownerIds.add(normalized);
   }
 
@@ -356,7 +407,7 @@ export async function setConversationOwnerIdentity(
   ]);
 
   return patchConversationMetadata(conversationId, {
-    ownerIdentity: ownerIdentityPatch,
+    ownerIdentity: normalizedOwnerIdentityPatch,
     policy: {
       ...policyPatch,
       ...(ownerIds.size ? { owner_external_ids: Array.from(mergedPolicyOwnerIds) } : {}),
