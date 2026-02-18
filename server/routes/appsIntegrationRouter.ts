@@ -17,6 +17,8 @@ const PROVIDER_TO_APP_ID: Record<string, string> = {
   outlook: "outlook-mail",
   outlook_calendar: "outlook-calendar",
   google_drive: "google-drive",
+  // Integration Kernel connectors can store Google-family tokens under the provider-level id "google".
+  google: "google-drive",
   google_forms: "google-forms",
 };
 
@@ -266,4 +268,3 @@ export function createAppsIntegrationRouter(): Router {
 
   return router;
 }
-
