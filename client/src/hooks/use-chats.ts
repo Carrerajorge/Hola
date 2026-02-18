@@ -1763,10 +1763,10 @@ export function useChats() {
           };
           setActiveRun(resolvedChatId, run);
           console.log(`[Run] ${data.deduplicated ? "Resumed" : "Created"} run ${run.id} for chat ${resolvedChatId}`);
-          return { run, deduplicated: !!data.deduplicated };
+          return { run, deduplicated: !!data.deduplicated, chatId: resolvedChatId };
         }
 
-        return undefined;
+        return { chatId: resolvedChatId };
       }
 
       const errText = await res.text().catch(() => "");
@@ -1790,7 +1790,7 @@ export function useChats() {
       if (retryable && normalizedMessage.role === "user") {
         enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
       }
-      return undefined;
+      return { chatId: resolvedChatId };
     } catch (error) {
       console.error("Error saving message to server:", error);
 
@@ -1811,7 +1811,7 @@ export function useChats() {
         enqueueFailedMessageForRecovery(resolvedChatId, normalizedMessage);
       }
 
-      return undefined;
+      return { chatId: resolvedChatId };
     }
   }, []);
 
