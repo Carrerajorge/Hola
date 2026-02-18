@@ -72,7 +72,9 @@ jobs:
             conclusion="$(echo "${ci_line}" | awk '{print $2}')"
 
             if [ "${status}" = "__parsefail__" ]; then
-              sample="$(printf '%s' "${runs_json}" | tr '\r\n' '  ' | head -c 240)"
+              sample="${runs_json//$'\r'/ }"
+              sample="${sample//$'\n'/ }"
+              sample="${sample:0:240}"
               echo "CI parse sample: ${sample}"
               if [ "${attempt}" -ge 6 ]; then
                 echo "::error::CI run API response could not be parsed after ${attempt} attempts."
