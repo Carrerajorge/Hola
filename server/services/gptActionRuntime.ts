@@ -72,6 +72,7 @@ const MAX_LOG_VALUE_DEPTH = 64;
 const MAX_LOG_VALUE_BYTES = 8_192;
 const MAX_LOG_ARRAY_ITEMS = 120;
 const FORBIDDEN_LOG_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const LOG_BLOCK_TAG_SANITIZER = /<\s*(script|iframe|object|embed|svg|math)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
 const LOG_TAG_SANITIZER = /<\s*\/?\s*(?:script|iframe|object|embed|img|svg|math)\b[^>]*>/gi;
 const LOG_URL_SCHEME_SANITIZER = /\b(?:javascript|vbscript|data)\s*:/gi;
 const ALLOWED_HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
@@ -752,6 +753,7 @@ function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), d
     let sanitized = raw
       .normalize("NFKC")
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+      .replace(LOG_BLOCK_TAG_SANITIZER, "[redacted]")
       .replace(LOG_TAG_SANITIZER, "[redacted]")
       .replace(LOG_URL_SCHEME_SANITIZER, "[redacted]");
 
@@ -762,6 +764,7 @@ function sanitizeLogValue(raw: unknown, seen: WeakSet<object> = new WeakSet(), d
           break;
         }
         sanitized = decoded
+          .replace(LOG_BLOCK_TAG_SANITIZER, "[redacted]")
           .replace(LOG_TAG_SANITIZER, "[redacted]")
           .replace(LOG_URL_SCHEME_SANITIZER, "[redacted]");
       } catch {
