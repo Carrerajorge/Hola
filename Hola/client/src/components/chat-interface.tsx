@@ -1891,6 +1891,24 @@ export function ChatInterface({
       return;
     }
 
+    // Image with fileId but no direct URL — try to load from API
+    if (att.type === "image" && att.fileId) {
+      try {
+        const response = await fetch(`/api/files/${att.fileId}/content`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.url || data.content) {
+            setLightboxImage(data.url || data.content);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Error loading image from file API:", error);
+      }
+      // Fallback: don't open anything rather than crashing
+      return;
+    }
+
     setPreviewFileAttachment({
       ...att,
       isLoading: true,

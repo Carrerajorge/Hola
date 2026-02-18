@@ -411,8 +411,9 @@ export default function Home() {
     console.error("[CRITICAL] handleSendMessage in home.tsx called:", { messageContent: message.content?.substring(0, 50), activeChat: activeChat?.id, pendingChatId: pendingChatIdRef.current });
     
     // Check for Simulator / Dry-Run command (B4)
-    if (message.content.trim().startsWith('/plan ') || message.content.trim().startsWith('/preview ')) {
-      const goal = message.content.replace(/^\/(plan|preview)\s+/, '').trim();
+    const messageContent = message.content || '';
+    if (messageContent.trim().startsWith('/plan ') || messageContent.trim().startsWith('/preview ')) {
+      const goal = messageContent.replace(/^\/(plan|preview)\s+/, '').trim();
 
       // 1. Send user message first
       const targetChatId = activeChat?.id || pendingChatIdRef.current;
@@ -762,7 +763,7 @@ export default function Home() {
               }}
             />
           </Suspense>
-        ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId) && (
+        ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId || pendingChatIdRef.current) && (
           <ChatErrorBoundary>
             <ChatInterface
               key={chatInterfaceKey}

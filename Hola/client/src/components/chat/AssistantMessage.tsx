@@ -131,29 +131,34 @@ export const AssistantMessage = memo(function AssistantMessage({
     }, [parsedContent.text]);
 
     const imageData = useMemo(() => {
-        const msgImage = message.generatedImage;
-        const storeImage = getGeneratedImage(message.id);
-        const pendingMatch =
-            pendingGeneratedImage?.messageId === message.id
-                ? pendingGeneratedImage.imageData
-                : null;
-        const refMatch =
-            latestGeneratedImageRef.current?.messageId === message.id
-                ? latestGeneratedImageRef.current.imageData
-                : null;
+        try {
+            const msgImage = message.generatedImage;
+            const storeImage = getGeneratedImage(message.id);
+            const pendingMatch =
+                pendingGeneratedImage?.messageId === message.id
+                    ? pendingGeneratedImage.imageData
+                    : null;
+            const refMatch =
+                latestGeneratedImageRef.current?.messageId === message.id
+                    ? latestGeneratedImageRef.current.imageData
+                    : null;
 
-        const result = msgImage || storeImage || pendingMatch || refMatch;
+            const result = msgImage || storeImage || pendingMatch || refMatch;
 
-        if (result && !storeImage) {
-            storeGeneratedImage(message.id, result);
-            storeLastGeneratedImageInfo({
-                messageId: message.id,
-                base64: result,
-                artifactId: null,
-            });
+            if (result && !storeImage) {
+                storeGeneratedImage(message.id, result);
+                storeLastGeneratedImageInfo({
+                    messageId: message.id,
+                    base64: result,
+                    artifactId: null,
+                });
+            }
+
+            return result;
+        } catch (e) {
+            console.error("[AssistantMessage] Error resolving image data:", e);
+            return null;
         }
-
-        return result;
     }, [message.id, message.generatedImage, pendingGeneratedImage, latestGeneratedImageRef]);
 
     if (variant === "compact") {
@@ -331,17 +336,19 @@ export const AssistantMessage = memo(function AssistantMessage({
 
             {imageData && (
                 <div className="mt-3">
-                    <ArtifactViewer
-                        artifact={{
-                            id: `generated-${message.id}`,
-                            type: "image",
-                            name: "Imagen generada",
-                            url: imageData,
-                            mimeType: "image/png"
-                        }}
-                        onExpand={onOpenLightbox}
-                        onDownload={() => onDownloadImage(imageData)}
-                    />
+                    <MarkdownErrorBoundary fallbackContent="Error al mostrar imagen generada">
+                        <ArtifactViewer
+                            artifact={{
+                                id: `generated-${message.id}`,
+                                type: "image",
+                                name: "Imagen generada",
+                                url: imageData,
+                                mimeType: "image/png"
+                            }}
+                            onExpand={onOpenLightbox}
+                            onDownload={() => onDownloadImage(imageData)}
+                        />
+                    </MarkdownErrorBoundary>
                 </div>
             )}
 
@@ -379,6 +386,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 
             {message.artifact && (
                 <div className="mt-3 w-full">
+                    <MarkdownErrorBoundary fallbackContent="Error al mostrar el archivo generado">
                     {message.artifact.type === "image" ? (
                         <div className="relative rounded-xl overflow-hidden group">
                             <img
@@ -482,6 +490,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                             </div>
                         </div>
                     )}
+                    </MarkdownErrorBoundary>
                 </div>
             )}
 
