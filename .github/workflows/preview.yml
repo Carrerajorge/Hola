@@ -39,7 +39,7 @@ jobs:
       VPS_PORT: ${{ secrets.VPS_PORT || '8022' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/hola' }}
       PREVIEW_SLUG: pr-${{ github.event.pull_request.number }}
-      HOST_PORT: ${{ 6100 + github.event.pull_request.number }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
       IMAGE_TAG: ${{ needs.build_images.outputs.image_tag }}
       APP_VERSION: ${{ github.sha }}
 
@@ -58,6 +58,7 @@ jobs:
       - name: Deploy preview on VPS
         run: |
           set -euo pipefail
+          HOST_PORT="$((6100 + PR_NUMBER))"
           ssh -i ~/.ssh/deploy_key -p "${VPS_PORT}" -o StrictHostKeyChecking=accept-new "${VPS_USER}@${VPS_HOST}" \
             "cd '${DEPLOY_PATH}' && PREVIEW_SLUG='${PREVIEW_SLUG}' HOST_PORT='${HOST_PORT}' IMAGE_TAG='${IMAGE_TAG}' APP_VERSION='${APP_VERSION}' bash scripts/deploy-preview.sh"
 
