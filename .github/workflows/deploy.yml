@@ -57,7 +57,7 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 72); do
             runs_json="$(gh run list --workflow "CI" --branch "${BRANCH}" --json headSha,status,conclusion --limit 20 || true)"
             if [ -z "${runs_json}" ] || [ "${runs_json}" = "null" ]; then
               echo "Unable to read workflow runs yet; retrying..."
