@@ -6,6 +6,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -69,7 +79,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "whatsapp",
     name: "WhatsApp",
-    description: "Conecta tu WhatsApp personal o Business escaneando un QR",
+    description: "Conecta tu WhatsApp personal o Business escaneando un código QR.",
     color: "text-green-600",
     bgHover: "hover:bg-green-50 dark:hover:bg-green-950/20",
     borderColor: "border-green-200 dark:border-green-800",
@@ -79,7 +89,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "telegram",
     name: "Telegram",
-    description: "Vincula un bot de Telegram con tu token de BotFather",
+    description: "Vincula un bot de Telegram usando el token de BotFather.",
     color: "text-blue-500",
     bgHover: "hover:bg-blue-50 dark:hover:bg-blue-950/20",
     borderColor: "border-blue-200 dark:border-blue-800",
@@ -89,7 +99,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "messenger",
     name: "Messenger",
-    description: "Conecta tu página de Facebook para recibir mensajes",
+    description: "Conecta tu página de Facebook para recibir mensajes.",
     color: "text-purple-600",
     bgHover: "hover:bg-purple-50 dark:hover:bg-purple-950/20",
     borderColor: "border-purple-200 dark:border-purple-800",
@@ -99,7 +109,7 @@ const CHANNELS: ChannelDef[] = [
   {
     id: "wechat",
     name: "WeChat",
-    description: "Integra tu cuenta oficial de WeChat para el mercado chino",
+    description: "Integra tu cuenta oficial de WeChat para el mercado chino.",
     color: "text-emerald-600",
     bgHover: "hover:bg-emerald-50 dark:hover:bg-emerald-950/20",
     borderColor: "border-emerald-200 dark:border-emerald-800",
@@ -508,6 +518,7 @@ export function ChannelsHubDialog({
   const [aiSettingsBusy, setAiSettingsBusy] = useState(false);
   const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [aiSettingsSaved, setAiSettingsSaved] = useState(false);
+  const [confirmEnableAutoResponderOpen, setConfirmEnableAutoResponderOpen] = useState(false);
 
   const loadAiSettings = useCallback(async () => {
     if (!open) return;
@@ -886,14 +897,14 @@ export function ChannelsHubDialog({
             AppsWebChat
           </DialogTitle>
           <DialogDescription>
-            Conecta tus canales de mensajería para enviar y recibir mensajes con IA
+            Conecta tus canales de mensajería para enviar y recibir mensajes con IA, todo en un solo lugar.
           </DialogDescription>
         </DialogHeader>
 
-	        <div className="grid grid-cols-2 gap-3 mt-1">
-	          {CHANNELS.map((ch) => (
-	            <button
-	              key={ch.id}
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          {CHANNELS.map((ch) => (
+            <button
+              key={ch.id}
               onClick={() => handleChannelClick(ch.id)}
               className={cn(
                 "relative rounded-xl border p-4 text-left transition-all duration-200",
@@ -930,69 +941,102 @@ export function ChannelsHubDialog({
                   : "Configurar →"}
               </div>
             </button>
-	          ))}
-	        </div>
+          ))}
+        </div>
 
-	        <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
-	          <div className="flex items-start justify-between gap-3">
-	            <div className="flex-1">
-	              <div className="text-sm font-medium">Respuestas automáticas (IA)</div>
-	              <p className="text-xs text-muted-foreground mt-1">
-	                Permite que ILIAGPT responda automáticamente a tus contactos en los canales conectados.
-	                Si lo activas, usará el contexto reciente de tus conversaciones para responder adecuadamente.
-	              </p>
-	            </div>
-	            <Switch
-	              checked={autoResponderEnabled}
-	              onCheckedChange={(checked) => {
-	                setAutoResponderEnabled(checked);
-	                void applyAutoResponderEnabled(checked);
-	              }}
-	              disabled={aiSettingsBusy}
-	            />
-	          </div>
+        <div className="mt-3 rounded-xl border bg-muted/20 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <div className="text-sm font-medium">Respuestas automáticas (IA)</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Con tu permiso, ILIAGPT puede responder automáticamente a tus contactos en los canales conectados.
+                Para responder adecuadamente, usará el historial reciente de cada conversación.
+              </p>
+              <div className="text-[11px] text-muted-foreground mt-2">
+                Se aplica a todos los canales conectados. En WhatsApp no se responde automáticamente a grupos.
+              </div>
+            </div>
+            <Switch
+              checked={autoResponderEnabled}
+              onCheckedChange={(checked) => {
+                if (checked && !autoResponderEnabled) {
+                  setConfirmEnableAutoResponderOpen(true);
+                  return;
+                }
+                setAutoResponderEnabled(checked);
+                void applyAutoResponderEnabled(checked);
+              }}
+              disabled={aiSettingsBusy}
+            />
+          </div>
 
-	          <div className="space-y-1">
-	            <div className="text-xs font-medium">Cómo quieres que responda (opcional)</div>
-	            <div className="flex items-center gap-2">
-	              <Input
-	                value={responseInstructions}
-	                onChange={(e) => setResponseInstructions(e.target.value)}
-	                placeholder='Ej: "Responde breve, amable y siempre pide confirmación antes de agendar."'
-	                className="text-sm"
-	                disabled={aiSettingsBusy}
-	              />
-	              <Button
-	                variant="outline"
-	                size="sm"
-	                onClick={() => void applyResponseInstructions()}
-	                disabled={aiSettingsBusy}
-	              >
-	                Guardar
-	              </Button>
-	            </div>
-	            <div className="text-[11px] text-muted-foreground">
-	              Para responder con calidad, la IA necesita acceder al contexto (historial reciente) de cada conversación.
-	            </div>
-	          </div>
+          <div className="space-y-1">
+            <div className="text-xs font-medium">¿Cómo quieres que responda? (opcional)</div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={responseInstructions}
+                onChange={(e) => setResponseInstructions(e.target.value)}
+                placeholder='Ej: "Responde breve, amable y pide confirmación antes de agendar."'
+                className="text-sm"
+                disabled={aiSettingsBusy}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void applyResponseInstructions()}
+                disabled={aiSettingsBusy}
+              >
+                Guardar
+              </Button>
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Tip: escribe el tono, el formato y reglas (por ejemplo: "si no estás seguro, pregunta").
+            </div>
+          </div>
 
-	          {aiSettingsError && (
-	            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
-	              {aiSettingsError}
-	            </div>
-	          )}
+          {aiSettingsError && (
+            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 rounded-md p-2">
+              {aiSettingsError}
+            </div>
+          )}
 
-	          {aiSettingsSaved && !aiSettingsError && (
-	            <div className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
-	              ✓ Ajustes guardados
-	            </div>
-	          )}
-	        </div>
+          {aiSettingsSaved && !aiSettingsError && (
+            <div className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/20 rounded-md p-2">
+              ✓ Ajustes guardados
+            </div>
+          )}
+        </div>
 
-	        <div className="text-xs text-muted-foreground text-center mt-2">
-	          Los mensajes entrantes siempre aparecen en tu bandeja, incluso si desactivas las respuestas automáticas.
-	        </div>
-	      </DialogContent>
-	    </Dialog>
-	  );
-	}
+        <AlertDialog open={confirmEnableAutoResponderOpen} onOpenChange={setConfirmEnableAutoResponderOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Permitir respuestas automáticas?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Si lo activas, ILIAGPT podrá responder a tus contactos en los canales conectados.
+                Para responder con contexto, usará el historial reciente de cada conversación.
+                Puedes desactivarlo en cualquier momento.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={aiSettingsBusy}>No permitir</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={aiSettingsBusy}
+                onClick={() => {
+                  setAutoResponderEnabled(true);
+                  setConfirmEnableAutoResponderOpen(false);
+                  void applyAutoResponderEnabled(true);
+                }}
+              >
+                Permitir y activar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <div className="text-xs text-muted-foreground text-center mt-2">
+          Los mensajes entrantes se procesan con IA y aparecen en tu bandeja, incluso si desactivas las respuestas automáticas.
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

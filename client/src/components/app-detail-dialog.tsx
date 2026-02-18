@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ExternalLink, Loader2, ChevronLeft, AlertCircle, RefreshCw, XCircle, Clock, Ban, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/apiClient";
 
 export interface AppMetadata {
   id: string;
@@ -29,7 +30,7 @@ export interface AppMetadata {
 }
 
 interface ConnectionError {
-  type: 'oauth_denied' | 'token_expired' | 'rate_limited' | 'network_error' | 'server_error' | 'not_configured' | 'permission_denied' | 'unknown';
+  type: 'oauth_denied' | 'token_expired' | 'rate_limited' | 'network_error' | 'server_error' | 'not_configured' | 'permission_denied' | 'invalid_endpoint' | 'unknown';
   message: string;
   details?: string;
   retryable: boolean;
@@ -87,6 +88,15 @@ function parseErrorResponse(error: any, responseData?: any): ConnectionError {
       type: 'not_configured',
       message: 'Integración no configurada',
       details: 'Esta aplicación necesita ser configurada a través del panel de integraciones de Replit.',
+      retryable: false
+    };
+  }
+  
+  if (errorMessage.includes('invalid endpoint') || errorMessage.includes('Cross-origin') || errorMessage.includes('cross-origin')) {
+    return {
+      type: 'invalid_endpoint',
+      message: 'Endpoint inválido',
+      details: 'El endpoint configurado no es seguro o no pertenece al origen permitido.',
       retryable: false
     };
   }
@@ -155,12 +165,17 @@ export function AppDetailDialog({
     setConnectionError(null);
     
     try {
-      const res = await fetch(app.statusEndpoint, { credentials: "include" });
+      const resolvedStatusEndpoint = new URL(app.statusEndpoint, window.location.origin);
+      if (resolvedStatusEndpoint.origin !== window.location.origin) {
+        throw new Error("invalid endpoint");
+      }
+
+      const res = await apiFetch(resolvedStatusEndpoint.toString());
       
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setIsConnected(data.connected === true);
-        setConnectionEmail(data.email || "");
+        setConnectionEmail(typeof data?.email === "string" ? data.email : "");
         
         queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
         
@@ -183,7 +198,7 @@ export function AppDetailDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [app?.statusEndpoint, app?.name, retryCount]);
+  }, [app?.id, app?.statusEndpoint, app?.name, queryClient, retryCount]);
 
   useEffect(() => {
     if (open && app?.statusEndpoint) {

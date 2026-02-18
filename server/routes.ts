@@ -30,6 +30,7 @@ import { createUserRouter } from "./routes/userRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
 import { createGmailRouter } from "./routes/gmailRouter";
+import { createAppsIntegrationRouter } from "./routes/appsIntegrationRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import calendarOAuthRouter from "./routes/calendarOAuthRouter";
 import outlookOAuthRouter from "./routes/outlookOAuthRouter";
@@ -594,6 +595,7 @@ export async function registerRoutes(
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
+  app.use("/api/apps", createAppsIntegrationRouter());
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
   app.use("/api/integrations/google/gmail", createGmailRouter());
   const { createWhatsAppWebRouter } = await import('./routes/whatsappWebRouter');
